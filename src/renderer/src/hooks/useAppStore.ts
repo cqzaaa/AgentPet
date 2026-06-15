@@ -1,0 +1,1135 @@
+import { useState, useRef, useEffect, type FormEvent } from 'react'
+import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
+
+// ── 类型定义 ─────────────────────────────────────────────────
+export interface CronLog {
+  id: string
+  time: string
+  status: 'success' | 'failed' | 'running'
+  message: string
+  messages?: any[]
+}
+
+export interface CronTask {
+  id: string
+  name: string
+  interval: number
+  lastTriggered: string
+  triggerCount: number
+  isActive: boolean
+  action?: string
+  logs?: CronLog[]
+}
+
+export interface Session {
+  id: string
+  name: string
+  time: string
+  messages: any[]
+}
+
+export interface TokenLog {
+  id: string
+  model: string
+  provider: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  timestamp: number
+  sessionId?: string
+  messageId?: number
+}
+
+export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs'
+export type AgentSubTab = 'skills' | 'memory' | 'cron'
+export type SettingsSubTab = 'keys' | 'wechat' | 'storage' | 'avatar'
+
+// ── useAppStore hook ─────────────────────────────────────────
+export function useAppStore() {
+  // ── Navigation ──────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<TabType>('chat')
+  const [agentSubTab, setAgentSubTab] = useState<AgentSubTab>('skills')
+  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('keys')
+
+  // ── UI State ─────────────────────────────────────────────────
+  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
+
+  // ── Toast ────────────────────────────────────────────────────
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type })
+  }
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000)
+      return () => clearTimeout(timer)
+    }
+    return () => {}
+  }, [toast])
+
+  // ── Theme ────────────────────────────────────────────────────
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('agentself_theme') as 'dark' | 'light') ||
+      (localStorage.getItem('agentpet_theme') as 'dark' | 'light') || 'light'
+  })
+
+  const handleThemeToggle = (): void => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(nextTheme)
+    localStorage.setItem('agentself_theme', nextTheme)
+  }
+
+  const [isSending, setIsSending] = useState(false)
+
+  // ── LLM Config ───────────────────────────────────────────────
+  const [llmConfig, setLlmConfig] = useState(() => {
+    const saved = localStorage.getItem('agentself_llm_config') || localStorage.getItem('agentpet_llm_config')
+    if (saved) {
+      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+    }
+    return { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: 2048 }
+  })
+
+  const saveLlmConfig = (newConfig: any) => {
+    if (isSending) {
+      showToast('大模型正在思考中，无法修改配置', 'error')
+      return
+    }
+    const prevModel = llmConfig.model
+    const newModel = newConfig.model
+    setLlmConfig(newConfig)
+    localStorage.setItem('agentpet_llm_config', JSON.stringify(newConfig))
+
+    if (prevModel && newModel && prevModel !== newModel) {
+      const timeStr = formatDateTime()
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: [...s.messages, {
+              id: `sys-${Date.now()}-${Math.random()}`,
+              sender: 'system',
+              text: `⚙️ 已将大模型切换为：**${newModel}**`,
+              time: timeStr
+            }]
+          }
+        }
+        return s
+      }))
+    }
+  }
+
+  // ── Wechat Config ────────────────────────────────────────────
+  const [wechatConfig, setWechatConfig] = useState(() => {
+    const saved = localStorage.getItem('agentself_wechat_config') || localStorage.getItem('agentpet_wechat_config')
+    if (saved) {
+      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+    }
+    return { webhookUrl: '', apiKey: '', localPort: '8080', autoReplyText: '你好，我是 Mao 的微信集成助手。' }
+  })
+
+  const [wechatSaveSuccess, setWechatSaveSuccess] = useState(false)
+
+  const handleSaveWechatConfig = (): void => {
+    localStorage.setItem('agentpet_wechat_config', JSON.stringify(wechatConfig))
+    setWechatSaveSuccess(true)
+    setTimeout(() => setWechatSaveSuccess(false), 3000)
+  }
+
+  // ── Cron Tasks ───────────────────────────────────────────────
+  const [cronTasks, setCronTasks] = useState<CronTask[]>(() => {
+    const saved = localStorage.getItem('agentself_cron_tasks') || localStorage.getItem('agentpet_cron_tasks')
+    if (saved) {
+      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+    }
+    return [] // 默认无预设任务，由用户自行添加
+  })
+
+
+  // ── Sessions ─────────────────────────────────────────────────
+  const [sessions, setSessions] = useState<Session[]>(() => {
+    const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.length > 0) return parsed
+      } catch (e) { console.error(e) }
+    }
+    return [{
+      id: 'agent:main:dashboard:default',
+      name: '(未命名)',
+      time: formatDateTime(),
+      messages: [
+        { id: 1, sender: 'agent', text: '__WELCOME_MSG__', time: formatDateTime() }
+      ]
+    }]
+  })
+
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    return localStorage.getItem('agentself_active_session_id') ||
+      localStorage.getItem('agentpet_active_session_id') ||
+      'agent:main:dashboard:default'
+  })
+
+  const [inputValue, setInputValue] = useState('')
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // ── System Info ──────────────────────────────────────────────
+  const [systemInfo, setSystemInfo] = useState<any>(null)
+
+  // ── Token Logs ───────────────────────────────────────────────
+  const [tokenLogs, setTokenLogs] = useState<TokenLog[]>(() => {
+    const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
+    if (saved) {
+      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+    }
+    return []
+  })
+
+  // ── Highlighted Message ──────────────────────────────────────
+  const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null)
+
+  // ── Skills ───────────────────────────────────────────────────
+  const [skillsList, setSkillsList] = useState<any[]>([])
+  const [skillsPath, setSkillsPath] = useState<string>('')
+  const [storageInputPath, setStorageInputPath] = useState('')
+  const [actualStoragePath, setActualStoragePath] = useState('')
+  const [storageSaveStatus, setStorageSaveStatus] = useState<{ type: 'success' | 'failed' | 'idle'; message: string }>({ type: 'idle', message: '' })
+  const [sandboxMode, setSandboxMode] = useState<boolean>(true)
+  const [activePermissionRequest, setActivePermissionRequest] = useState<{
+    requestId: number
+    command: string
+    execCwd: string
+  } | null>(null)
+
+  // ── Avatar ───────────────────────────────────────────────────
+  const [customModelDir, setCustomModelDir] = useState('')
+  const [customModelFile, setCustomModelFile] = useState('')
+  const [avatarList, setAvatarList] = useState<any[]>([])
+  const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
+
+  // ── Memory Settings ──────────────────────────────────────────
+  const [autoSaveHistory, setAutoSaveHistory] = useState(() => {
+    const val = localStorage.getItem('agentself_autosave') || localStorage.getItem('agentpet_autosave')
+    return val === null ? true : val === 'true'
+  })
+  const [contextRounds, setContextRounds] = useState(() => {
+    return Number(localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10')
+  })
+
+  // ── Connection Test ──────────────────────────────────────────
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | string>('idle')
+
+  // ── Effects ──────────────────────────────────────────────────
+
+  // 应用启动或配置更改时自动获取最新可用模型列表
+  useEffect(() => {
+    const isOllama = llmConfig.provider === 'ollama'
+    const hasKey = isOllama || !!llmConfig.apiKey
+    if (hasKey) {
+      const autoFetch = async () => {
+        setIsLoadingModels(true)
+        try {
+          const list = await window.api.getModels({ 
+            provider: llmConfig.provider, 
+            apiKey: llmConfig.apiKey, 
+            baseUrl: llmConfig.baseUrl 
+          })
+          if (list && list.length > 0) {
+            setAvailableModels(list)
+            // 如果拉取到的列表中不包含当前设置的 model，我们自适应选择第一个
+            if (!list.includes(llmConfig.model)) {
+              saveLlmConfig({ ...llmConfig, model: list[0] })
+            }
+          }
+        } catch (e) {
+          console.error('自动加载模型列表失败', e)
+        } finally {
+          setIsLoadingModels(false)
+        }
+      }
+      autoFetch()
+    } else {
+      setAvailableModels([])
+    }
+  }, [llmConfig.provider, llmConfig.apiKey, llmConfig.baseUrl])
+
+  // Click outside to close model dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowModelDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Poll system info
+  useEffect(() => {
+    const fetchInfo = async (): Promise<void> => {
+      try {
+        const info = await window.api.getSystemInfo()
+        setSystemInfo(info)
+      } catch (e) { console.error('获取系统资源失败', e) }
+    }
+    fetchInfo()
+    const interval = setInterval(fetchInfo, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Load skills & storage path
+  const refreshSkillsAndStorage = async (): Promise<void> => {
+    try {
+      const list = await window.api.getSkillsList()
+      setSkillsList(list)
+      const path = await window.api.getSkillsPath()
+      setSkillsPath(path)
+      const customPath = await window.api.getStoragePath()
+      setActualStoragePath(customPath || path)
+      setStorageInputPath(customPath)
+    } catch (e) { console.error(e) }
+  }
+
+  const refreshAvatarsList = async (): Promise<void> => {
+    try {
+      const list = await window.api.getAvatarsList()
+      setAvatarList(list)
+    } catch (e) { console.error(e) }
+  }
+
+  useEffect(() => {
+    refreshSkillsAndStorage()
+    const loadCustomModelInfo = async (): Promise<void> => {
+      try {
+        const info = await window.api.getCustomModel()
+        if (info) {
+          setCustomModelDir(info.customModelDir || '')
+          setCustomModelFile(info.customModelFile || '')
+        }
+      } catch (e) { console.error(e) }
+    }
+    const loadSandboxMode = async (): Promise<void> => {
+      try {
+        const enabled = await window.api.getSandboxMode()
+        setSandboxMode(enabled)
+      } catch (e) { console.error(e) }
+    }
+    loadSandboxMode()
+    loadCustomModelInfo()
+    refreshAvatarsList()
+  }, [])
+
+  // 加载本地及主进程定时任务
+  useEffect(() => {
+    const loadCronTasks = async () => {
+      try {
+        const tasks = await window.api.getCronTasks()
+        if (tasks && tasks.length > 0) {
+          setCronTasks(tasks)
+        } else {
+          // 兼容并迁移旧版 localStorage 里的定时任务
+          const saved = localStorage.getItem('agentpet_cron_tasks') || localStorage.getItem('agentself_cron_tasks')
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved)
+              setCronTasks(parsed)
+              await window.api.saveCronTasks(parsed)
+            } catch (e) {
+              console.error(e)
+            }
+          }
+        }
+      } catch (e) {
+        console.error('加载定时任务失败', e)
+      }
+    }
+    loadCronTasks()
+  }, [])
+
+  // 监听主进程的大模型定时任务更新通知
+  useEffect(() => {
+    if (!window.api.onCronUpdated) return
+    const unsubscribe = window.api.onCronUpdated(async () => {
+      try {
+        const tasks = await window.api.getCronTasks()
+        if (tasks) {
+          setCronTasks(tasks)
+          showToast('🤖 桌面助理已为您创建或更新了定时任务！', 'success')
+        }
+      } catch (e) {
+        console.error('刷新定时任务失败', e)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // 监听本地命令的安全沙盒授权请求
+  useEffect(() => {
+    if (!window.api.onRequestPermission) return
+    const unsubscribe = window.api.onRequestPermission((data: any) => {
+      setActivePermissionRequest(data)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Listen for Token Usage
+  useEffect(() => {
+    if (!window.api.onTokenUsage) return
+    const unsubscribe = window.api.onTokenUsage((data: any) => {
+      const newLog: TokenLog = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        model: data.model || 'unknown',
+        provider: data.provider || 'unknown',
+        promptTokens: data.promptTokens || 0,
+        completionTokens: data.completionTokens || 0,
+        totalTokens: (data.promptTokens || 0) + (data.completionTokens || 0),
+        timestamp: data.timestamp || Date.now(),
+        sessionId: data.sessionId,
+        messageId: data.messageId
+      }
+      setTokenLogs(prev => {
+        const next = [...prev, newLog]
+        localStorage.setItem('agentpet_token_logs', JSON.stringify(next))
+        return next
+      })
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Load sessions from local file
+  useEffect(() => {
+    const loadLocalSessions = async (): Promise<void> => {
+      try {
+        const localSess = await window.api.getLocalSessions()
+        if (localSess && localSess.length > 0) setSessions(localSess)
+      } catch (e) { console.error('从本地文件载入会话记录失败', e) }
+    }
+    loadLocalSessions()
+  }, [])
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [sessions, activeSessionId, activeTab])
+
+  // Auto-save sessions
+  useEffect(() => {
+    if (autoSaveHistory) {
+      localStorage.setItem('agentself_sessions', JSON.stringify(sessions))
+      window.api.saveLocalSessions(sessions)
+    } else {
+      localStorage.removeItem('agentself_sessions')
+    }
+  }, [sessions, autoSaveHistory])
+
+  useEffect(() => {
+    localStorage.setItem('agentself_active_session_id', activeSessionId)
+  }, [activeSessionId])
+
+  // Cron timer loop variables moved below to avoid TDZ
+
+  // ── Handlers ─────────────────────────────────────────────────
+
+  const handleFetchModels = async (): Promise<void> => {
+    setIsLoadingModels(true)
+    setShowModelDropdown(true)
+    try {
+      const list = await window.api.getModels({ provider: llmConfig.provider, apiKey: llmConfig.apiKey, baseUrl: llmConfig.baseUrl })
+      if (list && list.length > 0) {
+        setAvailableModels(list)
+        showToast('获取模型列表成功！', 'success')
+      } else {
+        setAvailableModels([])
+        showToast('未获取到可用模型列表', 'info')
+      }
+    } catch (e: any) {
+      setAvailableModels([])
+      showToast(e.message || '获取模型列表失败，请检查网络或配置', 'error')
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }
+
+  const handleDeleteSession = (id: string): void => {
+    const filtered = sessions.filter(s => s.id !== id)
+    let nextSessions = filtered
+    if (filtered.length === 0) {
+      const timeStr = formatDateTime()
+      nextSessions = [{
+        id: 'agent:main:dashboard:default',
+        name: '(未命名)',
+        time: timeStr,
+        messages: [
+          { id: 1, sender: 'agent', text: '喵呜~ 欢迎来到 AgentPet 终端！我是您的智能助理 Mao。有什么我可以帮您的吗？', time: timeStr }
+        ]
+      }]
+    }
+    setSessions(nextSessions)
+    if (activeSessionId === id) setActiveSessionId(nextSessions[0].id)
+  }
+
+  const handleCreateNewSession = (): void => {
+    const randNum = Math.floor(1000 + Math.random() * 9000)
+    const newId = `agent:main:dashboard:${randNum}`
+    const newSess: Session = {
+      id: newId,
+      name: '(未命名)',
+      time: formatDateTime(),
+      messages: [
+        { id: 1, sender: 'agent', text: `喵呜~ 已启动新会话。我是您的助理 ${currentAvatarName}，有什么我可以帮您的吗？`, time: formatDateTime() }
+      ]
+    }
+    setSessions([...sessions, newSess])
+    setActiveSessionId(newId)
+    setActiveTab('chat')
+  }
+
+  // ── 工作空间与文件上传管理 ────────────────────────────────────
+  const [workspacePath, setWorkspacePath] = useState<string>(() => {
+    return localStorage.getItem('agentpet_workspace_path') || ''
+  })
+  
+  const [attachedFile, setAttachedFile] = useState<{ name: string; path: string; content: string } | null>(null)
+
+  const handleSelectWorkspace = async (): Promise<void> => {
+    try {
+      const path = await window.api.selectDirectory({ title: '选择工作空间/项目目录' })
+      if (path) {
+        setWorkspacePath(path)
+        localStorage.setItem('agentpet_workspace_path', path)
+        showToast(`工作空间已设置为：${path}`, 'success')
+      }
+    } catch (e: any) {
+      showToast(`选择工作空间失败: ${e.message}`, 'error')
+    }
+  }
+
+  const handleClearWorkspace = (e: any): void => {
+    e.stopPropagation()
+    setWorkspacePath('')
+    localStorage.removeItem('agentpet_workspace_path')
+    showToast('工作空间已清除', 'info')
+  }
+
+  const handleUploadFile = async (): Promise<void> => {
+    try {
+      const file = await window.api.selectFile()
+      if (file) {
+        setAttachedFile(file)
+        showToast(`成功导入文本文件: ${file.name}`, 'success')
+      }
+    } catch (e: any) {
+      showToast(`读取文件失败: ${e.message}`, 'error')
+    }
+  }
+
+  // 监听大模型在后台的系统工具调用日志事件并插入最新的一条机器人消息中
+  useEffect(() => {
+    if (!window.api.onToolEvent) return
+    const unsubscribe = window.api.onToolEvent((data: any) => {
+      const { type, name, args, result, sessionId } = data
+
+      // 1. 如果是定时任务后台执行产生的工具调用事件
+      if (sessionId && sessionId.startsWith('cron:')) {
+        const runningLog = cronRunningLogsRef.current[sessionId]
+        if (runningLog && runningLog.messages) {
+          const messages = [...runningLog.messages]
+          const agentMsgIdx = messages.findIndex(m => m.sender === 'agent')
+          if (agentMsgIdx !== -1) {
+            const agentMsg = { ...messages[agentMsgIdx] }
+            const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
+            
+            if (type === 'tool_call') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'call',
+                name,
+                detail: args
+              })
+            } else if (type === 'tool_result') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'result',
+                name,
+                detail: result
+              })
+            }
+            
+            agentMsg.toolSteps = toolSteps
+            messages[agentMsgIdx] = agentMsg
+            runningLog.messages = messages
+
+            const parts = sessionId.split(':')
+            const taskId = parts[1]
+
+            // 实时刷新渲染状态，让前台展示中展现最新的 tool 调用链
+            setCronTasks(prevTasks => {
+              return prevTasks.map(t => {
+                if (t.id === taskId) {
+                  const updatedLogs = (t.logs || []).map(l => l.id === runningLog.id ? { ...runningLog } : l)
+                  return { ...t, logs: updatedLogs }
+                }
+                return t
+              })
+            })
+          }
+        }
+        return
+      }
+
+      // 2. 正常前台会话消息更新
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          const messages = [...s.messages]
+          const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
+          if (latestAgentIdx !== -1) {
+            const agentMsg = { ...messages[latestAgentIdx] }
+            const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
+            
+            if (type === 'tool_call') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'call',
+                name,
+                detail: args
+              })
+            } else if (type === 'tool_result') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'result',
+                name,
+                detail: result
+              })
+            }
+            
+            agentMsg.toolSteps = toolSteps
+            messages[latestAgentIdx] = agentMsg
+          }
+          return { ...s, messages }
+        }
+        return s
+      }))
+    })
+    return () => unsubscribe()
+  }, [activeSessionId])
+
+  const handleSendChat = async (): Promise<void> => {
+    if ((!inputValue.trim() && !attachedFile) || isSending) return
+    const text = inputValue.trim()
+    const timeStr = formatDateTime()
+    
+    // 1. 构建用户发送的消息
+    const userMsg: any = { 
+      id: Date.now(), 
+      sender: 'user', 
+      text: text || `📄 上传了文件 ${attachedFile?.name}`, 
+      time: timeStr 
+    }
+    if (attachedFile) {
+      userMsg.fileInfo = {
+        name: attachedFile.name,
+        path: attachedFile.path,
+        content: attachedFile.content
+      }
+    }
+
+    // 2. 构建机器人的思考占位消息
+    const replyId = Date.now() + 1
+    const agentPlaceholderMsg: any = {
+      id: replyId,
+      sender: 'agent',
+      text: '',
+      isThinking: true,
+      toolSteps: [],
+      time: timeStr
+    }
+
+    let updatedSessions = sessions.map(s => {
+      if (s.id === activeSessionId) {
+        let name = s.name
+        const isFirstUserMsg = s.messages.filter(m => m.sender === 'user').length === 0
+        if (isFirstUserMsg || s.name === '(未命名)' || s.name === '新会话' || s.name.startsWith('agent:main:dashboard:')) {
+          const displayTitle = text || attachedFile?.name || '新会话'
+          name = displayTitle.length > 15 ? displayTitle.substring(0, 15) + '...' : displayTitle
+        }
+        // 同步塞入用户消息和机器人的空白占位消息
+        return { ...s, name, messages: [...s.messages, userMsg, agentPlaceholderMsg] }
+      }
+      return s
+    })
+    
+    setSessions(updatedSessions)
+    setInputValue('')
+    setAttachedFile(null) // 发送后清空附件
+    setIsSending(true)
+
+    const isOllama = llmConfig.provider === 'ollama'
+    const hasKey = isOllama || !!llmConfig.apiKey
+
+    if (!hasKey) {
+      setTimeout(() => {
+        const agentReplies = [
+          '喵呜~ 您的指令我已经收到并加入核心记忆库中！',
+          '好的，我正在为您分析这部分数据，请稍等喵~',
+          '主人，今天的天气很适合写代码，但也要多注意休息哦！',
+          '正在为您检索网络资源... 喵喵！',
+          '这件事情听起来很有趣，我很乐意陪您一起探讨呢~'
+        ]
+        const randomReply = agentReplies[Math.floor(Math.random() * agentReplies.length)]
+        setSessions(prev => prev.map(s => {
+          if (s.id === activeSessionId) {
+            return {
+              ...s,
+              messages: s.messages.map(m => m.id === replyId ? { ...m, text: randomReply, isThinking: false } : m)
+            }
+          }
+          return s
+        }))
+        setIsSending(false)
+      }, 1000)
+      return
+    }
+
+    try {
+      const activeSessObj = updatedSessions.find(s => s.id === activeSessionId)
+      const currentMessages = activeSessObj ? activeSessObj.messages : []
+      const filtered = currentMessages.filter(m => m.sender === 'user' || m.sender === 'agent')
+      const chatMessages = filtered.slice(-contextRounds * 2).map(m => {
+        // 如果此条消息带有附件，则把文件内容拼装进去送给大模型
+        let content = m.text
+        if (m.fileInfo) {
+          content = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]\n${m.fileInfo.content}`
+        }
+        return { role: m.sender === 'user' ? 'user' : 'assistant', content }
+      })
+
+      // 动态拼装系统人设与技能感知上下文
+      const skillsContext = skillsList.length > 0
+        ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
+        : '你当前尚未安装配备任何第三方扩展技能。'
+      const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
+你需要使用忠诚、可爱、萌系的语气与主人（用户）对话，回答中要适当带有『喵~』、『喵呜~』等猫咪口癖。
+当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面宠物助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
+${skillsContext}
+在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
+⚠️ 极重要约束：只有当主人的指令或问题明确指示进行“查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以可爱的猫咪口吻文字进行回复，严禁滥用并调用任何系统工具。`
+
+      // 将 system prompt 注入为上下文的首条消息
+      chatMessages.unshift({ role: 'system', content: systemPrompt })
+
+      // 调用大模型接口，传入 workspacePath 参数，同时把 sessionId 和 messageId 传进去
+      const response = await window.api.callLLM(
+        {
+          ...llmConfig,
+          sessionId: activeSessionId,
+          messageId: replyId
+        },
+        chatMessages,
+        workspacePath
+      )
+      
+      // 更新该 replyId 占位消息的 text 并结束思考状态
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map(m => m.id === replyId ? { ...m, text: response, isThinking: false } : m)
+          }
+        }
+        return s
+      }))
+    } catch (e: any) {
+      console.error(e)
+      const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
+      const errMsg = isAbort 
+        ? '⚠️ 对话生成已被用户手动中断。'
+        : `系统错误：调用智能代理接口失败（${e.message || e}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map(m => m.id === replyId ? { ...m, text: errMsg, isThinking: false, isError: !isAbort } : m)
+          }
+        }
+        return s
+      }))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const handleTestConnection = async (): Promise<void> => {
+    setTestStatus('testing')
+    try {
+      const result = await window.api.callLLM(llmConfig, [{ role: 'user', content: 'Say "Success" in exactly one word.' }])
+      setTestStatus(`连接成功! 答复: "${result.trim()}"`)
+    } catch (e: any) {
+      setTestStatus(`连接失败: ${e.message || e}`)
+    }
+  }
+
+  const handleSkillsPathClick = async (): Promise<void> => {
+    try {
+      const path = await window.api.selectDirectory({ title: '选择技能存放目录' })
+      if (path) {
+        const savedPath = await window.api.setStoragePath(path)
+        showToast(`技能存放路径已成功更改为：${savedPath || '默认UserData'}`, 'success')
+        await refreshSkillsAndStorage()
+      }
+    } catch (e: any) {
+      showToast(`更改技能路径失败：${e.message || e}`, 'error')
+    }
+  }
+
+  const handleImportSkill = async (): Promise<void> => {
+    try {
+      const list = await window.api.uploadSkillPack()
+      if (list && list.length > 0) setSkillsList(list)
+    } catch (e) { console.error(e) }
+  }
+
+  const handleDeleteSkill = async (name: string): Promise<void> => {
+    try {
+      const list = await window.api.deleteSkill(name)
+      setSkillsList(list)
+    } catch (e) { console.error(e) }
+  }
+
+  const handleSaveStoragePath = async (): Promise<void> => {
+    setStorageSaveStatus({ type: 'idle', message: '' })
+    try {
+      const savedPath = await window.api.setStoragePath(storageInputPath)
+      setStorageSaveStatus({ type: 'success', message: `存储路径保存成功！已创建目录：${savedPath || '默认UserData'}` })
+      showToast('存储路径保存成功！已自动迁移文件。', 'success')
+      await refreshSkillsAndStorage()
+    } catch (e: any) {
+      setStorageSaveStatus({ type: 'failed', message: `存储路径修改失败：${e.message || e}` })
+      showToast(`存储路径修改失败：${e.message || e}`, 'error')
+    }
+  }
+
+  const handleToggleSandboxMode = async (enabled: boolean): Promise<void> => {
+    try {
+      const actual = await window.api.setSandboxMode(enabled)
+      setSandboxMode(actual)
+      showToast(`安全沙盒模式已${actual ? '开启' : '关闭'}`, 'success')
+    } catch (e: any) {
+      showToast(`保存沙盒配置失败: ${e.message || e}`, 'error')
+    }
+  }
+
+  const handleRespondPermission = (approved: boolean): void => {
+    if (activePermissionRequest) {
+      window.api.respondPermission(activePermissionRequest.requestId, approved)
+      setActivePermissionRequest(null)
+    }
+  }
+
+  const handleAbortLlm = async (): Promise<void> => {
+    try {
+      await window.api.abortLlm()
+      setIsSending(false)
+      // 在中断时，立刻将当前处于正在思考（loading）的消息的状态更新为“已终止任务”并隐藏 loading 动画
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map(m => m.isThinking ? { ...m, text: '⚠️ 对话生成已被手动终止。', isThinking: false } : m)
+          }
+        }
+        return s
+      }))
+      showToast('已中断大模型生成', 'info')
+    } catch (e: any) {
+      console.error(e)
+      showToast(`中断失败: ${e.message || e}`, 'error')
+    }
+  }
+
+  const handleToggleCronTask = async (id: string): Promise<void> => {
+    const updated = cronTasks.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t)
+    setCronTasks(updated)
+    localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
+    await window.api.saveCronTasks(updated)
+  }
+
+  const handleDeleteCronTask = async (id: string): Promise<void> => {
+    const updated = cronTasks.filter(t => t.id !== id)
+    setCronTasks(updated)
+    localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
+    await window.api.saveCronTasks(updated)
+  }
+
+  const handleClearCronLogs = async (id: string): Promise<void> => {
+    const updated = cronTasks.map(t => t.id === id ? { ...t, logs: [] } : t)
+    setCronTasks(updated)
+    localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
+    await window.api.saveCronTasks(updated)
+    showToast('定时任务日志已清空', 'success')
+  }
+
+  const handleClearTokenLogs = (): void => {
+    setTokenLogs([])
+    localStorage.removeItem('agentpet_token_logs')
+    showToast('已清空 Token 消耗日志', 'success')
+  }
+
+  // ── Derived State ─────────────────────────────────────────────
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || {
+    id: 'agent:main:dashboard:default',
+    name: 'agent:main:dashboard:default',
+    time: '',
+    messages: []
+  }
+  const activeSessMessages = activeSession.messages || []
+
+  // ── Cron Timer Loop & Backend Executor (Moved here to avoid TDZ) ──
+  // Cron timer loop
+  const elapsedTimesRef = useRef<Record<string, number>>({})
+  
+  const runTaskBackend = async (taskToRun: CronTask, tempSessionId: string, logId: string) => {
+    try {
+      const skillsContext = skillsList.length > 0
+        ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
+        : '你当前尚未安装配备任何第三方扩展技能。'
+      const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
+你正在后台为主人自动执行定时任务。为了保证安全和速度，请直接进行动作的执行（不需要过多客套、寒暄语），回答中要保留忠诚、可爱、萌系的语气（带『喵~』、『喵呜~』等猫咪口癖），并在执行完后给出简明扼要的执行结果。
+${skillsContext}
+在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。`
+      
+      const chatMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `执行定时任务指令: ${taskToRun.action || '无'}` }
+      ]
+
+      const response = await window.api.callLLM(
+        {
+          ...llmConfig,
+          sessionId: tempSessionId,
+          messageId: Date.now()
+        },
+        chatMessages,
+        workspacePath
+      )
+
+      const runningLog = cronRunningLogsRef.current[tempSessionId]
+      if (runningLog) {
+        runningLog.status = 'success'
+        runningLog.message = `定时任务 [${taskToRun.name}] 执行完成。`
+        if (runningLog.messages) {
+          runningLog.messages = runningLog.messages.map(m => 
+            m.sender === 'agent' ? { ...m, text: response, isThinking: false } : m
+          )
+        }
+        delete cronRunningLogsRef.current[tempSessionId]
+
+        setCronTasks(prevTasks => {
+          const nextTasks = prevTasks.map(t => {
+            if (t.id === taskToRun.id) {
+              const updatedLogs = (t.logs || []).map(l => l.id === logId ? { ...runningLog } : l)
+              return { ...t, logs: updatedLogs }
+            }
+            return t
+          })
+          localStorage.setItem('agentpet_cron_tasks', JSON.stringify(nextTasks))
+          window.api.saveCronTasks(nextTasks)
+          return nextTasks
+        })
+
+        // 触发系统托盘通知与桌面挂件气泡
+        await window.api.showNotification('⏰ 定时任务执行成功喵~', `任务 [${taskToRun.name}] 已成功执行完成！`)
+        window.api.showBubble(`任务 [${taskToRun.name}] 执行成功喵！`)
+      }
+    } catch (err: any) {
+      console.error('后台执行定时任务出错', err)
+      const runningLog = cronRunningLogsRef.current[tempSessionId]
+      if (runningLog) {
+        runningLog.status = 'failed'
+        runningLog.message = `定时任务 [${taskToRun.name}] 执行失败：${err.message || err}`
+        if (runningLog.messages) {
+          runningLog.messages = runningLog.messages.map(m => 
+            m.sender === 'agent' ? { ...m, text: `⚠️ 执行过程中出现错误：${err.message || err}`, isThinking: false, isError: true } : m
+          )
+        }
+        delete cronRunningLogsRef.current[tempSessionId]
+
+        setCronTasks(prevTasks => {
+          const nextTasks = prevTasks.map(t => {
+            if (t.id === taskToRun.id) {
+              const updatedLogs = (t.logs || []).map(l => l.id === logId ? { ...runningLog } : l)
+              return { ...t, logs: updatedLogs }
+            }
+            return t
+          })
+          localStorage.setItem('agentpet_cron_tasks', JSON.stringify(nextTasks))
+          window.api.saveCronTasks(nextTasks)
+          return nextTasks
+        })
+
+        await window.api.showNotification('⚠️ 定时任务执行失败', `任务 [${taskToRun.name}] 运行发生异常！`)
+        window.api.showBubble(`任务 [${taskToRun.name}] 失败了喵...`)
+      }
+    }
+  }
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCronTasks(prevTasks => {
+        let changed = false
+        const nextTasks = prevTasks.map(task => {
+          if (!task.isActive) return task
+          const currentElapsed = (elapsedTimesRef.current[task.id] || 0) + 1
+          if (currentElapsed >= task.interval) {
+            changed = true
+            elapsedTimesRef.current[task.id] = 0
+            const timeStr = formatDateTime()
+            const tempSessionId = `cron:${task.id}:${Date.now()}`
+            
+            // 写入日志
+            const newLog: CronLog = {
+              id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              time: timeStr,
+              status: 'running',
+              message: `定时任务 [${task.name}] 触发。正在后台执行...`,
+              messages: [
+                {
+                  id: `user-${Date.now()}`,
+                  sender: 'user',
+                  text: `执行定时任务指令: ${task.action || '无'}`,
+                  time: timeStr
+                },
+                {
+                  id: `agent-${Date.now()}`,
+                  sender: 'agent',
+                  text: '',
+                  isThinking: true,
+                  toolSteps: [],
+                  time: timeStr
+                }
+              ]
+            }
+            cronRunningLogsRef.current[tempSessionId] = newLog
+            const logs = [newLog, ...(task.logs || [])].slice(0, 100)
+
+            // 异步触发后台大模型执行
+            runTaskBackend(task, tempSessionId, newLog.id)
+
+            // 同时将系统触发消息提示也添加到前台当前 Chat 会话中
+            setSessions(prevSessions => {
+              const updated = prevSessions.map(session => {
+                if (session.id === activeSessionId) {
+                  return {
+                    ...session,
+                    messages: [...session.messages, {
+                      id: Date.now() + Math.random(),
+                      sender: 'system',
+                      text: `⏰ **定时任务触发**\n**任务名称**：${task.name}\n**执行动作**：${task.action || '无'}\n这是第 ${task.triggerCount + 1} 次触发执行。`,
+                      time: timeStr
+                    }]
+                  }
+                }
+                return session
+              })
+              if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+              return updated
+            })
+
+            return { ...task, triggerCount: task.triggerCount + 1, lastTriggered: timeStr, logs }
+          } else {
+            elapsedTimesRef.current[task.id] = currentElapsed
+            return task
+          }
+        })
+        if (changed) {
+          localStorage.setItem('agentpet_cron_tasks', JSON.stringify(nextTasks))
+          window.api.saveCronTasks(nextTasks)
+        }
+        return nextTasks
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [activeSessionId, autoSaveHistory, skillsList, currentAvatarName, llmConfig, workspacePath])
+
+  return {
+    // navigation
+    activeTab, setActiveTab,
+    agentSubTab, setAgentSubTab,
+    settingsSubTab, setSettingsSubTab,
+    // ui
+    isCollapsed, setIsCollapsed,
+    showApiKey, setShowApiKey,
+    showModelDropdown, setShowModelDropdown,
+    isLoadingModels,
+    availableModels,
+    dropdownRef,
+    // toast
+    toast, showToast,
+    // theme
+    theme, handleThemeToggle,
+    // llm
+    llmConfig, saveLlmConfig,
+    handleFetchModels, handleTestConnection,
+    testStatus,
+    // wechat
+    wechatConfig, setWechatConfig,
+    wechatSaveSuccess, handleSaveWechatConfig,
+    // cron
+    cronTasks,
+    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
+    // sessions
+    sessions, setSessions,
+    activeSessionId, setActiveSessionId,
+    activeSession, activeSessMessages,
+    inputValue, setInputValue,
+    isSending,
+    chatEndRef,
+    handleCreateNewSession, handleDeleteSession, handleSendChat,
+    // workspace & attached file
+    workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
+    attachedFile, setAttachedFile, handleUploadFile,
+    // system
+    systemInfo,
+    // skills
+    skillsList,
+    skillsPath,
+    handleSkillsPathClick, handleImportSkill, handleDeleteSkill,
+    // storage
+    storageInputPath, setStorageInputPath,
+    actualStoragePath,
+    storageSaveStatus,
+    handleSaveStoragePath,
+    // avatar
+    customModelDir, setCustomModelDir,
+    customModelFile, setCustomModelFile,
+    avatarList,
+    currentAvatarName,
+    refreshAvatarsList,
+    // memory
+    autoSaveHistory, setAutoSaveHistory,
+    contextRounds, setContextRounds,
+    // models default
+    DEFAULT_MODELS,
+    // token logs
+    tokenLogs, setTokenLogs,
+    handleClearTokenLogs,
+    // highlighted message
+    highlightedMessageId, setHighlightedMessageId,
+    // sandbox
+    sandboxMode,
+    handleToggleSandboxMode,
+    activePermissionRequest,
+    handleRespondPermission,
+    handleAbortLlm
+  }
+}
+
+export type AppStore = ReturnType<typeof useAppStore>
