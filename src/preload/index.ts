@@ -109,15 +109,26 @@ const api = {
   },
   showNotification: (title: string, body: string): Promise<boolean> =>
     ipcRenderer.invoke('api:show-notification', title, body),
-  onShowBubble: (callback: (text: string) => void): (() => void) => {
-    const subscription = (_event: any, text: string) => callback(text)
+  onShowBubble: (callback: (text: string, details?: string, taskId?: string, logId?: string) => void): (() => void) => {
+    const subscription = (_event: any, text: string, details?: string, taskId?: string, logId?: string) =>
+      callback(text, details, taskId, logId)
     ipcRenderer.on('api:show-bubble', subscription)
     return () => {
       ipcRenderer.removeListener('api:show-bubble', subscription)
     }
   },
-  showBubble: (text: string): void => {
-    ipcRenderer.send('api:trigger-bubble', text)
+  showBubble: (text: string, details?: string, taskId?: string, logId?: string): void => {
+    ipcRenderer.send('api:trigger-bubble', text, details, taskId, logId)
+  },
+  openCronLogDetails: (taskId: string, logId: string): void => {
+    ipcRenderer.send('api:request-open-cron-log-details', taskId, logId)
+  },
+  onOpenCronLogDetails: (callback: (taskId: string, logId: string) => void): (() => void) => {
+    const subscription = (_event: any, taskId: string, logId: string) => callback(taskId, logId)
+    ipcRenderer.on('api:open-cron-log-details', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:open-cron-log-details', subscription)
+    }
   }
 }
 

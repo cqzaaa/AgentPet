@@ -60,8 +60,13 @@ export function useAppStore() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
 
-  // ── Toast ────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+
+  // ── Cron Location Details ────────────────────────────────────
+  const [selectedTaskForLog, setSelectedTaskForLog] = useState<any>(null)
+  const [selectedCronLogDetails, setSelectedCronLogDetails] = useState<any>(null)
+  const [pendingOpenTaskId, setPendingOpenTaskId] = useState<string | null>(null)
+  const [pendingOpenLogId, setPendingOpenLogId] = useState<string | null>(null)
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type })
@@ -353,6 +358,54 @@ export function useAppStore() {
       }
     }
     loadCronTasks()
+  }, [])
+
+  // 监听并执行详情自动定位弹窗
+  useEffect(() => {
+    if (!pendingOpenTaskId || cronTasks.length === 0) return
+    const task = cronTasks.find(t => t.id === pendingOpenTaskId)
+    if (task) {
+      setSelectedTaskForLog(task)
+      if (pendingOpenLogId && task.logs) {
+        const log = task.logs.find(l => l.id === pendingOpenLogId)
+        if (log) {
+          setSelectedCronLogDetails(log)
+        }
+      }
+    }
+    setPendingOpenTaskId(null)
+    setPendingOpenLogId(null)
+  }, [pendingOpenTaskId, pendingOpenLogId, cronTasks])
+
+  // 监听主窗口 IPC 定位指令
+  useEffect(() => {
+    if (!window.api.onOpenCronLogDetails) return
+    const unsubscribe = window.api.onOpenCronLogDetails((taskId: string, logId: string) => {
+      setActiveTab('agent')
+      setAgentSubTab('cron')
+      setPendingOpenTaskId(taskId)
+      setPendingOpenLogId(logId)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // 挂载时解析 URL 传入的定位参数
+  useEffect(() => {
+    try {
+      const href = window.location.href
+      const taskMatch = href.match(/[?&]openTaskId=([^&?#]+)/)
+      const logMatch = href.match(/[?&]openLogId=([^&?#]+)/)
+      if (taskMatch && taskMatch[1]) {
+        setActiveTab('agent')
+        setAgentSubTab('cron')
+        setPendingOpenTaskId(decodeURIComponent(taskMatch[1]))
+      }
+      if (logMatch && logMatch[1]) {
+        setPendingOpenLogId(decodeURIComponent(logMatch[1]))
+      }
+    } catch (e) {
+      console.error('解析 URL 定位参数失败', e)
+    }
   }, [])
 
   // 监听主进程的大模型定时任务更新通知
@@ -946,8 +999,29 @@ ${skillsContext}
         })
 
         // 触发系统托盘通知与桌面挂件气泡
-        await window.api.showNotification('⏰ 定时任务执行成功喵~', `任务 [${taskToRun.name}] 已成功执行完成！`)
-        window.api.showBubble(`任务 [${taskToRun.name}] 执行成功喵！`)
+        window.api.showBubble(`任务 [${taskToRun.name}] 执行成功喵！`, response, taskToRun.id, logId)
+
+        // 在 Chat 会话中添加简化的完成提醒
+        const successTimeStr = formatDateTime()
+        const successTimeOnly = successTimeStr.split(' ')[1] || successTimeStr
+        setSessions(prevSessions => {
+          const updated = prevSessions.map(session => {
+            if (session.id === activeSessionId) {
+              return {
+                ...session,
+                messages: [...session.messages, {
+                  id: Date.now() + Math.random(),
+                  sender: 'system',
+                  text: `${successTimeOnly} - 完成【${taskToRun.name}】任务`,
+                  time: successTimeStr
+                }]
+              }
+            }
+            return session
+          })
+          if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+          return updated
+        })
       }
     } catch (err: any) {
       console.error('后台执行定时任务出错', err)
@@ -975,8 +1049,29 @@ ${skillsContext}
           return nextTasks
         })
 
-        await window.api.showNotification('⚠️ 定时任务执行失败', `任务 [${taskToRun.name}] 运行发生异常！`)
-        window.api.showBubble(`任务 [${taskToRun.name}] 失败了喵...`)
+        window.api.showBubble(`任务 [${taskToRun.name}] 失败了喵...`, err.message || err, taskToRun.id, logId)
+
+        // 在 Chat 会话中添加简化的失败提醒
+        const failTimeStr = formatDateTime()
+        const failTimeOnly = failTimeStr.split(' ')[1] || failTimeStr
+        setSessions(prevSessions => {
+          const updated = prevSessions.map(session => {
+            if (session.id === activeSessionId) {
+              return {
+                ...session,
+                messages: [...session.messages, {
+                  id: Date.now() + Math.random(),
+                  sender: 'system',
+                  text: `${failTimeOnly} - 【${taskToRun.name}】任务执行失败`,
+                  time: failTimeStr
+                }]
+              }
+            }
+            return session
+          })
+          if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+          return updated
+        })
       }
     }
   }
@@ -1023,26 +1118,6 @@ ${skillsContext}
             // 异步触发后台大模型执行
             runTaskBackend(task, tempSessionId, newLog.id)
 
-            // 同时将系统触发消息提示也添加到前台当前 Chat 会话中
-            setSessions(prevSessions => {
-              const updated = prevSessions.map(session => {
-                if (session.id === activeSessionId) {
-                  return {
-                    ...session,
-                    messages: [...session.messages, {
-                      id: Date.now() + Math.random(),
-                      sender: 'system',
-                      text: `⏰ **定时任务触发**\n**任务名称**：${task.name}\n**执行动作**：${task.action || '无'}\n这是第 ${task.triggerCount + 1} 次触发执行。`,
-                      time: timeStr
-                    }]
-                  }
-                }
-                return session
-              })
-              if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-              return updated
-            })
-
             return { ...task, triggerCount: task.triggerCount + 1, lastTriggered: timeStr, logs }
           } else {
             elapsedTimesRef.current[task.id] = currentElapsed
@@ -1085,6 +1160,8 @@ ${skillsContext}
     // cron
     cronTasks,
     handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
+    selectedTaskForLog, setSelectedTaskForLog,
+    selectedCronLogDetails, setSelectedCronLogDetails,
     // sessions
     sessions, setSessions,
     activeSessionId, setActiveSessionId,

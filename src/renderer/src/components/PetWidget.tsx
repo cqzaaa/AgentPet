@@ -34,25 +34,55 @@ export function PetWidget(): React.JSX.Element {
   }, [])
 
   const [bubbleText, setBubbleText] = useState<string | null>(null)
+  const [bubbleDetails, setBubbleDetails] = useState<string | null>(null)
+  const [bubbleTaskId, setBubbleTaskId] = useState<string | null>(null)
+  const [bubbleLogId, setBubbleLogId] = useState<string | null>(null)
   const bubbleTimerRef = useRef<any>(null)
 
   useEffect(() => {
     if (!window.api.onShowBubble) return
-    const unsubscribe = window.api.onShowBubble((text: string) => {
+    const unsubscribe = window.api.onShowBubble((text: string, details?: string, taskId?: string, logId?: string) => {
       setBubbleText(text)
+      setBubbleDetails(details || null)
+      setBubbleTaskId(taskId || null)
+      setBubbleLogId(logId || null)
       if (modelRef.current) {
         modelRef.current.motion('TapBody').catch((err) => console.log('Live2D motion failed', err))
       }
       if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
+      // 如果有 details，延长显示时间到 10 秒
+      const duration = details ? 10000 : 5000
       bubbleTimerRef.current = setTimeout(() => {
         setBubbleText(null)
-      }, 5000)
+        setBubbleDetails(null)
+        setBubbleTaskId(null)
+        setBubbleLogId(null)
+      }, duration)
     })
     return () => {
       unsubscribe()
       if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
     }
   }, [])
+
+  const handleViewDetails = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    const tId = bubbleTaskId
+    const lId = bubbleLogId
+    // 清除气泡
+    setBubbleText(null)
+    setBubbleDetails(null)
+    setBubbleTaskId(null)
+    setBubbleLogId(null)
+    if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
+
+    // 唤醒主配置中心窗口并定位详情
+    if (tId && lId) {
+      window.api.openCronLogDetails(tId, lId)
+    } else {
+      window.api.openAgentWindow()
+    }
+  }
 
   // Global mouse events
   useEffect(() => {
@@ -296,10 +326,19 @@ export function PetWidget(): React.JSX.Element {
       {/* 定时提醒气泡 */}
       {bubbleText && (
         <div className="pet-toast-bubble">
-          <div className="pet-toast-bubble-content">{bubbleText}</div>
+          <div className="pet-toast-bubble-content">
+            <div>{bubbleText}</div>
+            {bubbleDetails && (
+              <div className="pet-bubble-link" onClick={handleViewDetails}>
+                查看详情
+              </div>
+            )}
+          </div>
           <div className="pet-toast-bubble-arrow" />
         </div>
       )}
+
+
 
       {/* Live2D 渲染容器 */}
       <div

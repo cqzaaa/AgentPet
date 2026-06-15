@@ -54,10 +54,13 @@ async function copyFolderRecursive(src: string, dest: string): Promise<void> {
   }
 }
 
-function createAgentWindow(): void {
+function createAgentWindow(openParams?: { taskId: string; logId: string }): void {
   if (agentWindow) {
     if (agentWindow.isMinimized()) agentWindow.restore()
     agentWindow.focus()
+    if (openParams) {
+      agentWindow.webContents.send('api:open-cron-log-details', openParams.taskId, openParams.logId)
+    }
     return
   }
 
@@ -76,9 +79,13 @@ function createAgentWindow(): void {
   // 禁用默认菜单栏
   agentWindow.setMenu(null)
 
-  const agentUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
+  let agentUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
     ? `${process.env['ELECTRON_RENDERER_URL']}/#/agent`
     : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/agent`
+
+  if (openParams) {
+    agentUrl += `?openTaskId=${openParams.taskId}&openLogId=${openParams.logId}`
+  }
 
   agentWindow.loadURL(agentUrl)
 
@@ -522,10 +529,14 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.on('api:trigger-bubble', (_, text: string) => {
+  ipcMain.on('api:trigger-bubble', (_, text: string, details?: string, taskId?: string, logId?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('api:show-bubble', text)
+      mainWindow.webContents.send('api:show-bubble', text, details, taskId, logId)
     }
+  })
+
+  ipcMain.on('api:request-open-cron-log-details', (_, taskId: string, logId: string) => {
+    createAgentWindow({ taskId, logId })
   })
 
   ipcMain.handle('api:get-cron-tasks', async () => {

@@ -8,9 +8,6 @@ interface AgentPageProps {
 }
 
 export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
-  const [selectedTaskForLog, setSelectedTaskForLog] = useState<any>(null)
-  const [selectedCronLogDetails, setSelectedCronLogDetails] = useState<any>(null)
-
   const {
     agentSubTab, setAgentSubTab,
     // skills
@@ -23,7 +20,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     currentAvatarName,
     // cron
     cronTasks,
-    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs
+    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
+    selectedTaskForLog, setSelectedTaskForLog,
+    selectedCronLogDetails, setSelectedCronLogDetails
   } = store
 
   return (

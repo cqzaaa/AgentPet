@@ -3790,3 +3790,18 @@ body {
     transform: translateX(-50%) translateY(0) scale(1);
   }
 }
+
+/* 桌面挂件气泡“查看详情”链接与详情弹窗 */
+.pet-bubble-link {
+  margin-top: 6px;
+  color: #06b6d4;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 10px;
+  transition: color 0.15s ease;
+  display: block;
+}
+
+.pet-bubble-link:hover {
+  color: #f43f5e;
+}

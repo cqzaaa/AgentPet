@@ -45,8 +45,10 @@ declare global {
       saveCronTasks: (tasks: any[]) => Promise<boolean>
       onCronUpdated: (callback: () => void) => () => void
       showNotification: (title: string, body: string) => Promise<boolean>
-      onShowBubble: (callback: (text: string) => void) => () => void
-      showBubble: (text: string) => void
+      onShowBubble: (callback: (text: string, details?: string, taskId?: string, logId?: string) => void) => () => void
+      showBubble: (text: string, details?: string, taskId?: string, logId?: string) => void
+      openCronLogDetails: (taskId: string, logId: string) => void
+      onOpenCronLogDetails: (callback: (taskId: string, logId: string) => void) => () => void
     }
   }
 }
