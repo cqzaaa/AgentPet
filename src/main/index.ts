@@ -125,7 +125,7 @@ function createTray(mainWindow: BrowserWindow): void {
   tray.setContextMenu(contextMenu)
 
   tray.on('double-click', () => {
-    mainWindow.show()
+    createAgentWindow()
   })
 }
 
@@ -163,6 +163,10 @@ function createWindow(): void {
     // 初始开启穿透，直到鼠标移动到宠物元素上
     mainWindow.setIgnoreMouseEvents(true, { forward: true })
     createTray(mainWindow)
+  })
+
+  mainWindow.on('blur', () => {
+    mainWindow?.webContents.send('window-blur')
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

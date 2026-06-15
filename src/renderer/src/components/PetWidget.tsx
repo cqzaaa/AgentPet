@@ -100,13 +100,27 @@ export function PetWidget(): React.JSX.Element {
     const handleGlobalClick = (): void => {
       setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
     }
+    const handleBlur = (): void => {
+      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
+    }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
     window.addEventListener('click', handleGlobalClick)
+    window.addEventListener('blur', handleBlur)
+
+    const hasIpc = window.electron && window.electron.ipcRenderer
+    if (hasIpc) {
+      window.electron.ipcRenderer.on('window-blur', handleBlur)
+    }
+
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
       window.removeEventListener('click', handleGlobalClick)
+      window.removeEventListener('blur', handleBlur)
+      if (hasIpc) {
+        window.electron.ipcRenderer.removeListener('window-blur', handleBlur)
+      }
     }
   }, [])
 
@@ -243,7 +257,7 @@ export function PetWidget(): React.JSX.Element {
   const handleMouseEnter = (e: React.MouseEvent): void => {
     if (!modelRef.current) return
     const isHovering = checkHoveringModel(e.clientX, e.clientY)
-    if (isHovering) {
+    if (isHovering || contextMenu.visible) {
       window.api.setIgnoreMouseEvents(false)
     } else {
       window.api.setIgnoreMouseEvents(true, { forward: true })
@@ -264,7 +278,7 @@ export function PetWidget(): React.JSX.Element {
 
     // 动态控制鼠标穿透
     const isHovering = checkHoveringModel(e.clientX, e.clientY)
-    if (isHovering) {
+    if (isHovering || contextMenu.visible) {
       window.api.setIgnoreMouseEvents(false)
     } else {
       window.api.setIgnoreMouseEvents(true, { forward: true })
@@ -300,6 +314,7 @@ export function PetWidget(): React.JSX.Element {
     if (x < 8) x = 8
     if (y < 8) y = 8
     setContextMenu({ x, y, visible: true })
+    window.api.setIgnoreMouseEvents(false)
   }
 
   const handleOpenAgent = (e: React.MouseEvent): void => {
