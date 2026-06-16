@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import { randomBytes } from 'node:crypto'
+import * as crypto from 'crypto'
 
 export interface WechatLlmConfig {
   provider: string
@@ -29,6 +30,7 @@ interface WechatBotManagerOptions {
   callLlm: (config: any, messages: any[]) => Promise<string>
   onStatusUpdated: () => void
   notifyRenderSessionUpdate: () => void
+  getStorageDir: () => string
 }
 
 // ── 自研极简微信 iLink 客户端 ────────────────────────────────────────────
@@ -524,12 +526,13 @@ export class WechatBotManager {
             contextTokens.set(fromUserId, message.context_token)
           }
 
-          const text = extractText(message)
+          const nickname = message.from_user_nickname || `微信好友 (${fromUserId})`
+          const { text, mediaUrls } = await this.processMessageContent(message)
           if (!text) continue
 
-          const nickname = message.from_user_nickname || `微信好友 (${fromUserId})`
           this.state.messagesReceived++
-          this.addLog('in', `[${nickname}]: ${text}`)
+          const logText = text.replace(/!\[图片\]\(wechat-file:\/\/local\/.*?\)/g, '[图片]')
+          this.addLog('in', `[${nickname}]: ${logText}`)
 
           // 1. 在 SQLite 中保存用户的消息
           this.saveMessageToDB({
@@ -667,7 +670,15 @@ ${skillsContext}
 
       const messagesForLlm = [
         { role: 'system', content: systemPrompt },
-        ...history.slice(-30) // 最多取近 15 轮对话
+        ...history.slice(-30).map(h => {
+          if (h.role === 'user') {
+            return {
+              role: h.role,
+              content: this.convertWechatFileToBase64(h.content)
+            }
+          }
+          return h
+        })
       ]
 
       const response = await this.options.callLlm(llm, messagesForLlm)
@@ -733,5 +744,194 @@ ${skillsContext}
     } catch (dbErr) {
       this.addLog('info', `保存微信聊天记录到 SQLite 失败: ${dbErr}`)
     }
+  }
+
+  // ── 微信媒体解密与下载服务 ────────────────────────────────────────────
+
+  // 下载并解密微信媒体文件
+  private async downloadAndDecryptMedia(cdnUrl: string, aesKeyStr: string, ext = 'png'): Promise<string> {
+    try {
+      const wechatFilesDir = join(this.options.getStorageDir(), 'wechat_files')
+      if (!fs.existsSync(wechatFilesDir)) {
+        fs.mkdirSync(wechatFilesDir, { recursive: true })
+      }
+
+      // 1. 下载加密的 CDN 文件
+      const resp = await fetch(cdnUrl)
+      if (!resp.ok) {
+        throw new Error(`下载媒体文件失败: HTTP ${resp.status}`)
+      }
+      const encryptedBuffer = Buffer.from(await resp.arrayBuffer())
+
+      // 2. 解析 AES Key
+      const keyBuffer = this.parseAesKey(aesKeyStr)
+
+      // 3. AES-128-ECB 解密
+      const decryptedBuffer = this.decryptAesEcb(encryptedBuffer, keyBuffer)
+
+      // 4. 保存为本地文件
+      const fileName = `${Date.now()}_${randomBytes(4).toString('hex')}.${ext}`
+      const filePath = join(wechatFilesDir, fileName)
+      fs.writeFileSync(filePath, decryptedBuffer)
+
+      this.addLog('info', `微信媒体文件已下载解密并保存成功: ${fileName}`)
+      return `wechat-file://local/${fileName}`
+    } catch (e: any) {
+      this.addLog('info', `处理微信多媒体文件下载解密失败: ${e.message || e}`)
+      return ''
+    }
+  }
+
+  // 辅助函数：解析密钥
+  private parseAesKey(key: string): Buffer {
+    if (key.length === 32 && /^[0-9a-fA-F]{32}$/.test(key)) {
+      return Buffer.from(key, 'hex')
+    }
+    const decoded = Buffer.from(key, 'base64')
+    if (decoded.length === 16) {
+      return decoded
+    }
+    if (decoded.length === 32) {
+      return Buffer.from(decoded.toString('ascii'), 'hex')
+    }
+    return decoded
+  }
+
+  // 辅助函数：AES-128-ECB 解密
+  private decryptAesEcb(encryptedBuffer: Buffer, keyBuffer: Buffer): Buffer {
+    const decipher = crypto.createDecipheriv('aes-128-ecb', keyBuffer, null)
+    decipher.setAutoPadding(true)
+    return Buffer.concat([decipher.update(encryptedBuffer), decipher.final()])
+  }
+
+  // 处理微信消息的完整内容（包括多模态文件下载与解密）
+  private async processMessageContent(message: any): Promise<{ text: string; mediaUrls: string[] }> {
+    let textParts: string[] = []
+    const mediaUrls: string[] = []
+
+    if (!message || !message.item_list) {
+      return { text: '', mediaUrls: [] }
+    }
+
+    for (const item of message.item_list) {
+      if (item.type === 1 && item.text_item?.text) {
+        // 文本项
+        let txt = item.text_item.text
+        const ref = item.ref_msg
+        if (ref?.message_item) {
+          const isMedia = [2, 3, 4, 5].includes(ref.message_item.type)
+          if (!isMedia) {
+            const refBody = ref.message_item.text_item?.text || ''
+            const title = ref.title || ''
+            if (title !== '' || refBody !== '') {
+              txt = `[引用: ${title} | ${refBody}]\n${txt}`
+            }
+          }
+        }
+        textParts.push(txt)
+      } else if (item.type === 2) {
+        // 图片项 (ITEM_TYPE_IMAGE)
+        const imageItem = item.image_item
+        if (imageItem) {
+          const aesKey = imageItem.aeskey || imageItem.media?.aes_key || ''
+          const cdnUrl = imageItem.url || imageItem.cdn_url || imageItem.media?.full_url || ''
+          if (cdnUrl && aesKey) {
+            this.addLog('info', '检测到微信图片消息，开始下载解密...')
+            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, 'png')
+            if (localUrl) {
+              mediaUrls.push(localUrl)
+              textParts.push(`![图片](${localUrl})`)
+            } else {
+              textParts.push('[图片加载失败]')
+            }
+          } else {
+            textParts.push('[图片数据不完整]')
+          }
+        }
+      } else if (item.type === 3 && item.voice_item?.text) {
+        // 语音项 (如果有识别出来的文本)
+        textParts.push(item.voice_item.text)
+      } else if (item.type === 4) {
+        // 文件项 (ITEM_TYPE_FILE)
+        const fileItem = item.file_item
+        if (fileItem) {
+          const aesKey = fileItem.aeskey || fileItem.media?.aes_key || ''
+          const cdnUrl = fileItem.url || fileItem.cdn_url || fileItem.media?.full_url || ''
+          const fileName = fileItem.name || 'file.dat'
+          const ext = fileName.split('.').pop() || 'dat'
+          if (cdnUrl && aesKey) {
+            this.addLog('info', `检测到微信文件消息 [${fileName}]，开始下载解密...`)
+            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, ext)
+            if (localUrl) {
+              mediaUrls.push(localUrl)
+              textParts.push(`[文件: ${fileName}](${localUrl})`)
+            } else {
+              textParts.push(`[文件下载失败: ${fileName}]`)
+            }
+          } else {
+            textParts.push(`[文件数据不完整: ${fileName}]`)
+          }
+        }
+      }
+    }
+
+    return {
+      text: textParts.join('\n'),
+      mediaUrls
+    }
+  }
+
+  // 将 wechat-file:// 协议链接转换为大模型需要的 Base64 URL (若有)
+  private convertWechatFileToBase64(text: string): string | any[] {
+    const imgRegex = /!\[.*?\]\((wechat-file:\/\/local\/.*?)\)/g
+    const parts: any[] = []
+    let lastIndex = 0
+
+    // 检测是否包含图片
+    const hasImage = imgRegex.test(text)
+    if (!hasImage) {
+      return text // 纯文本
+    }
+
+    // 重置正则的 lastIndex
+    imgRegex.lastIndex = 0
+
+    let match
+    while ((match = imgRegex.exec(text)) !== null) {
+      const textBefore = text.substring(lastIndex, match.index)
+      if (textBefore.trim()) {
+        parts.push({ type: 'text', text: textBefore })
+      }
+
+      const fileUrl = match[1]
+      const fileName = fileUrl.replace('wechat-file://local/', '')
+      const filePath = join(this.options.getStorageDir(), 'wechat_files', fileName)
+
+      try {
+        if (fs.existsSync(filePath)) {
+          const imageBuffer = fs.readFileSync(filePath)
+          const base64 = imageBuffer.toString('base64')
+          const ext = fileName.split('.').pop() || 'png'
+          const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
+          parts.push({
+            type: 'image_url',
+            image_url: {
+              url: `data:${mimeType};base64,${base64}`
+            }
+          })
+        }
+      } catch (err) {
+        console.error('转换图片为 base64 失败', err)
+      }
+
+      lastIndex = imgRegex.lastIndex
+    }
+
+    const textAfter = text.substring(lastIndex)
+    if (textAfter.trim()) {
+      parts.push({ type: 'text', text: textAfter })
+    }
+
+    return parts
   }
 }

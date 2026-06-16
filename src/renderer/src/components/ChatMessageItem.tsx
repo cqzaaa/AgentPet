@@ -168,6 +168,78 @@ function parseMarkdownToHtml(markdown: string): string {
   return html
 }
 
+export function ChatImage({ src, alt }: { src: string; alt: string }) {
+  const [hasError, setHasError] = useState(false)
+
+  if (hasError) {
+    return (
+      <div
+        className="image-error-tip"
+        style={{
+          color: '#888',
+          fontSize: '12px',
+          border: '1px dashed #ccc',
+          padding: '8px',
+          borderRadius: '6px',
+          margin: '4px 0',
+          display: 'inline-block',
+          backgroundColor: 'rgba(0,0,0,0.02)'
+        }}
+      >
+        ⚠️ 已被删除 ({alt || '微信图片'})
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="chat-inline-image"
+      style={{
+        maxWidth: '100%',
+        maxHeight: '200px',
+        borderRadius: '8px',
+        margin: '4px 0',
+        display: 'block',
+        cursor: 'pointer'
+      }}
+      onClick={() => window.open(src)}
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
+// 渲染包含图片的普通文本部分
+export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  const imgRegex = /!\[(.*?)\]\((.*?)\)/g
+  let match
+  let lastIndex = 0
+
+  while ((match = imgRegex.exec(text)) !== null) {
+    const textBefore = text.substring(lastIndex, match.index)
+    if (textBefore.trim()) {
+      parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textBefore} />)
+    }
+
+    const alt = match[1]
+    const src = match[2]
+    parts.push(
+      <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
+    )
+
+    lastIndex = imgRegex.lastIndex
+  }
+
+  const textAfter = text.substring(lastIndex)
+  if (textAfter.trim()) {
+    parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textAfter} />)
+  }
+
+  return parts
+}
+
 export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Element {
   const html = React.useMemo(() => parseMarkdownToHtml(rawText), [rawText])
   return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
@@ -176,7 +248,7 @@ export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Elemen
 export function renderAdvancedMessage(text: string): React.ReactNode {
   if (!text) return ''
   const parts: React.ReactNode[] = []
-  let keyIdx = 0
+  const keyIdx = { val: 0 }
 
   const codeRegex = /```(\w*)\n([\s\S]*?)```/g
   let match
@@ -185,13 +257,13 @@ export function renderAdvancedMessage(text: string): React.ReactNode {
   while ((match = codeRegex.exec(text)) !== null) {
     const textBefore = text.substring(lastIndex, match.index)
     if (textBefore.trim()) {
-      parts.push(<MarkdownText key={`text-${keyIdx++}`} rawText={textBefore} />)
+      parts.push(...renderPlainOrImageText(textBefore, keyIdx))
     }
 
     const lang = match[1] || 'code'
     const codeContent = match[2]
     parts.push(
-      <CodeBlock key={`code-${keyIdx++}`} code={codeContent} lang={lang} />
+      <CodeBlock key={`code-${keyIdx.val++}`} code={codeContent} lang={lang} />
     )
 
     lastIndex = codeRegex.lastIndex
@@ -199,10 +271,10 @@ export function renderAdvancedMessage(text: string): React.ReactNode {
 
   const textAfter = text.substring(lastIndex)
   if (textAfter.trim()) {
-    parts.push(<MarkdownText key={`text-${keyIdx++}`} rawText={textAfter} />)
+    parts.push(...renderPlainOrImageText(textAfter, keyIdx))
   }
 
-  return parts.length > 0 ? <>{parts}</> : <MarkdownText rawText={text} />
+  return parts.length > 0 ? <>{parts}</> : <>{renderPlainOrImageText(text, keyIdx)}</>
 }
 
 // ── 可独立折叠的工具调用子组件 ─────────────────────────────────
@@ -221,7 +293,7 @@ export function ToolCallItem({ step, isThinking }: { step: any; isThinking: bool
 
   return (
     <div className="tool-step-item call">
-      <div 
+      <div
         className="step-call-header"
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
         title="点击展开/收起调用详情"
@@ -247,7 +319,7 @@ export function ToolCallItem({ step, isThinking }: { step: any; isThinking: bool
 // ── 可独立折叠的工具具体执行结果子组件 ─────────────────────────────────
 export function ToolResultItem({ step, isThinking }: { step: any; isThinking: boolean }) {
   const [isItemCollapsed, setIsItemCollapsed] = useState(true) // 默认是折叠的
-  
+
   useEffect(() => {
     if (!isThinking) {
       setIsItemCollapsed(true)
@@ -257,11 +329,11 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
   const displayResult = typeof step.detail === 'string'
     ? step.detail
     : JSON.stringify(step.detail, null, 2)
-  
+
   return (
     <div className="tool-step-item result">
-      <div 
-        className="step-result-header" 
+      <div
+        className="step-result-header"
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
         title="点击展开/收起具体内容"
       >
@@ -270,7 +342,7 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
         </span>
         <span className="step-result-arrow">{isItemCollapsed ? ' ∨' : ' ∧'}</span>
       </div>
-      
+
       {!isItemCollapsed && (
         <pre className="step-result-code">
           <code>{displayResult}</code>
@@ -339,7 +411,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         <span className="msg-sender-name">{senderName}</span>
         <span className="msg-send-time">{msg.time}</span>
       </div>
-      
+
       <div className="message-bubble">
         {/* 如果附带了文件 */}
         {msg.fileInfo && (
@@ -361,7 +433,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                 工具调用 {callsCount} · 过程消息 {msgsCount}
               </span>
             </div>
-            
+
             {!currentCollapsed && (
               <div className="tool-steps-list">
                 {toolSteps.map((step: any) => {

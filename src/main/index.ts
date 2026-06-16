@@ -282,6 +282,16 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true
     }
+  },
+  {
+    scheme: 'wechat-file',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
   }
 ])
 
@@ -528,6 +538,30 @@ app.whenReady().then(() => {
       return new Response(response.body, { status: response.status, headers })
     } catch (e) {
       console.error('[live2d protocol]', e)
+      return new Response('Not Found', { status: 404 })
+    }
+  })
+
+  protocol.handle('wechat-file', async (request) => {
+    try {
+      const url = new URL(request.url)
+      const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
+      const fileName = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      const filePath = join(wechatFilesDir, fileName)
+      
+      // 安全检查：防止目录遍历漏洞
+      if (!filePath.startsWith(wechatFilesDir)) {
+        return new Response('Access Denied', { status: 403 })
+      }
+      
+      const fileUrl = pathToFileURL(filePath).toString()
+      const response = await net.fetch(fileUrl)
+      const headers = new Headers(response.headers)
+      headers.set('Access-Control-Allow-Origin', '*')
+      headers.set('Access-Control-Allow-Methods', 'GET, HEAD')
+      return new Response(response.body, { status: response.status, headers })
+    } catch (e) {
+      console.error('[wechat-file protocol]', e)
       return new Response('Not Found', { status: 404 })
     }
   })
@@ -2150,7 +2184,8 @@ app.whenReady().then(() => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('api:wechat-session-updated')
       }
-    }
+    },
+    getStorageDir: getActiveStorageDir
   })
 
   // 尝试自动恢复登录会话
