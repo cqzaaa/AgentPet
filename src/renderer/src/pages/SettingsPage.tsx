@@ -17,9 +17,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     dropdownRef,
     handleFetchModels, handleTestConnection,
     testStatus,
-    // wechat
-    wechatConfig, setWechatConfig,
-    wechatSaveSuccess, handleSaveWechatConfig,
     // storage
     storageInputPath, setStorageInputPath,
     actualStoragePath, storageSaveStatus,
@@ -40,9 +37,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
       <div className="sub-tab-nav">
         <div className={`sub-tab-item ${settingsSubTab === 'keys' ? 'active' : ''}`} onClick={() => setSettingsSubTab('keys')}>
           模型配置
-        </div>
-        <div className={`sub-tab-item ${settingsSubTab === 'wechat' ? 'active' : ''}`} onClick={() => setSettingsSubTab('wechat')}>
-          通信集成
         </div>
         <div className={`sub-tab-item ${settingsSubTab === 'storage' ? 'active' : ''}`} onClick={() => setSettingsSubTab('storage')}>
           本地存储
@@ -216,44 +210,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
           </div>
         )}
 
-        {/* ── 通信集成 ── */}
-        {settingsSubTab === 'wechat' && (
-          <div className="settings-sub-panel">
-            <div className="form-desc-text">
-              配置微信机器人通信集成参数。微信消息可以通过配置的 Webhook 回调或本地映射端口同步转发给 Mao 进行自动答复。
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Webhook 回调地址 (Webhook URL)</label>
-              <input type="text" className="form-input" placeholder="https://wx.yourserver.com/callback" value={wechatConfig.webhookUrl} onChange={e => setWechatConfig({ ...wechatConfig, webhookUrl: e.target.value })} />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">微信助手 API 密钥 (Authorization Token)</label>
-              <input type="password" className="form-input" placeholder="微信消息中继服务密钥" value={wechatConfig.apiKey} onChange={e => setWechatConfig({ ...wechatConfig, apiKey: e.target.value })} />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">本地服务端口 (Local Listener Port)</label>
-              <input type="text" className="form-input" placeholder="8080" value={wechatConfig.localPort} onChange={e => setWechatConfig({ ...wechatConfig, localPort: e.target.value })} />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">默认微信自动回复话术</label>
-              <textarea className="form-textarea" placeholder="例如：您好，我是您的 Mao 微信助手，已收到您的消息。" value={wechatConfig.autoReplyText} onChange={e => setWechatConfig({ ...wechatConfig, autoReplyText: e.target.value })} />
-            </div>
-
-            <div className="action-row">
-              <button className="btn-primary" onClick={handleSaveWechatConfig}>💾 保存微信集成配置</button>
-            </div>
-
-            {wechatSaveSuccess && (
-              <div className="test-res-box success">
-                微信集成模拟配置已保存！本地监听端口映射已设置为：{wechatConfig.localPort || '8080'}。
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ── 本地存储 ── */}
         {settingsSubTab === 'storage' && (

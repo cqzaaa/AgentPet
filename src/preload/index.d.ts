@@ -49,6 +49,13 @@ declare global {
       showBubble: (text: string, details?: string, taskId?: string, logId?: string) => void
       openCronLogDetails: (taskId: string, logId: string) => void
       onOpenCronLogDetails: (callback: (taskId: string, logId: string) => void) => () => void
+      wechatStartLogin: () => Promise<boolean>
+      wechatLogout: () => Promise<boolean>
+      wechatGetStatus: () => Promise<any>
+      wechatSaveSettings: (settings: any) => Promise<boolean>
+      syncLlmConfig: (config: any) => Promise<boolean>
+      onWechatStatusUpdated: (callback: (data: any) => void) => () => void
+      onWechatSessionUpdated: (callback: () => void) => () => void
     }
   }
 }

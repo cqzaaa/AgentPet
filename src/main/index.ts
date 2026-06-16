@@ -8,6 +8,31 @@ import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import Database from 'better-sqlite3'
+import { WechatBotManager } from './wechatBot'
+
+let wechatBotManager: WechatBotManager | null = null
+let systemLlmConfig: any = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
+
+function loadSystemLlmConfig() {
+  try {
+    const configPath = join(app.getPath('userData'), 'system_llm_config.json')
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf8')
+      systemLlmConfig = { ...systemLlmConfig, ...JSON.parse(data) }
+    }
+  } catch (e) {
+    console.error('加载全局大模型配置文件失败:', e)
+  }
+}
+
+function saveSystemLlmConfig(config: any) {
+  try {
+    const configPath = join(app.getPath('userData'), 'system_llm_config.json')
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+  } catch (e) {
+    console.error('保存全局大模型配置文件失败:', e)
+  }
+}
 
 const execAsync = promisify(exec)
 
@@ -234,6 +259,9 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
+  loadSystemLlmConfig()
+
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
@@ -818,12 +846,13 @@ app.whenReady().then(() => {
       db = new Database(dbPath)
       // 开启外键支持
       db.pragma('foreign_keys = ON')
-      // 创建表
+      // 创建表（默认包含 user_id 列）
       db.exec(`
         CREATE TABLE IF NOT EXISTS sessions (
           id TEXT PRIMARY KEY,
           name TEXT,
-          time TEXT
+          time TEXT,
+          user_id TEXT DEFAULT 'system'
         );
         CREATE TABLE IF NOT EXISTS messages (
           id TEXT PRIMARY KEY,
@@ -835,9 +864,32 @@ app.whenReady().then(() => {
           tool_steps TEXT,
           file_info TEXT,
           is_error INTEGER DEFAULT 0,
+          user_id TEXT DEFAULT 'system',
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
       `)
+
+      // 动态升级旧数据库表结构，为已创建的表添加 user_id 字段
+      try {
+        db.prepare("SELECT user_id FROM sessions LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT 'system'")
+          console.log("成功升级 SQLite sessions 表结构，加入 user_id 列")
+        } catch (alterErr) {
+          console.error("升级 sessions 表结构添加 user_id 失败", alterErr)
+        }
+      }
+      try {
+        db.prepare("SELECT user_id FROM messages LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE messages ADD COLUMN user_id TEXT DEFAULT 'system'")
+          console.log("成功升级 SQLite messages 表结构，加入 user_id 列")
+        } catch (alterErr) {
+          console.error("升级 messages 表结构添加 user_id 失败", alterErr)
+        }
+      }
     }
     return db
   }
@@ -855,16 +907,16 @@ app.whenReady().then(() => {
           const database = getDB()
 
           // 使用事务一次性写入
-          const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time) VALUES (?, ?, ?)')
+          const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
           const insertMessage = database.prepare(`
             INSERT OR REPLACE INTO messages 
-            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
 
           const transaction = database.transaction((sessList: any[]) => {
             for (const s of sessList) {
-              insertSession.run(s.id, s.name || '新会话', s.time || '')
+              insertSession.run(s.id, s.name || '新会话', s.time || '', s.userId || 'system')
               if (Array.isArray(s.messages)) {
                 for (const m of s.messages) {
                   const msgId = String(m.id || `${Date.now()}-${Math.random()}`)
@@ -875,8 +927,9 @@ app.whenReady().then(() => {
                   const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
                   const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
                   const isError = m.isError ? 1 : 0
+                  const userId = m.userId || 'system'
 
-                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError)
+                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError, userId)
                 }
               }
             }
@@ -935,7 +988,8 @@ app.whenReady().then(() => {
             isThinking: m.is_thinking === 1,
             toolSteps,
             fileInfo,
-            isError: m.is_error === 1
+            isError: m.is_error === 1,
+            userId: m.user_id || 'system'
           }
         })
 
@@ -943,6 +997,7 @@ app.whenReady().then(() => {
           id: s.id,
           name: s.name,
           time: s.time,
+          userId: s.user_id || 'system',
           messages
         })
       }
@@ -958,11 +1013,11 @@ app.whenReady().then(() => {
     try {
       const database = getDB()
 
-      const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time) VALUES (?, ?, ?)')
+      const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
       const insertMessage = database.prepare(`
         INSERT OR REPLACE INTO messages 
-        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const sessionIds = sessions.map(s => s.id)
@@ -977,7 +1032,7 @@ app.whenReady().then(() => {
         }
 
         for (const s of sessList) {
-          insertSession.run(s.id, s.name, s.time)
+          insertSession.run(s.id, s.name, s.time, s.userId || 'system')
 
           // 收集当前 session 里的所有 message ID，用于删除已经不存在的 message
           const msgList = s.messages || []
@@ -999,8 +1054,9 @@ app.whenReady().then(() => {
             const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
             const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
             const isError = m.isError ? 1 : 0
+            const userId = m.userId || 'system'
 
-            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError)
+            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError, userId)
           }
         }
       })
@@ -1460,8 +1516,22 @@ app.whenReady().then(() => {
     }
   }
 
-  // 5. 大模型接口中转代理 (解决 CORS 跨域问题，支持 Tool Calling 循环)
-  ipcMain.handle('api:call-llm', async (event, config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number; maxTokens?: number; sessionId?: string; messageId?: number }, messages: any[], workspacePath?: string) => {
+  // 5. 通用大模型内部核心请求处理器 (解决 CORS 跨域问题，支持 Tool Calling 循环)
+  async function callLlmInternal(
+    config: { 
+      provider: string; 
+      apiKey: string; 
+      baseUrl: string; 
+      model: string; 
+      temperature: number; 
+      maxTokens?: number; 
+      sessionId?: string; 
+      messageId?: number 
+    }, 
+    messages: any[], 
+    workspacePath?: string,
+    event?: Electron.IpcMainInvokeEvent
+  ): Promise<string> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, messageId } = config
     currentLlmAbortController = new AbortController()
     
@@ -1507,9 +1577,11 @@ app.whenReady().then(() => {
       body.max_tokens = maxTokens
     }
 
-    // 默认提供工具调用结构
-    body.tools = toolDefinitions
-    body.tool_choice = 'auto'
+    // 只当有 IPC 触发的 event 传入时，才启用本地 Tool calling 动作，微信等后台消息交互不挂载 Tool definitions
+    if (event) {
+      body.tools = toolDefinitions
+      body.tool_choice = 'auto'
+    }
 
     let chatHistory = [...messages]
     let loopCount = 0
@@ -1520,7 +1592,7 @@ app.whenReady().then(() => {
 
     const sendTokenEvent = () => {
       try {
-        if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
+        if (event && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
           event.sender.send('api:llm-token-usage', {
             model: body.model || model,
             provider,
@@ -1549,7 +1621,7 @@ app.whenReady().then(() => {
 
         if (!response.ok) {
           const errorText = await response.text()
-          // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删去 tools 降级成普通调用
+          // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删除降级
           if (loopCount === 1 && body.tools && (response.status === 400 || errorText.includes('tools') || errorText.includes('tool_choice') || errorText.includes('parameter') || errorText.includes('unsupported'))) {
             console.warn('API 不支持工具参数，已优雅降级为纯对话模式', errorText)
             delete body.tools
@@ -1579,11 +1651,9 @@ app.whenReady().then(() => {
         }
 
         const toolCalls = message.tool_calls
-        if (toolCalls && toolCalls.length > 0) {
-          // 将大模型提出调用工具的这一轮追加到历史中
+        if (toolCalls && toolCalls.length > 0 && event) {
           chatHistory.push(message)
 
-          // 循环执行所有的 tool_call
           for (const toolCall of toolCalls) {
             const toolName = toolCall.function.name
             let toolArgs: any = {}
@@ -1593,26 +1663,22 @@ app.whenReady().then(() => {
               console.error('解析工具参数失败', pe)
             }
 
-            // 发送 IPC 通知渲染层：正在执行工具
             event.sender.send('api:llm-tool-event', {
               type: 'tool_call',
               name: toolName,
               args: toolArgs,
-              sessionId // 传递 sessionId 区分前台和后台定时任务
+              sessionId
             })
 
-            // 执行本地系统工具
             const toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event)
 
-            // 发送 IPC 通知渲染层：工具执行完毕
             event.sender.send('api:llm-tool-event', {
               type: 'tool_result',
               name: toolName,
               result: toolResult,
-              sessionId // 传递 sessionId 区分前台和后台定时任务
+              sessionId
             })
 
-            // 把执行结果追加到大模型历史中，供下一轮继续推理
             chatHistory.push({
               role: 'tool',
               tool_call_id: toolCall.id,
@@ -1620,10 +1686,8 @@ app.whenReady().then(() => {
               content: toolResult
             })
           }
-          // 进入下一轮 while 循环，LLM 根据刚才的 tool 执行结果继续生成
           continue
         } else {
-          // 没有 tool_calls，说明大模型已经推理出最终文字结论，直接返回
           sendTokenEvent()
           currentLlmAbortController = null
           return message.content || ''
@@ -1643,7 +1707,89 @@ app.whenReady().then(() => {
     sendTokenEvent()
     currentLlmAbortController = null
     return '智能代理执行工具链已达到最大轮数上限。'
+  }
+
+  // 大模型对外代理调用
+  ipcMain.handle('api:call-llm', async (event, config, messages, workspacePath) => {
+    return callLlmInternal(config, messages, workspacePath, event)
   })
+
+  // 微信智能助手接口通道注册
+  ipcMain.handle('api:wechat-start-login', async () => {
+    if (wechatBotManager) {
+      wechatBotManager.startLogin()
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle('api:wechat-logout', async () => {
+    if (wechatBotManager) {
+      await wechatBotManager.logout()
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle('api:wechat-get-status', () => {
+    if (wechatBotManager) {
+      return wechatBotManager.getState()
+    }
+    return null
+  })
+
+  ipcMain.handle('api:wechat-save-settings', (_, settings) => {
+    if (wechatBotManager) {
+      wechatBotManager.saveSettings(settings)
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle('api:sync-llm-config', (_, config) => {
+    systemLlmConfig = config
+    saveSystemLlmConfig(config)
+    return true
+  })
+
+  // 初始化微信 Bot 服务
+  wechatBotManager = new WechatBotManager({
+    getDB,
+    callLlm: async (config, messages) => {
+      const effectiveConfig = config.useSystemConfig
+        ? {
+            ...systemLlmConfig,
+            ...config,
+            apiKey: config.apiKey || systemLlmConfig.apiKey,
+            baseUrl: config.baseUrl || systemLlmConfig.baseUrl,
+            provider: config.provider || systemLlmConfig.provider,
+            model: config.model || systemLlmConfig.model
+          }
+        : config
+
+      if (effectiveConfig.provider !== 'ollama' && !effectiveConfig.apiKey) {
+        throw new Error('微信 Bot 未配置大模型密钥 (API Key)')
+      }
+
+      return callLlmInternal(effectiveConfig, messages, getActiveStorageDir())
+    },
+    onStatusUpdated: () => {
+      if (agentWindow && !agentWindow.isDestroyed()) {
+        agentWindow.webContents.send('api:wechat-status-updated', wechatBotManager?.getState())
+      }
+    },
+    notifyRenderSessionUpdate: () => {
+      if (agentWindow && !agentWindow.isDestroyed()) {
+        agentWindow.webContents.send('api:wechat-session-updated')
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('api:wechat-session-updated')
+      }
+    }
+  })
+
+  // 尝试自动恢复登录会话
+  wechatBotManager.autoReconnect()
 
   createWindow()
 

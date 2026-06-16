@@ -42,7 +42,7 @@ export interface TokenLog {
 
 export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs'
 export type AgentSubTab = 'skills' | 'memory' | 'cron'
-export type SettingsSubTab = 'keys' | 'wechat' | 'storage' | 'avatar'
+export type SettingsSubTab = 'keys' | 'storage' | 'avatar'
 
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
@@ -113,6 +113,9 @@ export function useAppStore() {
     setLlmConfig(newConfig)
     localStorage.setItem('agentpet_llm_config', JSON.stringify(newConfig))
 
+    // 同步配置到主进程
+    window.api.syncLlmConfig(newConfig).catch(console.error)
+
     if (prevModel && newModel && prevModel !== newModel) {
       const timeStr = formatDateTime()
       setSessions(prev => prev.map(s => {
@@ -130,23 +133,6 @@ export function useAppStore() {
         return s
       }))
     }
-  }
-
-  // ── Wechat Config ────────────────────────────────────────────
-  const [wechatConfig, setWechatConfig] = useState(() => {
-    const saved = localStorage.getItem('agentself_wechat_config') || localStorage.getItem('agentpet_wechat_config')
-    if (saved) {
-      try { return JSON.parse(saved) } catch (e) { console.error(e) }
-    }
-    return { webhookUrl: '', apiKey: '', localPort: '8080', autoReplyText: '你好，我是 Mao 的微信集成助手。' }
-  })
-
-  const [wechatSaveSuccess, setWechatSaveSuccess] = useState(false)
-
-  const handleSaveWechatConfig = (): void => {
-    localStorage.setItem('agentpet_wechat_config', JSON.stringify(wechatConfig))
-    setWechatSaveSuccess(true)
-    setTimeout(() => setWechatSaveSuccess(false), 3000)
   }
 
   // ── Cron Tasks ───────────────────────────────────────────────
@@ -458,15 +444,30 @@ export function useAppStore() {
     return () => unsubscribe()
   }, [])
 
+  const refreshSessions = async (): Promise<void> => {
+    try {
+      const localSess = await window.api.getLocalSessions()
+      if (localSess && localSess.length > 0) setSessions(localSess)
+    } catch (e) { console.error('从本地文件载入会话记录失败', e) }
+  }
+
+  // 同步初始化大模型配置
+  useEffect(() => {
+    window.api.syncLlmConfig(llmConfig).catch(console.error)
+  }, [])
+
+  // 监听微信聊天会话更新通知
+  useEffect(() => {
+    if (!window.api.onWechatSessionUpdated) return
+    const unsubscribe = window.api.onWechatSessionUpdated(() => {
+      refreshSessions()
+    })
+    return () => unsubscribe()
+  }, [])
+
   // Load sessions from local file
   useEffect(() => {
-    const loadLocalSessions = async (): Promise<void> => {
-      try {
-        const localSess = await window.api.getLocalSessions()
-        if (localSess && localSess.length > 0) setSessions(localSess)
-      } catch (e) { console.error('从本地文件载入会话记录失败', e) }
-    }
-    loadLocalSessions()
+    refreshSessions()
   }, [])
 
   // Auto-scroll chat
@@ -1154,9 +1155,6 @@ ${skillsContext}
     llmConfig, saveLlmConfig,
     handleFetchModels, handleTestConnection,
     testStatus,
-    // wechat
-    wechatConfig, setWechatConfig,
-    wechatSaveSuccess, handleSaveWechatConfig,
     // cron
     cronTasks,
     handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,

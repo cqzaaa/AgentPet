@@ -129,6 +129,25 @@ const api = {
     return () => {
       ipcRenderer.removeListener('api:open-cron-log-details', subscription)
     }
+  },
+  wechatStartLogin: (): Promise<boolean> => ipcRenderer.invoke('api:wechat-start-login'),
+  wechatLogout: (): Promise<boolean> => ipcRenderer.invoke('api:wechat-logout'),
+  wechatGetStatus: (): Promise<any> => ipcRenderer.invoke('api:wechat-get-status'),
+  wechatSaveSettings: (settings: any): Promise<boolean> => ipcRenderer.invoke('api:wechat-save-settings', settings),
+  syncLlmConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-llm-config', config),
+  onWechatStatusUpdated: (callback: (data: any) => void): (() => void) => {
+    const subscription = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:wechat-status-updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:wechat-status-updated', subscription)
+    }
+  },
+  onWechatSessionUpdated: (callback: () => void): (() => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on('api:wechat-session-updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:wechat-session-updated', subscription)
+    }
   }
 }
 
