@@ -76,6 +76,8 @@ const api = {
     ipcRenderer.invoke('api:save-local-sessions', sessions),
   getAvatarsList: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-avatars-list'),
+  saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }): Promise<boolean> =>
+    ipcRenderer.invoke('api:save-avatar-config', params),
   switchAvatar: (params: { dir: string; configFile: string }): Promise<any> =>
     ipcRenderer.invoke('api:switch-avatar', params),
   deleteAvatar: (dirPath: string): Promise<boolean> =>

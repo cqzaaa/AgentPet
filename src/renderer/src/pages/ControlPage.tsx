@@ -80,14 +80,14 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       })
       if (list && list.length > 0) {
         setWechatAvailableModels(list)
-        showToast('获取微信专用模型列表成功喵！', 'success')
+        showToast('获取微信专用模型列表成功！', 'success')
       } else {
         setWechatAvailableModels([])
-        showToast('未获取到可用模型列表，可手动输入喵~', 'info')
+        showToast('未获取到可用模型列表，可手动输入', 'info')
       }
     } catch (e: any) {
       setWechatAvailableModels([])
-      showToast(e.message || '获取模型列表失败，请检查网络或配置喵！', 'error')
+      showToast(e.message || '获取模型列表失败，请检查网络或配置！', 'error')
     } finally {
       setIsWechatLoadingModels(false)
     }
@@ -144,7 +144,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
     try {
       const ok = await window.api.wechatStartLogin()
       if (!ok) {
-        showToast('微信 Bot 登录服务启动失败喵！', 'error')
+        showToast('微信 Bot 登录服务启动失败！', 'error')
       }
     } catch (err: any) {
       showToast(`启动失败: ${err.message || err}`, 'error')
@@ -159,7 +159,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       setIsLoading(true)
       try {
         await window.api.wechatLogout()
-        showToast('微信 Bot 已断开连接喵~', 'info')
+        showToast('微信 Bot 已断开连接', 'info')
       } catch (err: any) {
         showToast(`注销失败: ${err.message || err}`, 'error')
       } finally {
@@ -179,7 +179,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       }
       const ok = await window.api.wechatSaveSettings(settings)
       if (ok) {
-        showToast('微信 Bot 配置保存成功喵！', 'success')
+        showToast('微信 Bot 配置保存成功！', 'success')
         fetchWechatStatus()
       } else {
         showToast('保存微信配置失败', 'error')

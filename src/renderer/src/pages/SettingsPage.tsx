@@ -45,6 +45,12 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
 
+  // 虚拟体编辑弹窗状态
+  const [showEditAvatarModal, setShowEditAvatarModal] = React.useState(false)
+  const [editingAvatar, setEditingAvatar] = React.useState<any>(null)
+  const [editAvatarName, setEditAvatarName] = React.useState('')
+  const [editAvatarStyle, setEditAvatarStyle] = React.useState('normal')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       {/* Sub Nav */}
@@ -362,92 +368,111 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
 
             <div className="settings-section-title" style={{ marginBottom: '16px' }}>本地形象库</div>
 
-            <div className="avatar-grid">
-              {/* 默认形象卡片 */}
-              <div className={`avatar-card ${(!customModelDir && !customModelFile) ? 'active' : ''}`}>
-                {(!customModelDir && !customModelFile) && <span className="avatar-active-badge">Active</span>}
-                <div className="avatar-avatar-box default-avatar">🐱</div>
-                <div className="avatar-card-info">
-                  <div className="avatar-name">Mao (默认形象)</div>
-                  <div className="avatar-path-desc">系统内置经典形象</div>
-                </div>
-                <div className="avatar-card-actions">
-                  {(!customModelDir && !customModelFile) ? (
-                    <span className="btn-active-lbl">使用中</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn-enable-avatar"
-                      onClick={async () => {
-                        await window.api.clearCustomModel()
-                        setCustomModelDir('')
-                        setCustomModelFile('')
-                      }}
-                    >
-                      启用此形象
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* 自定义已归档列表 */}
-              {avatarList.map(avatar => {
-                const isActive = customModelDir === avatar.dir
-                return (
-                  <div key={avatar.dir} className={`avatar-card ${isActive ? 'active' : ''}`}>
-                    {isActive && <span className="avatar-active-badge">Active</span>}
-                    <div className="avatar-avatar-box custom-avatar">
-                      {avatar.name.substring(0, 2).toUpperCase()}
-                    </div>
-                    <div className="avatar-card-info">
-                      <div className="avatar-name" title={avatar.name}>{avatar.name}</div>
-                      <div className="avatar-path-desc" title={avatar.dir}>{avatar.dir}</div>
-                    </div>
-                    <div className="avatar-card-actions">
-                      {isActive ? (
-                        <span className="btn-active-lbl">使用中</span>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="btn-enable-avatar"
-                            onClick={async () => {
-                              try {
-                                const res = await window.api.switchAvatar({ dir: avatar.dir, configFile: avatar.configFile })
-                                setCustomModelDir(res.customModelDir)
-                                setCustomModelFile(res.customModelFile)
-                                showToast('已启用此虚拟形象！', 'success')
-                              } catch (err: any) {
-                                showToast(err.message || '切换形象失败', 'error')
-                              }
-                            }}
-                          >
-                            启用此形象
-                          </button>
-                          <button
-                            type="button"
-                            className="avatar-card-delete-btn"
-                            title="删除该归档形象"
-                            onClick={async () => {
-                              if (confirm(`确认要彻底删除形象 [${avatar.name}] 吗？这会物理清空对应的本地模型文件夹。`)) {
-                                try {
-                                  await window.api.deleteAvatar(avatar.dir)
-                                  await refreshAvatarsList()
-                                  showToast('形象已成功删除。', 'success')
-                                } catch (err: any) {
-                                  showToast(err.message || err, 'error')
-                                }
-                              }
-                            }}
-                          >
-                            🗑️
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="avatar-table-container mcp-table-container">
+              <table className="mcp-table">
+                <thead>
+                  <tr>
+                    <th>形象标识 (图标)</th>
+                    <th>虚拟体名称</th>
+                    <th>语言风格</th>
+                    <th style={{ width: '100px', textAlign: 'center' }}>启用状态</th>
+                    <th style={{ width: '230px', textAlign: 'center' }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {avatarList.map(avatar => {
+                    const isActive = avatar.isDefault ? (!customModelDir && !customModelFile) : (customModelDir === avatar.dir)
+                    return (
+                      <tr key={avatar.id} className="mcp-table-row">
+                        <td style={{ textAlign: 'center' }}>
+                          {avatar.isDefault ? (
+                            <div className="avatar-avatar-box default-avatar" style={{ width: '32px', height: '32px', fontSize: '18px', margin: '0 auto' }}>🐱</div>
+                          ) : (
+                            <div className="avatar-avatar-box custom-avatar" style={{ width: '32px', height: '32px', fontSize: '14px', margin: '0 auto' }}>
+                              {avatar.name.substring(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 600, color: 'var(--text-color-strong)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span>{avatar.name}</span>
+                            {avatar.isDefault && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>系统内置经典形象</span>}
+                            {!avatar.isDefault && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }} title={avatar.dir}>{avatar.dir}</span>}
+                          </div>
+                        </td>
+                        <td>
+                          {avatar.languageStyle === 'cute' ? '🎀 可爱风格' : '📝 常规风格'}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span className={`mcp-badge ${isActive ? 'configured' : 'none'}`}>
+                            {isActive ? '使用中' : '未启用'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="mcp-btn-action-group">
+                            {!isActive && (
+                              <button
+                                type="button"
+                                className="mcp-btn-action test"
+                                onClick={async () => {
+                                  try {
+                                    if (avatar.isDefault) {
+                                      await window.api.clearCustomModel()
+                                      setCustomModelDir('')
+                                      setCustomModelFile('')
+                                    } else {
+                                      const res = await window.api.switchAvatar({ dir: avatar.dir, configFile: avatar.configFile })
+                                      setCustomModelDir(res.customModelDir)
+                                      setCustomModelFile(res.customModelFile)
+                                    }
+                                    showToast('已启用此虚拟形象！', 'success')
+                                  } catch (err: any) {
+                                    showToast(err.message || '切换形象失败', 'error')
+                                  }
+                                }}
+                              >
+                                ✅ 启用
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="mcp-btn-action edit"
+                              onClick={() => {
+                                setEditingAvatar(avatar)
+                                setEditAvatarName(avatar.name)
+                                setEditAvatarStyle(avatar.languageStyle || 'normal')
+                                setShowEditAvatarModal(true)
+                              }}
+                            >
+                              ✏️ 编辑
+                            </button>
+                            {!avatar.isDefault && (
+                              <button
+                                type="button"
+                                className="mcp-btn-action delete"
+                                title="删除该归档形象"
+                                onClick={async () => {
+                                  if (confirm(`确认要彻底删除形象 [${avatar.name}] 吗？这会物理清空对应的本地模型文件夹。`)) {
+                                    try {
+                                      await window.api.deleteAvatar(avatar.dir)
+                                      await refreshAvatarsList()
+                                      showToast('形象已成功删除。', 'success')
+                                    } catch (err: any) {
+                                      showToast(err.message || err, 'error')
+                                    }
+                                  }
+                                }}
+                              >
+                                🗑️ 删除
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -760,6 +785,84 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   setShowEditModal(false)
                   setEditingServer(null)
                   showToast('服务配置已更新并重新连接！', 'success')
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 虚拟体参数编辑弹窗 Modal */}
+      {showEditAvatarModal && editingAvatar && (
+        <div className="mcp-modal-overlay" onClick={() => { setShowEditAvatarModal(false); setEditingAvatar(null); }}>
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <span>✏️ 编辑虚拟体参数</span>
+              </div>
+              <button className="mcp-modal-close-btn" onClick={() => { setShowEditAvatarModal(false); setEditingAvatar(null); }}>×</button>
+            </div>
+            <div className="mcp-modal-body">
+              <div>
+                <label className="mcp-form-label">名称别名</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="给形象起个名字"
+                  value={editAvatarName}
+                  onChange={e => setEditAvatarName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">语言风格</label>
+                <select
+                  className="mcp-input-fancy"
+                  value={editAvatarStyle}
+                  onChange={e => setEditAvatarStyle(e.target.value)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="cute">1. 可爱风格</option>
+                  <option value="normal">2. 常规风格（友好）</option>
+                </select>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  提示：切换后将影响大模型智能体的语言表达风格。常规为专业友好，可爱为萌系调皮。
+                </div>
+              </div>
+            </div>
+            <div className="mcp-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setShowEditAvatarModal(false); setEditingAvatar(null); }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  if (!editAvatarName.trim()) {
+                    showToast('名称不能为空！', 'error')
+                    return
+                  }
+                  try {
+                    await window.api.saveAvatarConfig({
+                      id: editingAvatar.id,
+                      name: editAvatarName.trim(),
+                      languageStyle: editAvatarStyle
+                    })
+                    await refreshAvatarsList()
+                    setShowEditAvatarModal(false)
+                    setEditingAvatar(null)
+                    showToast('虚拟体参数已更新！', 'success')
+                  } catch (err: any) {
+                    showToast(err.message || '保存失败', 'error')
+                  }
                 }}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >

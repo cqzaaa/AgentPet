@@ -378,7 +378,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const handleCopy = () => {
     if (!msg.text) return
     const textToCopy = msg.text === '__WELCOME_MSG__'
-      ? `喵呜~ 欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
+      ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
       : msg.text === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
         : msg.text
@@ -466,7 +466,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           <div className="message-text">
             {renderAdvancedMessage(
               msg.text === '__WELCOME_MSG__'
-                ? `喵呜~ 欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
+                ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
                 : msg.text === '__SYSTEM_INIT_MSG__'
                   ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
                   : msg.text

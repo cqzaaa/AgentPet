@@ -595,12 +595,14 @@ app.whenReady().then(() => {
 
   let customStoragePath = ''
   let sandboxMode = true
+  let avatarConfigs: Record<string, any> = {}
   try {
     const config = readConfig()
     customStoragePath = config.storagePath || ''
     customModelDir = config.customModelDir || ''
     customModelFile = config.customModelFile || ''
     sandboxMode = config.sandboxMode !== false // 默认为 true
+    avatarConfigs = config.avatarConfigs || {}
   } catch (e) {
     console.error('读取存储路径配置失败', e)
   }
@@ -952,16 +954,32 @@ app.whenReady().then(() => {
       const live2dDir = getActiveLive2DDir()
       const entries = await fs.promises.readdir(live2dDir, { withFileTypes: true })
       const list: any[] = []
+
+      // 添加默认形象
+      const defaultConfig = avatarConfigs['default'] || {}
+      list.push({
+        id: 'default',
+        name: defaultConfig.name || 'Mao (默认形象)',
+        dir: '',
+        configFile: '',
+        languageStyle: defaultConfig.languageStyle || 'normal',
+        isDefault: true
+      })
+
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const subDirPath = join(live2dDir, entry.name)
           const files = await fs.promises.readdir(subDirPath)
           const modelFile = files.find(f => f.toLowerCase().endsWith('.model3.json'))
           if (modelFile) {
+            const cfg = avatarConfigs[subDirPath] || {}
             list.push({
-              name: entry.name,
+              id: subDirPath,
+              name: cfg.name || entry.name,
               dir: subDirPath,
-              configFile: modelFile
+              configFile: modelFile,
+              languageStyle: cfg.languageStyle || 'normal',
+              isDefault: false
             })
           }
         }
@@ -970,6 +988,22 @@ app.whenReady().then(() => {
     } catch (e) {
       console.error('获取虚拟体列表失败', e)
       return []
+    }
+  })
+
+  // 保存虚拟体参数
+  ipcMain.handle('api:save-avatar-config', async (_, { id, name, languageStyle }) => {
+    try {
+      if (!avatarConfigs[id]) {
+        avatarConfigs[id] = {}
+      }
+      avatarConfigs[id].name = name
+      avatarConfigs[id].languageStyle = languageStyle
+      writeConfig({ avatarConfigs })
+      return true
+    } catch (e) {
+      console.error('保存虚拟体配置失败', e)
+      return false
     }
   })
 
@@ -1522,7 +1556,7 @@ app.whenReady().then(() => {
             },
             action: { 
               type: 'string', 
-              description: '【创建任务时必填】定时任务触发时执行的动作指令或提示信息，例如："提醒我：主人，该喝水了喵~", "运行 npm run clean-log", "获取系统状态并提醒我"' 
+              description: '【创建任务时必填】定时任务触发时执行的动作指令或提示信息，例如："提醒我：主人，该喝水了", "运行 npm run clean-log", "获取系统状态并提醒我"' 
             },
             taskId: { 
               type: 'string', 

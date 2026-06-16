@@ -271,7 +271,9 @@ export function useAppStore() {
   const [customModelDir, setCustomModelDir] = useState('')
   const [customModelFile, setCustomModelFile] = useState('')
   const [avatarList, setAvatarList] = useState<any[]>([])
-  const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
+  const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
+  const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
+  const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
 
   // ── Memory Settings ──────────────────────────────────────────
   const [autoSaveHistory, setAutoSaveHistory] = useState(() => {
@@ -593,7 +595,7 @@ export function useAppStore() {
         name: '(未命名)',
         time: timeStr,
         messages: [
-          { id: 1, sender: 'agent', text: '喵呜~ 欢迎来到 AgentPet 终端！我是您的智能助理 Mao。有什么我可以帮您的吗？', time: timeStr }
+          { id: 1, sender: 'agent', text: '欢迎来到 AgentPet 终端！我是您的智能助理 Mao。有什么我可以帮您的吗？', time: timeStr }
         ]
       }]
     }
@@ -609,7 +611,7 @@ export function useAppStore() {
       name: '(未命名)',
       time: formatDateTime(),
       messages: [
-        { id: 1, sender: 'agent', text: `喵呜~ 已启动新会话。我是您的助理 ${currentAvatarName}，有什么我可以帮您的吗？`, time: formatDateTime() }
+        { id: 1, sender: 'agent', text: `已启动新会话。我是您的助理 ${currentAvatarName}，有什么我可以帮您的吗？`, time: formatDateTime() }
       ]
     }
     setSessions([...sessions, newSess])
@@ -802,10 +804,10 @@ export function useAppStore() {
     if (!hasKey) {
       setTimeout(() => {
         const agentReplies = [
-          '喵呜~ 您的指令我已经收到并加入核心记忆库中！',
-          '好的，我正在为您分析这部分数据，请稍等喵~',
+          '您的指令我已经收到并加入核心记忆库中！',
+          '好的，我正在为您分析这部分数据，请稍等。',
           '主人，今天的天气很适合写代码，但也要多注意休息哦！',
-          '正在为您检索网络资源... 喵喵！',
+          '正在为您检索网络资源...',
           '这件事情听起来很有趣，我很乐意陪您一起探讨呢~'
         ]
         const randomReply = agentReplies[Math.floor(Math.random() * agentReplies.length)]
@@ -840,12 +842,16 @@ export function useAppStore() {
       const skillsContext = skillsList.length > 0
         ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
         : '你当前尚未安装配备任何第三方扩展技能。'
+      const stylePrompt = currentAvatarStyle === 'cute' 
+        ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
+        : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
+
       const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
-你需要使用忠诚、可爱、萌系的语气与主人（用户）对话，回答中要适当带有『喵~』、『喵呜~』等猫咪口癖。
-当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面宠物助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
+${stylePrompt}
+当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
 ${skillsContext}
 在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
-⚠️ 极重要约束：只有当主人的指令或问题明确指示进行“查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以可爱的猫咪口吻文字进行回复，严禁滥用并调用任何系统工具。`
+⚠️ 极重要约束：只有当主人的指令或问题明确指示进行“查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })
@@ -1025,8 +1031,12 @@ ${skillsContext}
       const skillsContext = skillsList.length > 0
         ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
         : '你当前尚未安装配备任何第三方扩展技能。'
+      const stylePrompt = currentAvatarStyle === 'cute' 
+        ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
+        : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
+
       const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
-你正在后台为主人自动执行定时任务。为了保证安全和速度，请直接进行动作的执行（不需要过多客套、寒暄语），回答中要保留忠诚、可爱、萌系的语气（带『喵~』、『喵呜~』等猫咪口癖），并在执行完后给出简明扼要的执行结果。
+你正在后台为主人自动执行定时任务。为了保证安全和速度，请直接进行动作的执行（不需要过多客套、寒暄语），回答中要保留与设定相符的语气（${stylePrompt}），并在执行完后给出简明扼要的执行结果。
 ${skillsContext}
 在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。`
       
@@ -1070,7 +1080,7 @@ ${skillsContext}
         })
 
         // 触发系统托盘通知与桌面挂件气泡
-        window.api.showBubble(`任务 [${taskToRun.name}] 执行成功喵！`, response, taskToRun.id, logId)
+        window.api.showBubble(`任务 [${taskToRun.name}] 执行成功！`, response, taskToRun.id, logId)
 
         // 在 Chat 会话中添加简化的完成提醒
         const successTimeStr = formatDateTime()
@@ -1120,7 +1130,7 @@ ${skillsContext}
           return nextTasks
         })
 
-        window.api.showBubble(`任务 [${taskToRun.name}] 失败了喵...`, err.message || err, taskToRun.id, logId)
+        window.api.showBubble(`任务 [${taskToRun.name}] 执行失败。`, err.message || err, taskToRun.id, logId)
 
         // 在 Chat 会话中添加简化的失败提醒
         const failTimeStr = formatDateTime()

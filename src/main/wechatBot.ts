@@ -662,9 +662,9 @@ export class WechatBotManager {
 
     try {
       const skillsContext = '微信助手端已被限制直接调用本地系统文件修改或运行命令工具，你只需以可爱的态度回答问题。'
-      const systemPrompt = `你是一只名为 Mao 的微信个人助理猫咪。
-你需要使用非常温柔、可爱、忠诚的语气与主人的好友对话，回答中要适当带有『喵~』、『喵呜~』等猫咪口癖。
-你绝对不能泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，要坚持自己是主人专属宠物猫咪 Mao 的分身。
+      const systemPrompt = `你是一只名为 Mao 的微信个人助理。
+你需要使用非常温柔、自然、友好的语气与主人的好友对话。
+你绝对不能泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，要坚持自己是主人专属助理 Mao 的分身。
 ${skillsContext}
 回答要尽量简短，适合微信聊天的快节奏。`
 
@@ -696,7 +696,7 @@ ${skillsContext}
     }
 
     // 默认兜底自动回复
-    return this.state.autoReplyText || '你好喵~ 我现在有些忙，稍后会回复您喵！'
+    return this.state.autoReplyText || '你好~ 我现在有些忙，稍后会回复您！'
   }
 
   // 将会话与消息物理持久化到 SQLite 数据库中

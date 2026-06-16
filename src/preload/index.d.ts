@@ -34,6 +34,7 @@ declare global {
       getLocalSessions: () => Promise<any[] | null>
       saveLocalSessions: (sessions: any[]) => Promise<boolean>
       getAvatarsList: () => Promise<any[]>
+      saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }) => Promise<boolean>
       switchAvatar: (params: { dir: string; configFile: string }) => Promise<any>
       deleteAvatar: (dirPath: string) => Promise<boolean>
       getSandboxMode: () => Promise<boolean>

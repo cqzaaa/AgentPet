@@ -160,7 +160,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       if (s.id === activeSessionId) {
                         return {
                           ...s,
-                          messages: [{ id: 1, sender: 'agent', text: '本会话记录已清空。喵~', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]
+                          messages: [{ id: 1, sender: 'agent', text: '本会话记录已清空。', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]
                         }
                       }
                       return s
@@ -186,7 +186,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       id: 'agent:main:dashboard:default',
                       name: '新会话',
                       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                      messages: [{ id: 1, sender: 'agent', text: `会话记录已彻底清空。${currentAvatarName} 核心记忆已重置，喵~`, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]
+                      messages: [{ id: 1, sender: 'agent', text: `会话记录已彻底清空。${currentAvatarName} 核心记忆已重置。`, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]
                     }]
                     setSessions(defaultSess)
                     store.setActiveSessionId('agent:main:dashboard:default')
