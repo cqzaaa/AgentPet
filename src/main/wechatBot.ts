@@ -543,31 +543,86 @@ export class WechatBotManager {
 
           // 2. 自动回复
           if (this.state.enableAutoReply) {
-            const replyText = await this.generateAiReply(fromUserId, text)
+            const agentMsgId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+
+            // 写入思考占位符
+            this.saveMessageToDB({
+              sessionId: `wechat:${fromUserId}`,
+              sessionName: nickname,
+              messageId: agentMsgId,
+              sender: 'agent',
+              text: '',
+              userId: fromUserId,
+              isThinking: true
+            })
+
+            let replyText = ''
+            let isError = false
+            try {
+              replyText = await this.generateAiReply(fromUserId, text)
+            } catch (err: any) {
+              replyText = `⚠️ 自动回复生成失败: ${err.message || err}`
+              isError = true
+            }
+
             const token = contextTokens.get(fromUserId)
             
             if (!token) {
               this.addLog('info', `回复失败：未找到好友 [${nickname}] 的会话 context_token`)
+              this.saveMessageToDB({
+                sessionId: `wechat:${fromUserId}`,
+                sessionName: nickname,
+                messageId: agentMsgId,
+                sender: 'agent',
+                text: '⚠️ 发送失败：未找到微信会话 token',
+                userId: fromUserId,
+                isThinking: false,
+                isError: true
+              })
               continue
             }
 
             // 发送消息到微信
             try {
-              await this.client.sendText(fromUserId, replyText, token)
-              this.state.messagesSent++
-              this.addLog('out', `[回复 ${nickname}]: ${replyText}`)
+              if (isError) {
+                this.saveMessageToDB({
+                  sessionId: `wechat:${fromUserId}`,
+                  sessionName: nickname,
+                  messageId: agentMsgId,
+                  sender: 'agent',
+                  text: replyText,
+                  userId: fromUserId,
+                  isThinking: false,
+                  isError: true
+                })
+              } else {
+                await this.client.sendText(fromUserId, replyText, token)
+                this.state.messagesSent++
+                this.addLog('out', `[回复 ${nickname}]: ${replyText}`)
 
-              // 3. 在 SQLite 中保存机器人的回复
+                // 3. 在 SQLite 中保存机器人的回复（将思考占位符更新为真实回复）
+                this.saveMessageToDB({
+                  sessionId: `wechat:${fromUserId}`,
+                  sessionName: nickname,
+                  messageId: agentMsgId,
+                  sender: 'agent',
+                  text: replyText,
+                  userId: fromUserId,
+                  isThinking: false
+                })
+              }
+            } catch (pushErr: any) {
+              this.addLog('info', `向微信好友 [${nickname}] 发送回复失败: ${pushErr.message || pushErr}`)
               this.saveMessageToDB({
                 sessionId: `wechat:${fromUserId}`,
                 sessionName: nickname,
-                messageId: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                messageId: agentMsgId,
                 sender: 'agent',
-                text: replyText,
-                userId: fromUserId
+                text: `⚠️ 发送失败: ${pushErr.message || pushErr}`,
+                userId: fromUserId,
+                isThinking: false,
+                isError: true
               })
-            } catch (pushErr: any) {
-              this.addLog('info', `向微信好友 [${nickname}] 发送回复失败: ${pushErr.message || pushErr}`)
             }
           }
         }
@@ -641,6 +696,8 @@ ${skillsContext}
     sender: 'user' | 'agent'
     text: string
     userId: string
+    isThinking?: boolean
+    isError?: boolean
   }) {
     try {
       const database = this.options.getDB()
@@ -652,17 +709,22 @@ ${skillsContext}
       database.prepare('INSERT OR IGNORE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
         .run(params.sessionId, params.sessionName, timeStr, params.userId)
 
-      // 2. 插入消息
+      const isThinkingVal = params.isThinking ? 1 : 0
+      const isErrorVal = params.isError ? 1 : 0
+
+      // 2. 插入或更新消息
       database.prepare(`
-        INSERT INTO messages 
+        INSERT OR REPLACE INTO messages 
         (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
-        VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 0, ?)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
       `).run(
         params.messageId,
         params.sessionId,
         params.sender,
         params.text,
         timeStr,
+        isThinkingVal,
+        isErrorVal,
         params.userId
       )
 

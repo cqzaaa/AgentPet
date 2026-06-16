@@ -3805,3 +3805,316 @@ body {
 .pet-bubble-link:hover {
   color: #f43f5e;
 }
+
+/* =================================================================*
+   MCP Modern Settings UI 重构样式 
+   =================================================================*/
+
+/* 1. 表格容器与卡片 */
+.mcp-glass-card {
+  width: 100%;
+  background: var(--bg-card, rgba(20, 20, 20, 0.6));
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.mcp-table-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.mcp-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.mcp-table th {
+  padding: 14px 18px;
+  font-weight: 600;
+  color: var(--text-muted, #777);
+  background: rgba(128, 128, 128, 0.04);
+  border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  font-size: 11.5px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.mcp-table td {
+  padding: 14px 18px;
+  color: var(--text-secondary, #ccc);
+  border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.08));
+  vertical-align: middle;
+}
+
+.mcp-table-row {
+  transition: background-color 0.25s ease, border-left-color 0.25s ease;
+  position: relative;
+}
+
+.mcp-table-row:hover {
+  background-color: var(--bg-hover, rgba(128, 128, 128, 0.05)) !important;
+}
+
+/* 2. 状态标签与代码块展示 */
+.mcp-url-text {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  word-break: break-all;
+  max-width: 320px;
+  display: inline-block;
+}
+
+.mcp-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  display: inline-block;
+}
+
+.mcp-badge.configured {
+  background: rgba(16, 185, 129, 0.08);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.mcp-badge.none {
+  background: rgba(128, 128, 128, 0.08);
+  color: var(--text-muted, #888);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+/* 3. 极简定制 Switch Toggle 开关 */
+.mcp-switch-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mcp-switch-label {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.mcp-switch-label input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.mcp-switch-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(128, 128, 128, 0.2);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 30px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.1));
+}
+
+.mcp-switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.mcp-switch-label input:checked + .mcp-switch-slider {
+  background-color: #10b981;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.mcp-switch-label input:checked + .mcp-switch-slider:before {
+  transform: translateX(20px);
+}
+
+/* 4. 操作按钮微交互 */
+.mcp-btn-action-group {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+
+.mcp-btn-action {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.mcp-btn-action.test {
+  color: #10b981;
+}
+
+.mcp-btn-action.test:hover {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.mcp-btn-action.edit {
+  color: #3b82f6;
+}
+
+.mcp-btn-action.edit:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.mcp-btn-action.delete {
+  color: #ef4444;
+}
+
+.mcp-btn-action.delete:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* 5. 模态弹框样式 (Modal Edit) */
+.mcp-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: mcpFadeIn 0.25s ease-out;
+}
+
+.mcp-modal-card {
+  width: 90%;
+  max-width: 460px;
+  background: var(--bg-card, rgba(30, 30, 30, 0.85));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: mcpScaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mcp-modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-color-strong, #fff);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  transition: color 0.2s;
+  padding: 4px;
+}
+
+.mcp-modal-close-btn:hover {
+  color: var(--text-color-strong, #fff);
+}
+
+.mcp-modal-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mcp-modal-footer {
+  padding: 16px 24px;
+  background: rgba(128, 128, 128, 0.02);
+  border-top: 1px solid var(--border-color, rgba(128, 128, 128, 0.12));
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 6. 高级精致输入框 */
+.mcp-input-fancy {
+  width: 100%;
+  height: 38px;
+  background: var(--bg-input, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-primary, #fff);
+  outline: none;
+  transition: all 0.25s ease;
+}
+
+.mcp-input-fancy:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+  background: var(--bg-input-focus, rgba(0, 0, 0, 0.3));
+}
+
+.mcp-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #aaa);
+  margin-bottom: 6px;
+  display: block;
+}
+
+/* 动画定义 */
+@keyframes mcpFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mcpScaleUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+

@@ -148,7 +148,10 @@ const api = {
     return () => {
       ipcRenderer.removeListener('api:wechat-session-updated', subscription)
     }
-  }
+  },
+  syncMcpConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-mcp-config', config),
+  testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
+  getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

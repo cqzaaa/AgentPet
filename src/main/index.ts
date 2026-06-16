@@ -12,6 +12,238 @@ import { WechatBotManager } from './wechatBot'
 
 let wechatBotManager: WechatBotManager | null = null
 let systemLlmConfig: any = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
+let systemMcpConfig: { servers: McpServerConfig[] } = { servers: [] }
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+
+interface McpServerConfig {
+  id: string
+  name: string
+  url: string
+  apiKey: string
+  enabled: boolean
+}
+
+class McpManager {
+  private connections: Map<string, { client: Client; transport: SSEClientTransport | StreamableHTTPClientTransport; tools: any[]; config: McpServerConfig }> = new Map()
+
+  public async connectAll(configs: McpServerConfig[]) {
+    const configsToConnect = configs.filter(c => c.enabled && c.url)
+    const activeIds = configsToConnect.map(c => c.id)
+
+    // 1. 关闭不再活动或被禁用的连接
+    for (const [id, conn] of this.connections.entries()) {
+      if (!activeIds.includes(id)) {
+        console.log(`[MCP] 断开并移除服务: ${conn.config.name} (${id})`)
+        try {
+          await conn.client.close()
+        } catch (e) {
+          console.error(`[MCP] 关闭客户端 ${id} 失败`, e)
+        }
+        this.connections.delete(id)
+      }
+    }
+
+    // 2. 并发连接所有需要启用的服务
+    await Promise.all(configsToConnect.map(async (config) => {
+      const existing = this.connections.get(config.id)
+      
+      // 如果已存在连接，且参数没有变化，则无需重连
+      if (existing && existing.config.url === config.url && existing.config.apiKey === config.apiKey) {
+        return
+      }
+
+      // 否则，先断开旧连接
+      if (existing) {
+        console.log(`[MCP] 配置变更，正在重新连接服务: ${config.name}`)
+        try {
+          await existing.client.close()
+        } catch {}
+        this.connections.delete(config.id)
+      }
+
+      console.log(`[MCP] 正在建立服务连接: ${config.name} -> ${config.url}`)
+      try {
+        const headers: Record<string, string> = {}
+        if (config.apiKey) {
+          headers['Authorization'] = `Bearer ${config.apiKey}`
+        }
+
+        // 优先尝试 Streamable HTTP（MCP 2025-03-26 新协议），失败则回退到旧 SSE 协议
+        let transport: StreamableHTTPClientTransport | SSEClientTransport
+        let client = new Client(
+          { name: 'AgentPet-Client', version: '1.0.0' },
+          { capabilities: {} }
+        )
+
+        try {
+          transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+          await client.connect(transport)
+          console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
+        } catch (httpErr: any) {
+          console.warn(`[MCP] Streamable HTTP 连接失败 (${httpErr.message})，正在回退到 SSE 协议...`)
+          // 重新创建 client 避免状态污染
+          client = new Client(
+            { name: 'AgentPet-Client', version: '1.0.0' },
+            { capabilities: {} }
+          )
+          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          await client.connect(transport)
+          console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
+        }
+
+        const response = await client.listTools()
+        const tools = response.tools || []
+        
+        this.connections.set(config.id, { client, transport, tools, config })
+        console.log(`[MCP] 服务 ${config.name} 连接成功！加载了 ${tools.length} 个外部工具`)
+      } catch (err) {
+        console.error(`[MCP] 服务 ${config.name} 连接失败:`, err)
+      }
+    }))
+  }
+
+  public async disconnectAll() {
+    for (const [id, conn] of this.connections.entries()) {
+      try {
+        await conn.client.close()
+      } catch {}
+    }
+    this.connections.clear()
+  }
+
+  public getTools(): any[] {
+    const allTools: any[] = []
+    for (const conn of this.connections.values()) {
+      allTools.push(...conn.tools)
+    }
+    return allTools
+  }
+
+  public hasTool(name: string): boolean {
+    for (const conn of this.connections.values()) {
+      if (conn.tools.some(t => t.name === name)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  public async executeTool(name: string, args: any): Promise<string> {
+    let targetConn: any = null
+    for (const conn of this.connections.values()) {
+      if (conn.tools.some(t => t.name === name)) {
+        targetConn = conn
+        break
+      }
+    }
+
+    if (!targetConn) {
+      return `错误：未在任何已连接的 MCP 服务中找到工具: ${name}`
+    }
+
+    try {
+      const response = await targetConn.client.callTool({ name, arguments: args })
+      if (response && response.content) {
+        return response.content
+          .filter((c: any) => c.type === 'text')
+          .map((c: any) => c.text)
+          .join('\n')
+      }
+      return 'MCP 工具执行完毕，但未返回可读文本。'
+    } catch (err: any) {
+      console.error(`[MCP] 调用外部工具 ${name} 失败`, err)
+      return `错误：调用外部 MCP 工具失败: ${err.message || err}`
+    }
+  }
+}
+
+const mcpManager = new McpManager()
+
+function loadSystemMcpConfig() {
+  try {
+    const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
+    let parsed: any = null
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf8')
+      try {
+        parsed = JSON.parse(data)
+      } catch {}
+    }
+
+    if (parsed) {
+      // 向下兼容：如果以前是单配置格式，转换为列表格式
+      if (!Array.isArray(parsed.servers)) {
+        const oldConfig = parsed as any
+        if (oldConfig.url) {
+          systemMcpConfig = {
+            servers: [
+              {
+                id: 'legacy-default',
+                name: '高德地图mcp',
+                url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
+                apiKey: oldConfig.apiKey || '',
+                enabled: oldConfig.enabled ?? false
+              }
+            ]
+          }
+        } else {
+          systemMcpConfig = { servers: [] }
+        }
+      } else {
+        systemMcpConfig = { servers: parsed.servers || [] }
+        systemMcpConfig.servers = systemMcpConfig.servers.map((s: any) => {
+          if (s.name === '默认外部服务' || s.name === '高德地图服务') {
+            return {
+              ...s,
+              name: '高德地图mcp',
+              url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6'
+            }
+          }
+          return s
+        })
+      }
+    }
+
+    // 如果没有配置或列表为空，初始化默认服务
+    if (!systemMcpConfig.servers || systemMcpConfig.servers.length === 0) {
+      systemMcpConfig = {
+        servers: [
+          {
+            id: 'mcp-default-bing',
+            name: 'Bing 网页搜索',
+            url: 'https://mcpmarket.cn/mcp/93c3bda00747681006348634',
+            apiKey: '',
+            enabled: true
+          },
+          {
+            id: 'mcp-default-amap',
+            name: '高德地图mcp',
+            url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
+            apiKey: '',
+            enabled: true
+          }
+        ]
+      }
+      saveSystemMcpConfig(systemMcpConfig)
+    }
+
+    mcpManager.connectAll(systemMcpConfig.servers).catch(console.error)
+  } catch (e) {
+    console.error('加载全局 MCP 配置文件失败:', e)
+  }
+}
+
+function saveSystemMcpConfig(config: any) {
+  try {
+    const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+  } catch (e) {
+    console.error('保存全局 MCP 配置文件失败:', e)
+  }
+}
 
 function loadSystemLlmConfig() {
   try {
@@ -261,6 +493,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   loadSystemLlmConfig()
+  loadSystemMcpConfig()
 
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
@@ -1265,8 +1498,49 @@ app.whenReady().then(() => {
           required: ['action_type']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        description: '获取指定城市/地区的天气预报信息。如果不指定城市，默认查询深圳。',
+        parameters: {
+          type: 'object',
+          properties: {
+            city: { type: 'string', description: '城市或地区名称，例如 "深圳"、"北京"' }
+          },
+          required: ['city']
+        }
+      }
     }
   ]
+
+  function getFormattedTools(isFrontend: boolean): any[] {
+    const list: any[] = []
+    
+    if (isFrontend) {
+      list.push(...toolDefinitions)
+    } else {
+      const weatherTool = toolDefinitions.find(t => t.function.name === 'get_weather')
+      if (weatherTool) {
+        list.push(weatherTool)
+      }
+    }
+
+    const mcpTools = mcpManager.getTools()
+    for (const tool of mcpTools) {
+      list.push({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description || '',
+          parameters: tool.inputSchema || { type: 'object', properties: {} }
+        }
+      })
+    }
+
+    return list
+  }
 
   // 判定是否为只读或无害查询命令，用于免弹窗自动放行
   function isReadOnlyCommand(command: string): boolean {
@@ -1327,7 +1601,42 @@ app.whenReady().then(() => {
   }
 
   // 执行本地系统工具处理器
-  async function executeTool(name: string, args: any, workspacePath: string, event: Electron.IpcMainInvokeEvent): Promise<string> {
+  async function executeTool(name: string, args: any, workspacePath: string, event?: Electron.IpcMainInvokeEvent): Promise<string> {
+    if (name === 'get_weather') {
+      try {
+        const { city } = args
+        const targetCity = city || '深圳'
+        try {
+          const resp = await net.fetch(`https://autodev.openspeech.cn/api/v1/open/weather?city=${encodeURIComponent(targetCity)}`)
+          if (resp.ok) {
+            const data: any = await resp.json()
+            if (data && data.code === 1 && data.data && data.data.length > 0) {
+              const forecasts = data.data.slice(0, 3).map((item: any) => {
+                return `${item.date} (${item.dayOfWeek}): ${item.weather}, 温度: ${item.low}℃ ~ ${item.high}℃, 风向: ${item.wind}, 空气质量: ${item.airQuality || '未知'}`
+              }).join('\n')
+              return `[天气查询结果 - ${targetCity}]\n当前及近期天气预报:\n${forecasts}`
+            }
+          }
+        } catch (err) {
+          console.error('autodev 天气接口异常，尝试 wttr.in 备用', err)
+        }
+
+        try {
+          const resp = await net.fetch(`https://wttr.in/${encodeURIComponent(targetCity)}?format=3`)
+          if (resp.ok) {
+            const text = await resp.text()
+            return `[天气查询结果 - ${targetCity}]\n${text.trim()}`
+          }
+        } catch (err) {
+          console.error('wttr.in 天气接口异常', err)
+        }
+
+        return `暂未查询到 ${targetCity} 的天气信息，请稍后再试。`
+      } catch (err: any) {
+        return `执行 get_weather 工具失败: ${err.message || err}`
+      }
+    }
+
     if (name === 'manage_cron_task') {
       try {
         const { action_type, name: taskName, interval, action, taskId } = args
@@ -1356,7 +1665,7 @@ app.whenReady().then(() => {
           await fs.promises.writeFile(cronPath, JSON.stringify(tasks, null, 2), 'utf-8')
 
           // 通知渲染层定时任务已更新
-          event.sender.send('api:cron-updated')
+          event?.sender?.send('api:cron-updated')
           return JSON.stringify({
             status: 'success',
             message: `成功创建定时任务："${taskName}"`,
@@ -1372,7 +1681,7 @@ app.whenReady().then(() => {
           }
           await fs.promises.writeFile(cronPath, JSON.stringify(filtered, null, 2), 'utf-8')
 
-          event.sender.send('api:cron-updated')
+          event?.sender?.send('api:cron-updated')
           return `已成功删除 ID 为 ${taskId} 的定时任务`
         }
         return `未知的操作类型: ${action_type}`
@@ -1577,9 +1886,9 @@ app.whenReady().then(() => {
       body.max_tokens = maxTokens
     }
 
-    // 只当有 IPC 触发的 event 传入时，才启用本地 Tool calling 动作，微信等后台消息交互不挂载 Tool definitions
-    if (event) {
-      body.tools = toolDefinitions
+    const effectiveTools = getFormattedTools(!!event)
+    if (effectiveTools.length > 0) {
+      body.tools = effectiveTools
       body.tool_choice = 'auto'
     }
 
@@ -1651,7 +1960,7 @@ app.whenReady().then(() => {
         }
 
         const toolCalls = message.tool_calls
-        if (toolCalls && toolCalls.length > 0 && event) {
+        if (toolCalls && toolCalls.length > 0) {
           chatHistory.push(message)
 
           for (const toolCall of toolCalls) {
@@ -1663,21 +1972,30 @@ app.whenReady().then(() => {
               console.error('解析工具参数失败', pe)
             }
 
-            event.sender.send('api:llm-tool-event', {
-              type: 'tool_call',
-              name: toolName,
-              args: toolArgs,
-              sessionId
-            })
+            if (event) {
+              event.sender.send('api:llm-tool-event', {
+                type: 'tool_call',
+                name: toolName,
+                args: toolArgs,
+                sessionId
+              })
+            }
 
-            const toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event)
+            let toolResult = ''
+            if (mcpManager.hasTool(toolName)) {
+              toolResult = await mcpManager.executeTool(toolName, toolArgs)
+            } else {
+              toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event)
+            }
 
-            event.sender.send('api:llm-tool-event', {
-              type: 'tool_result',
-              name: toolName,
-              result: toolResult,
-              sessionId
-            })
+            if (event) {
+              event.sender.send('api:llm-tool-event', {
+                type: 'tool_result',
+                name: toolName,
+                result: toolResult,
+                sessionId
+              })
+            }
 
             chatHistory.push({
               role: 'tool',
@@ -1750,6 +2068,53 @@ app.whenReady().then(() => {
     systemLlmConfig = config
     saveSystemLlmConfig(config)
     return true
+  })
+
+  ipcMain.handle('api:sync-mcp-config', (_, config) => {
+    systemMcpConfig = config
+    saveSystemMcpConfig(config)
+    mcpManager.connectAll(config.servers).catch(console.error)
+    return true
+  })
+
+  ipcMain.handle('api:test-mcp-server', async (_, config) => {
+    try {
+      const headers: Record<string, string> = {}
+      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+
+      // 优先尝试 Streamable HTTP（MCP 2025-03-26 新协议），失败则回退到旧 SSE 协议
+      let client = new Client(
+        { name: 'AgentPet-Test', version: '1.0.0' },
+        { capabilities: {} }
+      )
+      let usedProtocol = 'Streamable HTTP'
+
+      try {
+        const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+        await client.connect(transport)
+      } catch (httpErr: any) {
+        console.warn(`[MCP Test] Streamable HTTP 失败，回退到 SSE: ${httpErr.message}`)
+        client = new Client(
+          { name: 'AgentPet-Test', version: '1.0.0' },
+          { capabilities: {} }
+        )
+        usedProtocol = 'SSE'
+        const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+        await client.connect(transport)
+      }
+
+      const response = await client.listTools()
+      await client.close()
+
+      return { success: true, tools: response.tools || [], protocol: usedProtocol }
+    } catch (err: any) {
+      console.error('MCP Test Error:', err)
+      return { success: false, error: err.message || err.toString() }
+    }
+  })
+
+  ipcMain.handle('api:get-mcp-config', () => {
+    return systemMcpConfig
   })
 
   // 初始化微信 Bot 服务

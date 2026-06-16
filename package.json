@@ -23,6 +23,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@openilink/openilink-sdk-node": "^0.6.0",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.1",

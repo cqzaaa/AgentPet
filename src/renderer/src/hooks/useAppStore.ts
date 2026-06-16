@@ -42,7 +42,7 @@ export interface TokenLog {
 
 export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs'
 export type AgentSubTab = 'skills' | 'memory' | 'cron'
-export type SettingsSubTab = 'keys' | 'storage' | 'avatar'
+export type SettingsSubTab = 'keys' | 'storage' | 'avatar' | 'mcp'
 
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
@@ -133,6 +133,72 @@ export function useAppStore() {
         return s
       }))
     }
+  }
+
+  // ── MCP Config ───────────────────────────────────────────────
+  const [mcpConfig, setMcpConfig] = useState(() => {
+    const saved = localStorage.getItem('agentpet_mcp_config')
+    let currentConfig: any = null
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && Array.isArray(parsed.servers)) {
+          currentConfig = parsed
+          currentConfig.servers = currentConfig.servers.map((s: any) => {
+            if (s.name === '默认外部服务' || s.name === '高德地图服务') {
+              return {
+                ...s,
+                name: '高德地图mcp',
+                url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6'
+              }
+            }
+            return s
+          })
+        }
+        // 向下兼容：如果以前是单个配置格式
+        else if (parsed && parsed.url) {
+          currentConfig = {
+            servers: [
+              {
+                id: 'legacy-default',
+                name: '高德地图mcp',
+                url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
+                apiKey: parsed.apiKey || '',
+                enabled: parsed.enabled ?? false
+              }
+            ]
+          }
+        }
+      } catch (e) { console.error(e) }
+    }
+
+    if (!currentConfig || !currentConfig.servers || currentConfig.servers.length === 0) {
+      const defaultServers = [
+        {
+          id: 'mcp-default-bing',
+          name: 'Bing 网页搜索',
+          url: 'https://mcpmarket.cn/mcp/93c3bda00747681006348634',
+          apiKey: '',
+          enabled: true
+        },
+        {
+          id: 'mcp-default-amap',
+          name: '高德地图mcp',
+          url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
+          apiKey: '',
+          enabled: true
+        }
+      ]
+      currentConfig = { servers: defaultServers }
+      localStorage.setItem('agentpet_mcp_config', JSON.stringify(currentConfig))
+    }
+    return currentConfig
+  })
+
+  const saveMcpConfig = (newConfig: any) => {
+    setMcpConfig(newConfig)
+    localStorage.setItem('agentpet_mcp_config', JSON.stringify(newConfig))
+    window.api.syncMcpConfig(newConfig).catch(console.error)
   }
 
   // ── Cron Tasks ───────────────────────────────────────────────
@@ -451,9 +517,10 @@ export function useAppStore() {
     } catch (e) { console.error('从本地文件载入会话记录失败', e) }
   }
 
-  // 同步初始化大模型配置
+  // 同步初始化大模型与 MCP 配置
   useEffect(() => {
     window.api.syncLlmConfig(llmConfig).catch(console.error)
+    window.api.syncMcpConfig(mcpConfig).catch(console.error)
   }, [])
 
   // 监听微信聊天会话更新通知
@@ -472,7 +539,10 @@ export function useAppStore() {
 
   // Auto-scroll chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const timer = setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 100)
+    return () => clearTimeout(timer)
   }, [sessions, activeSessionId, activeTab])
 
   // Auto-save sessions
@@ -1203,7 +1273,10 @@ ${skillsContext}
     handleToggleSandboxMode,
     activePermissionRequest,
     handleRespondPermission,
-    handleAbortLlm
+    handleAbortLlm,
+    // mcp
+    mcpConfig,
+    saveMcpConfig
   }
 }
 

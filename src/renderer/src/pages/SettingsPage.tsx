@@ -28,8 +28,22 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     showToast,
     // sandbox
     sandboxMode,
-    handleToggleSandboxMode
+    handleToggleSandboxMode,
+    // mcp
+    mcpConfig, saveMcpConfig
   } = store
+
+  const [mcpNewName, setMcpNewName] = React.useState('')
+  const [mcpNewUrl, setMcpNewUrl] = React.useState('')
+  const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
+  const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
+
+  // 编辑弹窗相关状态
+  const [showEditModal, setShowEditModal] = React.useState(false)
+  const [editingServer, setEditingServer] = React.useState<any>(null)
+  const [editName, setEditName] = React.useState('')
+  const [editUrl, setEditUrl] = React.useState('')
+  const [editApiKey, setEditApiKey] = React.useState('')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
@@ -43,6 +57,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
         </div>
         <div className={`sub-tab-item ${settingsSubTab === 'avatar' ? 'active' : ''}`} onClick={() => setSettingsSubTab('avatar')}>
           虚拟体设置
+        </div>
+        <div className={`sub-tab-item ${settingsSubTab === 'mcp' ? 'active' : ''}`} onClick={() => setSettingsSubTab('mcp')}>
+          MCP 服务
         </div>
       </div>
 
@@ -434,7 +451,324 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
             </div>
           </div>
         )}
+
+        {/* ── MCP 配置 ── */}
+        {settingsSubTab === 'mcp' && (
+          <div className="settings-sub-panel">
+            <div className="form-desc-text" style={{ marginBottom: '12px' }}>
+              配置并管理 Model Context Protocol (MCP) 服务列表。大模型及微信助手可自动并发连接并调用列表中处于启用状态的所有工具。
+            </div>
+
+            <div style={{ background: 'var(--bg-card-sub, rgba(128,128,128,0.02))', padding: '14px 18px', borderRadius: '8px', border: '1px solid var(--border-color, rgba(128,128,128,0.1))', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '2px', color: 'var(--text-color-strong)' }}>💡 发现更多外部 MCP 服务</div>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>探索由开发者社区提供的丰富工具包</div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <a href="https://mcpmarket.cn/" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
+                  🇨🇳 MCP 中文市场 ↗
+                </a>
+                <span style={{ color: 'rgba(128,128,128,0.3)', fontSize: '12px' }}>|</span>
+                <a href="https://smithery.ai/" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
+                  🛠️ Smithery 商店 ↗
+                </a>
+              </div>
+            </div>
+
+            {/* MCP 服务列表区 */}
+            <div className="settings-section-title" style={{ marginBottom: '12px', fontSize: '14px', fontWeight: 600 }}>已连接的服务列表 ({(mcpConfig?.servers || []).length})</div>
+            
+            <div className="mcp-glass-card">
+              {(mcpConfig?.servers || []).length === 0 ? (
+                <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: '13px' }}>
+                  👻 暂无已添加的服务，请通过下方“添加自定义”按钮添加。
+                </div>
+              ) : (
+                <div className="mcp-table-container">
+                  <table className="mcp-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '150px' }}>服务名称</th>
+                        <th>SSE 终结点地址 (Endpoint)</th>
+                        <th style={{ width: '100px', textAlign: 'center' }}>鉴权密钥</th>
+                        <th style={{ width: '90px', textAlign: 'center' }}>启用状态</th>
+                        <th style={{ width: '230px', textAlign: 'center' }}>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(mcpConfig.servers).map((server: any) => (
+                        <tr key={server.id} className="mcp-table-row">
+                          <td style={{ fontWeight: 600, color: 'var(--text-color-strong)' }}>
+                            {server.name}
+                          </td>
+                          <td>
+                            <span className="mcp-url-text" title={server.url}>
+                              {server.url}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className={`mcp-badge ${server.apiKey ? 'configured' : 'none'}`}>
+                              {server.apiKey ? '已配置' : '无'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="mcp-switch-container">
+                              <label className="mcp-switch-label">
+                                <input
+                                  type="checkbox"
+                                  checked={server.enabled}
+                                  onChange={e => {
+                                    const newServers = mcpConfig.servers.map((s: any) => s.id === server.id ? { ...s, enabled: e.target.checked } : s)
+                                    saveMcpConfig({ servers: newServers })
+                                  }}
+                                />
+                                <span className="mcp-switch-slider" />
+                              </label>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="mcp-btn-action-group">
+                              <button
+                                type="button"
+                                className="mcp-btn-action test"
+                                onClick={async () => {
+                                  try {
+                                    showToast(`正在测试连接 [${server.name}]...`, 'info')
+                                    const res = await window.api.testMcpServer({
+                                      url: server.url,
+                                      apiKey: server.apiKey
+                                    })
+                                    if (res.success) {
+                                      const protoLabel = res.protocol ? `\n协议：${res.protocol}` : ''
+                                      if (res.tools && res.tools.length > 0) {
+                                        const names = res.tools.map((t: any) => t.name).join(', ')
+                                        alert(`✅ 测试成功！${protoLabel}\n\n共获取到 ${res.tools.length} 个方法：\n${names}`)
+                                      } else {
+                                        alert(`✅ 测试成功！${protoLabel}\n\n但该服务未提供任何可用方法。`)
+                                      }
+                                    } else {
+                                      alert(`❌ 测试失败：\n${res.error}`)
+                                    }
+                                  } catch (err: any) {
+                                    alert(`❌ 测试异常：\n${err.message || err}`)
+                                  }
+                                }}
+                              >
+                                🔌 测试
+                              </button>
+                              <button
+                                type="button"
+                                className="mcp-btn-action edit"
+                                onClick={() => {
+                                  setEditingServer(server)
+                                  setEditName(server.name)
+                                  setEditUrl(server.url)
+                                  setEditApiKey(server.apiKey || '')
+                                  setShowEditModal(true)
+                                }}
+                              >
+                                ✏️ 编辑
+                              </button>
+                              <button
+                                type="button"
+                                className="mcp-btn-action delete"
+                                onClick={() => {
+                                  if (confirm(`确认要删除 [${server.name}] 服务吗？`)) {
+                                    const newServers = mcpConfig.servers.filter((s: any) => s.id !== server.id)
+                                    saveMcpConfig({ servers: newServers })
+                                    showToast(`已删除 [${server.name}] 服务。`, 'success')
+                                  }
+                                }}
+                              >
+                                🗑️ 删除
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 添加自定义 MCP 模块 */}
+            <div style={{ marginTop: '16px' }}>
+              {!showAddMcpForm ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => setShowAddMcpForm(true)}
+                  style={{ width: '100%', height: '38px', fontSize: '13px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  ➕ 添加自定义 MCP 服务
+                </button>
+              ) : (
+                <div style={{ background: 'var(--bg-card-sub, rgba(128,128,128,0.03))', border: '1px solid var(--border-color, rgba(128,128,128,0.15))', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-color-strong)' }}>➕ 新增 MCP 服务配置</div>
+                  
+                  <div>
+                    <label className="mcp-form-label">服务名称</label>
+                    <input
+                      type="text"
+                      className="mcp-input-fancy"
+                      placeholder="如：自定义服务、我的数据库助手"
+                      value={mcpNewName}
+                      onChange={e => setMcpNewName(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mcp-form-label">SSE Endpoint 地址</label>
+                    <input
+                      type="text"
+                      className="mcp-input-fancy"
+                      placeholder="https://mcpmarket.cn/mcp/..."
+                      value={mcpNewUrl}
+                      onChange={e => setMcpNewUrl(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                    <input
+                      type="password"
+                      className="mcp-input-fancy"
+                      placeholder="默认留空"
+                      value={mcpNewApiKey}
+                      onChange={e => setMcpNewApiKey(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setShowAddMcpForm(false)
+                        setMcpNewName('')
+                        setMcpNewUrl('')
+                        setMcpNewApiKey('')
+                      }}
+                      style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => {
+                        if (!mcpNewName.trim() || !mcpNewUrl.trim()) {
+                          showToast('请完整填写服务名称和地址！', 'error')
+                          return
+                        }
+                        const servers = mcpConfig?.servers || []
+                        const newServers = [...servers, {
+                          id: `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+                          name: mcpNewName.trim(),
+                          url: mcpNewUrl.trim(),
+                          apiKey: mcpNewApiKey.trim(),
+                          enabled: true
+                        }]
+                        saveMcpConfig({ servers: newServers })
+                        
+                        setShowAddMcpForm(false)
+                        setMcpNewName('')
+                        setMcpNewUrl('')
+                        setMcpNewApiKey('')
+                        showToast('已成功添加新 MCP 服务！', 'success')
+                      }}
+                      style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      保存并连接
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* 编辑弹窗 Modal */}
+      {showEditModal && editingServer && (
+        <div className="mcp-modal-overlay" onClick={() => { setShowEditModal(false); setEditingServer(null); }}>
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <span>✏️ 编辑 MCP 服务</span>
+              </div>
+              <button className="mcp-modal-close-btn" onClick={() => { setShowEditModal(false); setEditingServer(null); }}>×</button>
+            </div>
+            <div className="mcp-modal-body">
+              <div>
+                <label className="mcp-form-label">服务名称</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="如：Bing搜索"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">SSE Endpoint 地址</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="https://mcpmarket.cn/mcp/..."
+                  value={editUrl}
+                  onChange={e => setEditUrl(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                <input
+                  type="password"
+                  className="mcp-input-fancy"
+                  placeholder="默认留空"
+                  value={editApiKey}
+                  onChange={e => setEditApiKey(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mcp-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setShowEditModal(false); setEditingServer(null); }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  if (!editName.trim() || !editUrl.trim()) {
+                    showToast('请完整填写服务名称和地址！', 'error')
+                    return
+                  }
+                  const newServers = mcpConfig.servers.map((s: any) =>
+                    s.id === editingServer.id
+                      ? { ...s, name: editName.trim(), url: editUrl.trim(), apiKey: editApiKey.trim() }
+                      : s
+                  )
+                  saveMcpConfig({ servers: newServers })
+                  setShowEditModal(false)
+                  setEditingServer(null)
+                  showToast('服务配置已更新并重新连接！', 'success')
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
