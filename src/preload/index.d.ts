@@ -20,6 +20,7 @@ declare global {
       getSkillsList: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
+      saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
       onToolEvent: (callback: (data: any) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>

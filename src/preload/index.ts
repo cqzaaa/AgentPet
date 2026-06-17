@@ -40,6 +40,8 @@ const api = {
     ipcRenderer.invoke('api:call-llm', config, messages, workspacePath),
   selectFile: (): Promise<{ name: string; path: string; content: string } | null> =>
     ipcRenderer.invoke('api:select-file'),
+  saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>
+    ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
   onToolEvent: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:llm-tool-event', subscription)

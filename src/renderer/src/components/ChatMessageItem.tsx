@@ -170,6 +170,7 @@ function parseMarkdownToHtml(markdown: string): string {
 
 export function ChatImage({ src, alt }: { src: string; alt: string }) {
   const [hasError, setHasError] = useState(false)
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
   if (hasError) {
     return (
@@ -192,21 +193,31 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src}
-      alt={alt}
-      className="chat-inline-image"
-      style={{
-        maxWidth: '100%',
-        maxHeight: '200px',
-        borderRadius: '8px',
-        margin: '4px 0',
-        display: 'block',
-        cursor: 'pointer'
-      }}
-      onClick={() => window.open(src)}
-      onError={() => setHasError(true)}
-    />
+    <>
+      <img
+        src={src}
+        alt={alt}
+        className="chat-inline-image"
+        style={{
+          maxWidth: '100%',
+          maxHeight: '200px',
+          borderRadius: '8px',
+          margin: '4px 0',
+          display: 'block',
+          cursor: 'zoom-in'
+        }}
+        onClick={() => setPreviewSrc(src)}
+        onError={() => setHasError(true)}
+      />
+      {previewSrc && (
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          onClick={() => setPreviewSrc(null)}
+        >
+          <img src={previewSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+        </div>
+      )}
+    </>
   )
 }
 
@@ -374,6 +385,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   // 使用 userCollapsed 状态，绝对且强制在思考状态变化时更新折叠展示
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [copied, setCopied] = useState(false)
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
 
   const handleCopy = () => {
     if (!msg.text) return
@@ -413,14 +425,67 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
       </div>
 
       <div className="message-bubble">
-        {/* 如果附带了文件 */}
-        {msg.fileInfo && (
-          <div className="message-file-badge">
-            <span className="file-badge-icon">📄</span>
-            <div className="file-badge-info">
-              <span className="file-badge-name" title={msg.fileInfo.name}>{msg.fileInfo.name}</span>
-              <span className="file-badge-size">{msg.fileInfo.content.length} 字符</span>
+        {msg.fileInfo && !msg.fileInfos && (() => {
+          const f = msg.fileInfo
+          const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+          return isImage ? (
+            <div className="message-file-badges" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <img 
+                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')} 
+                  alt={f.name} 
+                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }} 
+                  onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
+                  onError={(e) => {
+                    // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话天生效）
+                    if (f.objectUrl) {
+                      const target = e.target as HTMLImageElement
+                      if (target.src !== f.objectUrl) {
+                        target.src = f.objectUrl
+                      }
+                    }
+                  }}
+                />
             </div>
+          ) : (
+            <div className="message-file-badge" style={{ marginBottom: '8px' }}>
+              <span className="file-badge-icon">📄</span>
+              <div className="file-badge-info">
+                <span className="file-badge-name" title={f.name}>{f.name}</span>
+              </div>
+            </div>
+          )
+        })()}
+
+        {msg.fileInfos && msg.fileInfos.length > 0 && (
+          <div className="message-file-badges" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+            {msg.fileInfos.map((f: any, i: number) => {
+              const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+              return isImage ? (
+                <img 
+                  key={i} 
+                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')} 
+                  alt={f.name} 
+                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }} 
+                  onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
+                  onError={(e) => {
+                    // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
+                    if (f.objectUrl) {
+                      const target = e.target as HTMLImageElement
+                      if (target.src !== f.objectUrl) {
+                        target.src = f.objectUrl
+                      }
+                    }
+                  }}
+                />
+              ) : (
+                <div key={i} className="message-file-badge" style={{ margin: 0, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <span className="file-badge-icon">📄</span>
+                  <div className="file-badge-info">
+                    <span className="file-badge-name" title={f.name}>{f.name}</span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -480,6 +545,15 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
             {copied ? '✓' : '📋'}
           </button>
+        </div>
+      )}
+
+      {previewImageSrc && (
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          onClick={() => setPreviewImageSrc(null)}
+        >
+          <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
         </div>
       )}
     </div>

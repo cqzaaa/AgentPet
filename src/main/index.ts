@@ -292,6 +292,17 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true
     }
+  },
+  {
+    scheme: 'local-file',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      bypassCSP: true,
+      stream: true
+    }
   }
 ])
 
@@ -567,6 +578,29 @@ app.whenReady().then(() => {
     }
   })
 
+  protocol.handle('local-file', async (request) => {
+    try {
+      // local-file 协议注册了 standard:true，Chromium 会将 local-file://C:/path 中的 C: 当 hostname 解析
+      // 渲染层统一使用 local-file:///C:/path（三斜杠），此时 pathname=/C:/path
+      // 需要去掉 Windows 盘符路径前多余的前导斜杠
+      const parsedUrl = new URL(request.url)
+      let filePath = decodeURIComponent(parsedUrl.pathname)
+      // Windows 绝对路径：/C:/path → C:/path
+      if (/^\/[A-Za-z]:\//.test(filePath)) {
+        filePath = filePath.slice(1)
+      }
+      const fileUrl = pathToFileURL(filePath).toString()
+      const response = await net.fetch(fileUrl)
+      const headers = new Headers(response.headers)
+      headers.set('Access-Control-Allow-Origin', '*')
+      headers.set('Access-Control-Allow-Methods', 'GET, HEAD')
+      return new Response(response.body, { status: response.status, headers })
+    } catch (e) {
+      console.error('[local-file protocol error]', e)
+      return new Response('Not Found', { status: 404 })
+    }
+  })
+
   ipcMain.on('ping', () => console.log('pong'))
 
   // 1. 初始化存储配置与动态目录管理
@@ -788,6 +822,29 @@ app.whenReady().then(() => {
     sandboxMode = !!enabled
     writeConfig({ sandboxMode })
     return sandboxMode
+  })
+
+  ipcMain.handle('api:save-chat-file', async (_, sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => {
+    try {
+      const chatDir = getActiveChatDir()
+      // 将特殊字符替换掉，防止路径穿越
+      const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+      const sessionDir = join(chatDir, safeSessionId)
+      if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true })
+      }
+      
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')
+      const uniqueFileName = `${Date.now()}_${safeFileName}`
+      const targetPath = join(sessionDir, uniqueFileName)
+      
+      const buffer = Buffer.from(arrayBuffer)
+      fs.writeFileSync(targetPath, buffer)
+      return { name: fileName, path: targetPath, safeName: uniqueFileName }
+    } catch (e: any) {
+      console.error('保存聊天附件失败', e)
+      throw new Error(`保存聊天附件失败: ${e.message}`)
+    }
   })
 
   const pendingPermissions = new Map<number, (approved: boolean) => void>()
@@ -1165,6 +1222,7 @@ app.whenReady().then(() => {
           is_thinking INTEGER DEFAULT 0,
           tool_steps TEXT,
           file_info TEXT,
+          file_infos TEXT,
           is_error INTEGER DEFAULT 0,
           user_id TEXT DEFAULT 'system',
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -1192,6 +1250,17 @@ app.whenReady().then(() => {
           console.error("升级 messages 表结构添加 user_id 失败", alterErr)
         }
       }
+      // 动态升级：为老数据库添加 file_infos 列（多附件/上传图片持久化）
+      try {
+        db.prepare("SELECT file_infos FROM messages LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE messages ADD COLUMN file_infos TEXT")
+          console.log("成功升级 SQLite messages 表结构，加入 file_infos 列")
+        } catch (alterErr) {
+          console.error("升级 messages 表结构添加 file_infos 失败", alterErr)
+        }
+      }
     }
     return db
   }
@@ -1212,8 +1281,8 @@ app.whenReady().then(() => {
           const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
           const insertMessage = database.prepare(`
             INSERT OR REPLACE INTO messages 
-            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
 
           const transaction = database.transaction((sessList: any[]) => {
@@ -1228,10 +1297,14 @@ app.whenReady().then(() => {
                   const isThinking = m.isThinking ? 1 : 0
                   const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
                   const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
+                  // fileInfos 保存时剔除 objectUrl（blob URL 重启后失效）
+                  const fileInfos = m.fileInfos
+                    ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
+                    : null
                   const isError = m.isError ? 1 : 0
                   const userId = m.userId || 'system'
 
-                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError, userId)
+                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId)
                 }
               }
             }
@@ -1270,7 +1343,20 @@ app.whenReady().then(() => {
           }
           let fileInfo = undefined
           if (m.file_info) {
-            try { fileInfo = JSON.parse(m.file_info) } catch (e) { console.error(e) }
+            try {
+              const fi = JSON.parse(m.file_info)
+              // 剔除失效的 blob objectUrl
+              const { objectUrl: _o, ...restFi } = fi
+              fileInfo = restFi
+            } catch (e) { console.error(e) }
+          }
+          let fileInfos = undefined
+          if (m.file_infos) {
+            try {
+              const arr = JSON.parse(m.file_infos)
+              // 剔除失效的 blob objectUrl，渲染层统一走 local-file:// 协议
+              fileInfos = arr.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest })
+            } catch (e) { console.error(e) }
           }
 
           // 还原 id。如果是纯数字，转回 number
@@ -1290,6 +1376,7 @@ app.whenReady().then(() => {
             isThinking: m.is_thinking === 1,
             toolSteps,
             fileInfo,
+            fileInfos,
             isError: m.is_error === 1,
             userId: m.user_id || 'system'
           }
@@ -1318,8 +1405,8 @@ app.whenReady().then(() => {
       const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
       const insertMessage = database.prepare(`
         INSERT OR REPLACE INTO messages 
-        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const sessionIds = sessions.map(s => s.id)
@@ -1355,10 +1442,14 @@ app.whenReady().then(() => {
             const isThinking = m.isThinking ? 1 : 0
             const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
             const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
+            // fileInfos 保存时剔除 objectUrl（blob URL 重启后失效）
+            const fileInfos = m.fileInfos
+              ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
+              : null
             const isError = m.isError ? 1 : 0
             const userId = m.userId || 'system'
 
-            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, isError, userId)
+            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId)
           }
         }
       })
@@ -1961,7 +2052,38 @@ app.whenReady().then(() => {
       body.tool_choice = 'auto'
     }
 
-    let chatHistory = [...messages]
+    let chatHistory = JSON.parse(JSON.stringify(messages)) // 深拷贝避免污染
+
+    // 在发送前解析本地图片路径为 base64 多模态格式
+    for (const msg of chatHistory) {
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'image_url' && block.image_url && block.image_url.url && block.image_url.url.startsWith('local-file://')) {
+            // 解析 local-file:///C:/path 格式（三斜杠），去掉 Windows 路径前导斜杠
+            let localPath = ''
+            try {
+              const parsedUrl = new URL(block.image_url.url)
+              localPath = decodeURIComponent(parsedUrl.pathname)
+              if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
+            } catch {
+              localPath = block.image_url.url.replace('local-file://', '')
+            }
+            try {
+              if (fs.existsSync(localPath)) {
+                const buffer = fs.readFileSync(localPath)
+                let ext = localPath.split('.').pop()?.toLowerCase() || 'jpeg'
+                if (ext === 'jpg') ext = 'jpeg'
+                const mimeType = `image/${ext}`
+                block.image_url.url = `data:${mimeType};base64,${buffer.toString('base64')}`
+              }
+            } catch (err) {
+              console.error('读取本地图片转换 Base64 给大模型时失败:', err)
+            }
+          }
+        }
+      }
+    }
+
     let loopCount = 0
     const maxLoops = 6
 
@@ -2018,7 +2140,12 @@ app.whenReady().then(() => {
           totalCompletionTokens += data.usage.completion_tokens || 0
         } else if (data.choices?.[0]?.message?.content) {
           const textOut = data.choices[0].message.content || ''
-          const textIn = chatHistory.map(m => m.content || '').join('')
+          const textIn = chatHistory.map((m: any) => {
+            if (Array.isArray(m.content)) {
+              return m.content.map((b: any) => b.text || '').join('')
+            }
+            return m.content || ''
+          }).join('')
           totalPromptTokens += Math.max(1, Math.round(textIn.length * 0.5))
           totalCompletionTokens += Math.max(1, Math.round(textOut.length * 0.8))
         }

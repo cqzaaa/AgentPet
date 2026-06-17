@@ -22,14 +22,17 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     workspacePath,
     handleSelectWorkspace,
     handleClearWorkspace,
-    attachedFile,
-    setAttachedFile,
+    attachedFiles,
+    setAttachedFiles,
+    handlePasteFiles,
     handleUploadFile,
     highlightedMessageId,
     setHighlightedMessageId,
     handleAbortLlm,
     isSessionSwitching
   } = store
+
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
 
   // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
@@ -49,12 +52,33 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     return () => {}
   }, [highlightedMessageId, setHighlightedMessageId])
 
+  useEffect(() => {
+    // 全局阻止浏览器默认的拖拽打开文件行为，防止不小心把文件拖到页面空白处导致应用跳转
+    const preventDefault = (e: any) => e.preventDefault()
+    window.addEventListener('dragover', preventDefault)
+    window.addEventListener('drop', preventDefault)
+    return () => {
+      window.removeEventListener('dragover', preventDefault)
+      window.removeEventListener('drop', preventDefault)
+    }
+  }, [])
+
   const isOllama = llmConfig.provider === 'ollama'
   const hasKey = isOllama || !!llmConfig.apiKey
 
   return (
     <div className="chat-split-container">
-      <div className="chat-main" style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
+      <div 
+        className="chat-main" 
+        style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => {
+          e.preventDefault()
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handlePasteFiles(e.dataTransfer.files)
+          }
+        }}
+      >
         {/* 消息滚动列表 */}
         {/* 消息滚动列表 */}
         <div className="chat-messages-box">
@@ -91,16 +115,16 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
             <div className="chat-empty-state">
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
-                <div className="suggestion-chip">
+                <div className="suggestion-chip" onClick={() => store.setInputValue('帮我处理一下这份文档的内容，提取关键信息')}>
                   <span className="chip-icon">📄</span>文档处理
                 </div>
-                <div className="suggestion-chip">
+                <div className="suggestion-chip" onClick={() => store.setInputValue('帮我分析这组数据并生成一份可视化报告')}>
                   <span className="chip-icon">📊</span>数据分析与可视化
                 </div>
-                <div className="suggestion-chip">
+                <div className="suggestion-chip" onClick={() => store.setInputValue('请为我构思一个独特的UI设计方案')}>
                   <span className="chip-icon">🎨</span>设计创意
                 </div>
-                <div className="suggestion-chip">
+                <div className="suggestion-chip" onClick={() => store.setInputValue('用最佳实践编写这段代码功能')}>
                   <span className="chip-icon">💻</span>代码开发
                 </div>
               </div>
@@ -121,11 +145,24 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
         </div>
 
         {/* 附件在输入框上方的实时预览 */}
-        {attachedFile && (
-          <div className="input-file-preview">
-            <span className="preview-icon">📄</span>
-            <span className="preview-name">{attachedFile.name}</span>
-            <button className="preview-remove-btn" onClick={() => setAttachedFile(null)} title="移除文件">✕</button>
+        {attachedFiles && attachedFiles.length > 0 && (
+          <div className="input-files-preview-container" style={{ display: 'flex', gap: '8px', padding: '0 16px 8px', flexWrap: 'wrap', overflowX: 'auto' }}>
+            {attachedFiles.map((file, idx) => (
+              <div key={idx} className="input-file-preview" style={{ margin: 0, position: 'relative', display: 'flex', alignItems: 'center', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '6px 12px' }}>
+                {file.objectUrl ? (
+                  <img 
+                    src={file.objectUrl} 
+                    alt={file.name} 
+                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', marginRight: '8px', cursor: 'pointer' }} 
+                    onClick={() => setPreviewImageSrc(file.objectUrl || null)}
+                  />
+                ) : (
+                  <span className="preview-icon" style={{ marginRight: '6px' }}>📄</span>
+                )}
+                <span className="preview-name" style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>{file.name}</span>
+                <button className="preview-remove-btn" onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} title="移除文件" style={{ marginLeft: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '2px' }}>✕</button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -134,10 +171,16 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           <textarea
             className="chat-textarea-field"
             rows={2}
-            placeholder={isSending ? `${currentAvatarName} 正在思考中...` : `输入指令并发送给 ${currentAvatarName} ... (支持 Shift + Enter 换行)`}
+            placeholder={isSending ? `${currentAvatarName} 正在思考中...` : `输入指令并发送给 ${currentAvatarName} ... (支持 Shift + Enter 换行，支持 Ctrl+V 粘贴文件/截图)`}
             value={inputValue}
             disabled={isSending}
             onChange={e => setInputValue(e.target.value)}
+            onPaste={e => {
+              if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                e.preventDefault()
+                handlePasteFiles(e.clipboardData.files)
+              }
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -211,7 +254,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                 <button
                   className="toolbar-send-btn"
                   onClick={handleSendChat}
-                  disabled={!inputValue.trim() && !attachedFile}
+                  disabled={!inputValue.trim() && attachedFiles.length === 0}
                 >
                   发送
                 </button>
@@ -220,6 +263,16 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {previewImageSrc && (
+        <div 
+          className="fullscreen-image-preview"
+          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          onClick={() => setPreviewImageSrc(null)}
+        >
+          <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+        </div>
+      )}
     </div>
   )
 }

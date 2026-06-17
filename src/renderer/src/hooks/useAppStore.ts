@@ -44,6 +44,14 @@ export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs'
 export type AgentSubTab = 'skills' | 'memory' | 'cron'
 export type SettingsSubTab = 'keys' | 'storage' | 'avatar' | 'mcp'
 
+export interface AttachedFile {
+  name: string
+  path: string
+  content?: string
+  safeName?: string
+  objectUrl?: string
+}
+
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
   // ── Navigation ──────────────────────────────────────────────
@@ -224,9 +232,7 @@ export function useAppStore() {
       id: 'agent:main:dashboard:default',
       name: '(未命名)',
       time: formatDateTime(),
-      messages: [
-        { id: 1, sender: 'agent', text: '__WELCOME_MSG__', time: formatDateTime() }
-      ]
+      messages: []
     }]
   })
 
@@ -622,9 +628,7 @@ export function useAppStore() {
         id: 'agent:main:dashboard:default',
         name: '(未命名)',
         time: timeStr,
-        messages: [
-          { id: 1, sender: 'agent', text: '欢迎来到 AgentPet 终端！我是您的智能助理 Mao。有什么我可以帮您的吗？', time: timeStr }
-        ]
+        messages: []
       }]
     }
     setSessions(nextSessions)
@@ -643,9 +647,7 @@ export function useAppStore() {
       id: newId,
       name: '(未命名)',
       time: formatDateTime(),
-      messages: [
-        { id: 1, sender: 'agent', text: `已启动新会话。我是您的助理 ${currentAvatarName}，有什么我可以帮您的吗？`, time: formatDateTime() }
-      ]
+      messages: []
     }
     setSessions([...sessions, newSess])
     setActiveSessionId(newId)
@@ -657,7 +659,7 @@ export function useAppStore() {
     return localStorage.getItem('agentpet_workspace_path') || ''
   })
   
-  const [attachedFile, setAttachedFile] = useState<{ name: string; path: string; content: string } | null>(null)
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
 
   const handleSelectWorkspace = async (): Promise<void> => {
     try {
@@ -683,11 +685,42 @@ export function useAppStore() {
     try {
       const file = await window.api.selectFile()
       if (file) {
-        setAttachedFile(file)
+        setAttachedFiles(prev => [...prev, file])
         showToast(`成功导入文本文件: ${file.name}`, 'success')
       }
     } catch (e: any) {
       showToast(`读取文件失败: ${e.message}`, 'error')
+    }
+  }
+
+  const handlePasteFiles = async (files: FileList): Promise<void> => {
+    if (!files || files.length === 0) return
+    const newAttachments: AttachedFile[] = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const arrayBuffer = await file.arrayBuffer()
+        const result = await window.api.saveChatFile(activeSessionId, file.name || 'image.png', arrayBuffer)
+        
+        let objectUrl
+        if (file.type.startsWith('image/')) {
+          objectUrl = URL.createObjectURL(file)
+        }
+        
+        newAttachments.push({
+          name: result.name,
+          path: result.path,
+          safeName: result.safeName,
+          objectUrl
+        })
+      } catch (e: any) {
+        console.error('粘贴保存文件失败', e)
+        showToast(`保存粘贴文件失败: ${e.message}`, 'error')
+      }
+    }
+    if (newAttachments.length > 0) {
+      setAttachedFiles(prev => [...prev, ...newAttachments])
+      showToast(`成功粘贴 ${newAttachments.length} 个文件`, 'success')
     }
   }
 
@@ -782,23 +815,27 @@ export function useAppStore() {
   }, [activeSessionId])
 
   const handleSendChat = async (): Promise<void> => {
-    if ((!inputValue.trim() && !attachedFile) || isSending) return
+    if ((!inputValue.trim() && attachedFiles.length === 0) || isSending) return
     const text = inputValue.trim()
     const timeStr = formatDateTime()
     
+    const fileNames = attachedFiles.map(f => f.name).join(', ')
     // 1. 构建用户发送的消息
     const userMsg: any = { 
       id: Date.now(), 
       sender: 'user', 
-      text: text || `📄 上传了文件 ${attachedFile?.name}`, 
+      text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''), 
       time: timeStr 
     }
-    if (attachedFile) {
-      userMsg.fileInfo = {
-        name: attachedFile.name,
-        path: attachedFile.path,
-        content: attachedFile.content
-      }
+    if (attachedFiles.length > 0) {
+      userMsg.fileInfos = attachedFiles.map(f => ({
+        name: f.name,
+        path: f.path,
+        content: f.content,
+        safeName: f.safeName
+        // ⚠️ 不保存 objectUrl（blob URL 仅在当前进程生命周期内有效，重启后失效）
+        // 渲染层会通过 local-file:// 协议直接从磁盘读取 path 来展示图片
+      }))
     }
 
     // 2. 构建机器人的思考占位消息
@@ -817,7 +854,7 @@ export function useAppStore() {
         let name = s.name
         const isFirstUserMsg = s.messages.filter(m => m.sender === 'user').length === 0
         if (isFirstUserMsg || s.name === '(未命名)' || s.name === '新会话' || s.name.startsWith('agent:main:dashboard:')) {
-          const displayTitle = text || attachedFile?.name || '新会话'
+          const displayTitle = text || (attachedFiles.length > 0 ? attachedFiles[0].name : '新会话')
           name = displayTitle.length > 15 ? displayTitle.substring(0, 15) + '...' : displayTitle
         }
         // 同步塞入用户消息和机器人的空白占位消息
@@ -828,7 +865,7 @@ export function useAppStore() {
     
     setSessions(updatedSessions)
     setInputValue('')
-    setAttachedFile(null) // 发送后清空附件
+    setAttachedFiles([]) // 发送后清空附件
     setIsSending(true)
 
     const isOllama = llmConfig.provider === 'ollama'
@@ -861,14 +898,44 @@ export function useAppStore() {
     try {
       const activeSessObj = updatedSessions.find(s => s.id === activeSessionId)
       const currentMessages = activeSessObj ? activeSessObj.messages : []
-      const filtered = currentMessages.filter(m => m.sender === 'user' || m.sender === 'agent')
+      const filtered = currentMessages.filter(m => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking)
       const chatMessages = filtered.slice(-contextRounds * 2).map(m => {
         // 如果此条消息带有附件，则把文件内容拼装进去送给大模型
-        let content = m.text
+        let textContent = m.text || ''
+        let hasImage = false
+        const imageBlocks: any[] = []
+
         if (m.fileInfo) {
-          content = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]\n${m.fileInfo.content}`
+          textContent = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]\n${m.fileInfo.content}`
+        } else if (m.fileInfos && m.fileInfos.length > 0) {
+          const attachmentsText = m.fileInfos.filter((f: any) => f.content).map((f: any) => `--- [附带文件: ${f.name}]\n${f.content}`).join('\n\n')
+          if (attachmentsText) {
+             textContent = `${m.text}\n\n${attachmentsText}`
+          }
+
+          // 提取图片（依据扩展名或者包含 objectUrl 判断）
+          const imageFiles = m.fileInfos.filter((f: any) => !f.content && f.path && (f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i) || f.objectUrl))
+          if (imageFiles.length > 0) {
+            hasImage = true
+            imageFiles.forEach((f: any) => {
+              imageBlocks.push({
+                type: 'image_url',
+                image_url: { url: `local-file:///${f.path.replace(/\\/g, '/')}` }
+              })
+            })
+          }
         }
-        return { role: m.sender === 'user' ? 'user' : 'assistant', content }
+
+        if (hasImage) {
+          const finalContent: any[] = []
+          if (textContent) {
+            finalContent.push({ type: 'text', text: textContent })
+          }
+          finalContent.push(...imageBlocks)
+          return { role: m.sender === 'user' ? 'user' : 'assistant', content: finalContent }
+        } else {
+          return { role: m.sender === 'user' ? 'user' : 'assistant', content: textContent }
+        }
       })
 
       // 动态拼装系统人设与技能感知上下文
@@ -1283,7 +1350,7 @@ ${skillsContext}
     handleCreateNewSession, handleDeleteSession, handleSendChat,
     // workspace & attached file
     workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
-    attachedFile, setAttachedFile, handleUploadFile,
+    attachedFiles, setAttachedFiles, handlePasteFiles, handleUploadFile,
     // system
     systemInfo,
     // skills
