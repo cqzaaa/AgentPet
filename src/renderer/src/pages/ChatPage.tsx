@@ -55,21 +55,44 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     <div className="chat-split-container">
       <div className="chat-main" style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
         {/* 消息滚动列表 */}
+        {/* 消息滚动列表 */}
         <div className="chat-messages-box">
           {!hasKey && (
             <div className="api-warn-banner">
               <span>⚠️ 未配置大模型 API Key。当前处于『演示模式』，{currentAvatarName} 将使用内置模拟语句回复您。请前往『设置 {"->"} 本地存储』配置大模型以开启真实交互。</span>
             </div>
           )}
-          {activeSessMessages.map(msg => (
-            <ChatMessageItem 
-              key={msg.id} 
-              msg={msg} 
-              currentAvatarName={currentAvatarName} 
-              highlightedMessageId={highlightedMessageId}
-            />
-          ))}
-          <div ref={chatEndRef} />
+          {activeSessMessages.length === 0 ? (
+            <div className="chat-empty-state">
+              <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
+              <div className="chat-empty-suggestions">
+                <div className="suggestion-chip">
+                  <span className="chip-icon">📄</span>文档处理
+                </div>
+                <div className="suggestion-chip">
+                  <span className="chip-icon">📊</span>数据分析与可视化
+                </div>
+                <div className="suggestion-chip">
+                  <span className="chip-icon">🎨</span>设计创意
+                </div>
+                <div className="suggestion-chip">
+                  <span className="chip-icon">💻</span>代码开发
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {activeSessMessages.map(msg => (
+                <ChatMessageItem 
+                  key={msg.id} 
+                  msg={msg} 
+                  currentAvatarName={currentAvatarName} 
+                  highlightedMessageId={highlightedMessageId}
+                />
+              ))}
+              <div ref={chatEndRef} />
+            </>
+          )}
         </div>
 
         {/* 附件在输入框上方的实时预览 */}

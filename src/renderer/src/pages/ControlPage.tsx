@@ -192,7 +192,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', gap: '4px' }}>
       
       {/* ── 顶部子导航：支持微信/飞书切换 ── */}
       <div className="sub-tab-nav" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))', paddingBottom: '8px' }}>
@@ -215,7 +215,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       {/* ── Tab 一：微信 Bot 集成内容 ── */}
       {activeSubTab === 'wechat' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flex: 1 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(360px, 1.4fr)', gap: '20px' }}>
             
             {/* 左侧：微信 Bot 设备托管卡片 */}
             <div className="overview-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '340px' }}>
@@ -322,9 +322,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                 <div className="card-title">⚙️ 微信 Bot 专用大模型配置</div>
 
                 {/* 自动回复开关 */}
-                <div className="form-group" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <div>
-                    <label className="form-label" style={{ marginBottom: '2px' }}>启用大模型微信自动回复</label>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div style={{ textAlign: 'left', flex: 1, paddingRight: '16px' }}>
+                    <label className="form-label" style={{ marginBottom: '2px', display: 'block' }}>启用大模型微信自动回复</label>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>开启后，收到好友消息将利用 AI 角色自动匹配回复。</div>
                   </div>
                   <label className="switch-toggle" style={{ position: 'relative', display: 'inline-block', width: '42px', height: '22px', flexShrink: 0 }}>
@@ -348,9 +348,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                 </div>
 
                 {/* 是否使用电脑全局大模型配置 */}
-                <div className="form-group" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <div>
-                    <label className="form-label" style={{ marginBottom: '2px' }}>使用与电脑端相同的模型配置</label>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div style={{ textAlign: 'left', flex: 1, paddingRight: '16px' }}>
+                    <label className="form-label" style={{ marginBottom: '2px', display: 'block' }}>使用与电脑端相同的模型配置</label>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>勾选直接调用您在“设置-模型配置”中配置的主模型。</div>
                   </div>
                   <label className="switch-toggle" style={{ position: 'relative', display: 'inline-block', width: '42px', height: '22px', flexShrink: 0 }}>

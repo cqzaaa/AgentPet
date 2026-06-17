@@ -337,6 +337,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     show: false,
     frame: true,
     resizable: true,
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false

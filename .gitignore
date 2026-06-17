@@ -4,3 +4,7 @@ out
 .DS_Store
 .eslintcache
 *.log*
+.agents*
+.vscode*
+skills-lock.json
+

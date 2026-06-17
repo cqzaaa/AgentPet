@@ -6,6 +6,7 @@ import { AgentPage } from '../pages/AgentPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { ChatIcon, OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import { LogsPage } from '../pages/LogsPage'
+import iconFromImage from '../assets/icon.png'
 
 function LogsIcon(): React.JSX.Element {
   return (
@@ -57,7 +58,9 @@ export function AgentWindow(): React.JSX.Element {
           {/* Brand/Avatar Info */}
           <div className="sidebar-brand">
             <div className="brand-left">
-              <div className="brand-avatar">🐱</div>
+              <div className="brand-avatar" style={{ background: 'transparent', boxShadow: 'none' }}>
+                <img src={iconFromImage} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit', transform: 'scale(1)' }} />
+              </div>
               {!isCollapsed && (
                 <div className="brand-info">
                   <span className="brand-name">agentself</span>
@@ -167,14 +170,14 @@ export function AgentWindow(): React.JSX.Element {
           <div>
             <div className="content-title">
               {activeTab === 'chat' && '本地安全沙箱会话'}
-              {activeTab === 'control' && '控制与主机概况'}
+              {activeTab === 'control' && '集成第三方服务'}
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置与外部集成'}
             </div>
             <div className="content-subtitle">
               {activeTab === 'chat' && `当前使用模型：${llmConfig.model || '未定义'}`}
-              {activeTab === 'control' && '查看本地硬件负载及智能体指标'}
+              {activeTab === 'control' && '配置三方Bot'}
               {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
               {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
               {activeTab === 'settings' && '大模型与微信消息集成模拟配置项'}
