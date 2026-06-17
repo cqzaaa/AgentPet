@@ -539,13 +539,41 @@ export function useAppStore() {
     refreshSessions()
   }, [])
 
-  // Auto-scroll chat
+  const [isSessionSwitching, setIsSessionSwitching] = useState(false)
+  const prevSessionIdRef = useRef<string | null>(null)
+  const justSwitchedRef = useRef(false)
+
+  // 1. 处理会话切换时的骨架屏和定位
   useEffect(() => {
-    const timer = setTimeout(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [sessions, activeSessionId, activeTab])
+    if (prevSessionIdRef.current !== activeSessionId) {
+      setIsSessionSwitching(true)
+      prevSessionIdRef.current = activeSessionId
+      
+      const skeletonTimer = setTimeout(() => {
+        setIsSessionSwitching(false)
+        justSwitchedRef.current = true
+        
+        // 让 React 有时间把骨架屏替换为真实聊天 DOM 后再滚动定位
+        setTimeout(() => {
+          chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
+          justSwitchedRef.current = false
+        }, 50)
+      }, 400) // 显示 400ms 骨架屏
+      
+      return () => clearTimeout(skeletonTimer)
+    }
+  }, [activeSessionId])
+
+  // 2. 处理正常收到或发送新消息时的平滑滚动
+  useEffect(() => {
+    // 只有在非切换状态下才执行平滑滚动
+    if (!isSessionSwitching && !justSwitchedRef.current) {
+      const timer = setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [sessions, activeTab])
 
   // Auto-save sessions
   useEffect(() => {
@@ -604,6 +632,11 @@ export function useAppStore() {
   }
 
   const handleCreateNewSession = (): void => {
+    if (sessions.length > 0 && sessions[sessions.length - 1].name === '(未命名)') {
+      setActiveSessionId(sessions[sessions.length - 1].id)
+      setActiveTab('chat')
+      return
+    }
     const randNum = Math.floor(1000 + Math.random() * 9000)
     const newId = `agent:main:dashboard:${randNum}`
     const newSess: Session = {
@@ -1286,7 +1319,9 @@ ${skillsContext}
     handleAbortLlm,
     // mcp
     mcpConfig,
-    saveMcpConfig
+    saveMcpConfig,
+    // session switch
+    isSessionSwitching
   }
 }
 

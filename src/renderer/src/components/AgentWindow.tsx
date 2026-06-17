@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useAppStore } from '../hooks/useAppStore'
 import { ChatPage } from '../pages/ChatPage'
 import { ControlPage } from '../pages/ControlPage'
@@ -20,6 +20,19 @@ function LogsIcon(): React.JSX.Element {
   )
 }
 
+function HistoryListIcon(): React.JSX.Element {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <line x1="8" y1="6" x2="21" y2="6"></line>
+      <line x1="8" y1="12" x2="21" y2="12"></line>
+      <line x1="8" y1="18" x2="21" y2="18"></line>
+      <line x1="3" y1="6" x2="3.01" y2="6"></line>
+      <line x1="3" y1="12" x2="3.01" y2="12"></line>
+      <line x1="3" y1="18" x2="3.01" y2="18"></line>
+    </svg>
+  )
+}
+
 export function AgentWindow(): React.JSX.Element {
   const store = useAppStore()
 
@@ -34,10 +47,29 @@ export function AgentWindow(): React.JSX.Element {
     skillsList, contextRounds,
     toast,
     // sandbox
-    activePermissionRequest
+    activePermissionRequest,
+    activeSessMessages,
+    setHighlightedMessageId
   } = store
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
+
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
+  const historyDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) {
+        setShowHistoryDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+
+  const userMessages = activeSessMessages?.filter(m => m.sender === 'user') || []
 
   const renderPage = (): React.JSX.Element => {
     switch (activeTab) {
@@ -169,7 +201,7 @@ export function AgentWindow(): React.JSX.Element {
         <div className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div className="content-title">
-              {activeTab === 'chat' && '本地安全沙箱会话'}
+              {activeTab === 'chat' && (sessions.find(s => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
               {activeTab === 'control' && '集成第三方服务'}
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
@@ -184,6 +216,47 @@ export function AgentWindow(): React.JSX.Element {
             </div>
           </div>
 
+          {/* 右侧工具栏 */}
+          {activeTab === 'chat' && (
+            <div style={{ position: 'relative' }} ref={historyDropdownRef}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  className="history-btn"
+                  onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}
+                  title="查看历史提问"
+                >
+                  <HistoryListIcon />
+                </button>
+              </div>
+
+              {showHistoryDropdown && (
+                <div className="history-dropdown">
+                  <div className="history-dropdown-header">
+                    历史提问 ({userMessages.length})
+                  </div>
+                  <div className="history-dropdown-list">
+                    {userMessages.length > 0 ? (
+                      userMessages.map(msg => (
+                        <div
+                          key={msg.id}
+                          className="history-item"
+                          onClick={() => {
+                            setHighlightedMessageId(msg.id)
+                            setShowHistoryDropdown(false)
+                          }}
+                          title={msg.text}
+                        >
+                          {msg.text}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="history-empty">暂无提问记录</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className={`content-body tab-${activeTab}`}>
           {renderPage()}

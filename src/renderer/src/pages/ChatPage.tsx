@@ -27,7 +27,8 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     handleUploadFile,
     highlightedMessageId,
     setHighlightedMessageId,
-    handleAbortLlm
+    handleAbortLlm,
+    isSessionSwitching
   } = store
 
   // 监听定位跳转事件，平滑滚动并高亮消息
@@ -62,7 +63,31 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               <span>⚠️ 未配置大模型 API Key。当前处于『演示模式』，{currentAvatarName} 将使用内置模拟语句回复您。请前往『设置 {"->"} 本地存储』配置大模型以开启真实交互。</span>
             </div>
           )}
-          {activeSessMessages.length === 0 ? (
+          {isSessionSwitching ? (
+            <div className="chat-skeleton-container">
+              <div className="skeleton-message agent">
+                <div className="skeleton-header">
+                  <div className="skeleton-avatar"></div>
+                  <div className="skeleton-name"></div>
+                </div>
+                <div className="skeleton-bubble long"></div>
+              </div>
+              <div className="skeleton-message user">
+                <div className="skeleton-header">
+                  <div className="skeleton-avatar"></div>
+                  <div className="skeleton-name"></div>
+                </div>
+                <div className="skeleton-bubble short"></div>
+              </div>
+              <div className="skeleton-message agent">
+                <div className="skeleton-header">
+                  <div className="skeleton-avatar"></div>
+                  <div className="skeleton-name"></div>
+                </div>
+                <div className="skeleton-bubble medium"></div>
+              </div>
+            </div>
+          ) : activeSessMessages.length === 0 ? (
             <div className="chat-empty-state">
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
