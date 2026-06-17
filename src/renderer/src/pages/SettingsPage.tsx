@@ -139,7 +139,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                 <label className="form-label">模型名称 (Model)</label>
                 {DEFAULT_MODELS[llmConfig.provider] && (
                   <span
-                    style={{ fontSize: '11px', color: '#f43f5e', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
+                    style={{ fontSize: '11px', color: '#60a5fa', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
                     onClick={() => saveLlmConfig({ ...llmConfig, model: DEFAULT_MODELS[llmConfig.provider] })}
                   >
                     填入默认模型 ({DEFAULT_MODELS[llmConfig.provider]})

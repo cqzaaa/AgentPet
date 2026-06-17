@@ -197,9 +197,9 @@ body {
   --text-menu: #94a3b8;
 
   --bg-menu-hover: rgba(255, 255, 255, 0.03);
-  --bg-menu-active: rgba(244, 63, 94, 0.08);
-  --border-menu-active: rgba(244, 63, 94, 0.2);
-  --text-menu-active: #fda4af;
+  --bg-menu-active: rgba(96, 165, 250, 0.08);
+  --border-menu-active: rgba(96, 165, 250, 0.2);
+  --text-menu-active: #bfdbfe;
 
   --bg-bubble-agent: rgba(255, 255, 255, 0.02);
   --border-bubble-agent: rgba(255, 255, 255, 0.05);
@@ -209,13 +209,13 @@ body {
   --border-input: rgba(255, 255, 255, 0.08);
   --bg-table-header: rgba(255, 255, 255, 0.01);
 
-  --bg-btn-newchat: rgba(244, 63, 94, 0.1);
-  --border-btn-newchat: rgba(244, 63, 94, 0.3);
-  --text-btn-newchat: #fda4af;
+  --bg-btn-newchat: rgba(96, 165, 250, 0.1);
+  --border-btn-newchat: rgba(96, 165, 250, 0.3);
+  --text-btn-newchat: #bfdbfe;
 
-  --bg-recent-active: rgba(244, 63, 94, 0.08);
-  --border-recent-active: rgba(244, 63, 94, 0.25);
-  --text-recent-active: #fda4af;
+  --bg-recent-active: rgba(96, 165, 250, 0.08);
+  --border-recent-active: rgba(96, 165, 250, 0.25);
+  --text-recent-active: #bfdbfe;
 }
 
 .agent-window-container.light {
@@ -231,9 +231,9 @@ body {
   --text-menu: #475569;
 
   --bg-menu-hover: rgba(0, 0, 0, 0.02);
-  --bg-menu-active: rgba(244, 63, 94, 0.04);
-  --border-menu-active: rgba(244, 63, 94, 0.15);
-  --text-menu-active: #e11d48;
+  --bg-menu-active: rgba(96, 165, 250, 0.04);
+  --border-menu-active: rgba(96, 165, 250, 0.15);
+  --text-menu-active: #3b82f6;
 
   --bg-bubble-agent: #ffffff;
   --border-bubble-agent: #e2e8f0;
@@ -243,13 +243,13 @@ body {
   --border-input: #cbd5e1;
   --bg-table-header: #f1f5f9;
 
-  --bg-btn-newchat: rgba(244, 63, 94, 0.04);
-  --border-btn-newchat: rgba(244, 63, 94, 0.25);
-  --text-btn-newchat: #be123c;
+  --bg-btn-newchat: rgba(96, 165, 250, 0.04);
+  --border-btn-newchat: rgba(96, 165, 250, 0.25);
+  --text-btn-newchat: #3b82f6;
 
-  --bg-recent-active: rgba(244, 63, 94, 0.04);
-  --border-recent-active: rgba(244, 63, 94, 0.2);
-  --text-recent-active: #be123c;
+  --bg-recent-active: rgba(96, 165, 250, 0.04);
+  --border-recent-active: rgba(96, 165, 250, 0.2);
+  --text-recent-active: #3b82f6;
 }
 
 .agent-window-container {
@@ -316,13 +316,13 @@ body {
 .brand-avatar {
   width: 34px;
   height: 34px;
-  background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  box-shadow: 0 0 10px rgba(244, 63, 94, 0.2);
+  box-shadow: 0 0 10px rgba(96, 165, 250, 0.2);
   flex-shrink: 0;
 }
 
@@ -493,7 +493,7 @@ body {
 }
 
 .new-chat-btn:hover {
-  background: rgba(244, 63, 94, 0.08);
+  background: rgba(96, 165, 250, 0.08);
   transform: translateY(-1px);
 }
 
@@ -547,7 +547,7 @@ body {
 }
 
 .sidebar-recent-container::-webkit-scrollbar-thumb {
-  background: rgba(244, 63, 94, 0.1);
+  background: rgba(96, 165, 250, 0.1);
   border-radius: 1.5px;
 }
 
@@ -584,8 +584,8 @@ body {
 }
 
 .recent-item.active .recent-dot {
-  background: #f43f5e;
-  box-shadow: 0 0 6px #f43f5e;
+  background: #60a5fa;
+  box-shadow: 0 0 6px #60a5fa;
 }
 
 .recent-meta {
@@ -638,7 +638,7 @@ body {
 
 .recent-delete-btn:hover {
   opacity: 1 !important;
-  background: rgba(244, 63, 94, 0.15);
+  background: rgba(96, 165, 250, 0.15);
 }
 
 .recent-item:hover .recent-meta {
@@ -782,7 +782,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-content);
+  background: radial-gradient(circle 600px at top right, rgba(77, 115, 240, 0.15), transparent 80%), var(--bg-content);
   overflow: hidden;
   transition: background 0.3s;
 }
@@ -796,7 +796,7 @@ body {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
-  background: var(--bg-content);
+  background: transparent;
   position: relative;
   z-index: 1;
 }
@@ -839,7 +839,7 @@ body {
 }
 
 .content-body::-webkit-scrollbar-thumb {
-  background: rgba(244, 63, 94, 0.15);
+  background: rgba(96, 165, 250, 0.15);
   border-radius: 10px;
 }
 
@@ -926,14 +926,14 @@ body {
 .agent-large-avatar {
   width: 68px;
   height: 68px;
-  background: rgba(244, 63, 94, 0.08);
-  border: 1px solid rgba(244, 63, 94, 0.25);
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.25);
   border-radius: 50%;
   font-size: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 15px rgba(244, 63, 94, 0.15);
+  box-shadow: 0 0 15px rgba(96, 165, 250, 0.15);
 }
 
 .agent-profile-info {
@@ -1004,7 +1004,7 @@ body {
 
 .metric-bar {
   height: 8px;
-  background: rgba(244, 63, 94, 0.03);
+  background: rgba(96, 165, 250, 0.03);
   border-radius: 4px;
   overflow: hidden;
   margin-top: 8px;
@@ -1018,11 +1018,11 @@ body {
 }
 
 .metric-fill.cpu {
-  background: linear-gradient(90deg, #f43f5e, #be123c);
+  background: linear-gradient(90deg, #60a5fa, #3b82f6);
 }
 
 .metric-fill.mem {
-  background: linear-gradient(90deg, #fda4af, #f43f5e);
+  background: linear-gradient(90deg, #bfdbfe, #60a5fa);
 }
 
 /* 系统信息表 */
@@ -1078,7 +1078,7 @@ body {
 }
 
 .chat-messages-box::-webkit-scrollbar-thumb {
-  background: rgba(244, 63, 94, 0.15);
+  background: rgba(96, 165, 250, 0.15);
   border-radius: 4px;
 }
 
@@ -1196,15 +1196,15 @@ body {
 }
 
 .message-row.user .message-bubble {
-  background: rgba(244, 63, 94, 0.04);
-  border-color: rgba(244, 63, 94, 0.15);
+  background: rgba(96, 165, 250, 0.04);
+  border-color: rgba(96, 165, 250, 0.15);
   border-radius: 10px;
   border-bottom-right-radius: 2px;
 }
 
 .light .message-row.user .message-bubble {
-  background: rgba(244, 63, 94, 0.015);
-  border-color: rgba(244, 63, 94, 0.08);
+  background: rgba(96, 165, 250, 0.015);
+  border-color: rgba(96, 165, 250, 0.08);
 }
 
 .message-row.system .message-bubble {
@@ -1232,7 +1232,7 @@ body {
 .loading-dot {
   width: 6px;
   height: 6px;
-  background-color: #f43f5e;
+  background-color: #60a5fa;
   border-radius: 50%;
   display: inline-block;
   animation: waveBounce 1.4s infinite ease-in-out both;
@@ -1377,8 +1377,8 @@ body {
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  background: rgba(244, 63, 94, 0.05);
-  border: 1px solid rgba(244, 63, 94, 0.12);
+  background: rgba(96, 165, 250, 0.05);
+  border: 1px solid rgba(96, 165, 250, 0.12);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 11px;
@@ -1387,12 +1387,12 @@ body {
 }
 
 .light .step-call-header {
-  background: rgba(244, 63, 94, 0.02);
+  background: rgba(96, 165, 250, 0.02);
 }
 
 .step-call-header:hover {
-  background: rgba(244, 63, 94, 0.1);
-  border-color: rgba(244, 63, 94, 0.25);
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.25);
 }
 
 .step-call-title-area {
@@ -1404,14 +1404,14 @@ body {
 
 .step-call-arrow {
   font-size: 9px;
-  color: #f43f5e;
+  color: #60a5fa;
   font-weight: 700;
 }
 
 .step-title {
   font-size: 11px;
   font-weight: 700;
-  color: #f43f5e;
+  color: #60a5fa;
   text-transform: uppercase;
 }
 
@@ -1448,8 +1448,8 @@ body {
 
 /* 高级 Markdown 内联代码 */
 .inline-code {
-  background: rgba(244, 63, 94, 0.06);
-  color: #f43f5e;
+  background: rgba(96, 165, 250, 0.06);
+  color: #60a5fa;
   padding: 2px 5px;
   border-radius: 4px;
   font-family: 'Consolas', monospace;
@@ -1457,7 +1457,7 @@ body {
 }
 
 .light .inline-code {
-  background: rgba(244, 63, 94, 0.04);
+  background: rgba(96, 165, 250, 0.04);
 }
 
 /* 代码卡片容器 */
@@ -1549,7 +1549,7 @@ body {
 
 .file-badge-icon {
   font-size: 20px;
-  color: #f43f5e;
+  color: #60a5fa;
 }
 
 .file-badge-info {
@@ -1578,8 +1578,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(244, 63, 94, 0.08);
-  border: 1px solid rgba(244, 63, 94, 0.2);
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.2);
   border-radius: 8px;
   padding: 6px 12px;
   margin: 0 16px 10px 16px;
@@ -1606,7 +1606,7 @@ body {
 .preview-name {
   font-size: 11.5px;
   font-weight: 700;
-  color: #f43f5e;
+  color: #60a5fa;
 }
 
 .preview-remove-btn {
@@ -1620,7 +1620,7 @@ body {
 }
 
 .preview-remove-btn:hover {
-  color: #f43f5e;
+  color: #60a5fa;
 }
 
 /* 现代卡片式输入控制面板 */
@@ -1637,8 +1637,8 @@ body {
 }
 
 .chat-control-card:focus-within {
-  border-color: rgba(244, 63, 94, 0.35);
-  box-shadow: 0 4px 24px rgba(244, 63, 94, 0.06);
+  border-color: rgba(96, 165, 250, 0.35);
+  box-shadow: 0 4px 24px rgba(96, 165, 250, 0.06);
 }
 
 .chat-textarea-field {
@@ -1752,9 +1752,9 @@ body {
 }
 
 .workspace-btn-inline.selected {
-  color: #f43f5e;
-  border-color: rgba(244, 63, 94, 0.25);
-  background: rgba(244, 63, 94, 0.04);
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.25);
+  background: rgba(96, 165, 250, 0.04);
 }
 
 /* 清除工作空间按钮样式 */
@@ -1778,7 +1778,7 @@ body {
 }
 
 .clear-workspace-btn:hover {
-  background: #f43f5e !important;
+  background: #60a5fa !important;
   color: #ffffff !important;
   transform: scale(1.1);
 }
@@ -1812,7 +1812,7 @@ body {
 
 /* 发送按钮 */
 .toolbar-send-btn {
-  background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   border: none;
   outline: none;
   color: #ffffff;
@@ -1822,12 +1822,12 @@ body {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.15);
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.15);
 }
 
 .toolbar-send-btn:hover {
   transform: translateY(-0.5px);
-  box-shadow: 0 4px 12px rgba(244, 63, 94, 0.25);
+  box-shadow: 0 4px 12px rgba(96, 165, 250, 0.25);
 }
 
 .toolbar-send-btn:disabled {
@@ -1962,7 +1962,7 @@ body {
 .form-input:focus,
 .form-select:focus,
 .form-textarea:focus {
-  border-color: rgba(244, 63, 94, 0.4);
+  border-color: rgba(96, 165, 250, 0.4);
 }
 
 .form-textarea {
@@ -1995,9 +1995,9 @@ body {
 }
 
 .provider-btn.active {
-  border-color: #f43f5e;
-  color: #f43f5e;
-  background: rgba(244, 63, 94, 0.04);
+  border-color: #60a5fa;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.04);
 }
 
 .slider-group {
@@ -2008,14 +2008,14 @@ body {
 
 .form-slider {
   flex: 1;
-  accent-color: #f43f5e;
+  accent-color: #60a5fa;
   cursor: pointer;
 }
 
 .slider-val {
   font-size: 13px;
   font-family: monospace;
-  color: #f43f5e;
+  color: #60a5fa;
   font-weight: 700;
   width: 28px;
 }
@@ -2044,7 +2044,7 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   border: none;
   color: #ffffff;
   padding: 10px 22px;
@@ -2056,7 +2056,7 @@ body {
 }
 
 .btn-primary:hover {
-  box-shadow: 0 4px 10px rgba(244, 63, 94, 0.2);
+  box-shadow: 0 4px 10px rgba(96, 165, 250, 0.2);
   opacity: 0.95;
 }
 
@@ -2141,9 +2141,9 @@ body {
 }
 
 .skill-zip-badge {
-  background: rgba(244, 63, 94, 0.08);
-  border: 1px solid rgba(244, 63, 94, 0.2);
-  color: #f43f5e;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  color: #60a5fa;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 11px;
@@ -2243,21 +2243,21 @@ body {
 
 .avatar-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(244, 63, 94, 0.4);
+  border-color: rgba(96, 165, 250, 0.4);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .avatar-card.active {
-  border-color: #f43f5e;
-  box-shadow: 0 0 14px rgba(244, 63, 94, 0.2);
-  background: rgba(244, 63, 94, 0.02);
+  border-color: #60a5fa;
+  box-shadow: 0 0 14px rgba(96, 165, 250, 0.2);
+  background: rgba(96, 165, 250, 0.02);
 }
 
 .avatar-active-badge {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: #f43f5e;
+  background: #60a5fa;
   color: #fff;
   font-size: 9px;
   padding: 2px 6px;
@@ -2265,7 +2265,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.3);
+  box-shadow: 0 2px 6px rgba(96, 165, 250, 0.3);
 }
 
 .avatar-avatar-box {
@@ -2283,15 +2283,15 @@ body {
 }
 
 .avatar-avatar-box.default-avatar {
-  background: rgba(244, 63, 94, 0.1);
-  color: #f43f5e;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
 }
 
 .avatar-avatar-box.custom-avatar {
-  background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   color: #fff;
   font-size: 15px;
-  box-shadow: 0 4px 10px rgba(244, 63, 94, 0.2);
+  box-shadow: 0 4px 10px rgba(96, 165, 250, 0.2);
 }
 
 .avatar-card:hover .avatar-avatar-box {
@@ -2348,7 +2348,7 @@ body {
 }
 
 .btn-enable-avatar:hover {
-  background: rgba(244, 63, 94, 0.16);
+  background: rgba(96, 165, 250, 0.16);
   transform: translateY(-0.5px);
 }
 
@@ -2382,8 +2382,8 @@ body {
 }
 
 .avatar-card-delete-btn:hover {
-  background: rgba(244, 63, 94, 0.1);
-  color: #f43f5e;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
 }
 
 /* 模型配置下拉菜单样式 */
@@ -2631,7 +2631,7 @@ body {
 }
 
 .rose-text {
-  color: #f43f5e;
+  color: #60a5fa;
   text-shadow: 0 0 10px rgba(244, 63, 150, 0.15);
 }
 
@@ -2647,12 +2647,12 @@ body {
 
 /* 顶部累计大卡片发光背景 */
 .stat-glow-card.total {
-  background: linear-gradient(135deg, rgba(244, 63, 94, 0.04) 0%, rgba(99, 102, 241, 0.03) 100%);
-  border-color: rgba(244, 63, 94, 0.12);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.04) 0%, rgba(99, 102, 241, 0.03) 100%);
+  border-color: rgba(96, 165, 250, 0.12);
 }
 
 .stat-glow-card.total .card-number {
-  background: linear-gradient(135deg, #f43f5e 0%, #6366f1 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #6366f1 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -2718,8 +2718,8 @@ body {
 }
 
 .legend-dot.rose {
-  background-color: #f43f5e;
-  box-shadow: 0 0 6px #f43f5e;
+  background-color: #60a5fa;
+  box-shadow: 0 0 6px #60a5fa;
 }
 
 .chart-card-body {
@@ -2806,7 +2806,7 @@ body {
 }
 
 .tooltip-row .dot.rose {
-  background-color: #f43f5e;
+  background-color: #60a5fa;
 }
 
 .tooltip-total {
@@ -2815,7 +2815,7 @@ body {
   padding-top: 4px;
   font-size: 10.5px;
   font-weight: 700;
-  color: #fda4af;
+  color: #bfdbfe;
 }
 
 /* 环形图占比双栏排版 */
@@ -2951,9 +2951,9 @@ body {
 }
 
 .btn-clear-logs {
-  background: rgba(244, 63, 94, 0.06);
-  border: 1px solid rgba(244, 63, 94, 0.2);
-  color: #f43f5e;
+  background: rgba(96, 165, 250, 0.06);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  color: #60a5fa;
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 11.5px;
@@ -2963,8 +2963,8 @@ body {
 }
 
 .btn-clear-logs:hover {
-  background: rgba(244, 63, 94, 0.12);
-  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.35);
   transform: translateY(-1px);
 }
 
@@ -3308,8 +3308,8 @@ body {
 }
 
 .markdown-link:hover {
-  color: #f43f5e;
-  border-bottom-color: rgba(244, 63, 94, 0.6);
+  color: #60a5fa;
+  border-bottom-color: rgba(96, 165, 250, 0.6);
 }
 
 /* 分割线 */
@@ -3368,7 +3368,7 @@ body {
 /* 行内代码 */
 .inline-code {
   background: rgba(255, 255, 255, 0.05);
-  color: #fda4af;
+  color: #bfdbfe;
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
@@ -3378,7 +3378,7 @@ body {
 
 .agent-window-container.light .inline-code {
   background: rgba(0, 0, 0, 0.04);
-  color: #be123c;
+  color: #3b82f6;
   border-color: rgba(0, 0, 0, 0.03);
 }
 
@@ -3803,7 +3803,7 @@ body {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1.5px solid rgba(244, 63, 94, 0.3);
+  border: 1.5px solid rgba(96, 165, 250, 0.3);
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
   border-radius: 12px;
   padding: 8px 12px;
@@ -3831,8 +3831,8 @@ body {
   width: 10px;
   height: 10px;
   background: rgba(255, 255, 255, 0.95);
-  border-right: 1.5px solid rgba(244, 63, 94, 0.3);
-  border-bottom: 1.5px solid rgba(244, 63, 94, 0.3);
+  border-right: 1.5px solid rgba(96, 165, 250, 0.3);
+  border-bottom: 1.5px solid rgba(96, 165, 250, 0.3);
 }
 
 @keyframes bubbleFadeIn {
@@ -3858,7 +3858,7 @@ body {
 }
 
 .pet-bubble-link:hover {
-  color: #f43f5e;
+  color: #60a5fa;
 }
 
 /* =================================================================*

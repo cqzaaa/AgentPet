@@ -65,7 +65,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     if (!hasData) return []
     const modelMap: Record<string, { total: number; color: string; provider: string }> = {}
     
-    const colors = ['#f43f5e', '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899']
+    const colors = ['#60a5fa', '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899']
     let colorIdx = 0
 
     activeLogs.forEach(log => {
@@ -302,8 +302,8 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                       <stop offset="100%" stopColor="#06b6d4" stopOpacity="0" />
                     </linearGradient>
                     <linearGradient id="gradient-completion" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
-                      <stop offset="100%" stopColor="#f43f5e" stopOpacity="0" />
+                      <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#60a5fa" stopOpacity="0" />
                     </linearGradient>
                   </defs>
 
@@ -325,7 +325,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
 
                   {/* 折线路径 */}
                   <path d={trendData.pathPromptStr} fill="none" stroke="#06b6d4" strokeWidth="2.5" strokeLinecap="round" />
-                  <path d={trendData.pathCompletionStr} fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" />
+                  <path d={trendData.pathCompletionStr} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" />
 
                   {/* 交互数据描点与 X 轴 Tick */}
                   {trendData.pointsPrompt.map((p, idx) => {
@@ -336,7 +336,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                         {/* 隐形的大范围触发器，提供良好的鼠标交互体验 */}
                         <circle cx={p.x} cy={p.y} r="14" fill="transparent" style={{ cursor: 'pointer' }} />
                         <circle cx={p.x} cy={p.y} r={isHovered ? '6' : '3.5'} fill="#08090d" stroke="#06b6d4" strokeWidth={isHovered ? '3' : '2'} style={{ transition: 'all 0.15s ease' }} />
-                        <circle cx={trendData.pointsCompletion[idx].x} cy={trendData.pointsCompletion[idx].y} r={isHovered ? '6' : '3.5'} fill="#08090d" stroke="#f43f5e" strokeWidth={isHovered ? '3' : '2'} style={{ transition: 'all 0.15s ease' }} />
+                        <circle cx={trendData.pointsCompletion[idx].x} cy={trendData.pointsCompletion[idx].y} r={isHovered ? '6' : '3.5'} fill="#08090d" stroke="#60a5fa" strokeWidth={isHovered ? '3' : '2'} style={{ transition: 'all 0.15s ease' }} />
                         
                         {/* X 轴竖线短刻度 (Ticks) */}
                         <line x1={p.x} y1={trendData.paddingTop + trendData.chartHeight} x2={p.x} y2={trendData.paddingTop + trendData.chartHeight + 4} stroke="var(--text-muted)" strokeWidth="1.2" />

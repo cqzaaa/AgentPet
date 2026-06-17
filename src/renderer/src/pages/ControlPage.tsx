@@ -401,7 +401,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                           <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', color: 'var(--text-muted)' }}>模型名称</label>
                           {DEFAULT_MODELS[localLlmConfig.provider] && (
                             <span
-                              style={{ fontSize: '10px', color: '#f43f5e', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
+                              style={{ fontSize: '10px', color: '#60a5fa', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
                               onClick={() => {
                                 setLocalLlmConfig({ ...localLlmConfig, model: DEFAULT_MODELS[localLlmConfig.provider] })
                                 setShowWechatModelDropdown(false)
