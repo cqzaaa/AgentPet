@@ -155,7 +155,20 @@ const api = {
   },
   syncMcpConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-mcp-config', config),
   testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
-  getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config')
+  getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config'),
+  onRequestGeolocation: (callback: (data: { requestId: number }) => void): (() => void) => {
+    const subscription = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:request-geolocation', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:request-geolocation', subscription)
+    }
+  },
+  respondGeolocation: (requestId: number, location: any, error?: string): void => {
+    ipcRenderer.send('api:geolocation-response', { requestId, location, error })
+  },
+  copyText: (text: string): void => {
+    ipcRenderer.send('api:copy-text', text)
+  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

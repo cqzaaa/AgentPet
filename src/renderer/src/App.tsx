@@ -18,6 +18,28 @@ function App(): React.JSX.Element {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
+  useEffect(() => {
+    if (window.api && typeof window.api.onRequestGeolocation === 'function') {
+      const cleanup = window.api.onRequestGeolocation(({ requestId }) => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            window.api.respondGeolocation(requestId, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy
+            })
+          },
+          (error) => {
+            window.api.respondGeolocation(requestId, null, error.message)
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        )
+      })
+      return cleanup
+    }
+    return undefined
+  }, [])
+
   return isAgent ? <AgentWindow /> : <PetWidget />
 }
 

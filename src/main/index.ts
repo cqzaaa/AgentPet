@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard } from 'electron'
 import { join, basename, dirname } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -6,6 +6,8 @@ import icon from '../../resources/icon.png?asset'
 import * as fs from 'fs'
 import * as os from 'os'
 import { exec } from 'child_process'
+import * as https from 'https'
+import * as http from 'http'
 import { promisify } from 'util'
 import Database from 'better-sqlite3'
 import { WechatBotManager } from './wechatBot'
@@ -623,6 +625,35 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
+  // 配置地理定位权限处理器，允许渲染进程获取系统定位
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'geolocation') {
+      const activeWin = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+      dialog.showMessageBox(activeWin, {
+        type: 'question',
+        buttons: ['允许', '拒绝'],
+        defaultId: 0,
+        cancelId: 1,
+        title: '地理定位授权',
+        message: '“AgentPet” 想要获取您的电脑地理位置定位，是否允许？',
+        detail: '允许定位将使桌面助理能获取您当前的位置以提供对应城市的天气、时间等服务。'
+      }).then(({ response }) => {
+        callback(response === 0)
+      }).catch(() => {
+        callback(false)
+      })
+    } else {
+      callback(false)
+    }
+  })
+
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    if (permission === 'geolocation') {
+      return true
+    }
+    return false
+  })
+
   // Default open or close DevTools by F12 in development
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -958,6 +989,14 @@ app.whenReady().then(() => {
     if (resolve) {
       resolve(!!approved)
       pendingPermissions.delete(requestId)
+    }
+  })
+
+  ipcMain.on('api:copy-text', (_, text: string) => {
+    try {
+      clipboard.writeText(text || '')
+    } catch (err) {
+      console.error('主进程写入剪贴板异常:', err)
     }
   })
 
@@ -1775,6 +1814,17 @@ app.whenReady().then(() => {
           required: ['city']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_location',
+        description: '获取用户当前电脑的地理位置定位信息（经纬度），以便提供当地时间、天气、或基于当前位置的其他针对性建议。不需要参数。',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
+      }
     }
   ]
 
@@ -1865,6 +1915,151 @@ app.whenReady().then(() => {
 
   // 执行本地系统工具处理器
   async function executeTool(name: string, args: any, workspacePath: string, event?: Electron.IpcMainInvokeEvent): Promise<string> {
+    if (name === 'get_location') {
+      try {
+        const activeWin = event?.sender
+        if (!activeWin) {
+          return '获取定位失败：无法获取当前活动的渲染进程实例。'
+        }
+
+        // ── Windows 系统定位（WinRT Geolocator API，Windows 10+ 现代接口）──
+        // 使用 Windows.Devices.Geolocation.Geolocator，与系统「设置→隐私→位置」直连，
+        // 支持 GPS + Wi-Fi 三角定位 + 基站，精度远高于旧的 System.Device API。
+        // 通过 PowerShell Add-Type 内联 C# 调用 WinRT 异步接口。
+        const psScript = `
+$ProgressPreference = 'SilentlyContinue'
+$VerbosePreference  = 'SilentlyContinue'
+$WarningPreference  = 'SilentlyContinue'
+
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+
+# 加载 WinRT 类型
+$null = [Windows.Devices.Geolocation.Geolocator, Windows.Devices.Geolocation, ContentType=WindowsRuntime]
+
+# 获取 AsTask 泛型扩展方法（把 WinRT IAsyncOperation 转为 .NET Task）
+$asTaskMethod = [System.WindowsRuntimeSystemExtensions].GetMethods() |
+  Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.IsGenericMethod } |
+  Select-Object -First 1
+
+$geoposType = [Windows.Devices.Geolocation.Geoposition, Windows.Devices.Geolocation, ContentType=WindowsRuntime]
+$asTask = $asTaskMethod.MakeGenericMethod($geoposType)
+
+$geo = [Windows.Devices.Geolocation.Geolocator]::new()
+$geo.DesiredAccuracy = [Windows.Devices.Geolocation.PositionAccuracy]::High
+
+$asyncOp = $geo.GetGeopositionAsync()
+$task = $asTask.Invoke($null, @($asyncOp))
+
+if (-not $task.Wait(15000)) {
+  Write-Output 'ERROR:LocationTimeout'
+} elseif ($task.IsFaulted) {
+  Write-Output "ERROR:LocationFailed:$($task.Exception.InnerException.Message)"
+} else {
+  $pos = $task.Result
+  $acc = if ($pos.Coordinate.Accuracy -ne $null) { $pos.Coordinate.Accuracy } else { 50 }
+  Write-Output "$($pos.Coordinate.Latitude),$($pos.Coordinate.Longitude),$acc"
+}
+`
+
+        let winCoords: { latitude: number; longitude: number; accuracy: number } | null = null
+        let winError = ''
+
+        try {
+          const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
+          const { stdout } = await execAsync(`powershell -EncodedCommand ${encoded}`, { timeout: 22000 })
+          const out = stdout.trim()
+
+          // 用正则验证输出格式：真实坐标是 "lat,lon,acc" 数字格式
+          // PowerShell 进度流产生的 CLIXML 会混入 stderr，但不影响 stdout
+          const coordMatch = out.match(/^(-?\d+\.\d+),(-?\d+\.\d+),?(\d*\.?\d*)$/m)
+          if (coordMatch) {
+            winCoords = {
+              latitude: parseFloat(coordMatch[1]),
+              longitude: parseFloat(coordMatch[2]),
+              accuracy: coordMatch[3] ? parseFloat(coordMatch[3]) : 50
+            }
+          } else if (out.startsWith('ERROR:')) {
+            winError = out.replace('ERROR:', '')
+          } else {
+            winError = out || '脚本无输出，请检查 Windows 位置服务权限'
+          }
+        } catch (psErr: any) {
+          winError = psErr?.message || String(psErr)
+        }
+
+        if (!winCoords) {
+          return [
+            `获取 Windows 物理定位失败：${winError}`,
+            '',
+            '请检查以下设置：',
+            '① Windows 设置 → 隐私和安全性 → 位置 → 开启「位置服务」',
+            '② 同页面开启「允许桌面应用访问你的位置」',
+            '③ 确保 Wi-Fi 已连接（用于 Wi-Fi 三角定位）'
+          ].join('\n')
+        }
+
+        // 将真实坐标注入 Chromium（此后 navigator.geolocation 返回注入值，不调 Google API）
+        try {
+          if (!activeWin.debugger.isAttached()) activeWin.debugger.attach('1.3')
+          await activeWin.debugger.sendCommand('Emulation.setGeolocationOverride', {
+            latitude: winCoords.latitude,
+            longitude: winCoords.longitude,
+            accuracy: winCoords.accuracy
+          })
+          console.log(`[Geolocation] WinRT 坐标注入成功: ${winCoords.latitude}, ${winCoords.longitude}`)
+        } catch (debugErr: any) {
+          console.warn('[Geolocation] debugger 注入失败，直接返回坐标:', debugErr?.message)
+          return JSON.stringify({
+            status: 'success',
+            latitude: winCoords.latitude,
+            longitude: winCoords.longitude,
+            accuracy: `${winCoords.accuracy.toFixed(1)}m`,
+            provider: 'windows_winrt_geolocator'
+          }, null, 2)
+        }
+
+        // 触发渲染层 navigator.geolocation 弹窗授权（用户看到允许/拒绝弹窗）
+        // 允许后 Chromium 直接返回注入坐标，不再调 Google API，无 403
+        return await new Promise<string>((resolve) => {
+          const reqId = nextPermissionRequestId++
+          activeWin.send('api:request-geolocation', { requestId: reqId })
+
+          const onResponse = (_evt: any, resp: { requestId: number; location?: { latitude: number; longitude: number; accuracy: number }; error?: string }) => {
+            if (resp && resp.requestId === reqId) {
+              ipcMain.removeListener('api:geolocation-response', onResponse)
+              const coords = resp.location || winCoords!
+              resolve(JSON.stringify({
+                status: 'success',
+                latitude: coords.latitude,
+                longitude: coords.longitude,
+                accuracy: `${typeof coords.accuracy === 'number' ? coords.accuracy.toFixed(1) : coords.accuracy}m`,
+                provider: 'windows_winrt_geolocator'
+              }, null, 2))
+            }
+          }
+
+          ipcMain.on('api:geolocation-response', onResponse)
+
+          // 15 秒等待用户点击弹窗，超时直接返回坐标
+          setTimeout(() => {
+            ipcMain.removeListener('api:geolocation-response', onResponse)
+            resolve(JSON.stringify({
+              status: 'success',
+              latitude: winCoords!.latitude,
+              longitude: winCoords!.longitude,
+              accuracy: `${winCoords!.accuracy.toFixed(1)}m`,
+              provider: 'windows_winrt_geolocator'
+            }, null, 2))
+          }, 15000)
+        })
+
+      } catch (err: any) {
+        return `执行 get_location 工具失败：${err.message || err}`
+      }
+    }
+
+
+
     if (name === 'get_weather') {
       try {
         const { city } = args

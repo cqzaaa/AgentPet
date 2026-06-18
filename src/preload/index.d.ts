@@ -61,6 +61,9 @@ declare global {
       syncMcpConfig: (config: any) => Promise<boolean>
       testMcpServer: (config: any) => Promise<any>
       getMcpConfig: () => Promise<any>
+      onRequestGeolocation: (callback: (data: { requestId: number }) => void) => () => void
+      respondGeolocation: (requestId: number, location: any, error?: string) => void
+      copyText: (text: string) => void
     }
   }
 }

@@ -4,7 +4,11 @@ import React, { useState, useEffect } from 'react'
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = () => {
-    navigator.clipboard.writeText(code)
+    if (window.api && typeof window.api.copyText === 'function') {
+      window.api.copyText(code)
+    } else {
+      navigator.clipboard.writeText(code)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -487,7 +491,11 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
       : msg.text === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
         : msg.text
-    navigator.clipboard.writeText(textToCopy)
+    if (window.api && typeof window.api.copyText === 'function') {
+      window.api.copyText(textToCopy)
+    } else {
+      navigator.clipboard.writeText(textToCopy)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
