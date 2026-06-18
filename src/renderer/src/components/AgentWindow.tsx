@@ -96,7 +96,7 @@ export function AgentWindow(): React.JSX.Element {
               {!isCollapsed && (
                 <div className="brand-info">
                   <span className="brand-name">agentself</span>
-                  <span className="brand-status">
+                  <span className="brand-status" title={currentAvatarName}>
                     <span className="status-dot-pulse"></span>
                     {currentAvatarName}
                   </span>
@@ -128,7 +128,7 @@ export function AgentWindow(): React.JSX.Element {
                 >
                   <span className="recent-dot"></span>
                   <div className="recent-meta">
-                    <span className="recent-title">{session.name}</span>
+                    <span className="recent-title" title={session.name}>{session.name}</span>
                     <span className="recent-time">{session.time}</span>
                   </div>
                   <button

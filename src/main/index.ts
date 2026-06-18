@@ -860,6 +860,27 @@ app.whenReady().then(() => {
   // 触发一次 memory 目录初始化
   getActiveMemoryDir()
 
+  // 生成文件目录管理（支持按会话隔离）
+  const getGeneratedFilesDir = (sessionId?: string): string => {
+    const base = getActiveStorageDir()
+    let dir: string
+    if (sessionId) {
+      const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+      dir = join(base, 'chat', safeSessionId, 'generated_files')
+    } else {
+      dir = join(base, 'generated_files')
+    }
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true })
+      } catch (e) {
+        console.error('创建 generated_files 文件夹失败', e)
+      }
+    }
+    return dir
+  }
+  getGeneratedFilesDir()
+
   // 2. CPU/内存及系统状态获取
   function getCpuUsageInfo(): { totalIdle: number; totalTick: number } {
     const cpus = os.cpus()
@@ -1769,14 +1790,15 @@ app.whenReady().then(() => {
     return await readSkillsFolder()
   })
 
-  // 4.5. 文本文件选择与加载接口
+  // 4.5. 文本文件选择与加载接口（支持 PDF/Word/Excel/CSV 等格式）
   ipcMain.handle('api:select-file', async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) return null
     const result = await dialog.showOpenDialog(window, {
-      title: '选择上传的文本文件',
+      title: '选择上传的文件',
       properties: ['openFile'],
       filters: [
+        { name: '文档文件', extensions: ['pdf', 'docx', 'xlsx', 'xls', 'csv'] },
         { name: '文本与代码文件', extensions: ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'sh', 'bat', 'yml', 'yaml', 'ini', 'xml'] },
         { name: '所有文件', extensions: ['*'] }
       ]
@@ -1786,11 +1808,174 @@ app.whenReady().then(() => {
     }
     const filePath = result.filePaths[0]
     const name = basename(filePath)
+    const ext = name.split('.').pop()?.toLowerCase() || ''
+
     try {
-      const content = await fs.promises.readFile(filePath, 'utf-8')
+      let content = ''
+
+      if (ext === 'pdf') {
+        // PDF 文件解析
+        const { PDFParse } = require('pdf-parse')
+        const buffer = await fs.promises.readFile(filePath)
+        const parser = new PDFParse()
+        const data = await parser.parseBuffer(buffer)
+        content = data.text || ''
+        if (!content.trim()) {
+          content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
+        }
+      } else if (ext === 'docx') {
+        // Word 文档解析
+        const mammoth = require('mammoth')
+        const buffer = await fs.promises.readFile(filePath)
+        const result = await mammoth.extractRawText({ buffer })
+        content = result.value || ''
+        if (!content.trim()) {
+          content = '[Word 文档已加载，但内容为空]'
+        }
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        // Excel 文件解析
+        const XLSX = require('xlsx')
+        const workbook = XLSX.readFile(filePath)
+        const sheets: string[] = []
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName]
+          const csv = XLSX.utils.sheet_to_csv(sheet)
+          if (csv.trim()) {
+            sheets.push(`[工作表: ${sheetName}]\n${csv}`)
+          }
+        }
+        content = sheets.join('\n\n') || '[Excel 文件已加载，但内容为空]'
+      } else if (ext === 'csv') {
+        // CSV 文件解析
+        const Papa = require('papaparse')
+        const csvContent = await fs.promises.readFile(filePath, 'utf-8')
+        const parsed = Papa.parse(csvContent, { header: true })
+        if (parsed.data && parsed.data.length > 0) {
+          // 转为可读的文本格式
+          const headers = parsed.meta.fields || []
+          const rows = parsed.data.slice(0, 500) as any[] // 限制最多 500 行
+          content = `列名: ${headers.join(', ')}\n\n`
+          content += rows.map((row, i) => `第${i + 1}行: ${headers.map(h => `${h}=${row[h] ?? ''}`).join(', ')}`).join('\n')
+          if ((parsed.data as any[]).length > 500) {
+            content += `\n\n... 共 ${parsed.data.length} 行，已截取前 500 行`
+          }
+        } else {
+          content = '[CSV 文件已加载，但内容为空]'
+        }
+      } else {
+        // 纯文本文件（txt, md, js, json 等）
+        content = await fs.promises.readFile(filePath, 'utf-8')
+      }
+
       return { name, path: filePath, content }
     } catch (e: any) {
       throw new Error(`读取文件失败: ${e.message}`)
+    }
+  })
+
+  // 解析指定路径的文档文件内容（供粘贴/拖拽文件时使用）
+  ipcMain.handle('api:parse-file-content', async (_, filePath: string) => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+    try {
+      if (ext === 'pdf') {
+        const { PDFParse } = require('pdf-parse')
+        const buffer = await fs.promises.readFile(filePath)
+        const parser = new PDFParse()
+        const data = await parser.parseBuffer(buffer)
+        return data.text || '[PDF 未能提取到文本内容]'
+      } else if (ext === 'docx') {
+        const mammoth = require('mammoth')
+        const buffer = await fs.promises.readFile(filePath)
+        const result = await mammoth.extractRawText({ buffer })
+        return result.value || '[Word 文档内容为空]'
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        const XLSX = require('xlsx')
+        const workbook = XLSX.readFile(filePath)
+        const sheets: string[] = []
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName]
+          const csv = XLSX.utils.sheet_to_csv(sheet)
+          if (csv.trim()) sheets.push(`[工作表: ${sheetName}]\n${csv}`)
+        }
+        return sheets.join('\n\n') || '[Excel 文件内容为空]'
+      } else if (ext === 'csv') {
+        const Papa = require('papaparse')
+        const csvContent = await fs.promises.readFile(filePath, 'utf-8')
+        const parsed = Papa.parse(csvContent, { header: true })
+        if (parsed.data && parsed.data.length > 0) {
+          const headers = parsed.meta.fields || []
+          const rows = parsed.data.slice(0, 500) as any[]
+          let text = `列名: ${headers.join(', ')}\n\n`
+          text += rows.map((row, i) => `第${i + 1}行: ${headers.map(h => `${h}=${row[h] ?? ''}`).join(', ')}`).join('\n')
+          if ((parsed.data as any[]).length > 500) text += `\n\n... 共 ${parsed.data.length} 行，已截取前 500 行`
+          return text
+        }
+        return '[CSV 文件内容为空]'
+      } else {
+        return await fs.promises.readFile(filePath, 'utf-8')
+      }
+    } catch (e: any) {
+      return `[文件解析失败: ${e.message}]`
+    }
+  })
+
+  // 获取已生成的文件列表（支持按会话过滤）
+  ipcMain.handle('api:get-generated-files', async (_, sessionId?: string) => {
+    try {
+      const genDir = getGeneratedFilesDir(sessionId)
+      const files = await fs.promises.readdir(genDir)
+      const list: { name: string; path: string; size: number; time: string }[] = []
+      for (const file of files) {
+        const filePath = join(genDir, file)
+        const stat = await fs.promises.stat(filePath)
+        if (stat.isFile()) {
+          list.push({
+            name: file,
+            path: filePath,
+            size: stat.size,
+            time: stat.mtime.toISOString()
+          })
+        }
+      }
+      // 按修改时间倒序
+      list.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+      return list
+    } catch (e) {
+      console.error('获取生成文件列表失败', e)
+      return []
+    }
+  })
+
+  // 生成文件另存为（弹出系统保存对话框）
+  ipcMain.handle('api:save-generated-file-as', async (_, filePath: string) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    if (!win) return false
+    const fileName = basename(filePath)
+    const ext = fileName.split('.').pop() || ''
+    const result = await dialog.showSaveDialog(win, {
+      title: '保存文件',
+      defaultPath: fileName,
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    try {
+      await fs.promises.copyFile(filePath, result.filePath)
+      return true
+    } catch (e) {
+      console.error('另存为失败', e)
+      return false
+    }
+  })
+
+  // 删除已生成的文件
+  ipcMain.handle('api:delete-generated-file', async (_, filePath: string, sessionId?: string) => {
+    try {
+      const genDir = getGeneratedFilesDir(sessionId)
+      if (!filePath.startsWith(genDir)) return false
+      await fs.promises.unlink(filePath)
+      return true
+    } catch (e) {
+      return false
     }
   })
 
@@ -1919,6 +2104,22 @@ app.whenReady().then(() => {
           properties: {}
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_file',
+        description: '生成一个文件供用户下载。支持生成：文本/代码文件（txt, md, js, ts, py, html, css, json, xml, yml, csv 等）、Excel（xlsx）、Word 文档（docx）、PDF（pdf）、PowerPoint（pptx）。当用户上传某种格式的文件时，生成结果应使用相同格式。',
+        parameters: {
+          type: 'object',
+          properties: {
+            file_name: { type: 'string', description: '文件名（含扩展名），例如 "report.md"、"data.csv"、"analysis.xlsx"、"报告.docx"、"slides.pptx"' },
+            content: { type: 'string', description: '文件的文本内容。对于 xlsx 格式，传入 CSV 格式的数据内容。对于 docx/pdf/pptx 格式，传入纯文本内容，会自动转为对应格式。' },
+            file_type: { type: 'string', enum: ['text', 'excel', 'docx', 'pdf', 'pptx'], description: '文件类型：text（文本/代码）、excel（Excel 表格）、docx（Word 文档）、pdf（PDF 文档）、pptx（PPT 演示文稿）。默认 text。' }
+          },
+          required: ['file_name', 'content']
+        }
+      }
     }
   ]
 
@@ -2008,7 +2209,7 @@ app.whenReady().then(() => {
   }
 
   // 执行本地系统工具处理器
-  async function executeTool(name: string, args: any, workspacePath: string, event?: Electron.IpcMainInvokeEvent): Promise<string> {
+  async function executeTool(name: string, args: any, workspacePath: string, event?: Electron.IpcMainInvokeEvent, sessionId?: string): Promise<string> {
     if (name === 'get_location') {
       try {
         const activeWin = event?.sender
@@ -2316,12 +2517,167 @@ if (-not $task.Wait(15000)) {
       }
     }
 
+    // 生成文件不需要工作空间
+    if (name === 'generate_file') {
+      try {
+        const { file_name, content, file_type } = args
+        if (!file_name || !content) {
+          return '错误：缺少必要参数 file_name 或 content'
+        }
+
+        const genDir = getGeneratedFilesDir(sessionId)
+        const safeName = file_name.replace(/[<>:”/\\|?*]/g, '_')
+        const filePath = join(genDir, safeName)
+
+        if (file_type === 'excel') {
+          const XLSX = require('xlsx')
+          const wb = XLSX.utils.book_new()
+          const ws = XLSX.utils.aoa_to_sheet(
+            content.split('\n').map((row: string) => row.split(','))
+          )
+          XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+          XLSX.writeFile(wb, filePath)
+        } else if (file_type === 'docx') {
+          const docx = require('docx')
+          const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx
+          // 将内容按换行拆分为段落
+          const lines = content.split('\n')
+          const children = lines.map((line: string) => {
+            // 简单识别标题行（以 # 开头或全大写短行）
+            if (line.startsWith('# ')) {
+              return new Paragraph({
+                heading: HeadingLevel.HEADING_1,
+                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 32 })]
+              })
+            } else if (line.startsWith('## ')) {
+              return new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 28 })]
+              })
+            } else if (line.startsWith('### ')) {
+              return new Paragraph({
+                heading: HeadingLevel.HEADING_3,
+                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 24 })]
+              })
+            } else if (line.trim() === '') {
+              return new Paragraph({ children: [] })
+            } else {
+              return new Paragraph({
+                children: [new TextRun({ text: line, size: 24 })]
+              })
+            }
+          })
+          const doc = new Document({ sections: [{ children }] })
+          const buffer = await Packer.toBuffer(doc)
+          await fs.promises.writeFile(filePath, buffer)
+        } else if (file_type === 'pdf') {
+          const PDFDocument = require('pdfkit')
+          await new Promise<void>((resolve, reject) => {
+            const pdf = new PDFDocument({ size: 'A4', margin: 50 })
+            const stream = fs.createWriteStream(filePath)
+            pdf.pipe(stream)
+            // 注册中文字体支持（尝试系统字体）
+            try {
+              const fontPath = process.platform === 'win32'
+                ? 'C:/Windows/Fonts/msyh.ttc'
+                : process.platform === 'darwin'
+                  ? '/System/Library/Fonts/PingFang.ttc'
+                  : '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc'
+              if (fs.existsSync(fontPath)) {
+                pdf.registerFont('CJK', fontPath)
+                pdf.font('CJK')
+              }
+            } catch (e) { /* fallback to default font */ }
+            const lines = content.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('# ')) {
+                pdf.fontSize(20).text(line.replace(/^#+\s*/, ''), { continued: false })
+                pdf.moveDown(0.3)
+              } else if (line.startsWith('## ')) {
+                pdf.fontSize(16).text(line.replace(/^#+\s*/, ''), { continued: false })
+                pdf.moveDown(0.2)
+              } else if (line.startsWith('### ')) {
+                pdf.fontSize(14).text(line.replace(/^#+\s*/, ''), { continued: false })
+                pdf.moveDown(0.1)
+              } else {
+                pdf.fontSize(11).text(line || ' ', { continued: false })
+              }
+            }
+            pdf.end()
+            stream.on('finish', resolve)
+            stream.on('error', reject)
+          })
+        } else if (file_type === 'pptx') {
+          const PptxGenJS = require('pptxgenjs')
+          const pptx = new PptxGenJS()
+          pptx.layout = 'LAYOUT_16x9'
+          const lines = content.split('\n')
+          let currentSlide = pptx.addSlide()
+          let lineCount = 0
+          const maxLinesPerSlide = 12
+          for (const line of lines) {
+            if (line.startsWith('# ')) {
+              // 一级标题 → 新幻灯片
+              currentSlide = pptx.addSlide()
+              currentSlide.addText(line.replace(/^#+\s*/, ''), {
+                x: 0.5, y: 0.3, w: '90%', h: 0.8,
+                fontSize: 28, bold: true, color: '1a1a2e'
+              })
+              lineCount = 0
+            } else if (line.startsWith('## ')) {
+              // 二级标题 → 新幻灯片
+              currentSlide = pptx.addSlide()
+              currentSlide.addText(line.replace(/^#+\s*/, ''), {
+                x: 0.5, y: 0.3, w: '90%', h: 0.6,
+                fontSize: 22, bold: true, color: '2d3436'
+              })
+              lineCount = 0
+            } else if (line.trim() === '') {
+              continue
+            } else {
+              if (lineCount >= maxLinesPerSlide) {
+                currentSlide = pptx.addSlide()
+                lineCount = 0
+              }
+              currentSlide.addText(line, {
+                x: 0.5, y: 1.0 + lineCount * 0.45, w: '90%', h: 0.4,
+                fontSize: 14, color: '333333'
+              })
+              lineCount++
+            }
+          }
+          const buffer = await pptx.write({ outputType: 'nodebuffer' })
+          await fs.promises.writeFile(filePath, buffer)
+        } else {
+          await fs.promises.writeFile(filePath, content, 'utf-8')
+        }
+
+        const activeWin = agentWindow || mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+        if (activeWin) {
+          activeWin.webContents.send('api:generated-file-updated')
+        }
+
+        return JSON.stringify({
+          status: 'success',
+          message: `文件 “${safeName}” 已生成`,
+          file_path: filePath,
+          file_name: safeName
+        }, null, 2)
+      } catch (err: any) {
+        return `生成文件失败：${err.message || err}`
+      }
+    }
+
+    // 未指定工作空间时，自动使用存储目录下的 workspace 子目录
     if (!workspacePath) {
-      return '错误：用户尚未选择工作空间目录。请指示用户点击输入框底部的“选择工作空间”按钮配置工作目录。'
+      workspacePath = join(getActiveStorageDir(), 'workspace')
+      if (!fs.existsSync(workspacePath)) {
+        try { fs.mkdirSync(workspacePath, { recursive: true }) } catch (e) { /* ignore */ }
+      }
     }
 
     if (!fs.existsSync(workspacePath)) {
-      return `错误：选定的工作空间路径不存在：${workspacePath}`
+      return `错误：工作空间路径不存在：${workspacePath}`
     }
 
     try {
@@ -2573,7 +2929,7 @@ if (-not $task.Wait(15000)) {
             if (mcpManager.hasTool(toolName)) {
               toolResult = await mcpManager.executeTool(toolName, toolArgs)
             } else {
-              toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event)
+              toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event, sessionId)
             }
 
             if (event) {

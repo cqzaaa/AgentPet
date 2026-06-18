@@ -20,6 +20,11 @@ declare global {
       getSkillsList: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
+      parseFileContent: (filePath: string) => Promise<string>
+      getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string }[]>
+      saveGeneratedFileAs: (filePath: string) => Promise<boolean>
+      deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
+      onGeneratedFileUpdated: (callback: () => void) => () => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
       onToolEvent: (callback: (data: any) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void

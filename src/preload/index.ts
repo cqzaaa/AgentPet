@@ -40,6 +40,21 @@ const api = {
     ipcRenderer.invoke('api:call-llm', config, messages, workspacePath),
   selectFile: (): Promise<{ name: string; path: string; content: string } | null> =>
     ipcRenderer.invoke('api:select-file'),
+  parseFileContent: (filePath: string): Promise<string> =>
+    ipcRenderer.invoke('api:parse-file-content', filePath),
+  getGeneratedFiles: (sessionId?: string): Promise<{ name: string; path: string; size: number; time: string }[]> =>
+    ipcRenderer.invoke('api:get-generated-files', sessionId),
+  saveGeneratedFileAs: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:save-generated-file-as', filePath),
+  deleteGeneratedFile: (filePath: string, sessionId?: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:delete-generated-file', filePath, sessionId),
+  onGeneratedFileUpdated: (callback: () => void): (() => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on('api:generated-file-updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:generated-file-updated', subscription)
+    }
+  },
   saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>
     ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
   onToolEvent: (callback: (data: any) => void): (() => void) => {

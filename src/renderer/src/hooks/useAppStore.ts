@@ -709,17 +709,29 @@ export function useAppStore() {
       try {
         const arrayBuffer = await file.arrayBuffer()
         const result = await window.api.saveChatFile(activeSessionId, file.name || 'image.png', arrayBuffer)
-        
+
         let objectUrl
         if (file.type.startsWith('image/')) {
           objectUrl = URL.createObjectURL(file)
         }
-        
+
+        // 对非图片文件，解析文档内容
+        let content: string | undefined
+        const ext = file.name.split('.').pop()?.toLowerCase() || ''
+        const docExts = ['pdf', 'docx', 'xlsx', 'xls', 'csv']
+        const textExts = ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'sh', 'bat', 'yml', 'yaml', 'ini', 'xml']
+        if (docExts.includes(ext)) {
+          content = await window.api.parseFileContent(result.path)
+        } else if (textExts.includes(ext)) {
+          content = await file.text()
+        }
+
         newAttachments.push({
           name: result.name,
           path: result.path,
           safeName: result.safeName,
-          objectUrl
+          objectUrl,
+          content
         })
       } catch (e: any) {
         console.error('粘贴保存文件失败', e)

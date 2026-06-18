@@ -12,6 +12,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     llmConfig,
     activeSessMessages,
     activeSession,
+    activeSessionId,
     currentAvatarName,
     isSending,
     inputValue, setInputValue,
@@ -19,9 +20,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     handleSendChat,
     availableModels,
     saveLlmConfig,
-    workspacePath,
-    handleSelectWorkspace,
-    handleClearWorkspace,
     attachedFiles,
     setAttachedFiles,
     handlePasteFiles,
@@ -33,6 +31,27 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   } = store
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
+  const [showGenFiles, setShowGenFiles] = useState(false)
+
+  // 加载已生成的文件列表（按会话隔离）
+  const loadGeneratedFiles = async () => {
+    if (window.api?.getGeneratedFiles) {
+      const files = await window.api.getGeneratedFiles(activeSessionId)
+      setGeneratedFiles(files)
+    }
+  }
+
+  useEffect(() => {
+    loadGeneratedFiles()
+    if (window.api?.onGeneratedFileUpdated) {
+      const unsub = window.api.onGeneratedFileUpdated(() => {
+        loadGeneratedFiles()
+        setShowGenFiles(true)
+      })
+      return unsub
+    }
+  }, [activeSessionId])
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
@@ -166,7 +185,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                 ) : (
                   <span className="preview-icon" style={{ marginRight: '6px' }}>📄</span>
                 )}
-                <span className="preview-name" style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>{file.name}</span>
+                <span className="preview-name" title={file.name} style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>{file.name}</span>
                 <button className="preview-remove-btn" onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} title="移除文件" style={{ marginLeft: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '2px' }}>✕</button>
               </div>
             ))}
@@ -197,7 +216,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           />
 
           <div className="chat-control-toolbar">
-            {/* 左侧：模型切换与工作空间选择 */}
+            {/* 左侧：模型切换 */}
             <div className="toolbar-group-left">
               <div className="model-dropdown-container">
                 <span className="toolbar-lbl-icon">🤖</span>
@@ -219,22 +238,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                 </select>
               </div>
 
-              <button
-                className={`workspace-btn-inline ${workspacePath ? 'selected' : ''}`}
-                onClick={handleSelectWorkspace}
-                title={workspacePath ? `当前项目目录: ${workspacePath}` : '配置本地电脑工作区'}
-              >
-                📁 {workspacePath ? `项目: ${workspacePath.split(/[\\/]/).pop()}` : '选择工作空间'}
-                {workspacePath && (
-                  <span
-                    className="clear-workspace-btn"
-                    onClick={handleClearWorkspace}
-                    title="清除工作空间"
-                  >
-                    ✕
-                  </span>
-                )}
-              </button>
             </div>
 
             {/* 右侧：文件上传与发送按钮 */}
@@ -247,6 +250,17 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               >
                 ➕ 上传文件
               </button>
+
+              {generatedFiles.length > 0 && (
+                <button
+                  className="toolbar-action-btn"
+                  onClick={() => setShowGenFiles(!showGenFiles)}
+                  title="查看已生成的文件"
+                  style={{ position: 'relative' }}
+                >
+                  📁 文件 ({generatedFiles.length})
+                </button>
+              )}
 
               {isSending ? (
                 <button
@@ -282,6 +296,78 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           }}
         >
           <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+        </div>
+      )}
+
+      {/* 已生成文件浮窗 */}
+      {showGenFiles && generatedFiles.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '80px',
+            right: '16px',
+            width: '320px',
+            maxHeight: '400px',
+            backgroundColor: 'var(--bg-card, #1a1a1a)',
+            border: '1px solid var(--border-card)',
+            borderRadius: '12px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}
+        >
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-card)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>📁 已生成的文件</span>
+            <button
+              onClick={() => setShowGenFiles(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '16px' }}
+            >✕</button>
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1, padding: '8px' }}>
+            {generatedFiles.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  marginBottom: '4px',
+                  backgroundColor: 'var(--bg-menu-hover, rgba(255,255,255,0.03))',
+                  transition: 'background-color 0.15s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-active, rgba(255,255,255,0.06))'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(255,255,255,0.03))'}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div title={f.name} style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {(f.size / 1024).toFixed(1)} KB
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                  <button
+                    onClick={async () => {
+                      await window.api.saveGeneratedFileAs(f.path)
+                    }}
+                    title="另存为"
+                    style={{ background: 'rgba(59, 130, 246, 0.15)', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#3b82f6', fontSize: '12px' }}
+                  >💾 保存</button>
+                  <button
+                    onClick={async () => {
+                      await window.api.deleteGeneratedFile(f.path, activeSessionId)
+                      loadGeneratedFiles()
+                    }}
+                    title="删除"
+                    style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#ef4444', fontSize: '12px' }}
+                  >🗑</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
