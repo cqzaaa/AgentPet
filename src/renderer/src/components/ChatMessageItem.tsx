@@ -210,7 +210,7 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
         onError={() => setHasError(true)}
       />
       {previewSrc && (
-        <div 
+        <div
           style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
           onClick={() => setPreviewSrc(null)}
         >
@@ -221,26 +221,119 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
   )
 }
 
-// 渲染包含图片的普通文本部分
+// 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
   const parts: React.ReactNode[] = []
-  const imgRegex = /!\[(.*?)\]\((.*?)\)/g
+  // 匹配 ![alt](url) 或者 [alt](url)
+  const linkOrImgRegex = /(!)?\[(.*?)\]\((.*?)\)/g
   let match
   let lastIndex = 0
 
-  while ((match = imgRegex.exec(text)) !== null) {
+  const normalizeLocalSrc = (url: string): string => {
+    if (!url) return url
+    // 1. 将 file:/// 替换为 local-file:///
+    if (url.startsWith('file:///')) {
+      return url.replace('file:///', 'local-file:///')
+    }
+    // 2. 如果是 Windows 盘符绝对路径 (例如 C:\ 或 D:/)
+    if (/^[A-Za-z]:[/\\]/.test(url)) {
+      // 统一转换为 local-file:/// 协议，并将反斜杠替换为正斜杠
+      const cleanPath = url.replace(/\\/g, '/')
+      return `local-file:///${cleanPath}`
+    }
+    return url
+  }
+
+  const isImageSrc = (url: string) => {
+    if (!url) return false
+    const lowerUrl = url.toLowerCase()
+
+    // 1. base64图片数据
+    if (lowerUrl.startsWith('data:image/')) {
+      return true
+    }
+
+    // 2. 获取去掉参数和锚点后的干净路径
+    const cleanUrl = lowerUrl.split('?')[0].split('#')[0]
+
+    // 3. 检查常见图片后缀
+    const isCommonImageExt = 
+      cleanUrl.endsWith('.png') || 
+      cleanUrl.endsWith('.jpg') || 
+      cleanUrl.endsWith('.jpeg') || 
+      cleanUrl.endsWith('.gif') || 
+      cleanUrl.endsWith('.webp') || 
+      cleanUrl.endsWith('.bmp') || 
+      cleanUrl.endsWith('.svg') ||
+      cleanUrl.endsWith('.jfif') ||
+      cleanUrl.endsWith('.tiff')
+
+    if (isCommonImageExt) {
+      return true
+    }
+
+    // 4. 特殊本地图片协议处理：如果是以 local-file:// 或 wechat-file:// 开头
+    if (lowerUrl.startsWith('local-file://') || lowerUrl.startsWith('wechat-file://')) {
+      // 排除一些明显的非图片格式后缀，其余默认当做图片预览
+      const isNonImageExt = 
+        cleanUrl.endsWith('.txt') || 
+        cleanUrl.endsWith('.json') || 
+        cleanUrl.endsWith('.md') || 
+        cleanUrl.endsWith('.zip') || 
+        cleanUrl.endsWith('.rar') || 
+        cleanUrl.endsWith('.pdf') || 
+        cleanUrl.endsWith('.doc') || 
+        cleanUrl.endsWith('.docx') || 
+        cleanUrl.endsWith('.xls') || 
+        cleanUrl.endsWith('.xlsx') || 
+        cleanUrl.endsWith('.ppt') || 
+        cleanUrl.endsWith('.pptx') || 
+        cleanUrl.endsWith('.mp3') || 
+        cleanUrl.endsWith('.mp4') ||
+        cleanUrl.endsWith('.js') ||
+        cleanUrl.endsWith('.ts')
+
+      if (!isNonImageExt) {
+        return true
+      }
+    }
+
+    // 5. 针对特殊远程图床或链接特征的匹配 (例如蚂蚁金服 afts 图床等)
+    if (
+      lowerUrl.includes('alipayobjects.com') ||
+      lowerUrl.includes('/afts/img/') ||
+      (lowerUrl.includes('original') && (lowerUrl.includes('img') || lowerUrl.includes('image') || lowerUrl.includes('chart')))
+    ) {
+      return true
+    }
+
+    return false
+  }
+
+  while ((match = linkOrImgRegex.exec(text)) !== null) {
     const textBefore = text.substring(lastIndex, match.index)
     if (textBefore.trim()) {
       parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textBefore} />)
     }
 
-    const alt = match[1]
-    const src = match[2]
-    parts.push(
-      <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
-    )
+    const isExplicitImg = !!match[1]
+    const alt = match[2]
+    const rawSrc = match[3]
+    const src = normalizeLocalSrc(rawSrc)
 
-    lastIndex = imgRegex.lastIndex
+    if (isExplicitImg || isImageSrc(src)) {
+      parts.push(
+        <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
+      )
+    } else {
+      parts.push(
+        <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
+          {alt}
+        </a>
+      )
+    }
+
+    lastIndex = linkOrImgRegex.lastIndex
   }
 
   const textAfter = text.substring(lastIndex)
@@ -430,21 +523,21 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
           return isImage ? (
             <div className="message-file-badges" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                <img 
-                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')} 
-                  alt={f.name} 
-                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }} 
-                  onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
-                  onError={(e) => {
-                    // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话天生效）
-                    if (f.objectUrl) {
-                      const target = e.target as HTMLImageElement
-                      if (target.src !== f.objectUrl) {
-                        target.src = f.objectUrl
-                      }
+              <img
+                src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
+                alt={f.name}
+                style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
+                onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
+                onError={(e) => {
+                  // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话天生效）
+                  if (f.objectUrl) {
+                    const target = e.target as HTMLImageElement
+                    if (target.src !== f.objectUrl) {
+                      target.src = f.objectUrl
                     }
-                  }}
-                />
+                  }
+                }}
+              />
             </div>
           ) : (
             <div className="message-file-badge" style={{ marginBottom: '8px' }}>
@@ -461,11 +554,11 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
             {msg.fileInfos.map((f: any, i: number) => {
               const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
               return isImage ? (
-                <img 
-                  key={i} 
-                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')} 
-                  alt={f.name} 
-                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }} 
+                <img
+                  key={i}
+                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
+                  alt={f.name}
+                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
                   onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
                   onError={(e) => {
                     // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
@@ -549,7 +642,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
       )}
 
       {previewImageSrc && (
-        <div 
+        <div
           style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
           onClick={() => setPreviewImageSrc(null)}
         >

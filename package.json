@@ -30,7 +30,8 @@
     "electron-updater": "^6.3.9",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -40,6 +41,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.184.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",

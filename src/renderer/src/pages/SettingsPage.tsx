@@ -36,6 +36,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [mcpNewName, setMcpNewName] = React.useState('')
   const [mcpNewUrl, setMcpNewUrl] = React.useState('')
   const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
+  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
   const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
 
   // 编辑弹窗相关状态
@@ -44,6 +45,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editName, setEditName] = React.useState('')
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
+  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
 
   // 虚拟体编辑弹窗状态
   const [showEditAvatarModal, setShowEditAvatarModal] = React.useState(false)
@@ -514,7 +516,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     <thead>
                       <tr>
                         <th style={{ width: '150px' }}>服务名称</th>
-                        <th>SSE 终结点地址 (Endpoint)</th>
+                        <th>终结点地址 (Endpoint)</th>
+                        <th style={{ width: '100px', textAlign: 'center' }}>协议类型</th>
                         <th style={{ width: '100px', textAlign: 'center' }}>鉴权密钥</th>
                         <th style={{ width: '90px', textAlign: 'center' }}>启用状态</th>
                         <th style={{ width: '230px', textAlign: 'center' }}>操作</th>
@@ -529,6 +532,11 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                           <td>
                             <span className="mcp-url-text" title={server.url}>
                               {server.url}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className={`mcp-badge ${server.type === 'sse' ? 'none' : 'configured'}`}>
+                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : 'Stream'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -561,7 +569,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                     showToast(`正在测试连接 [${server.name}]...`, 'info')
                                     const res = await window.api.testMcpServer({
                                       url: server.url,
-                                      apiKey: server.apiKey
+                                      apiKey: server.apiKey,
+                                      type: server.type || 'stream'
                                     })
                                     if (res.success) {
                                       const protoLabel = res.protocol ? `\n协议：${res.protocol}` : ''
@@ -589,6 +598,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                   setEditName(server.name)
                                   setEditUrl(server.url)
                                   setEditApiKey(server.apiKey || '')
+                                  setEditType(server.type || 'stream')
                                   setShowEditModal(true)
                                 }}
                               >
@@ -665,6 +675,20 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     />
                   </div>
 
+                  <div>
+                    <label className="mcp-form-label">传输协议类型</label>
+                    <select
+                      className="mcp-input-fancy"
+                      value={mcpNewType}
+                      onChange={e => setMcpNewType(e.target.value as any)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <option value="stream">Streamable HTTP (推荐)</option>
+                      <option value="sse">Server-Sent Events</option>
+                      <option value="auto">自动探测</option>
+                    </select>
+                  </div>
+
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <button
                       type="button"
@@ -674,6 +698,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                         setMcpNewName('')
                         setMcpNewUrl('')
                         setMcpNewApiKey('')
+                        setMcpNewType('stream')
                       }}
                       style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
                     >
@@ -693,6 +718,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                           name: mcpNewName.trim(),
                           url: mcpNewUrl.trim(),
                           apiKey: mcpNewApiKey.trim(),
+                          type: mcpNewType,
                           enabled: true
                         }]
                         saveMcpConfig({ servers: newServers })
@@ -701,6 +727,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                         setMcpNewName('')
                         setMcpNewUrl('')
                         setMcpNewApiKey('')
+                        setMcpNewType('stream')
                         showToast('已成功添加新 MCP 服务！', 'success')
                       }}
                       style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
@@ -758,6 +785,20 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   onChange={e => setEditApiKey(e.target.value)}
                 />
               </div>
+
+              <div>
+                <label className="mcp-form-label">传输协议类型</label>
+                <select
+                  className="mcp-input-fancy"
+                  value={editType}
+                  onChange={e => setEditType(e.target.value as any)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="stream">Streamable HTTP (推荐)</option>
+                  <option value="sse">Server-Sent Events</option>
+                  <option value="auto">自动探测</option>
+                </select>
+              </div>
             </div>
             <div className="mcp-modal-footer">
               <button
@@ -778,7 +819,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   }
                   const newServers = mcpConfig.servers.map((s: any) =>
                     s.id === editingServer.id
-                      ? { ...s, name: editName.trim(), url: editUrl.trim(), apiKey: editApiKey.trim() }
+                      ? { ...s, name: editName.trim(), url: editUrl.trim(), apiKey: editApiKey.trim(), type: editType }
                       : s
                   )
                   saveMcpConfig({ servers: newServers })

@@ -23,6 +23,7 @@ interface McpServerConfig {
   name: string
   url: string
   apiKey: string
+  type?: 'sse' | 'stream' | 'auto'
   enabled: boolean
 }
 
@@ -51,7 +52,7 @@ class McpManager {
       const existing = this.connections.get(config.id)
       
       // 如果已存在连接，且参数没有变化，则无需重连
-      if (existing && existing.config.url === config.url && existing.config.apiKey === config.apiKey) {
+      if (existing && existing.config.url === config.url && existing.config.apiKey === config.apiKey && existing.config.type === config.type) {
         return
       }
 
@@ -71,27 +72,43 @@ class McpManager {
           headers['Authorization'] = `Bearer ${config.apiKey}`
         }
 
-        // 优先尝试 Streamable HTTP（MCP 2025-03-26 新协议），失败则回退到旧 SSE 协议
         let transport: StreamableHTTPClientTransport | SSEClientTransport
         let client = new Client(
           { name: 'AgentPet-Client', version: '1.0.0' },
           { capabilities: {} }
         )
 
-        try {
+        const connectTimeout = (ms: number) => new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`连接超时 (${ms}ms)`)), ms)
+        )
+
+        const mcpType = config.type || 'stream'
+
+        if (mcpType === 'stream') {
           transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
-          await client.connect(transport)
+          await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
-        } catch (httpErr: any) {
-          console.warn(`[MCP] Streamable HTTP 连接失败 (${httpErr.message})，正在回退到 SSE 协议...`)
-          // 重新创建 client 避免状态污染
-          client = new Client(
-            { name: 'AgentPet-Client', version: '1.0.0' },
-            { capabilities: {} }
-          )
+        } else if (mcpType === 'sse') {
           transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
-          await client.connect(transport)
-          console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
+          await Promise.race([client.connect(transport), connectTimeout(5000)])
+          console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功`)
+        } else {
+          // auto 模式
+          try {
+            transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+            await Promise.race([client.connect(transport), connectTimeout(5000)])
+            console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
+          } catch (httpErr: any) {
+            console.warn(`[MCP] Streamable HTTP 连接失败 (${httpErr.message})，正在回退到 SSE 协议...`)
+            // 重新创建 client 避免状态污染
+            client = new Client(
+              { name: 'AgentPet-Client', version: '1.0.0' },
+              { capabilities: {} }
+            )
+            transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+            await Promise.race([client.connect(transport), connectTimeout(5000)])
+            console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
+          }
         }
 
         const response = await client.listTools()
@@ -103,6 +120,72 @@ class McpManager {
         console.error(`[MCP] 服务 ${config.name} 连接失败:`, err)
       }
     }))
+  }
+
+  private async reconnectServer(id: string): Promise<boolean> {
+    const conn = this.connections.get(id)
+    if (!conn) return false
+    const config = conn.config
+
+    console.log(`[MCP] 正在尝试重连服务: ${config.name} (${id})`)
+    try {
+      try {
+        await conn.client.close()
+      } catch {}
+      this.connections.delete(id)
+
+      const headers: Record<string, string> = {}
+      if (config.apiKey) {
+        headers['Authorization'] = `Bearer ${config.apiKey}`
+      }
+
+      let transport: StreamableHTTPClientTransport | SSEClientTransport
+      let client = new Client(
+        { name: 'AgentPet-Client', version: '1.0.0' },
+        { capabilities: {} }
+      )
+
+      const connectTimeout = (ms: number) => new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`连接超时 (${ms}ms)`)), ms)
+      )
+
+      const mcpType = config.type || 'stream'
+
+      if (mcpType === 'stream') {
+        transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+        await Promise.race([client.connect(transport), connectTimeout(5000)])
+        console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
+      } else if (mcpType === 'sse') {
+        transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+        await Promise.race([client.connect(transport), connectTimeout(5000)])
+        console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
+      } else {
+        // auto 模式
+        try {
+          transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+          await Promise.race([client.connect(transport), connectTimeout(5000)])
+          console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
+        } catch (httpErr: any) {
+          console.warn(`[MCP] 服务 ${config.name} 重连 Streamable HTTP 失败，回退到 SSE...`)
+          client = new Client(
+            { name: 'AgentPet-Client', version: '1.0.0' },
+            { capabilities: {} }
+          )
+          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          await Promise.race([client.connect(transport), connectTimeout(5000)])
+          console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
+        }
+      }
+
+      const response = await client.listTools()
+      const tools = response.tools || []
+
+      this.connections.set(config.id, { client, transport, tools, config })
+      return true
+    } catch (err) {
+      console.error(`[MCP] 服务 ${config.name} 重连失败:`, err)
+      return false
+    }
   }
 
   public async disconnectAll() {
@@ -131,21 +214,30 @@ class McpManager {
     return false
   }
 
-  public async executeTool(name: string, args: any): Promise<string> {
+  public async executeTool(name: string, args: any, isRetry = false): Promise<string> {
+    let targetConnId: string | null = null
     let targetConn: any = null
-    for (const conn of this.connections.values()) {
+    for (const [id, conn] of this.connections.entries()) {
       if (conn.tools.some(t => t.name === name)) {
+        targetConnId = id
         targetConn = conn
         break
       }
     }
 
-    if (!targetConn) {
+    if (!targetConn || !targetConnId) {
       return `错误：未在任何已连接的 MCP 服务中找到工具: ${name}`
     }
 
     try {
-      const response = await targetConn.client.callTool({ name, arguments: args })
+      // 增加超时控制 (10秒限制)
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('MCP 工具调用超时 (10秒限制)')), 20000)
+      )
+
+      const callPromise = targetConn.client.callTool({ name, arguments: args })
+      const response = await Promise.race([callPromise, timeoutPromise])
+
       if (response && response.content) {
         return response.content
           .filter((c: any) => c.type === 'text')
@@ -155,6 +247,17 @@ class McpManager {
       return 'MCP 工具执行完毕，但未返回可读文本。'
     } catch (err: any) {
       console.error(`[MCP] 调用外部工具 ${name} 失败`, err)
+
+      // 无论何种调用失败错误（如 ECONNRESET、Timeout、Aborted），只要尚未重试过，立即执行重连并重试
+      if (!isRetry) {
+        console.log(`[MCP] 检测到服务 ${targetConn.config.name} 的连接可能已失效/报错，正在尝试自动重连...`)
+        const success = await this.reconnectServer(targetConnId)
+        if (success) {
+          console.log(`[MCP] 服务 ${targetConn.config.name} 重连成功，正在重新执行工具 ${name}...`)
+          return this.executeTool(name, args, true)
+        }
+      }
+
       return `错误：调用外部 MCP 工具失败: ${err.message || err}`
     }
   }
@@ -2278,25 +2381,37 @@ app.whenReady().then(() => {
       const headers: Record<string, string> = {}
       if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
-      // 优先尝试 Streamable HTTP（MCP 2025-03-26 新协议），失败则回退到旧 SSE 协议
       let client = new Client(
         { name: 'AgentPet-Test', version: '1.0.0' },
         { capabilities: {} }
       )
       let usedProtocol = 'Streamable HTTP'
+      const mcpType = config.type || 'stream'
 
-      try {
+      if (mcpType === 'stream') {
         const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
         await client.connect(transport)
-      } catch (httpErr: any) {
-        console.warn(`[MCP Test] Streamable HTTP 失败，回退到 SSE: ${httpErr.message}`)
-        client = new Client(
-          { name: 'AgentPet-Test', version: '1.0.0' },
-          { capabilities: {} }
-        )
-        usedProtocol = 'SSE'
+        usedProtocol = 'Streamable HTTP'
+      } else if (mcpType === 'sse') {
         const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
         await client.connect(transport)
+        usedProtocol = 'SSE'
+      } else {
+        // auto 模式
+        try {
+          const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+          await client.connect(transport)
+          usedProtocol = 'Streamable HTTP'
+        } catch (httpErr: any) {
+          console.warn(`[MCP Test] Streamable HTTP 失败，回退到 SSE: ${httpErr.message}`)
+          client = new Client(
+            { name: 'AgentPet-Test', version: '1.0.0' },
+            { capabilities: {} }
+          )
+          usedProtocol = 'SSE'
+          const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          await client.connect(transport)
+        }
       }
 
       const response = await client.listTools()
