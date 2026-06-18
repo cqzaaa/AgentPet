@@ -34,6 +34,13 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
 
+  const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
+    e.preventDefault()
+    if (window.api && typeof window.api.showImageContextMenu === 'function') {
+      window.api.showImageContextMenu(imgSrc)
+    }
+  }
+
   // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
     if (highlightedMessageId) {
@@ -49,7 +56,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
       }, 150)
       return () => clearTimeout(timer)
     }
-    return () => {}
+    return () => { }
   }, [highlightedMessageId, setHighlightedMessageId])
 
   useEffect(() => {
@@ -68,8 +75,8 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
 
   return (
     <div className="chat-split-container">
-      <div 
-        className="chat-main" 
+      <div
+        className="chat-main"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
         onDragOver={e => e.preventDefault()}
         onDrop={e => {
@@ -132,10 +139,10 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           ) : (
             <>
               {activeSessMessages.map(msg => (
-                <ChatMessageItem 
-                  key={msg.id} 
-                  msg={msg} 
-                  currentAvatarName={currentAvatarName} 
+                <ChatMessageItem
+                  key={msg.id}
+                  msg={msg}
+                  currentAvatarName={currentAvatarName}
                   highlightedMessageId={highlightedMessageId}
                 />
               ))}
@@ -150,10 +157,10 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
             {attachedFiles.map((file, idx) => (
               <div key={idx} className="input-file-preview" style={{ margin: 0, position: 'relative', display: 'flex', alignItems: 'center', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '6px 12px' }}>
                 {file.objectUrl ? (
-                  <img 
-                    src={file.objectUrl} 
-                    alt={file.name} 
-                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', marginRight: '8px', cursor: 'pointer' }} 
+                  <img
+                    src={file.objectUrl}
+                    alt={file.name}
+                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', marginRight: '8px', cursor: 'pointer' }}
                     onClick={() => setPreviewImageSrc(file.objectUrl || null)}
                   />
                 ) : (
@@ -171,7 +178,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           <textarea
             className="chat-textarea-field"
             rows={2}
-            placeholder={isSending ? `${currentAvatarName} 正在思考中...` : `输入指令并发送给 ${currentAvatarName} ... (支持 Shift + Enter 换行，支持 Ctrl+V 粘贴文件/截图)`}
+            placeholder={isSending ? `${currentAvatarName} 正在思考中...` : `输入指令并发送给 ${currentAvatarName} ...`}
             value={inputValue}
             disabled={isSending}
             onChange={e => setInputValue(e.target.value)}
@@ -188,7 +195,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               }
             }}
           />
-          
+
           <div className="chat-control-toolbar">
             {/* 左侧：模型切换与工作空间选择 */}
             <div className="toolbar-group-left">
@@ -212,15 +219,15 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                 </select>
               </div>
 
-              <button 
+              <button
                 className={`workspace-btn-inline ${workspacePath ? 'selected' : ''}`}
                 onClick={handleSelectWorkspace}
                 title={workspacePath ? `当前项目目录: ${workspacePath}` : '配置本地电脑工作区'}
               >
                 📁 {workspacePath ? `项目: ${workspacePath.split(/[\\/]/).pop()}` : '选择工作空间'}
                 {workspacePath && (
-                  <span 
-                    className="clear-workspace-btn" 
+                  <span
+                    className="clear-workspace-btn"
                     onClick={handleClearWorkspace}
                     title="清除工作空间"
                   >
@@ -240,7 +247,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               >
                 ➕ 上传文件
               </button>
-              
+
               {isSending ? (
                 <button
                   className="toolbar-send-btn stop"
@@ -265,10 +272,14 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
       </div>
 
       {previewImageSrc && (
-        <div 
+        <div
           className="fullscreen-image-preview"
           style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
           onClick={() => setPreviewImageSrc(null)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            handleImageContextMenu(e, previewImageSrc)
+          }}
         >
           <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
         </div>

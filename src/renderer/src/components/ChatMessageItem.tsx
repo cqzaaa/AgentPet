@@ -172,9 +172,18 @@ function parseMarkdownToHtml(markdown: string): string {
   return html
 }
 
+// ── 带右键复制菜单的图片包装组件 ─────────────────────────────────
 export function ChatImage({ src, alt }: { src: string; alt: string }) {
   const [hasError, setHasError] = useState(false)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (window.api && typeof window.api.showImageContextMenu === 'function') {
+      window.api.showImageContextMenu(src)
+    }
+  }
 
   if (hasError) {
     return (
@@ -211,6 +220,7 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
           cursor: 'zoom-in'
         }}
         onClick={() => setPreviewSrc(src)}
+        onContextMenu={handleContextMenu}
         onError={() => setHasError(true)}
       />
       {previewSrc && (
@@ -483,6 +493,13 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [copied, setCopied] = useState(false)
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (window.api && typeof window.api.showImageContextMenu === 'function') {
+      window.api.showImageContextMenu(imgSrc)
+    }
+  }
 
   const handleCopy = () => {
     if (!msg.text) return
@@ -536,6 +553,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                 alt={f.name}
                 style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
                 onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
+                onContextMenu={(e) => handleImageContextMenu(e, (e.target as HTMLImageElement).src)}
                 onError={(e) => {
                   // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话天生效）
                   if (f.objectUrl) {
@@ -568,6 +586,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                   alt={f.name}
                   style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
                   onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
+                  onContextMenu={(e) => handleImageContextMenu(e, (e.target as HTMLImageElement).src)}
                   onError={(e) => {
                     // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
                     if (f.objectUrl) {
@@ -653,6 +672,12 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         <div
           style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
           onClick={() => setPreviewImageSrc(null)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            if (window.api && typeof window.api.showImageContextMenu === 'function') {
+              window.api.showImageContextMenu(previewImageSrc)
+            }
+          }}
         >
           <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
         </div>

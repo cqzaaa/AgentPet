@@ -64,6 +64,8 @@ declare global {
       onRequestGeolocation: (callback: (data: { requestId: number }) => void) => () => void
       respondGeolocation: (requestId: number, location: any, error?: string) => void
       copyText: (text: string) => void
+      copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
+      showImageContextMenu: (imageUrl: string) => void
     }
   }
 }

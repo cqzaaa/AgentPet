@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage } from 'electron'
 import { join, basename, dirname } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -998,6 +998,80 @@ app.whenReady().then(() => {
     } catch (err) {
       console.error('主进程写入剪贴板异常:', err)
     }
+  })
+
+  // 复制图片到剪贴板（支持 local-file:///、wechat-file:/// 和 http/https URL）
+  ipcMain.handle('api:copy-image', async (_, imageUrl: string) => {
+    try {
+      let img: Electron.NativeImage
+
+      if (imageUrl.startsWith('local-file:///')) {
+        // local-file:///C:/path → C:/path
+        let filePath = imageUrl.replace('local-file:///', '')
+        if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
+        img = nativeImage.createFromPath(filePath)
+      } else if (imageUrl.startsWith('wechat-file://')) {
+        const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
+        const fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+        const filePath = join(wechatFilesDir, fileName)
+        img = nativeImage.createFromPath(filePath)
+      } else if (imageUrl.startsWith('data:image/')) {
+        // base64 data URL
+        img = nativeImage.createFromDataURL(imageUrl)
+      } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+        // 远程图片：先下载再写入剪贴板
+        const response = await net.fetch(imageUrl)
+        const buffer = Buffer.from(await response.arrayBuffer())
+        img = nativeImage.createFromBuffer(buffer)
+      } else {
+        return { success: false, error: '不支持的图片 URL 格式' }
+      }
+
+      if (img.isEmpty()) {
+        return { success: false, error: '图片加载失败，可能文件已被删除' }
+      }
+
+      clipboard.writeImage(img)
+      return { success: true }
+    } catch (err: any) {
+      console.error('复制图片到剪贴板失败:', err)
+      return { success: false, error: err.message || String(err) }
+    }
+  })
+
+  // 显示原生右键菜单（复制图片）
+  ipcMain.on('api:show-image-context-menu', (_, imageUrl: string) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '📋 复制图片',
+        click: async () => {
+          try {
+            let img: Electron.NativeImage
+            if (imageUrl.startsWith('local-file:///')) {
+              let filePath = imageUrl.replace('local-file:///', '')
+              if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
+              img = nativeImage.createFromPath(filePath)
+            } else if (imageUrl.startsWith('wechat-file://')) {
+              const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
+              const fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+              img = nativeImage.createFromPath(join(wechatFilesDir, fileName))
+            } else if (imageUrl.startsWith('data:image/')) {
+              img = nativeImage.createFromDataURL(imageUrl)
+            } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+              const response = await net.fetch(imageUrl)
+              const buffer = Buffer.from(await response.arrayBuffer())
+              img = nativeImage.createFromBuffer(buffer)
+            } else {
+              return
+            }
+            if (!img.isEmpty()) clipboard.writeImage(img)
+          } catch (err) {
+            console.error('原生菜单复制图片失败:', err)
+          }
+        }
+      }
+    ])
+    menu.popup()
   })
 
   ipcMain.handle('api:abort-llm', () => {

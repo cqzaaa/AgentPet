@@ -168,6 +168,11 @@ const api = {
   },
   copyText: (text: string): void => {
     ipcRenderer.send('api:copy-text', text)
+  },
+  copyImage: (imageUrl: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('api:copy-image', imageUrl),
+  showImageContextMenu: (imageUrl: string): void => {
+    ipcRenderer.send('api:show-image-context-menu', imageUrl)
   }
 }
 
