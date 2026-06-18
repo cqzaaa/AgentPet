@@ -1221,6 +1221,8 @@ body {
 .message-text {
   word-break: break-all;
   white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 正在思考的三圆点跳跃动画 */
@@ -3204,6 +3206,8 @@ body {
   color: var(--text-secondary);
   font-family: inherit;
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .markdown-body p {

@@ -473,6 +473,12 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   agentWindow.loadURL(agentUrl)
 
+  // 让链接在系统浏览器中打开，而不是弹出新窗口
+  agentWindow.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
   agentWindow.on('ready-to-show', () => {
     agentWindow?.show()
   })
@@ -1068,6 +1074,20 @@ app.whenReady().then(() => {
           } catch (err) {
             console.error('原生菜单复制图片失败:', err)
           }
+        }
+      }
+    ])
+    menu.popup()
+  })
+
+  // 显示原生右键菜单（复制文本）
+  ipcMain.on('api:show-text-context-menu', (_, selectedText: string) => {
+    if (!selectedText) return
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '📋 复制',
+        click: () => {
+          clipboard.writeText(selectedText)
         }
       }
     ])

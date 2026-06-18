@@ -173,6 +173,9 @@ const api = {
     ipcRenderer.invoke('api:copy-image', imageUrl),
   showImageContextMenu: (imageUrl: string): void => {
     ipcRenderer.send('api:show-image-context-menu', imageUrl)
+  },
+  showTextContextMenu: (selectedText: string): void => {
+    ipcRenderer.send('api:show-text-context-menu', selectedText)
   }
 }
 

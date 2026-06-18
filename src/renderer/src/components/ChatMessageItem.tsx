@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 
 // ── 复制代码块的高级代码面板组件 ─────────────────────────────────
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
@@ -493,6 +493,17 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [copied, setCopied] = useState(false)
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+
+  // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
+  const renderedText = useMemo(() => {
+    if (!msg.text) return null
+    const displayText = msg.text === '__WELCOME_MSG__'
+      ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
+      : msg.text === '__SYSTEM_INIT_MSG__'
+        ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
+        : msg.text
+    return renderAdvancedMessage(displayText)
+  }, [msg.text, currentAvatarName])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -647,15 +658,19 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         )}
 
         {/* 最终大模型回复文本渲染 */}
-        {msg.text && (
-          <div className="message-text">
-            {renderAdvancedMessage(
-              msg.text === '__WELCOME_MSG__'
-                ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
-                : msg.text === '__SYSTEM_INIT_MSG__'
-                  ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
-                  : msg.text
-            )}
+        {renderedText && (
+          <div
+            className="message-text"
+            onContextMenu={(e) => {
+              const selection = window.getSelection()
+              const selectedText = selection?.toString().trim()
+              if (selectedText && window.api?.showTextContextMenu) {
+                e.preventDefault()
+                window.api.showTextContextMenu(selectedText)
+              }
+            }}
+          >
+            {renderedText}
           </div>
         )}
       </div>

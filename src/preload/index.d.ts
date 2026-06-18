@@ -66,6 +66,7 @@ declare global {
       copyText: (text: string) => void
       copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
       showImageContextMenu: (imageUrl: string) => void
+      showTextContextMenu: (selectedText: string) => void
     }
   }
 }

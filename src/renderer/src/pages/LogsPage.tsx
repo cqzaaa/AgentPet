@@ -6,19 +6,19 @@ interface LogsPageProps {
 }
 
 export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
-  const { 
-    tokenLogs, 
-    handleClearTokenLogs, 
-    showToast, 
-    setActiveTab, 
-    setActiveSessionId, 
-    setHighlightedMessageId, 
-    sessions 
+  const {
+    tokenLogs,
+    handleClearTokenLogs,
+    showToast,
+    setActiveTab,
+    setActiveSessionId,
+    setHighlightedMessageId,
+    sessions
   } = store
-  
+
   // 1. 时间范围筛选状态：'24h' | '7d' | 'all'，默认 '7d'
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | 'all'>('7d')
-  
+
   // 是否有总数据
   const hasTotalData = tokenLogs.length > 0
 
@@ -64,7 +64,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
   const modelDistribution = useMemo(() => {
     if (!hasData) return []
     const modelMap: Record<string, { total: number; color: string; provider: string }> = {}
-    
+
     const colors = ['#60a5fa', '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899']
     let colorIdx = 0
 
@@ -82,7 +82,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     })
 
     const totalAll = Object.values(modelMap).reduce((sum, curr) => sum + curr.total, 0) || 1
-    
+
     return Object.entries(modelMap)
       .map(([name, data]) => ({
         name,
@@ -119,7 +119,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     records.forEach((rec, idx) => {
       const stepX = records.length > 1 ? chartWidth / (records.length - 1) : chartWidth
       const x = paddingLeft + idx * stepX
-      
+
       const yPrompt = paddingTop + chartHeight - ((rec.promptTokens || 0) / yMaxLimit) * chartHeight
       const yCompletion = paddingTop + chartHeight - ((rec.completionTokens || 0) / yMaxLimit) * chartHeight
 
@@ -135,7 +135,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     if (records.length > 0) {
       pathPromptStr = `M ${pointsPrompt[0].x} ${pointsPrompt[0].y} `
       areaPromptStr = `M ${pointsPrompt[0].x} ${paddingTop + chartHeight} L ${pointsPrompt[0].x} ${pointsPrompt[0].y} `
-      
+
       for (let i = 1; i < pointsPrompt.length; i++) {
         pathPromptStr += `L ${pointsPrompt[i].x} ${pointsPrompt[i].y} `
         areaPromptStr += `L ${pointsPrompt[i].x} ${pointsPrompt[i].y} `
@@ -144,7 +144,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
 
       pathCompletionStr = `M ${pointsCompletion[0].x} ${pointsCompletion[0].y} `
       areaCompletionStr = `M ${pointsCompletion[0].x} ${paddingTop + chartHeight} L ${pointsCompletion[0].x} ${pointsCompletion[0].y} `
-      
+
       for (let i = 1; i < pointsCompletion.length; i++) {
         pathCompletionStr += `L ${pointsCompletion[i].x} ${pointsCompletion[i].y} `
         areaCompletionStr += `L ${pointsCompletion[i].x} ${pointsCompletion[i].y} `
@@ -226,20 +226,20 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
       {/* 时间筛选器选项卡 */}
       <div className="time-filter-wrapper">
         <div className="time-filter-tabs">
-          <button 
-            className={`filter-tab ${timeRange === '24h' ? 'active' : ''}`} 
+          <button
+            className={`filter-tab ${timeRange === '24h' ? 'active' : ''}`}
             onClick={() => setTimeRange('24h')}
           >
             最近 24 小时
           </button>
-          <button 
-            className={`filter-tab ${timeRange === '7d' ? 'active' : ''}`} 
+          <button
+            className={`filter-tab ${timeRange === '7d' ? 'active' : ''}`}
             onClick={() => setTimeRange('7d')}
           >
             最近 7 天
           </button>
-          <button 
-            className={`filter-tab ${timeRange === 'all' ? 'active' : ''}`} 
+          <button
+            className={`filter-tab ${timeRange === 'all' ? 'active' : ''}`}
             onClick={() => setTimeRange('all')}
           >
             全部历史
@@ -265,7 +265,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
           </div>
         </div>
         <div className="stat-glow-card completion">
-          <span className="card-label">Completion 生成词 Token</span>
+          <span className="card-label">生成词 Token</span>
           <span className="card-number rose-text">{stats.totalCompletion.toLocaleString()}</span>
           <div className="card-sub-info">
             <span>占比 {(stats.totalTokens > 0 ? (stats.totalCompletion / stats.totalTokens) * 100 : 0).toFixed(1)}%</span>
@@ -282,7 +282,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
 
       {/* ── 2. 图表双栏 ─────────────────────────────────────────── */}
       <div className="charts-double-row">
-        
+
         {/* A. 折线走势图 */}
         <div className="chart-box-card trend-chart-wrapper">
           <div className="chart-card-header">
@@ -310,7 +310,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                   {/* 背景网格虚线 (横向虚线 Y 轴网格线) */}
                   <line x1={trendData.paddingLeft} y1={trendData.paddingTop} x2={trendData.width - trendData.paddingRight} y2={trendData.paddingTop} stroke="var(--border-color)" strokeDasharray="4 4" strokeWidth="1" />
                   <line x1={trendData.paddingLeft} y1={trendData.paddingTop + trendData.chartHeight * 0.5} x2={trendData.width - trendData.paddingRight} y2={trendData.paddingTop + trendData.chartHeight * 0.5} stroke="var(--border-color)" strokeDasharray="4 4" strokeWidth="1" />
-                  
+
                   {/* X 轴底线 (横向实线) */}
                   <line x1={trendData.paddingLeft} y1={trendData.paddingTop + trendData.chartHeight} x2={trendData.width - trendData.paddingRight} y2={trendData.paddingTop + trendData.chartHeight} stroke="var(--text-muted)" strokeWidth="1.5" />
 
@@ -337,7 +337,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                         <circle cx={p.x} cy={p.y} r="14" fill="transparent" style={{ cursor: 'pointer' }} />
                         <circle cx={p.x} cy={p.y} r={isHovered ? '6' : '3.5'} fill="#08090d" stroke="#06b6d4" strokeWidth={isHovered ? '3' : '2'} style={{ transition: 'all 0.15s ease' }} />
                         <circle cx={trendData.pointsCompletion[idx].x} cy={trendData.pointsCompletion[idx].y} r={isHovered ? '6' : '3.5'} fill="#08090d" stroke="#60a5fa" strokeWidth={isHovered ? '3' : '2'} style={{ transition: 'all 0.15s ease' }} />
-                        
+
                         {/* X 轴竖线短刻度 (Ticks) */}
                         <line x1={p.x} y1={trendData.paddingTop + trendData.chartHeight} x2={p.x} y2={trendData.paddingTop + trendData.chartHeight + 4} stroke="var(--text-muted)" strokeWidth="1.2" />
 
@@ -352,7 +352,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
 
                 {/* 动态 HTML Tooltip，定位在鼠标悬浮的对应数据点上 */}
                 {hoveredPointIdx !== null && trendData.records[hoveredPointIdx] && (
-                  <div 
+                  <div
                     className="chart-tooltip-bubble"
                     style={{
                       position: 'absolute',
@@ -487,7 +487,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                     <td className="num-td total-td">{log.totalTokens.toLocaleString()}</td>
                     <td>
                       {log.sessionId && log.messageId ? (
-                        <button 
+                        <button
                           className="btn-locate-chat"
                           onClick={() => handleLocateChat(log.sessionId!, log.messageId!)}
                           title="跳转并定位至具体聊天消息"

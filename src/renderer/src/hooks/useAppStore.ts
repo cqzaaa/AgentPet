@@ -554,18 +554,22 @@ export function useAppStore() {
     if (prevSessionIdRef.current !== activeSessionId) {
       setIsSessionSwitching(true)
       prevSessionIdRef.current = activeSessionId
-      
+
+      // 切换会话时清空输入框和附件
+      setInputValue('')
+      setAttachedFiles([])
+
       const skeletonTimer = setTimeout(() => {
         setIsSessionSwitching(false)
         justSwitchedRef.current = true
-        
+
         // 让 React 有时间把骨架屏替换为真实聊天 DOM 后再滚动定位
         setTimeout(() => {
           chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
           justSwitchedRef.current = false
         }, 50)
       }, 400) // 显示 400ms 骨架屏
-      
+
       return () => clearTimeout(skeletonTimer)
     }
   }, [activeSessionId])
@@ -638,6 +642,8 @@ export function useAppStore() {
   const handleCreateNewSession = (): void => {
     if (sessions.length > 0 && sessions[sessions.length - 1].name === '(未命名)') {
       setActiveSessionId(sessions[sessions.length - 1].id)
+      setAttachedFiles([])
+      setInputValue('')
       setActiveTab('chat')
       return
     }
@@ -651,6 +657,8 @@ export function useAppStore() {
     }
     setSessions([...sessions, newSess])
     setActiveSessionId(newId)
+    setAttachedFiles([])
+    setInputValue('')
     setActiveTab('chat')
   }
 
