@@ -52,6 +52,21 @@ export interface AttachedFile {
   objectUrl?: string
 }
 
+// ── 内部剪贴板（用于消息间复制文件） ─────────────────────────
+let internalClipboard: { files: { name: string; path: string; content?: string }[]; text: string } | null = null
+
+export function setInternalClipboard(files: { name: string; path: string; content?: string }[] | null, text?: string) {
+  if (files && files.length > 0) {
+    internalClipboard = { files, text: text || '' }
+  } else {
+    internalClipboard = null
+  }
+}
+
+export function getInternalClipboard() {
+  return internalClipboard
+}
+
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
   // ── Navigation ──────────────────────────────────────────────
@@ -977,7 +992,19 @@ ${stylePrompt}
 当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
 ${skillsContext}
 在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
-⚠️ 极重要约束：只有当主人的指令或问题明确指示进行“查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。`
+⚠️ 极重要约束：只有当主人的指令或问题明确指示进行”查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。
+
+🚫 工具调用严格约束：你只能使用以下列出的工具，绝对不允许调用或编造任何不在列表中的工具名称（如 get_current_date、search_web、calculate 等均不存在）。如果你需要获取当前日期时间等信息，请通过 run_terminal_command 执行系统命令（如 date /T）来获取。
+你当前可用的工具列表如下：
+1. run_terminal_command — 执行终端命令（如运行脚本、查看文件、获取日期时间等）
+2. get_system_status — 获取 CPU/内存/系统负载状态
+3. manage_cron_task — 创建或删除定时任务
+4. get_location — 获取当前地理位置（经纬度）
+5. generate_file — 从零创建新文件（txt/xlsx/docx/pdf/pptx 等）
+6. modify_docx_file — 修改已上传的 docx 文件（保留原格式）
+7. modify_xlsx_file — 修改已上传的 xlsx 文件（保留原格式）
+8. read_file — 读取文件内容（xlsx/docx/pdf/csv/文本等）
+以上是全部可用工具，不存在其他工具。如需获取日期、时间、网络信息等，请使用 run_terminal_command 执行相应系统命令。`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })

@@ -71,6 +71,8 @@ export function AgentWindow(): React.JSX.Element {
   const isDraggingRef = useRef(false)
   const dragStartXRef = useRef(0)
   const dragStartWidthRef = useRef(0)
+  const sheetDataRef = useRef<any[] | null>(null)
+  const sheetResizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 拖拽调整面板宽度
   useEffect(() => {
@@ -129,6 +131,7 @@ export function AgentWindow(): React.JSX.Element {
     setPreviewContent('')
     setPreviewHtml('')
     setPreviewLoading(true)
+    sheetDataRef.current = null
 
     const ext = f.name.split('.').pop()?.toLowerCase() || ''
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
@@ -185,12 +188,17 @@ export function AgentWindow(): React.JSX.Element {
             const rows: any = {}
             json.forEach((row, ri) => {
               const cells: any = {}
-              row.forEach((cell, ci) => { cells[ci] = { text: String(cell ?? '') } })
+              row.forEach((cell, ci) => {
+                // 过滤掉模板表达式（如 ${erd.cloud.pdm...}）
+                let text = String(cell ?? '').replace(/\$\{[^}]*\}/g, '').trim()
+                cells[ci] = { text }
+              })
               rows[ri] = { cells }
             })
             return { name, rows }
           })
           const xSpreadsheet = (await import('x-data-spreadsheet')).default
+          sheetDataRef.current = sheetData
           sheetContainerRef.current.innerHTML = ''
           new xSpreadsheet(sheetContainerRef.current, {
             showToolbar: false,
@@ -212,12 +220,14 @@ export function AgentWindow(): React.JSX.Element {
             rows[ri] = { cells }
           })
           const xSpreadsheet = (await import('x-data-spreadsheet')).default
+          const csvSheetData = [{ name: 'Sheet1', rows }]
+          sheetDataRef.current = csvSheetData
           sheetContainerRef.current.innerHTML = ''
           new xSpreadsheet(sheetContainerRef.current, {
             showToolbar: false,
             showBottomBar: false,
             view: { height: () => sheetContainerRef.current!.clientHeight, width: () => sheetContainerRef.current!.clientWidth }
-          }).loadData([{ name: 'Sheet1', rows }])
+          }).loadData(csvSheetData)
         }
       } else {
         const content = await window.api.parseFileContent(f.path)
@@ -631,7 +641,8 @@ export function AgentWindow(): React.JSX.Element {
                       <div ref={(el) => {
                         // 监听容器尺寸变化，动态调整预览缩放
                         if (el && previewFile) {
-                          const resizeHandler = () => {
+                          const observer = new ResizeObserver(() => {
+                            // docx 缩放适配
                             const docxEl = el.querySelector('.docx-preview-container') as HTMLElement
                             if (docxEl && docxEl.scrollWidth > el.clientWidth) {
                               const scale = el.clientWidth / docxEl.scrollWidth
@@ -639,11 +650,22 @@ export function AgentWindow(): React.JSX.Element {
                               docxEl.style.transformOrigin = 'top left'
                               docxEl.style.width = `${100 / Math.min(1, scale)}%`
                             }
-                          }
-                          const observer = new ResizeObserver(resizeHandler)
+                            // xlsx/csv 表格重建适配
+                            const sheetEl = el.querySelector('.sheet-preview-container') as HTMLElement
+                            if (sheetEl && sheetDataRef.current) {
+                              if (sheetResizeTimerRef.current) clearTimeout(sheetResizeTimerRef.current)
+                              sheetResizeTimerRef.current = setTimeout(async () => {
+                                const xSpreadsheet = (await import('x-data-spreadsheet')).default
+                                sheetEl.innerHTML = ''
+                                new xSpreadsheet(sheetEl, {
+                                  showToolbar: false,
+                                  showBottomBar: true,
+                                  view: { height: () => sheetEl.clientHeight, width: () => sheetEl.clientWidth }
+                                }).loadData(sheetDataRef.current!)
+                              }, 300)
+                            }
+                          })
                           observer.observe(el)
-                          // 初始触发
-                          setTimeout(resizeHandler, 200)
                         }
                       }} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
                         {previewLoading && (

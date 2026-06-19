@@ -421,6 +421,8 @@ let tray: Tray | null = null
 let customModelDir = ''
 let customModelFile = ''
 let currentLlmAbortController: AbortController | null = null
+// 跟踪每个会话最近上传的 xlsx 文件，用于 generate_file 时自动复制数据验证
+const sessionLastXlsxMap: Map<string, string> = new Map()
 
 async function copyFolderRecursive(src: string, dest: string): Promise<void> {
   if (!fs.existsSync(src)) return
@@ -1001,10 +1003,44 @@ app.whenReady().then(() => {
       
       const buffer = Buffer.from(arrayBuffer)
       fs.writeFileSync(targetPath, buffer)
+      // 跟踪 xlsx 文件，用于 generate_file 时自动复制数据验证
+      if (/\.(xlsx|xls)$/i.test(fileName)) {
+        sessionLastXlsxMap.set(sessionId, targetPath)
+      }
       return { name: fileName, path: targetPath, safeName: uniqueFileName }
     } catch (e: any) {
       console.error('保存聊天附件失败', e)
       throw new Error(`保存聊天附件失败: ${e.message}`)
+    }
+  })
+
+  // 将文件复制到当前会话目录（用于跨会话复制文件，确保路径有效）
+  ipcMain.handle('api:copy-to-chat-file', async (_, sessionId: string, sourcePath: string) => {
+    try {
+      // 如果源文件存在，直接复制
+      if (fs.existsSync(sourcePath)) {
+        const chatDir = getActiveChatDir()
+        const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+        const sessionDir = join(chatDir, safeSessionId)
+        if (!fs.existsSync(sessionDir)) {
+          fs.mkdirSync(sessionDir, { recursive: true })
+        }
+        const baseName = basename(sourcePath)
+        const safeFileName = baseName.replace(/[^a-zA-Z0-9_.-]/g, '_')
+        const uniqueFileName = `${Date.now()}_${safeFileName}`
+        const targetPath = join(sessionDir, uniqueFileName)
+        await fs.promises.copyFile(sourcePath, targetPath)
+        // 跟踪 xlsx 文件
+        if (/\.(xlsx|xls)$/i.test(sourcePath)) {
+          sessionLastXlsxMap.set(sessionId, targetPath)
+        }
+        return { path: targetPath, exists: true }
+      }
+      // 源文件不存在
+      return { path: sourcePath, exists: false }
+    } catch (e: any) {
+      console.error('复制文件到会话目录失败', e)
+      return { path: sourcePath, exists: false }
     }
   })
 
@@ -1062,6 +1098,49 @@ app.whenReady().then(() => {
       return { success: true }
     } catch (err: any) {
       console.error('复制图片到剪贴板失败:', err)
+      return { success: false, error: err.message || String(err) }
+    }
+  })
+
+  // 复制文件到剪贴板（支持在资源管理器中粘贴，同时支持文本粘贴）
+  ipcMain.handle('api:copy-files', async (_, { filePaths, text }: { filePaths: string[]; text?: string }) => {
+    try {
+      if (!filePaths || filePaths.length === 0) {
+        return { success: false, error: '没有可复制的文件' }
+      }
+      // 验证文件存在
+      const fs = require('fs')
+      const validPaths = filePaths.filter(p => {
+        try { return fs.existsSync(p) } catch { return false }
+      })
+      if (validPaths.length === 0) {
+        return { success: false, error: '文件不存在' }
+      }
+      // 构建 CF_HDROP 格式的 DROPFILES 结构
+      const encodedPaths = validPaths.map(p => Buffer.from(p + '\0', 'utf16le'))
+      const totalPathBytes = encodedPaths.reduce((sum, b) => sum + b.length, 0) + 2
+      const dropFiles = Buffer.alloc(20 + totalPathBytes)
+      dropFiles.writeUInt32LE(20, 0)
+      dropFiles.writeUInt32LE(0, 4)
+      dropFiles.writeUInt32LE(0, 8)
+      dropFiles.writeInt32LE(0, 12)
+      dropFiles.writeInt32LE(1, 16)
+      let offset = 20
+      for (const buf of encodedPaths) {
+        buf.copy(dropFiles, offset)
+        offset += buf.length
+      }
+      // 同时写入文件格式和文本格式，这样粘贴到资源管理器是文件，粘贴到文本框是文本
+      const writeObj: any = {
+        CF_HDROP: dropFiles
+      }
+      if (text) {
+        writeObj.text = text
+      }
+      clipboard.write(writeObj)
+      return { success: true }
+    } catch (err: any) {
+      console.error('复制文件到剪贴板失败:', err)
       return { success: false, error: err.message || String(err) }
     }
   })
@@ -1841,7 +1920,9 @@ app.whenReady().then(() => {
           const sheet = workbook.Sheets[sheetName]
           const csv = XLSX.utils.sheet_to_csv(sheet)
           if (csv.trim()) {
-            sheets.push(`[工作表: ${sheetName}]\n${csv}`)
+            // 过滤掉模板表达式（如 ${erd.cloud.pdm...}），这些是源工具的占位符
+            const cleaned = csv.replace(/\$\{[^}]*\}/g, '').replace(/,{2,}/g, ',').replace(/^,+|,+$/gm, '')
+            sheets.push(`[工作表: ${sheetName}]\n${cleaned}`)
           }
         }
         content = sheets.join('\n\n') || '[Excel 文件已加载，但内容为空]'
@@ -2133,20 +2214,6 @@ app.whenReady().then(() => {
     {
       type: 'function',
       function: {
-        name: 'get_weather',
-        description: '获取指定城市/地区的天气预报信息。如果不指定城市，默认查询深圳。',
-        parameters: {
-          type: 'object',
-          properties: {
-            city: { type: 'string', description: '城市或地区名称，例如 "深圳"、"北京"' }
-          },
-          required: ['city']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
         name: 'get_location',
         description: '获取用户当前电脑的地理位置定位信息（经纬度），以便提供当地时间、天气、或基于当前位置的其他针对性建议。不需要参数。',
         parameters: {
@@ -2159,12 +2226,12 @@ app.whenReady().then(() => {
       type: 'function',
       function: {
         name: 'generate_file',
-        description: '生成一个文件供用户下载。支持生成：文本/代码文件（txt, md, js, ts, py, html, css, json, xml, yml, csv 等）、Excel（xlsx）、Word 文档（docx）、PDF（pdf）、PowerPoint（pptx）。当用户上传某种格式的文件时，生成结果应使用相同格式。',
+        description: '生成一个新文件供用户下载。支持生成：文本/代码文件（txt, md, js, ts, py, html, css, json, xml, yml, csv 等）、Excel（xlsx）、Word 文档（docx）、PDF（pdf）、PowerPoint（pptx）。注意：如果用户上传了 xlsx/docx 文件并要求修改，必须使用 modify_xlsx_file 或 modify_docx_file 而不是此工具，否则会丢失原有格式、下拉选择等。此工具仅用于从零创建新文件。',
         parameters: {
           type: 'object',
           properties: {
             file_name: { type: 'string', description: '文件名（含扩展名），例如 "report.md"、"data.csv"、"analysis.xlsx"、"报告.docx"、"slides.pptx"' },
-            content: { type: 'string', description: '文件内容。对于 xlsx 格式，支持两种格式：1) CSV 文本（简单数据）2) JSON 字符串（支持样式/公式/多sheet，格式：{"sheets":[{"name":"Sheet1","data":[["A1值","B1值"]],"styles":{"A1":{"bold":true,"bgColor":"FFFF00"}},"formulas":{"B2":"=SUM(B1)"},"merge":["A1:C1"],"colWidths":{"A":20}}]}）。对于 docx/pdf/pptx 格式，传入纯文本内容。' },
+            content: { type: 'string', description: '文件内容。对于 xlsx 格式，支持两种格式：1) CSV 文本（简单数据）2) JSON 字符串（支持样式/公式/多sheet/下拉选择，格式：{"sheets":[{"name":"Sheet1","data":[["A1值","B1值"]],"styles":{"A1":{"bold":true,"bgColor":"FFFF00"}},"formulas":{"B2":"=SUM(B1)"},"merge":["A1:C1"],"colWidths":{"A":20},"dataValidations":{"B2:B100":{"type":"list","formulae":["选项1,选项2,选项3"]}}}]}）。对于 docx/pdf/pptx 格式，传入纯文本内容。' },
             file_type: { type: 'string', enum: ['text', 'excel', 'docx', 'pdf', 'pptx'], description: '文件类型：text（文本/代码）、excel（Excel 表格）、docx（Word 文档）、pdf（PDF 文档）、pptx（PPT 演示文稿）。默认 text。' }
           },
           required: ['file_name', 'content']
@@ -2229,7 +2296,7 @@ app.whenReady().then(() => {
       type: 'function',
       function: {
         name: 'modify_xlsx_file',
-        description: '修改已上传的 xlsx 文件内容，支持修改单元格值、设置样式（字体/颜色/边框/背景）、写入公式、合并单元格、添加新工作表。当用户上传 xlsx 文件并要求修改时，必须使用此工具。',
+        description: '修改用户上传的 xlsx 文件。保留原有格式、下拉选择（数据验证）、合并单元格等。支持修改单元格值、设置样式、写入公式、合并单元格、添加新工作表、设置新的数据验证（下拉选择）。重要：当用户上传了 xlsx 文件并要求修改、分析后重新生成时，必须使用此工具（不是 generate_file），这样能保留源文件的下拉选择等数据验证。',
         parameters: {
           type: 'object',
           properties: {
@@ -2279,9 +2346,34 @@ app.whenReady().then(() => {
               type: 'object',
               description: '列宽设置，如 {"A": 20, "B": 15}',
               additionalProperties: { type: 'number' }
+            },
+            data_validations: {
+              type: 'object',
+              description: '数据验证（下拉选择等），key 为单元格区域如 "B2:B100"，value 为验证规则。示例：{"A2:A100": {"type": "list", "formulae": ["选项1,选项2,选项3"]}}',
+              additionalProperties: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['list', 'whole', 'decimal', 'date', 'time', 'textLength', 'custom'], description: '验证类型，list 为下拉选择' },
+                  formulae: { type: 'array', items: { type: 'string' }, description: '公式/选项列表，list 类型传逗号分隔的选项如 ["是,否,待定"]' }
+                }
+              }
             }
           },
           required: ['source_path', 'output_name', 'modifications']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: '读取指定路径文件的内容。支持 Excel（xlsx/xls）、Word（docx）、PDF、CSV 及常见文本/代码文件（txt, md, js, json, html, css, py 等）。返回文件的文本内容，Excel 文件返回各工作表的 CSV 数据。',
+        parameters: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string', description: '文件的绝对路径，如 "C:\\Users\\xx\\Documents\\data.xlsx"' }
+          },
+          required: ['file_path']
         }
       }
     }
@@ -2293,10 +2385,7 @@ app.whenReady().then(() => {
     if (isFrontend) {
       list.push(...toolDefinitions)
     } else {
-      const weatherTool = toolDefinitions.find(t => t.function.name === 'get_weather')
-      if (weatherTool) {
-        list.push(weatherTool)
-      }
+      // 后端（如微信机器人）不注入本地工具，仅使用 MCP 工具
     }
 
     const mcpTools = mcpManager.getTools()
@@ -2519,41 +2608,6 @@ if (-not $task.Wait(15000)) {
 
 
 
-    if (name === 'get_weather') {
-      try {
-        const { city } = args
-        const targetCity = city || '深圳'
-        try {
-          const resp = await net.fetch(`https://autodev.openspeech.cn/api/v1/open/weather?city=${encodeURIComponent(targetCity)}`)
-          if (resp.ok) {
-            const data: any = await resp.json()
-            if (data && data.code === 1 && data.data && data.data.length > 0) {
-              const forecasts = data.data.slice(0, 3).map((item: any) => {
-                return `${item.date} (${item.dayOfWeek}): ${item.weather}, 温度: ${item.low}℃ ~ ${item.high}℃, 风向: ${item.wind}, 空气质量: ${item.airQuality || '未知'}`
-              }).join('\n')
-              return `[天气查询结果 - ${targetCity}]\n当前及近期天气预报:\n${forecasts}`
-            }
-          }
-        } catch (err) {
-          console.error('autodev 天气接口异常，尝试 wttr.in 备用', err)
-        }
-
-        try {
-          const resp = await net.fetch(`https://wttr.in/${encodeURIComponent(targetCity)}?format=3`)
-          if (resp.ok) {
-            const text = await resp.text()
-            return `[天气查询结果 - ${targetCity}]\n${text.trim()}`
-          }
-        } catch (err) {
-          console.error('wttr.in 天气接口异常', err)
-        }
-
-        return `暂未查询到 ${targetCity} 的天气信息，请稍后再试。`
-      } catch (err: any) {
-        return `执行 get_weather 工具失败: ${err.message || err}`
-      }
-    }
-
     if (name === 'manage_cron_task') {
       try {
         const { action_type, name: taskName, interval, action, taskId } = args
@@ -2629,10 +2683,17 @@ if (-not $task.Wait(15000)) {
     if (name === 'run_terminal_command') {
       try {
         const { command } = args
-        // 智能降级：如果没有配置工作空间，则默认在用户主目录下执行全局命令
-        const execCwd = workspacePath && fs.existsSync(workspacePath)
-          ? workspacePath
-          : os.homedir()
+        // 优先在当前会话的文件目录下执行，其次用工作空间，最后用主目录
+        let execCwd = os.homedir()
+        if (sessionId) {
+          const sessionDir = join(getActiveStorageDir(), 'chat', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'))
+          if (fs.existsSync(sessionDir)) {
+            execCwd = sessionDir
+          }
+        }
+        if (execCwd === os.homedir() && workspacePath && fs.existsSync(workspacePath)) {
+          execCwd = workspacePath
+        }
 
         if (sandboxMode) {
           // 1. 只读免密自动放行
@@ -2758,6 +2819,21 @@ if (-not $task.Wait(15000)) {
                   ws.getColumn(col).width = width
                 }
               }
+              // 数据验证（下拉选择等）
+              if (sheetDef.dataValidations) {
+                for (const [range, dv] of Object.entries(sheetDef.dataValidations as Record<string, any>)) {
+                  ws.dataValidations.add(range, {
+                    type: dv.type || 'list',
+                    formulae: dv.formulae || [],
+                    showErrorMessage: dv.showErrorMessage !== false,
+                    errorTitle: dv.errorTitle || '输入错误',
+                    error: dv.error || '请从下拉列表中选择',
+                    showInputMessage: dv.showInputMessage || false,
+                    promptTitle: dv.promptTitle || '',
+                    prompt: dv.prompt || ''
+                  })
+                }
+              }
             }
           } else {
             // CSV 模式（向后兼容）
@@ -2765,6 +2841,47 @@ if (-not $task.Wait(15000)) {
             const lines = content.split('\n')
             for (const line of lines) {
               ws.addRow(line.split(','))
+            }
+          }
+
+          // 自动从源 xlsx 文件复制数据验证（下拉选择等）
+          const sourceXlsx = sessionId ? sessionLastXlsxMap.get(sessionId) : null
+          if (sourceXlsx && fs.existsSync(sourceXlsx)) {
+            try {
+              const XLSXLib = require('xlsx')
+              const srcBuf = await fs.promises.readFile(sourceXlsx)
+              const srcWb = XLSXLib.read(srcBuf, { type: 'buffer' })
+              for (const sheetName of srcWb.SheetNames) {
+                const srcSheet = srcWb.Sheets[sheetName]
+                // XLSX 库将数据验证存在 sheet['!dataValidation'] 或 sheet['!validations']
+                const validations = (srcSheet as any)['!dataValidation'] || (srcSheet as any)['!validations']
+                if (validations && validations.length > 0) {
+                  const dstWs = workbook.getWorksheet(sheetName) || workbook.worksheets[0]
+                  if (dstWs) {
+                    for (const dv of validations) {
+                      if (dv.sqref && dv.type === 'list' && dv.formula1) {
+                        // 将 XLSX 库的验证格式转为 ExcelJS 格式
+                        // formula1 通常是带引号的逗号分隔列表如 '"选项1,选项2,选项3"'
+                        let formulaStr = dv.formula1.replace(/^"|"$/g, '')
+                        const ranges = Array.isArray(dv.sqref) ? dv.sqref : [dv.sqref]
+                        for (const range of ranges) {
+                          try {
+                            dstWs.dataValidations.add(range, {
+                              type: 'list',
+                              formulae: [formulaStr],
+                              showErrorMessage: true,
+                              errorTitle: '输入错误',
+                              error: '请从下拉列表中选择'
+                            })
+                          } catch (_) { /* skip */ }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('复制源文件数据验证失败（不影响文件生成）:', (e as Error).message)
             }
           }
 
@@ -3265,7 +3382,7 @@ if (-not $task.Wait(15000)) {
     // 修改 xlsx 文件（支持样式、公式、合并单元格）
     if (name === 'modify_xlsx_file') {
       try {
-        const { source_path, output_name, modifications, merge_cells, add_sheet, column_widths } = args
+        const { source_path, output_name, modifications, merge_cells, add_sheet, column_widths, data_validations } = args
         if (!source_path || !output_name || !modifications || !Array.isArray(modifications)) {
           return '错误：缺少必要参数 source_path、output_name 或 modifications'
         }
@@ -3349,6 +3466,23 @@ if (-not $task.Wait(15000)) {
           }
         }
 
+        // 设置数据验证（下拉选择等）
+        if (data_validations && typeof data_validations === 'object') {
+          const ws = workbook.worksheets[0]
+          for (const [range, dv] of Object.entries(data_validations as Record<string, any>)) {
+            ws.dataValidations.add(range, {
+              type: dv.type || 'list',
+              formulae: dv.formulae || [],
+              showErrorMessage: dv.showErrorMessage !== false,
+              errorTitle: dv.errorTitle || '输入错误',
+              error: dv.error || '请从下拉列表中选择',
+              showInputMessage: dv.showInputMessage || false,
+              promptTitle: dv.promptTitle || '',
+              prompt: dv.prompt || ''
+            })
+          }
+        }
+
         const genDir = getGeneratedFilesDir(sessionId)
         const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
         const filePath = join(genDir, safeName)
@@ -3368,6 +3502,68 @@ if (-not $task.Wait(15000)) {
         }, null, 2)
       } catch (err: any) {
         return `修改 xlsx 文件失败：${err.message || err}`
+      }
+    }
+
+    // 通用读取文件工具（支持 xlsx/xls/docx/pdf/csv 及文本文件）
+    if (name === 'read_file') {
+      try {
+        const { file_path } = args
+        if (!file_path) return '错误：缺少必要参数 file_path'
+        if (!fs.existsSync(file_path)) return `错误：文件不存在：${file_path}`
+        const ext = file_path.split('.').pop()?.toLowerCase() || ''
+        let content = ''
+
+        if (ext === 'pdf') {
+          const { PDFParse } = require('pdf-parse')
+          const buffer = await fs.promises.readFile(file_path)
+          const parser = new PDFParse()
+          const data = await parser.parseBuffer(buffer)
+          content = data.text || ''
+          if (!content.trim()) content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
+        } else if (ext === 'docx') {
+          const mammoth = require('mammoth')
+          const buffer = await fs.promises.readFile(file_path)
+          const result = await mammoth.extractRawText({ buffer })
+          content = result.value || ''
+          if (!content.trim()) content = '[Word 文档已加载，但内容为空]'
+        } else if (ext === 'xlsx' || ext === 'xls') {
+          const XLSX = require('xlsx')
+          const workbook = XLSX.readFile(file_path)
+          const sheets: string[] = []
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName]
+            const csv = XLSX.utils.sheet_to_csv(sheet)
+            if (csv.trim()) {
+              // 过滤掉模板表达式（如 ${erd.cloud.pdm...}），这些是源工具的占位符
+              const cleaned = csv.replace(/\$\{[^}]*\}/g, '').replace(/,{2,}/g, ',').replace(/^,+|,+$/gm, '')
+              sheets.push(`[工作表: ${sheetName}]\n${cleaned}`)
+            }
+          }
+          content = sheets.join('\n\n') || '[Excel 文件已加载，但内容为空]'
+        } else if (ext === 'csv') {
+          const Papa = require('papaparse')
+          const csvContent = await fs.promises.readFile(file_path, 'utf-8')
+          const parsed = Papa.parse(csvContent, { header: true })
+          if (parsed.data && parsed.data.length > 0) {
+            const headers = parsed.meta.fields || []
+            const rows = parsed.data.slice(0, 500) as any[]
+            content = `列名: ${headers.join(', ')}\n\n`
+            content += rows.map((row, i) => `第${i + 1}行: ${headers.map(h => `${h}=${row[h] ?? ''}`).join(', ')}`).join('\n')
+            if ((parsed.data as any[]).length > 500) content += `\n\n... 共 ${parsed.data.length} 行，已截取前 500 行`
+          } else {
+            content = '[CSV 文件已加载，但内容为空]'
+          }
+        } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+          content = `[图片文件: ${basename(file_path)}，路径: ${file_path}]`
+        } else {
+          // 文本/代码文件
+          content = await fs.promises.readFile(file_path, 'utf-8')
+        }
+
+        return content
+      } catch (err: any) {
+        return `读取文件失败：${err.message || err}`
       }
     }
 
@@ -3453,8 +3649,13 @@ if (-not $task.Wait(15000)) {
     event?: Electron.IpcMainInvokeEvent
   ): Promise<string> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, messageId } = config
+    // 清理上一次可能残留的 abort controller
+    if (currentLlmAbortController) {
+      try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
+    }
     currentLlmAbortController = new AbortController()
-    
+    const thisController = currentLlmAbortController
+
     let url = ''
     const headers: any = {
       'Content-Type': 'application/json'
@@ -3536,7 +3737,7 @@ if (-not $task.Wait(15000)) {
     }
 
     let loopCount = 0
-    const maxLoops = 6
+    const maxLoops = 40
 
     let totalPromptTokens = 0
     let totalCompletionTokens = 0
@@ -3661,10 +3862,13 @@ if (-not $task.Wait(15000)) {
       } catch (e: any) {
         console.error('[call-llm loop error]', e)
         sendTokenEvent()
-        currentLlmAbortController = null
-        if (e.name === 'AbortError' || e.message?.includes('aborted') || e.message?.includes('Cancel') || e.message?.includes('abort')) {
+        // 只有当前请求的 controller 被中止才抛 UserAborted，避免被后续请求误清理
+        if (thisController.signal.aborted) {
+          currentLlmAbortController = null
           throw new Error('UserAborted')
         }
+        // 非中止错误，清理 controller 并抛出原始错误
+        currentLlmAbortController = null
         throw new Error(e.message || 'LLM 请求代理失败')
       }
     }

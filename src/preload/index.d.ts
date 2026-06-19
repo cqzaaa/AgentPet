@@ -28,6 +28,7 @@ declare global {
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
+      copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
       onToolEvent: (callback: (data: any) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
@@ -72,6 +73,7 @@ declare global {
       respondGeolocation: (requestId: number, location: any, error?: string) => void
       copyText: (text: string) => void
       copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
+      copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
     }

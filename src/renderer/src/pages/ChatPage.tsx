@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
+import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { ChatMessageItem } from '../components/ChatMessageItem'
 
 
@@ -182,7 +183,45 @@ export function ChatPage({ store, generatedFiles = [] }: ChatPageProps): React.J
             value={inputValue}
             disabled={isSending}
             onChange={e => setInputValue(e.target.value)}
-            onPaste={e => {
+            onPaste={async e => {
+              // 优先检查内部剪贴板（从消息复制的文件+文本）
+              const internalClip = getInternalClipboard()
+              if (internalClip && internalClip.files.length > 0) {
+                e.preventDefault()
+                setInternalClipboard(null)
+                // 将内部剪贴板文件转为附件（复制到当前会话目录确保路径有效）
+                const newAttachments = await Promise.all(internalClip.files.map(async f => {
+                  const ext = f.name.split('.').pop()?.toLowerCase() || ''
+                  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+                  const isImage = imageExts.includes(ext)
+                  // 将文件复制到当前会话目录，确保路径有效
+                  let filePath = f.path
+                  if (window.api.copyToChatFile) {
+                    const result = await window.api.copyToChatFile(activeSessionId, f.path)
+                    filePath = result.path
+                  }
+                  // 如果没有预加载内容，尝试解析文件内容
+                  let content = f.content
+                  if (!content && filePath) {
+                    try {
+                      content = await window.api.parseFileContent(filePath)
+                    } catch { /* 忽略解析失败 */ }
+                  }
+                  return {
+                    name: f.name,
+                    path: filePath,
+                    content,
+                    objectUrl: isImage ? `local-file:///${filePath.replace(/\\/g, '/')}` : undefined
+                  }
+                }))
+                setAttachedFiles(prev => [...prev, ...newAttachments])
+                // 同时插入文本到输入框
+                if (internalClip.text) {
+                  setInputValue(prev => prev ? prev + internalClip.text : internalClip.text)
+                }
+                return
+              }
+              // 系统剪贴板文件（图片等）
               if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                 e.preventDefault()
                 handlePasteFiles(e.clipboardData.files)

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { setInternalClipboard } from '../hooks/useAppStore'
 
 // ── 复制代码块的高级代码面板组件 ─────────────────────────────────
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
@@ -512,17 +513,39 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
     }
   }
 
-  const handleCopy = () => {
-    if (!msg.text) return
+  const handleCopy = async () => {
+    if (!msg.text && !msg.fileInfo && !msg.fileInfos) return
     const textToCopy = msg.text === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
       : msg.text === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
-        : msg.text
-    if (window.api && typeof window.api.copyText === 'function') {
-      window.api.copyText(textToCopy)
+        : (msg.text || '')
+    // 收集文件信息
+    const files: { name: string; path: string; content?: string }[] = []
+    if (msg.fileInfos && Array.isArray(msg.fileInfos)) {
+      for (const f of msg.fileInfos) {
+        if (f.path) files.push({ name: f.name, path: f.path, content: f.content })
+      }
+    } else if (msg.fileInfo?.path) {
+      files.push({ name: msg.fileInfo.name, path: msg.fileInfo.path, content: msg.fileInfo.content })
+    }
+    if (files.length > 0) {
+      // 存入内部剪贴板（粘贴到输入框时可作为附件 + 文本）
+      setInternalClipboard(files, textToCopy)
+      // 同时写入系统剪贴板（支持粘贴到资源管理器和文本框）
+      const filePaths = files.map(f => f.path)
+      if (window.api && typeof window.api.copyFiles === 'function') {
+        await window.api.copyFiles(filePaths, textToCopy)
+      } else {
+        window.api?.copyText?.(textToCopy) || navigator.clipboard.writeText(textToCopy)
+      }
     } else {
-      navigator.clipboard.writeText(textToCopy)
+      // 无文件，纯文本复制
+      if (window.api && typeof window.api.copyText === 'function') {
+        window.api.copyText(textToCopy)
+      } else {
+        navigator.clipboard.writeText(textToCopy)
+      }
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -675,7 +698,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         )}
       </div>
 
-      {msg.text && !msg.isThinking && (
+      {(msg.text || msg.fileInfo || msg.fileInfos) && !msg.isThinking && (
         <div className="message-action-row">
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
             {copied ? '✓' : '📋'}

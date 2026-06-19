@@ -61,6 +61,8 @@ const api = {
   },
   saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>
     ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
+  copyToChatFile: (sessionId: string, sourcePath: string): Promise<{ path: string; exists: boolean }> =>
+    ipcRenderer.invoke('api:copy-to-chat-file', sessionId, sourcePath),
   onToolEvent: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:llm-tool-event', subscription)
@@ -190,6 +192,8 @@ const api = {
   },
   copyImage: (imageUrl: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('api:copy-image', imageUrl),
+  copyFiles: (filePaths: string[], text?: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('api:copy-files', { filePaths, text }),
   showImageContextMenu: (imageUrl: string): void => {
     ipcRenderer.send('api:show-image-context-menu', imageUrl)
   },
