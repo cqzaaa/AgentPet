@@ -962,13 +962,13 @@ export function useAppStore() {
         const imageBlocks: any[] = []
 
         if (m.fileInfo) {
-          const isDocx = m.fileInfo.name?.toLowerCase().endsWith('.docx')
-          const pathNote = isDocx && m.fileInfo.path ? `\n[源文件路径: ${m.fileInfo.path}]` : ''
+          const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(m.fileInfo.name || '')
+          const pathNote = needsPath && m.fileInfo.path ? `\n[源文件路径: ${m.fileInfo.path}]` : ''
           textContent = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]${pathNote}\n${m.fileInfo.content}`
         } else if (m.fileInfos && m.fileInfos.length > 0) {
           const attachmentsText = m.fileInfos.filter((f: any) => f.content).map((f: any) => {
-            const isDocx = f.name?.toLowerCase().endsWith('.docx')
-            const pathNote = isDocx && f.path ? `\n[源文件路径: ${f.path}]` : ''
+            const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(f.name || '')
+            const pathNote = needsPath && f.path ? `\n[源文件路径: ${f.path}]` : ''
             return `--- [附带文件: ${f.name}]${pathNote}\n${f.content}`
           }).join('\n\n')
           if (attachmentsText) {
@@ -1023,7 +1023,7 @@ ${skillsContext}
 4. get_location — 获取当前地理位置（经纬度）
 5. generate_file — 从零创建新文件（txt/xlsx/docx/pdf/pptx 等）
 6. modify_docx_file — 修改已上传的 docx 文件（保留原格式）
-7. modify_xlsx_file — 修改已上传的 xlsx 文件（保留原格式）
+7. modify_xlsx_file — 修改已上传的 xlsx 文件（保留原格式，批量在表尾追加行数据，必须优先使用其中的 append_rows 参数而非 modifications）
 8. read_file — 读取文件内容（xlsx/docx/pdf/csv/文本等）
 以上是全部可用工具，不存在其他工具。如需获取日期、时间、网络信息等，请使用 run_terminal_command 执行相应系统命令。`
 

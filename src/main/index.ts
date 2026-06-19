@@ -2296,7 +2296,7 @@ app.whenReady().then(() => {
       type: 'function',
       function: {
         name: 'modify_xlsx_file',
-        description: '修改用户上传的 xlsx 文件。保留原有格式、下拉选择（数据验证）、合并单元格等。支持修改单元格值、设置样式、写入公式、合并单元格、添加新工作表、设置新的数据验证（下拉选择）。重要：当用户上传了 xlsx 文件并要求修改、分析后重新生成时，必须使用此工具（不是 generate_file），这样能保留源文件的下拉选择等数据验证。',
+        description: '修改用户上传的 xlsx 文件。保留原有格式、下拉选择（数据验证）、合并单元格等。支持修改单元格值、设置样式、写入公式、合并单元格、添加新工作表、设置新的数据验证（下拉选择）、批量在末尾追加新数据行。重要：1) 当用户上传了 xlsx 文件并要求修改时，必须使用此工具而非 generate_file 以保留格式。2) 如果需要批量在表尾追加/新增整行数据，必须优先使用 append_rows 参数，绝不能将每一行的单元格拆分为 modifications 中的单个 cell 元素，否则会产生海量单元格修改导致生成截断。',
         parameters: {
           type: 'object',
           properties: {
@@ -2304,7 +2304,7 @@ app.whenReady().then(() => {
             output_name: { type: 'string', description: '输出文件名，如 "修改后的报表.xlsx"' },
             modifications: {
               type: 'array',
-              description: '单元格修改指令数组',
+              description: '单元格修改指令数组。仅用于修改已有单元格的值、公式或应用单元格样式。如果需要追加新数据行，请务必使用 append_rows 参数而非本参数。',
               items: {
                 type: 'object',
                 properties: {
@@ -2333,6 +2333,22 @@ app.whenReady().then(() => {
                 required: ['cell']
               }
             },
+            append_rows: {
+              type: 'array',
+              description: '可选。在工作表末尾追加的新行数据列表。当需要批量新增行时，必须优先使用此参数而不是 modifications，以避免大量单元格修改导致大模型输出被截断。',
+              items: {
+                type: 'object',
+                properties: {
+                  sheet: { type: 'string', description: '工作表名称，默认第一个 sheet' },
+                  values: {
+                    type: 'array',
+                    description: '这一行的单元格值列表，例如 ["电容", "电容-（M30系列）", "=SUM(A1:A2)"]。值会依次填入新行的 A, B, C... 列。如果元素是字符串且以 "=" 开头（如 "=SUM(A1:B1)"），会自动识别并作为 Excel 公式写入该单元格。',
+                    items: { type: 'string' }
+                  }
+                },
+                required: ['values']
+              }
+            },
             merge_cells: {
               type: 'array',
               description: '合并单元格区域数组，如 ["A1:C1", "D2:E2"]',
@@ -2359,7 +2375,7 @@ app.whenReady().then(() => {
               }
             }
           },
-          required: ['source_path', 'output_name', 'modifications']
+          required: ['source_path', 'output_name']
         }
       }
     },
@@ -3372,128 +3388,113 @@ if (-not $task.Wait(15000)) {
       }
     }
 
-    // 修改 xlsx 文件（支持样式、公式、合并单元格）
+    // 修改 xlsx 文件（支持样式、公式、合并单元格、批量追加新行）
+    // ⚠️ exceljs 在 Main Process 中读取大型文件时会瞬间占用大量内存，触发 Crashpad 退出。
+    // 解决方案：用 worker_threads 将 exceljs 操作完全隔离到子线程，子线程崩溃不影响主进程。
     if (name === 'modify_xlsx_file') {
       try {
-        const { source_path, output_name, modifications, merge_cells, add_sheet, column_widths, data_validations } = args
-        if (!source_path || !output_name || !modifications || !Array.isArray(modifications)) {
-          return '错误：缺少必要参数 source_path、output_name 或 modifications'
+        const { source_path, output_name, modifications, append_rows, merge_cells, add_sheet, column_widths, data_validations } = args
+        console.log('[modify_xlsx_file] 开始执行 Excel 修改, 路径:', source_path, '输出文件名:', output_name)
+        if (!source_path || !output_name) {
+          console.warn('[modify_xlsx_file] 缺少必要参数 source_path 或 output_name')
+          return '错误：缺少必要参数 source_path 或 output_name'
+        }
+        if (!modifications && !append_rows && !merge_cells && !add_sheet && !column_widths && !data_validations) {
+          console.warn('[modify_xlsx_file] 未提供任何修改操作')
+          return '错误：未提供任何修改操作（modifications, append_rows, merge_cells 等至少需要提供一个）'
         }
         if (!fs.existsSync(source_path)) {
+          console.warn('[modify_xlsx_file] 源文件不存在:', source_path)
           return `错误：源文件不存在：${source_path}`
-        }
-
-        const ExcelJS = require('exceljs')
-        const workbook = new ExcelJS.Workbook()
-        await workbook.xlsx.readFile(source_path)
-
-        // 添加新工作表
-        if (add_sheet) {
-          workbook.addWorksheet(add_sheet)
-        }
-
-        // 应用单元格修改
-        let modCount = 0
-        for (const mod of modifications) {
-          const ws = mod.sheet
-            ? workbook.getWorksheet(mod.sheet)
-            : workbook.worksheets[0]
-          if (!ws) continue
-
-          const cell = ws.getCell(mod.cell)
-          if (mod.formula) {
-            cell.value = { formula: mod.formula.replace(/^=/, '') }
-          } else if (mod.value !== undefined) {
-            cell.value = mod.value
-          }
-
-          if (mod.style) {
-            const s = mod.style
-            const font: any = {}
-            if (s.bold) font.bold = true
-            if (s.italic) font.italic = true
-            if (s.fontSize) font.size = s.fontSize
-            if (s.fontColor) font.color = { argb: 'FF' + s.fontColor.replace(/^#/, '') }
-            if (Object.keys(font).length > 0) cell.font = font
-
-            if (s.bgColor) {
-              cell.fill = {
-                type: 'pattern', pattern: 'solid',
-                fgColor: { argb: 'FF' + s.bgColor.replace(/^#/, '') }
-              }
-            }
-
-            if (s.borderStyle) {
-              const border: any = {}
-              const side = { style: s.borderStyle, color: s.borderColor ? { argb: 'FF' + s.borderColor.replace(/^#/, '') } : undefined }
-              border.top = side; border.bottom = side; border.left = side; border.right = side
-              cell.border = border
-            }
-
-            const alignment: any = {}
-            if (s.align) alignment.horizontal = s.align
-            if (s.valign) alignment.vertical = s.valign
-            if (s.wrapText) alignment.wrapText = true
-            if (Object.keys(alignment).length > 0) cell.alignment = alignment
-
-            if (s.numberFormat) cell.numFmt = s.numberFormat
-          }
-          modCount++
-        }
-
-        // 合并单元格
-        if (merge_cells && Array.isArray(merge_cells)) {
-          const ws = workbook.worksheets[0]
-          for (const range of merge_cells) {
-            try { ws.unmerge(range) } catch (e) { /* ignore if not merged */ }
-            ws.mergeCells(range)
-          }
-        }
-
-        // 设置列宽
-        if (column_widths && typeof column_widths === 'object') {
-          const ws = workbook.worksheets[0]
-          for (const [col, width] of Object.entries(column_widths)) {
-            const column = ws.getColumn(col)
-            column.width = width as number
-          }
-        }
-
-        // 设置数据验证（下拉选择等）
-        if (data_validations && typeof data_validations === 'object') {
-          const ws = workbook.worksheets[0]
-          for (const [range, dv] of Object.entries(data_validations as Record<string, any>)) {
-            ws.dataValidations.add(range, {
-              type: dv.type || 'list',
-              formulae: dv.formulae || [],
-              showErrorMessage: dv.showErrorMessage !== false,
-              errorTitle: dv.errorTitle || '输入错误',
-              error: dv.error || '请从下拉列表中选择',
-              showInputMessage: dv.showInputMessage || false,
-              promptTitle: dv.promptTitle || '',
-              prompt: dv.prompt || ''
-            })
-          }
         }
 
         const genDir = getGeneratedFilesDir(sessionId)
         const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
         const filePath = join(genDir, safeName)
-        await workbook.xlsx.writeFile(filePath)
+
+        // ✅ 使用 Electron 官方的 utilityProcess.fork() 运行后台 Node.js 任务。
+        // utilityProcess 是 Electron 专为此设计的 API（Electron 20+）：
+        //   - 独立 OS 进程，与 Main Process 完全内存隔离
+        //   - 不带 GUI / Crashpad，不会触发应用退出
+        //   - 通信使用 child.postMessage / child.on('message')
+        //   - 子进程内使用 process.parentPort 收发消息
+        const { utilityProcess } = require('electron')
+        let workerPath = join(__dirname, 'xlsx-worker.js')
+        if (!fs.existsSync(workerPath)) {
+          workerPath = join(app.getAppPath(), 'src', 'main', 'xlsx-worker.js')
+        }
+        console.log('[modify_xlsx_file] utilityProcess.fork 启动, path:', workerPath)
+
+        const { modCount, appendCount } = await new Promise<{ modCount: number; appendCount: number }>((resolve, reject) => {
+          const child = utilityProcess.fork(workerPath, [], {
+            serviceName: 'xlsx-worker',
+            stdio: 'pipe',
+            execArgv: ['--max-old-space-size=8192']
+          })
+
+          // 转发子进程 stdout/stderr
+          child.stdout?.on('data', (d: Buffer) => console.log('[xlsx-worker]', d.toString().trim()))
+          child.stderr?.on('data', (d: Buffer) => console.error('[xlsx-worker err]', d.toString().trim()))
+
+          let settled = false
+          const done = (fn: () => void) => { if (!settled) { settled = true; fn() } }
+
+          const timeout = setTimeout(() => {
+            child.kill()
+            done(() => reject(new Error('xlsx 处理超时（>120s）')))
+          }, 120000)
+
+          child.on('message', (msg: any) => {
+            clearTimeout(timeout)
+            if (msg.success) {
+              done(() => resolve({ modCount: msg.modCount, appendCount: msg.appendCount }))
+            } else {
+              done(() => reject(new Error(msg.error || 'xlsx 子进程处理失败')))
+            }
+            child.kill()
+          })
+          child.on('exit', (code: number) => {
+            clearTimeout(timeout)
+            if (code !== 0) {
+              done(() => reject(new Error(`xlsx 子进程异常退出，code=${code}`)))
+            }
+          })
+
+          // 发送数据给子进程
+          child.postMessage({
+            source_path,
+            output_path: filePath,
+            modifications,
+            append_rows,
+            merge_cells,
+            add_sheet,
+            column_widths,
+            data_validations
+          })
+        })
+
+        console.log('[modify_xlsx_file] Excel 文件成功保存。modCount:', modCount, 'appendCount:', appendCount)
 
         const activeWin = agentWindow || mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
         if (activeWin) {
           activeWin.webContents.send('api:generated-file-updated')
         }
 
+        const parts = []
+        if (modCount > 0) parts.push(`修改了 ${modCount} 个单元格`)
+        if (appendCount > 0) parts.push(`追加了 ${appendCount} 行数据`)
+        const messageStr = parts.length > 0 ? parts.join('，') : '无数据改动'
+
         return JSON.stringify({
           status: 'success',
-          message: `文件 "${safeName}" 已生成，修改了 ${modCount} 个单元格`,
+          message: `文件 "${safeName}" 已生成，${messageStr}`,
           file_path: filePath,
           file_name: safeName,
-          modified: modCount
+          modified: modCount,
+          appended: appendCount
         }, null, 2)
       } catch (err: any) {
+        console.error('[modify_xlsx_file] 捕获到内部错误:', err)
         return `修改 xlsx 文件失败：${err.message || err}`
       }
     }
@@ -3508,10 +3509,9 @@ if (-not $task.Wait(15000)) {
         let content = ''
 
         if (ext === 'pdf') {
-          const { PDFParse } = require('pdf-parse')
+          const pdf = require('pdf-parse')
           const buffer = await fs.promises.readFile(file_path)
-          const parser = new PDFParse()
-          const data = await parser.parseBuffer(buffer)
+          const data = await pdf(buffer)
           content = data.text || ''
           if (!content.trim()) content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
         } else if (ext === 'docx') {
@@ -3554,6 +3554,10 @@ if (-not $task.Wait(15000)) {
           content = await fs.promises.readFile(file_path, 'utf-8')
         }
 
+        const MAX_READ_LEN = 30000
+        if (content.length > MAX_READ_LEN) {
+          content = content.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请通过命令拆分读取或使用其他方式。]`
+        }
         return content
       } catch (err: any) {
         return `读取文件失败：${err.message || err}`
@@ -3601,7 +3605,11 @@ if (-not $task.Wait(15000)) {
         if (stat.isDirectory()) {
           return `错误：${relative_path} 是一个目录，不能读取为文本文件。`
         }
-        const content = await fs.promises.readFile(fullPath, 'utf-8')
+        let content = await fs.promises.readFile(fullPath, 'utf-8')
+        const MAX_READ_LEN = 30000
+        if (content.length > MAX_READ_LEN) {
+          content = content.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请通过命令拆分读取或使用其他方式。]`
+        }
         return content
       }
 
@@ -3849,7 +3857,11 @@ if (-not $task.Wait(15000)) {
         } else {
           sendTokenEvent()
           currentLlmAbortController = null
-          return message.content || ''
+          let finalResponse = message.content || ''
+          if (!finalResponse.trim() && loopCount > 1) {
+            finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'
+          }
+          return finalResponse
         }
 
       } catch (e: any) {
