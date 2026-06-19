@@ -2845,39 +2845,32 @@ if (-not $task.Wait(15000)) {
           }
 
           // 自动从源 xlsx 文件复制数据验证（下拉选择等）
+          // 使用 ExcelJS 读取源文件（SheetJS 社区版不支持读取数据验证）
           const sourceXlsx = sessionId ? sessionLastXlsxMap.get(sessionId) : null
           if (sourceXlsx && fs.existsSync(sourceXlsx)) {
             try {
-              const XLSXLib = require('xlsx')
-              const srcBuf = await fs.promises.readFile(sourceXlsx)
-              const srcWb = XLSXLib.read(srcBuf, { type: 'buffer' })
-              for (const sheetName of srcWb.SheetNames) {
-                const srcSheet = srcWb.Sheets[sheetName]
-                // XLSX 库将数据验证存在 sheet['!dataValidation'] 或 sheet['!validations']
-                const validations = (srcSheet as any)['!dataValidation'] || (srcSheet as any)['!validations']
-                if (validations && validations.length > 0) {
-                  const dstWs = workbook.getWorksheet(sheetName) || workbook.worksheets[0]
-                  if (dstWs) {
-                    for (const dv of validations) {
-                      if (dv.sqref && dv.type === 'list' && dv.formula1) {
-                        // 将 XLSX 库的验证格式转为 ExcelJS 格式
-                        // formula1 通常是带引号的逗号分隔列表如 '"选项1,选项2,选项3"'
-                        let formulaStr = dv.formula1.replace(/^"|"$/g, '')
-                        const ranges = Array.isArray(dv.sqref) ? dv.sqref : [dv.sqref]
-                        for (const range of ranges) {
-                          try {
-                            dstWs.dataValidations.add(range, {
-                              type: 'list',
-                              formulae: [formulaStr],
-                              showErrorMessage: true,
-                              errorTitle: '输入错误',
-                              error: '请从下拉列表中选择'
-                            })
-                          } catch (_) { /* skip */ }
-                        }
-                      }
-                    }
-                  }
+              const ExcelJSReader = require('exceljs')
+              const srcReaderWb = new ExcelJSReader.Workbook()
+              await srcReaderWb.xlsx.readFile(sourceXlsx)
+              for (const srcWs of srcReaderWb.worksheets) {
+                const dstWs = workbook.getWorksheet(srcWs.name) || workbook.worksheets[0]
+                if (!dstWs) continue
+                // ExcelJS 的 dataValidations 是一个 DataValidations 对象
+                const dvModel = (srcWs.dataValidations as any).model || srcWs.dataValidations
+                if (!dvModel) continue
+                for (const [addr, dv] of Object.entries(dvModel as Record<string, any>)) {
+                  try {
+                    dstWs.dataValidations.add(addr, {
+                      type: dv.type || 'list',
+                      formulae: dv.formulae || [],
+                      showErrorMessage: dv.showErrorMessage !== false,
+                      errorTitle: dv.errorTitle || '输入错误',
+                      error: dv.error || '请从下拉列表中选择',
+                      showInputMessage: dv.showInputMessage || false,
+                      promptTitle: dv.promptTitle || '',
+                      prompt: dv.prompt || ''
+                    })
+                  } catch (_) { /* skip invalid entries */ }
                 }
               }
             } catch (e) {
@@ -4019,6 +4012,33 @@ if (-not $task.Wait(15000)) {
 
   // 尝试自动恢复登录会话
   wechatBotManager.autoReconnect()
+
+  // 应用退出前清理所有进行中的请求和连接，防止重启后假死
+  app.on('before-quit', () => {
+    console.log('[App] 正在清理进行中的请求和连接...')
+
+    // 1. 中止正在进行的 LLM 请求
+    if (currentLlmAbortController) {
+      try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
+      currentLlmAbortController = null
+    }
+
+    // 2. 解除所有等待授权的阻塞，避免 loading 挂起
+    if (pendingPermissions.size > 0) {
+      for (const [, resolve] of pendingPermissions.entries()) {
+        resolve(false)
+      }
+      pendingPermissions.clear()
+    }
+
+    // 3. 断开所有 MCP 服务连接
+    mcpManager.disconnectAll().catch(() => {})
+
+    // 4. 断开微信 Bot
+    if (wechatBotManager) {
+      wechatBotManager.logout().catch(() => {})
+    }
+  })
 
   createWindow()
 
