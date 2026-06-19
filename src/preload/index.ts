@@ -42,6 +42,10 @@ const api = {
     ipcRenderer.invoke('api:select-file'),
   parseFileContent: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-content', filePath),
+  parseFileHtml: (filePath: string): Promise<string> =>
+    ipcRenderer.invoke('api:parse-file-html', filePath),
+  readFileBase64: (filePath: string): Promise<string | null> =>
+    ipcRenderer.invoke('api:read-file-base64', filePath),
   getGeneratedFiles: (sessionId?: string): Promise<{ name: string; path: string; size: number; time: string }[]> =>
     ipcRenderer.invoke('api:get-generated-files', sessionId),
   saveGeneratedFileAs: (filePath: string): Promise<boolean> =>

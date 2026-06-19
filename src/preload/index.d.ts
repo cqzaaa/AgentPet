@@ -21,6 +21,8 @@ declare global {
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
       parseFileContent: (filePath: string) => Promise<string>
+      parseFileHtml: (filePath: string) => Promise<string>
+      readFileBase64: (filePath: string) => Promise<string | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>

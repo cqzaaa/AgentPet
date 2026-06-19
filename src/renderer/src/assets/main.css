@@ -4195,6 +4195,56 @@ body {
   color: var(--text-primary, #c9d1d9);
 }
 
+.history-btn.active {
+  background: var(--bg-menu-active);
+  color: var(--text-menu-active);
+}
+
+/* docx-preview 渲染样式 */
+.docx-preview-container .docx {
+  margin: 0 !important;
+  padding: 12px !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.docx-preview-container .docx-wrapper {
+  background: #fff !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.docx-preview-container table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  max-width: 100% !important;
+}
+
+.docx-preview-container td,
+.docx-preview-container th {
+  border: 1px solid #d1d5db;
+  padding: 4px 8px;
+}
+
+.docx-preview-container img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* x-data-spreadsheet 渲染样式 */
+.sheet-preview-container {
+  background: #fff;
+}
+
+.sheet-preview-container .x-spreadsheet {
+  border: none !important;
+}
+
+.sheet-preview-container .x-spreadsheet-sheet {
+  overflow: auto !important;
+}
+
 .history-dropdown {
   position: absolute;
   right: 0;

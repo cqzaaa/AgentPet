@@ -1919,6 +1919,96 @@ app.whenReady().then(() => {
     }
   })
 
+  // 解析文件为 HTML（用于富文本预览，保留排版）
+  ipcMain.handle('api:parse-file-html', async (_, filePath: string) => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+    try {
+      if (ext === 'docx') {
+        const mammoth = require('mammoth')
+        const buffer = await fs.promises.readFile(filePath)
+        const result = await mammoth.convertToHtml({ buffer })
+        const html = result.value || ''
+        if (!html.trim()) return '<p style="color:#999">[Word 文档内容为空]</p>'
+        // 包装基础样式
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, "Microsoft YaHei", sans-serif; font-size: 14px; line-height: 1.7; color: #1e293b; padding: 16px; margin: 0; }
+          table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+          td, th { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; }
+          th { background: #f1f5f9; font-weight: 600; }
+          h1 { font-size: 22px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+          h2 { font-size: 18px; }
+          h3 { font-size: 16px; }
+          img { max-width: 100%; height: auto; }
+          p { margin: 0 0 10px 0; }
+          ul, ol { padding-left: 20px; }
+          blockquote { border-left: 3px solid #cbd5e1; padding-left: 12px; color: #64748b; margin: 10px 0; }
+        </style></head><body>${html}</body></html>`
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        const ExcelJS = require('exceljs')
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.readFile(filePath)
+        let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, "Microsoft YaHei", sans-serif; font-size: 13px; padding: 16px; margin: 0; color: #1e293b; }
+          table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+          td, th { border: 1px solid #cbd5e1; padding: 4px 8px; text-align: left; font-size: 12px; }
+          th { background: #f1f5f9; font-weight: 600; position: sticky; top: 0; }
+          .sheet-title { font-size: 15px; font-weight: 700; margin: 16px 0 8px; color: #334155; }
+        </style></head><body>`
+        for (const ws of workbook.worksheets) {
+          html += `<div class="sheet-title">📊 ${ws.name}</div><table>`
+          ws.eachRow((row, rowNumber) => {
+            html += '<tr>'
+            row.eachCell({ includeEmpty: true }, (cell) => {
+              const tag = rowNumber === 1 ? 'th' : 'td'
+              const val = cell.value !== null && cell.value !== undefined ? String(cell.value) : ''
+              html += `<${tag}>${val}</${tag}>`
+            })
+            html += '</tr>'
+          })
+          html += '</table>'
+        }
+        html += '</body></html>'
+        return html
+      } else if (ext === 'csv') {
+        const Papa = require('papaparse')
+        const csvContent = await fs.promises.readFile(filePath, 'utf-8')
+        const parsed = Papa.parse(csvContent, { header: true })
+        let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, sans-serif; font-size: 13px; padding: 16px; margin: 0; }
+          table { border-collapse: collapse; width: 100%; }
+          td, th { border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; }
+          th { background: #f1f5f9; font-weight: 600; }
+        </style></head><body><table>`
+        if (parsed.meta.fields) {
+          html += '<tr>' + parsed.meta.fields.map(f => `<th>${f}</th>`).join('') + '</tr>'
+        }
+        for (const row of (parsed.data as any[]).slice(0, 200)) {
+          html += '<tr>' + Object.values(row).map(v => `<td>${v ?? ''}</td>`).join('') + '</tr>'
+        }
+        html += '</table></body></html>'
+        return html
+      } else {
+        // 普通文本文件
+        const text = await fs.promises.readFile(filePath, 'utf-8')
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: Consolas, Monaco, monospace; font-size: 13px; line-height: 1.5; padding: 16px; margin: 0; white-space: pre-wrap; word-break: break-all; color: #1e293b; }
+        </style></head><body>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</body></html>`
+      }
+    } catch (e: any) {
+      return `<p style="color:red">预览失败: ${e.message}</p>`
+    }
+  })
+
+  // 读取文件为 base64（供 docx-preview 等前端库使用）
+  ipcMain.handle('api:read-file-base64', async (_, filePath: string) => {
+    try {
+      const buffer = await fs.promises.readFile(filePath)
+      return buffer.toString('base64')
+    } catch (e: any) {
+      return null
+    }
+  })
+
   // 获取已生成的文件列表（支持按会话过滤）
   ipcMain.handle('api:get-generated-files', async (_, sessionId?: string) => {
     try {

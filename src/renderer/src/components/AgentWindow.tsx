@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useAppStore } from '../hooks/useAppStore'
 import { ChatPage } from '../pages/ChatPage'
 import { ControlPage } from '../pages/ControlPage'
@@ -57,6 +57,177 @@ export function AgentWindow(): React.JSX.Element {
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
 
+  // ── 已生成文件 & 预览面板状态 ──
+  const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
+  const [showFilePanel, setShowFilePanel] = useState(false)
+  const [previewFile, setPreviewFile] = useState<{ name: string; path: string; size: number } | null>(null)
+  const [previewContent, setPreviewContent] = useState<string>('')
+  const [previewHtml, setPreviewHtml] = useState<string>('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const docxContainerRef = useRef<HTMLDivElement>(null)
+  const sheetContainerRef = useRef<HTMLDivElement>(null)
+  const [filePanelWidth, setFilePanelWidth] = useState(320)
+  const isDraggingRef = useRef(false)
+  const dragStartXRef = useRef(0)
+  const dragStartWidthRef = useRef(0)
+
+  // 拖拽调整面板宽度
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return
+      const delta = dragStartXRef.current - e.clientX
+      const newWidth = Math.max(240, Math.min(800, dragStartWidthRef.current + delta))
+      setFilePanelWidth(newWidth)
+    }
+    const handleMouseUp = () => {
+      isDraggingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  const loadGeneratedFiles = async () => {
+    if (window.api?.getGeneratedFiles) {
+      const files = await window.api.getGeneratedFiles(activeSessionId)
+      setGeneratedFiles(files)
+    }
+  }
+
+  useEffect(() => {
+    loadGeneratedFiles()
+    if (window.api?.onGeneratedFileUpdated) {
+      const unsub = window.api.onGeneratedFileUpdated(() => {
+        loadGeneratedFiles()
+        setShowFilePanel(true)
+      })
+      return unsub
+    }
+  }, [activeSessionId])
+
+  // 点击文件 → 加载预览内容
+  const handlePreviewFile = async (f: { name: string; path: string; size: number }) => {
+    setPreviewFile(f)
+    if (filePanelWidth < 380) setFilePanelWidth(420)
+    setPreviewContent('')
+    setPreviewHtml('')
+    setPreviewLoading(true)
+
+    const ext = f.name.split('.').pop()?.toLowerCase() || ''
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+    if (imageExts.includes(ext)) {
+      setPreviewLoading(false)
+      return
+    }
+
+    try {
+      if (ext === 'docx') {
+        const base64 = await window.api.readFileBase64(f.path)
+        // 先让容器渲染出来，再填充内容
+        setPreviewLoading(false)
+        // 等一帧确保 DOM 更新
+        await new Promise(r => setTimeout(r, 50))
+        if (base64 && docxContainerRef.current) {
+          const binary = atob(base64)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+          const { renderAsync } = await import('docx-preview')
+          docxContainerRef.current.innerHTML = ''
+          try {
+            await renderAsync(bytes.buffer, docxContainerRef.current, undefined, {
+              className: 'docx-preview',
+              inWrapper: true,
+              ignoreWidth: false,
+              ignoreHeight: false,
+              ignoreFonts: false,
+              breakPages: false,
+              ignoreLastRenderedPageBreak: true,
+              trimXmlDeclaration: true
+            })
+            console.log('[docx-preview] rendered successfully')
+          } catch (renderErr) {
+            console.error('[docx-preview] render error:', renderErr)
+            docxContainerRef.current.innerHTML = '<p style="color:red;padding:16px">docx 渲染失败</p>'
+          }
+        } else {
+          console.log('[docx-preview] base64 or container missing', { hasBase64: !!base64, hasContainer: !!docxContainerRef.current })
+        }
+      } else if (['xlsx', 'xls'].includes(ext)) {
+        const base64 = await window.api.readFileBase64(f.path)
+        setPreviewLoading(false)
+        await new Promise(r => setTimeout(r, 50))
+        if (base64 && sheetContainerRef.current) {
+          const binary = atob(base64)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+          const XLSX = await import('xlsx')
+          const workbook = XLSX.read(bytes.buffer, { type: 'array' })
+          const sheetData = workbook.SheetNames.map(name => {
+            const sheet = workbook.Sheets[name]
+            const json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][]
+            const rows: any = {}
+            json.forEach((row, ri) => {
+              const cells: any = {}
+              row.forEach((cell, ci) => { cells[ci] = { text: String(cell ?? '') } })
+              rows[ri] = { cells }
+            })
+            return { name, rows }
+          })
+          const xSpreadsheet = (await import('x-data-spreadsheet')).default
+          sheetContainerRef.current.innerHTML = ''
+          new xSpreadsheet(sheetContainerRef.current, {
+            showToolbar: false,
+            showBottomBar: true,
+            view: { height: () => sheetContainerRef.current!.clientHeight, width: () => sheetContainerRef.current!.clientWidth }
+          }).loadData(sheetData)
+        }
+      } else if (ext === 'csv') {
+        setPreviewLoading(false)
+        await new Promise(r => setTimeout(r, 50))
+        const content = await window.api.parseFileContent(f.path)
+        if (content && sheetContainerRef.current) {
+          const Papa = (await import('papaparse')).default
+          const parsed = Papa.parse(content, { header: false, skipEmptyLines: true })
+          const rows: any = {}
+          ;(parsed.data as any[][]).forEach((row, ri) => {
+            const cells: any = {}
+            row.forEach((cell: any, ci: number) => { cells[ci] = { text: String(cell ?? '') } })
+            rows[ri] = { cells }
+          })
+          const xSpreadsheet = (await import('x-data-spreadsheet')).default
+          sheetContainerRef.current.innerHTML = ''
+          new xSpreadsheet(sheetContainerRef.current, {
+            showToolbar: false,
+            showBottomBar: false,
+            view: { height: () => sheetContainerRef.current!.clientHeight, width: () => sheetContainerRef.current!.clientWidth }
+          }).loadData([{ name: 'Sheet1', rows }])
+        }
+      } else {
+        const content = await window.api.parseFileContent(f.path)
+        setPreviewContent(content || '[文件内容为空]')
+        setPreviewLoading(false)
+      }
+    } catch (e) {
+      console.error('[preview] error:', e)
+      setPreviewContent('[读取文件失败]')
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleDeleteFile = async (f: { path: string }) => {
+    await window.api.deleteGeneratedFile(f.path, activeSessionId)
+    loadGeneratedFiles()
+    if (previewFile?.path === f.path) {
+      setPreviewFile(null)
+      setPreviewContent('')
+    }
+  }
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) {
@@ -73,7 +244,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const renderPage = (): React.JSX.Element => {
     switch (activeTab) {
-      case 'chat': return <ChatPage store={store} />
+      case 'chat': return <ChatPage store={store} generatedFiles={generatedFiles} onDeleteFile={handleDeleteFile} />
       case 'control': return <ControlPage store={store} />
       case 'agent': return <AgentPage store={store} />
       case 'logs': return <LogsPage store={store} />
@@ -220,6 +391,15 @@ export function AgentWindow(): React.JSX.Element {
           {activeTab === 'chat' && (
             <div style={{ position: 'relative' }} ref={historyDropdownRef}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {generatedFiles.length > 0 && (
+                  <button
+                    className={`history-btn ${showFilePanel ? 'active' : ''}`}
+                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setPreviewContent('') } }}
+                    title="查看已生成的文件"
+                  >
+                    📁 {generatedFiles.length}
+                  </button>
+                )}
                 <button
                   className="history-btn"
                   onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}
@@ -258,8 +438,203 @@ export function AgentWindow(): React.JSX.Element {
             </div>
           )}
         </div>
-        <div className={`content-body tab-${activeTab}`}>
-          {renderPage()}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div className={`content-body tab-${activeTab}`} style={{ flex: 1, minWidth: 0 }}>
+            {renderPage()}
+          </div>
+
+          {/* 右侧文件面板 */}
+          {showFilePanel && activeTab === 'chat' && (
+            <>
+              {/* 拖拽调整条 */}
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  isDraggingRef.current = true
+                  dragStartXRef.current = e.clientX
+                  dragStartWidthRef.current = filePanelWidth
+                  document.body.style.cursor = 'col-resize'
+                  document.body.style.userSelect = 'none'
+                }}
+                style={{
+                  width: '5px',
+                  cursor: 'col-resize',
+                  background: 'var(--border-color)',
+                  flexShrink: 0,
+                  transition: 'background 0.15s',
+                  position: 'relative'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--text-muted)'}
+                onMouseLeave={e => { if (!isDraggingRef.current) e.currentTarget.style.background = 'var(--border-color)' }}
+              />
+              <div style={{
+              width: `${filePanelWidth}px`,
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'var(--bg-card)',
+              overflow: 'hidden',
+              flexShrink: 0
+            }}>
+              {/* 面板头部 */}
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: '13px', fontWeight: 600 }}>📁 已生成的文件 ({generatedFiles.length})</span>
+                <button
+                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setPreviewContent('') }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
+                >✕</button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                {/* 上方：文件 Tab 栏 */}
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'nowrap',
+                  overflowX: 'auto',
+                  overflowY: 'hidden',
+                  flexShrink: 0,
+                  gap: '2px',
+                  padding: '6px 8px 0',
+                  borderBottom: '1px solid var(--border-color)',
+                  background: 'var(--bg-menu-hover, rgba(128,128,128,0.03))'
+                }}>
+                  {generatedFiles.map((f, i) => {
+                    const isActive = previewFile?.path === f.path
+                    const ext = f.name.split('.').pop()?.toLowerCase() || ''
+                    const extColors: Record<string, string> = {
+                      docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
+                      pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
+                      html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
+                      png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
+                      zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
+                    }
+                    const color = extColors[ext] || '#6B7280'
+                    const label = ext.toUpperCase().slice(0, 4)
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => handlePreviewFile(f)}
+                        title={`${f.name} (${(f.size / 1024).toFixed(1)} KB)`}
+                        style={{
+                          padding: '4px 8px',
+                          cursor: 'pointer',
+                          borderRadius: '6px 6px 0 0',
+                          border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
+                          borderBottom: isActive ? '1px solid var(--bg-card)' : '1px solid transparent',
+                          background: isActive ? 'var(--bg-card)' : 'transparent',
+                          color: isActive ? 'var(--text-menu-active)' : 'var(--text-muted)',
+                          fontSize: '11px',
+                          fontWeight: isActive ? 600 : 400,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          maxWidth: '150px',
+                          transition: 'all 0.15s',
+                          marginBottom: '-1px',
+                          position: 'relative' as const,
+                          zIndex: isActive ? 1 : 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--bg-menu-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
+                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
+                      >
+                        <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                          <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+                            <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1"/>
+                            <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB"/>
+                            <rect x="0" y="12" width="16" height="6" rx="0" fill={color}/>
+                            <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
+                          </svg>
+                        </span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // 软删除：只关闭这个 Tab 的预览，不删除文件
+                            if (previewFile?.path === f.path) {
+                              setPreviewFile(null)
+                              setPreviewContent('')
+                              setPreviewHtml('')
+                            }
+                          }}
+                          title="关闭预览"
+                          style={{
+                            fontSize: '10px',
+                            flexShrink: 0,
+                            opacity: 0.5,
+                            cursor: 'pointer',
+                            padding: '0 2px',
+                            borderRadius: '3px',
+                            lineHeight: 1
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
+                        >✕</span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* 下方：预览区域 */}
+                {previewFile && (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                    {/* 预览头部 */}
+                    <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                      <span title={previewFile.name} style={{ fontSize: '11px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{previewFile.name}</span>
+                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
+                        <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
+                        <button onClick={() => handleDeleteFile(previewFile)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
+                        <button onClick={() => { setPreviewFile(null); setPreviewContent('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}>✕</button>
+                      </div>
+                    </div>
+
+                    {/* 预览正文 */}
+                    <div ref={(el) => {
+                      // 监听容器尺寸变化，动态调整预览缩放
+                      if (el && previewFile) {
+                        const resizeHandler = () => {
+                          const docxEl = el.querySelector('.docx-preview-container') as HTMLElement
+                          if (docxEl && docxEl.scrollWidth > el.clientWidth) {
+                            const scale = el.clientWidth / docxEl.scrollWidth
+                            docxEl.style.transform = `scale(${Math.min(1, scale)})`
+                            docxEl.style.transformOrigin = 'top left'
+                            docxEl.style.width = `${100 / Math.min(1, scale)}%`
+                          }
+                        }
+                        const observer = new ResizeObserver(resizeHandler)
+                        observer.observe(el)
+                        // 初始触发
+                        setTimeout(resizeHandler, 200)
+                      }
+                    }} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+                      {previewLoading && (
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
+                      )}
+                      {(() => {
+                        const ext = previewFile.name.split('.').pop()?.toLowerCase() || ''
+                        const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+                        if (imageExts.includes(ext)) {
+                          return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
+                        }
+                        if (ext === 'docx') {
+                          return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff', transformOrigin: 'top left' }} />
+                        }
+                        if (['xlsx', 'xls', 'csv'].includes(ext)) {
+                          return <div ref={sheetContainerRef} style={{ width: '100%', height: '100%' }} className="sheet-preview-container" />
+                        }
+                        if (previewContent) {
+                          return <pre style={{ margin: 0, padding: '12px', fontFamily: "'Consolas', 'Monaco', monospace", fontSize: '11.5px', lineHeight: '1.5', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{previewContent}</pre>
+                        }
+                        return <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', marginTop: '40px' }}>无法预览此文件类型</div>
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            </>
+          )}
         </div>
       </div>
 
