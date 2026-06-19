@@ -60,6 +60,7 @@ export function AgentWindow(): React.JSX.Element {
   // ── 已生成文件 & 预览面板状态 ──
   const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
   const [showFilePanel, setShowFilePanel] = useState(false)
+  const [openTabs, setOpenTabs] = useState<{ name: string; path: string; size: number; time: string }[]>([])
   const [previewFile, setPreviewFile] = useState<{ name: string; path: string; size: number } | null>(null)
   const [previewContent, setPreviewContent] = useState<string>('')
   const [previewHtml, setPreviewHtml] = useState<string>('')
@@ -101,6 +102,11 @@ export function AgentWindow(): React.JSX.Element {
 
   useEffect(() => {
     loadGeneratedFiles()
+    // 切换会话时重置预览状态
+    setOpenTabs([])
+    setPreviewFile(null)
+    setPreviewContent('')
+    setPreviewHtml('')
     if (window.api?.onGeneratedFileUpdated) {
       const unsub = window.api.onGeneratedFileUpdated(() => {
         loadGeneratedFiles()
@@ -113,6 +119,12 @@ export function AgentWindow(): React.JSX.Element {
   // 点击文件 → 加载预览内容
   const handlePreviewFile = async (f: { name: string; path: string; size: number }) => {
     setPreviewFile(f)
+    // 将文件添加到已打开的 Tab 列表（如尚未存在）
+    setOpenTabs(prev => {
+      if (prev.some(t => t.path === f.path)) return prev
+      const fullFile = generatedFiles.find(g => g.path === f.path)
+      return [...prev, fullFile || { ...f, time: '' }]
+    })
     if (filePanelWidth < 380) setFilePanelWidth(420)
     setPreviewContent('')
     setPreviewHtml('')
@@ -222,9 +234,18 @@ export function AgentWindow(): React.JSX.Element {
   const handleDeleteFile = async (f: { path: string }) => {
     await window.api.deleteGeneratedFile(f.path, activeSessionId)
     loadGeneratedFiles()
+    // 从已打开的 Tab 中移除
+    const remaining = openTabs.filter(t => t.path !== f.path)
+    setOpenTabs(remaining)
     if (previewFile?.path === f.path) {
-      setPreviewFile(null)
-      setPreviewContent('')
+      if (remaining.length === 0) {
+        setPreviewFile(null)
+        setPreviewContent('')
+        setPreviewHtml('')
+      } else {
+        const next = remaining[remaining.length - 1]
+        handlePreviewFile(next)
+      }
     }
   }
 
@@ -394,7 +415,7 @@ export function AgentWindow(): React.JSX.Element {
                 {generatedFiles.length > 0 && (
                   <button
                     className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setPreviewContent('') } }}
+                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setPreviewContent(''); setPreviewHtml(''); setOpenTabs([]) } }}
                     title="查看已生成的文件"
                   >
                     📁 {generatedFiles.length}
@@ -479,156 +500,240 @@ export function AgentWindow(): React.JSX.Element {
               <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                 <span style={{ fontSize: '13px', fontWeight: 600 }}>📁 已生成的文件 ({generatedFiles.length})</span>
                 <button
-                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setPreviewContent('') }}
+                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setPreviewContent(''); setPreviewHtml(''); setOpenTabs([]) }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
                 >✕</button>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                {/* 上方：文件 Tab 栏 */}
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'nowrap',
-                  overflowX: 'auto',
-                  overflowY: 'hidden',
-                  flexShrink: 0,
-                  gap: '2px',
-                  padding: '6px 8px 0',
-                  borderBottom: '1px solid var(--border-color)',
-                  background: 'var(--bg-menu-hover, rgba(128,128,128,0.03))'
-                }}>
-                  {generatedFiles.map((f, i) => {
-                    const isActive = previewFile?.path === f.path
-                    const ext = f.name.split('.').pop()?.toLowerCase() || ''
-                    const extColors: Record<string, string> = {
-                      docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
-                      pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
-                      html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
-                      png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
-                      zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
-                    }
-                    const color = extColors[ext] || '#6B7280'
-                    const label = ext.toUpperCase().slice(0, 4)
-                    return (
-                      <div
-                        key={i}
-                        onClick={() => handlePreviewFile(f)}
-                        title={`${f.name} (${(f.size / 1024).toFixed(1)} KB)`}
-                        style={{
-                          padding: '4px 8px',
-                          cursor: 'pointer',
-                          borderRadius: '6px 6px 0 0',
-                          border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
-                          borderBottom: isActive ? '1px solid var(--bg-card)' : '1px solid transparent',
-                          background: isActive ? 'var(--bg-card)' : 'transparent',
-                          color: isActive ? 'var(--text-menu-active)' : 'var(--text-muted)',
-                          fontSize: '11px',
-                          fontWeight: isActive ? 600 : 400,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          maxWidth: '150px',
-                          transition: 'all 0.15s',
-                          marginBottom: '-1px',
-                          position: 'relative' as const,
-                          zIndex: isActive ? 1 : 0,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}
-                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--bg-menu-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
-                      >
-                        <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                          <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
-                            <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1"/>
-                            <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB"/>
-                            <rect x="0" y="12" width="16" height="6" rx="0" fill={color}/>
-                            <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
-                          </svg>
-                        </span>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            // 软删除：只关闭这个 Tab 的预览，不删除文件
-                            if (previewFile?.path === f.path) {
-                              setPreviewFile(null)
-                              setPreviewContent('')
-                              setPreviewHtml('')
+                {openTabs.length > 0 ? (
+                  <>
+                    {/* 有已打开的 Tab 时：上方 Tab 栏 + 下方预览区域 */}
+                    <div style={{
+                      display: 'flex',
+                      flexWrap: 'nowrap',
+                      overflowX: 'auto',
+                      overflowY: 'hidden',
+                      flexShrink: 0,
+                      gap: '2px',
+                      padding: '6px 8px 0',
+                      borderBottom: '1px solid var(--border-color)',
+                      background: 'var(--bg-menu-hover, rgba(128,128,128,0.03))'
+                    }}>
+                      {openTabs.map((f, i) => {
+                        const isActive = previewFile?.path === f.path
+                        const ext = f.name.split('.').pop()?.toLowerCase() || ''
+                        const extColors: Record<string, string> = {
+                          docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
+                          pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
+                          html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
+                          png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
+                          zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
+                        }
+                        const color = extColors[ext] || '#6B7280'
+                        const label = ext.toUpperCase().slice(0, 4)
+                        return (
+                          <div
+                            key={f.path}
+                            onClick={() => handlePreviewFile(f)}
+                            title={`${f.name} (${(f.size / 1024).toFixed(1)} KB)`}
+                            style={{
+                              padding: '4px 8px',
+                              cursor: 'pointer',
+                              borderRadius: '6px 6px 0 0',
+                              border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
+                              borderBottom: isActive ? '1px solid var(--bg-card)' : '1px solid transparent',
+                              background: isActive ? 'var(--bg-card)' : 'transparent',
+                              color: isActive ? 'var(--text-menu-active)' : 'var(--text-muted)',
+                              fontSize: '11px',
+                              fontWeight: isActive ? 600 : 400,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '150px',
+                              transition: 'all 0.15s',
+                              marginBottom: '-1px',
+                              position: 'relative' as const,
+                              zIndex: isActive ? 1 : 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--bg-menu-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
+                            onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
+                          >
+                            <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                              <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+                                <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1"/>
+                                <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB"/>
+                                <rect x="0" y="12" width="16" height="6" rx="0" fill={color}/>
+                                <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
+                              </svg>
+                            </span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                // 软删除：从 Tab 列表移除
+                                const remaining = openTabs.filter(t => t.path !== f.path)
+                                setOpenTabs(remaining)
+                                if (remaining.length === 0) {
+                                  // 最后一个 Tab 关闭 → 回到文件列表视图
+                                  setPreviewFile(null)
+                                  setPreviewContent('')
+                                  setPreviewHtml('')
+                                } else if (previewFile?.path === f.path) {
+                                  // 关闭的是当前激活的 Tab → 切换到最后一个 Tab
+                                  const next = remaining[remaining.length - 1]
+                                  handlePreviewFile(next)
+                                }
+                              }}
+                              title="关闭 Tab"
+                              style={{
+                                fontSize: '10px',
+                                flexShrink: 0,
+                                opacity: 0.5,
+                                cursor: 'pointer',
+                                padding: '0 2px',
+                                borderRadius: '3px',
+                                lineHeight: 1
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
+                              onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
+                            >✕</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* 预览区域 */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                      {/* 预览头部 */}
+                      <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                        <span title={previewFile.name} style={{ fontSize: '11px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{previewFile.name}</span>
+                        <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
+                          <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
+                          <button onClick={() => handleDeleteFile(previewFile)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
+                          <button onClick={() => {
+                            const remaining = openTabs.filter(t => t.path !== previewFile.path)
+                            setOpenTabs(remaining)
+                            if (remaining.length === 0) {
+                              setPreviewFile(null); setPreviewContent(''); setPreviewHtml('')
+                            } else {
+                              const next = remaining[remaining.length - 1]
+                              handlePreviewFile(next)
                             }
-                          }}
-                          title="关闭预览"
-                          style={{
-                            fontSize: '10px',
-                            flexShrink: 0,
-                            opacity: 0.5,
-                            cursor: 'pointer',
-                            padding: '0 2px',
-                            borderRadius: '3px',
-                            lineHeight: 1
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
-                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
-                        >✕</span>
+                          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}>✕</button>
+                        </div>
                       </div>
-                    )
-                  })}
-                </div>
 
-                {/* 下方：预览区域 */}
-                {previewFile && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                    {/* 预览头部 */}
-                    <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-                      <span title={previewFile.name} style={{ fontSize: '11px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{previewFile.name}</span>
-                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
-                        <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
-                        <button onClick={() => handleDeleteFile(previewFile)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
-                        <button onClick={() => { setPreviewFile(null); setPreviewContent('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}>✕</button>
-                      </div>
-                    </div>
-
-                    {/* 预览正文 */}
-                    <div ref={(el) => {
-                      // 监听容器尺寸变化，动态调整预览缩放
-                      if (el && previewFile) {
-                        const resizeHandler = () => {
-                          const docxEl = el.querySelector('.docx-preview-container') as HTMLElement
-                          if (docxEl && docxEl.scrollWidth > el.clientWidth) {
-                            const scale = el.clientWidth / docxEl.scrollWidth
-                            docxEl.style.transform = `scale(${Math.min(1, scale)})`
-                            docxEl.style.transformOrigin = 'top left'
-                            docxEl.style.width = `${100 / Math.min(1, scale)}%`
+                      {/* 预览正文 */}
+                      <div ref={(el) => {
+                        // 监听容器尺寸变化，动态调整预览缩放
+                        if (el && previewFile) {
+                          const resizeHandler = () => {
+                            const docxEl = el.querySelector('.docx-preview-container') as HTMLElement
+                            if (docxEl && docxEl.scrollWidth > el.clientWidth) {
+                              const scale = el.clientWidth / docxEl.scrollWidth
+                              docxEl.style.transform = `scale(${Math.min(1, scale)})`
+                              docxEl.style.transformOrigin = 'top left'
+                              docxEl.style.width = `${100 / Math.min(1, scale)}%`
+                            }
                           }
+                          const observer = new ResizeObserver(resizeHandler)
+                          observer.observe(el)
+                          // 初始触发
+                          setTimeout(resizeHandler, 200)
                         }
-                        const observer = new ResizeObserver(resizeHandler)
-                        observer.observe(el)
-                        // 初始触发
-                        setTimeout(resizeHandler, 200)
-                      }
-                    }} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-                      {previewLoading && (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
-                      )}
-                      {(() => {
-                        const ext = previewFile.name.split('.').pop()?.toLowerCase() || ''
-                        const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
-                        if (imageExts.includes(ext)) {
-                          return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
-                        }
-                        if (ext === 'docx') {
-                          return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff', transformOrigin: 'top left' }} />
-                        }
-                        if (['xlsx', 'xls', 'csv'].includes(ext)) {
-                          return <div ref={sheetContainerRef} style={{ width: '100%', height: '100%' }} className="sheet-preview-container" />
-                        }
-                        if (previewContent) {
-                          return <pre style={{ margin: 0, padding: '12px', fontFamily: "'Consolas', 'Monaco', monospace", fontSize: '11.5px', lineHeight: '1.5', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{previewContent}</pre>
-                        }
-                        return <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', marginTop: '40px' }}>无法预览此文件类型</div>
-                      })()}
+                      }} style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+                        {previewLoading && (
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
+                        )}
+                        {(() => {
+                          const ext = previewFile.name.split('.').pop()?.toLowerCase() || ''
+                          const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+                          if (imageExts.includes(ext)) {
+                            return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
+                          }
+                          if (ext === 'docx') {
+                            return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff', transformOrigin: 'top left' }} />
+                          }
+                          if (['xlsx', 'xls', 'csv'].includes(ext)) {
+                            return <div ref={sheetContainerRef} style={{ width: '100%', height: '100%' }} className="sheet-preview-container" />
+                          }
+                          if (previewContent) {
+                            return <pre style={{ margin: 0, padding: '12px', fontFamily: "'Consolas', 'Monaco', monospace", fontSize: '11.5px', lineHeight: '1.5', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{previewContent}</pre>
+                          }
+                          return <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', marginTop: '40px' }}>无法预览此文件类型</div>
+                        })()}
+                      </div>
                     </div>
+                  </>
+                ) : (
+                  /* 无预览文件时：垂直文件列表 */
+                  <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+                    {generatedFiles.map((f, i) => {
+                      const ext = f.name.split('.').pop()?.toLowerCase() || ''
+                      const extColors: Record<string, string> = {
+                        docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
+                        pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
+                        html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
+                        png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
+                        zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
+                      }
+                      const color = extColors[ext] || '#6B7280'
+                      const label = ext.toUpperCase().slice(0, 4)
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => handlePreviewFile(f)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '8px 10px',
+                            cursor: 'pointer',
+                            borderRadius: '6px',
+                            transition: 'background 0.15s',
+                            marginBottom: '2px'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-menu-hover)' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                        >
+                          <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                            <svg width="20" height="22" viewBox="0 0 16 18" fill="none">
+                              <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1"/>
+                              <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB"/>
+                              <rect x="0" y="12" width="16" height="6" rx="0" fill={color}/>
+                              <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
+                            </svg>
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{(f.size / 1024).toFixed(1)} KB</div>
+                          </div>
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteFile(f)
+                            }}
+                            title="删除文件"
+                            style={{
+                              fontSize: '11px',
+                              opacity: 0,
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              borderRadius: '3px',
+                              color: 'var(--text-muted)',
+                              transition: 'opacity 0.15s',
+                              flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; e.currentTarget.style.color = '#ef4444' }}
+                            onMouseLeave={e => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                          >🗑</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
