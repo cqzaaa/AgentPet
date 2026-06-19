@@ -926,9 +926,15 @@ export function useAppStore() {
         const imageBlocks: any[] = []
 
         if (m.fileInfo) {
-          textContent = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]\n${m.fileInfo.content}`
+          const isDocx = m.fileInfo.name?.toLowerCase().endsWith('.docx')
+          const pathNote = isDocx && m.fileInfo.path ? `\n[源文件路径: ${m.fileInfo.path}]` : ''
+          textContent = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]${pathNote}\n${m.fileInfo.content}`
         } else if (m.fileInfos && m.fileInfos.length > 0) {
-          const attachmentsText = m.fileInfos.filter((f: any) => f.content).map((f: any) => `--- [附带文件: ${f.name}]\n${f.content}`).join('\n\n')
+          const attachmentsText = m.fileInfos.filter((f: any) => f.content).map((f: any) => {
+            const isDocx = f.name?.toLowerCase().endsWith('.docx')
+            const pathNote = isDocx && f.path ? `\n[源文件路径: ${f.path}]` : ''
+            return `--- [附带文件: ${f.name}]${pathNote}\n${f.content}`
+          }).join('\n\n')
           if (attachmentsText) {
              textContent = `${m.text}\n\n${attachmentsText}`
           }

@@ -1985,53 +1985,13 @@ app.whenReady().then(() => {
       type: 'function',
       function: {
         name: 'run_terminal_command',
-        description: '在当前选定的工作空间目录下执行一条终端命令，并返回输出结果。只能在工作空间已选择时使用。',
+        description: '执行一条终端命令并返回输出结果。默认在系统临时工作目录下执行。',
         parameters: {
           type: 'object',
           properties: {
             command: { type: 'string', description: '要执行的终端命令内容' }
           },
           required: ['command']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'read_workspace_file',
-        description: '读取当前工作空间目录下指定文件的文本内容。',
-        parameters: {
-          type: 'object',
-          properties: {
-            relative_path: { type: 'string', description: '文件相对于工作空间根目录的相对路径' }
-          },
-          required: ['relative_path']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'write_workspace_file',
-        description: '在当前工作空间目录下创建或覆写指定文件，并写入文本内容。',
-        parameters: {
-          type: 'object',
-          properties: {
-            relative_path: { type: 'string', description: '文件相对于工作空间根目录的相对路径' },
-            content: { type: 'string', description: '要写入的文本内容' }
-          },
-          required: ['relative_path', 'content']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'list_workspace_files',
-        description: '列出当前工作空间目录下的所有文件和文件夹列表。',
-        parameters: {
-          type: 'object',
-          properties: {}
         }
       }
     },
@@ -2114,10 +2074,124 @@ app.whenReady().then(() => {
           type: 'object',
           properties: {
             file_name: { type: 'string', description: '文件名（含扩展名），例如 "report.md"、"data.csv"、"analysis.xlsx"、"报告.docx"、"slides.pptx"' },
-            content: { type: 'string', description: '文件的文本内容。对于 xlsx 格式，传入 CSV 格式的数据内容。对于 docx/pdf/pptx 格式，传入纯文本内容，会自动转为对应格式。' },
+            content: { type: 'string', description: '文件内容。对于 xlsx 格式，支持两种格式：1) CSV 文本（简单数据）2) JSON 字符串（支持样式/公式/多sheet，格式：{"sheets":[{"name":"Sheet1","data":[["A1值","B1值"]],"styles":{"A1":{"bold":true,"bgColor":"FFFF00"}},"formulas":{"B2":"=SUM(B1)"},"merge":["A1:C1"],"colWidths":{"A":20}}]}）。对于 docx/pdf/pptx 格式，传入纯文本内容。' },
             file_type: { type: 'string', enum: ['text', 'excel', 'docx', 'pdf', 'pptx'], description: '文件类型：text（文本/代码）、excel（Excel 表格）、docx（Word 文档）、pdf（PDF 文档）、pptx（PPT 演示文稿）。默认 text。' }
           },
           required: ['file_name', 'content']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'modify_docx_file',
+        description: '修改已上传的 docx 文件内容并保留原始排版格式。支持修改文字、设置样式（字体颜色/加粗/字号等）、嵌入图片。当用户上传 docx 文件并要求修改时，必须使用此工具而不是 generate_file。',
+        parameters: {
+          type: 'object',
+          properties: {
+            source_path: { type: 'string', description: '原始 docx 文件的绝对路径（从用户上传的文件信息中获取）' },
+            output_name: { type: 'string', description: '输出文件名，如 "修改后的报告.docx"' },
+            modifications: {
+              type: 'array',
+              description: '文本修改指令数组。每个元素包含 search（要查找的原文）、replace（替换后的新文）、可选的 style（样式修改）。',
+              items: {
+                type: 'object',
+                properties: {
+                  search: { type: 'string', description: '要查找的原始文本（必须与文档中的文字完全一致）' },
+                  replace: { type: 'string', description: '替换后的新文本' },
+                  paragraphStyle: { type: 'string', description: '可选。限定只在指定段落样式中搜索。常见值："Heading1"（一级标题）、"Heading2"（二级标题）、"Heading3"（三级标题）、"Normal"（正文）、"Title"（文档标题）。不指定则在全文搜索。' },
+                  style: {
+                    type: 'object',
+                    description: '可选。对替换后文字应用的样式。',
+                    properties: {
+                      bold: { type: 'boolean', description: '是否加粗' },
+                      italic: { type: 'boolean', description: '是否斜体' },
+                      underline: { type: 'boolean', description: '是否下划线' },
+                      color: { type: 'string', description: '字体颜色，十六进制如 "FF0000"（红色）' },
+                      fontSize: { type: 'number', description: '字号（半磅为单位，如 24 = 12pt）' },
+                      highlight: { type: 'string', description: '高亮背景色，如 "yellow"、"cyan"' }
+                    }
+                  }
+                },
+                required: ['search', 'replace']
+              }
+            },
+            images: {
+              type: 'array',
+              description: '可选。图片嵌入指令数组。在指定文字位置插入图片。',
+              items: {
+                type: 'object',
+                properties: {
+                  search_text: { type: 'string', description: '要替换为图片的文字（会从文档中删除这段文字，替换为图片）' },
+                  image_path: { type: 'string', description: '图片文件的绝对路径' },
+                  width: { type: 'number', description: '图片宽度（厘米），默认 10' },
+                  height: { type: 'number', description: '图片高度（厘米），默认 8' }
+                },
+                required: ['search_text', 'image_path']
+              }
+            }
+          },
+          required: ['source_path', 'output_name', 'modifications']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'modify_xlsx_file',
+        description: '修改已上传的 xlsx 文件内容，支持修改单元格值、设置样式（字体/颜色/边框/背景）、写入公式、合并单元格、添加新工作表。当用户上传 xlsx 文件并要求修改时，必须使用此工具。',
+        parameters: {
+          type: 'object',
+          properties: {
+            source_path: { type: 'string', description: '原始 xlsx 文件的绝对路径' },
+            output_name: { type: 'string', description: '输出文件名，如 "修改后的报表.xlsx"' },
+            modifications: {
+              type: 'array',
+              description: '单元格修改指令数组',
+              items: {
+                type: 'object',
+                properties: {
+                  sheet: { type: 'string', description: '工作表名称，默认第一个 sheet' },
+                  cell: { type: 'string', description: '单元格地址，如 "A1"、"B3"' },
+                  value: { description: '单元格值（字符串/数字/布尔），与 formula 二选一' },
+                  formula: { type: 'string', description: '公式，如 "=SUM(A1:A10)"，与 value 二选一' },
+                  style: {
+                    type: 'object',
+                    description: '可选。单元格样式。',
+                    properties: {
+                      bold: { type: 'boolean' },
+                      italic: { type: 'boolean' },
+                      fontSize: { type: 'number', description: '字号，如 12' },
+                      fontColor: { type: 'string', description: '字体颜色，十六进制如 "FF0000"' },
+                      bgColor: { type: 'string', description: '背景填充颜色，十六进制如 "FFFF00"' },
+                      borderStyle: { type: 'string', description: '边框样式：thin/medium/thick/dashed/dotted' },
+                      borderColor: { type: 'string', description: '边框颜色，十六进制' },
+                      align: { type: 'string', description: '水平对齐：left/center/right' },
+                      valign: { type: 'string', description: '垂直对齐：top/middle/bottom' },
+                      wrapText: { type: 'boolean', description: '自动换行' },
+                      numberFormat: { type: 'string', description: '数字格式，如 "#,##0.00"、"$#,##0"、"0%"' }
+                    }
+                  }
+                },
+                required: ['cell']
+              }
+            },
+            merge_cells: {
+              type: 'array',
+              description: '合并单元格区域数组，如 ["A1:C1", "D2:E2"]',
+              items: { type: 'string' }
+            },
+            add_sheet: {
+              type: 'string',
+              description: '新增工作表名称'
+            },
+            column_widths: {
+              type: 'object',
+              description: '列宽设置，如 {"A": 20, "B": 15}',
+              additionalProperties: { type: 'number' }
+            }
+          },
+          required: ['source_path', 'output_name', 'modifications']
         }
       }
     }
@@ -2530,13 +2604,81 @@ if (-not $task.Wait(15000)) {
         const filePath = join(genDir, safeName)
 
         if (file_type === 'excel') {
-          const XLSX = require('xlsx')
-          const wb = XLSX.utils.book_new()
-          const ws = XLSX.utils.aoa_to_sheet(
-            content.split('\n').map((row: string) => row.split(','))
-          )
-          XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-          XLSX.writeFile(wb, filePath)
+          const ExcelJS = require('exceljs')
+          const workbook = new ExcelJS.Workbook()
+
+          // 尝试解析为 JSON（支持样式/公式/多sheet）
+          let jsonData: any = null
+          try { jsonData = JSON.parse(content) } catch (e) { /* not JSON, treat as CSV */ }
+
+          if (jsonData && jsonData.sheets && Array.isArray(jsonData.sheets)) {
+            // JSON 模式：支持样式、公式、合并、列宽
+            for (const sheetDef of jsonData.sheets) {
+              const ws = workbook.addWorksheet(sheetDef.name || 'Sheet1')
+              // 写入数据
+              if (sheetDef.data && Array.isArray(sheetDef.data)) {
+                for (let r = 0; r < sheetDef.data.length; r++) {
+                  const row = sheetDef.data[r]
+                  for (let c = 0; c < row.length; c++) {
+                    const cell = ws.getCell(r + 1, c + 1)
+                    cell.value = row[c]
+                  }
+                }
+              }
+              // 应用样式
+              if (sheetDef.styles) {
+                for (const [cellRef, style] of Object.entries(sheetDef.styles as Record<string, any>)) {
+                  const cell = ws.getCell(cellRef)
+                  const font: any = {}
+                  if (style.bold) font.bold = true
+                  if (style.italic) font.italic = true
+                  if (style.fontSize) font.size = style.fontSize
+                  if (style.fontColor) font.color = { argb: 'FF' + String(style.fontColor).replace(/^#/, '') }
+                  if (Object.keys(font).length > 0) cell.font = font
+                  if (style.bgColor) {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + String(style.bgColor).replace(/^#/, '') } }
+                  }
+                  if (style.borderStyle) {
+                    const side = { style: style.borderStyle, color: style.borderColor ? { argb: 'FF' + String(style.borderColor).replace(/^#/, '') } : undefined }
+                    cell.border = { top: side, bottom: side, left: side, right: side }
+                  }
+                  const alignment: any = {}
+                  if (style.align) alignment.horizontal = style.align
+                  if (style.valign) alignment.vertical = style.valign
+                  if (style.wrapText) alignment.wrapText = true
+                  if (Object.keys(alignment).length > 0) cell.alignment = alignment
+                  if (style.numberFormat) cell.numFmt = style.numberFormat
+                }
+              }
+              // 写入公式
+              if (sheetDef.formulas) {
+                for (const [cellRef, formula] of Object.entries(sheetDef.formulas as Record<string, string>)) {
+                  ws.getCell(cellRef).value = { formula: String(formula).replace(/^=/, '') }
+                }
+              }
+              // 合并单元格
+              if (sheetDef.merge && Array.isArray(sheetDef.merge)) {
+                for (const range of sheetDef.merge) {
+                  ws.mergeCells(range)
+                }
+              }
+              // 列宽
+              if (sheetDef.colWidths) {
+                for (const [col, width] of Object.entries(sheetDef.colWidths as Record<string, number>)) {
+                  ws.getColumn(col).width = width
+                }
+              }
+            }
+          } else {
+            // CSV 模式（向后兼容）
+            const ws = workbook.addWorksheet('Sheet1')
+            const lines = content.split('\n')
+            for (const line of lines) {
+              ws.addRow(line.split(','))
+            }
+          }
+
+          await workbook.xlsx.writeFile(filePath)
         } else if (file_type === 'docx') {
           const docx = require('docx')
           const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx
@@ -2665,6 +2807,477 @@ if (-not $task.Wait(15000)) {
         }, null, 2)
       } catch (err: any) {
         return `生成文件失败：${err.message || err}`
+      }
+    }
+
+    // 修改 docx 文件（保留原始排版）
+    if (name === 'modify_docx_file') {
+      try {
+        const { source_path, output_name, modifications, images } = args
+        if (!source_path || !output_name) {
+          return '错误：缺少必要参数 source_path 或 output_name'
+        }
+        if (!modifications && !images) {
+          return '错误：至少需要提供 modifications 或 images 参数'
+        }
+        if (!fs.existsSync(source_path)) {
+          return `错误：源文件不存在：${source_path}`
+        }
+
+        const JSZip = require('jszip')
+        const path = require('path')
+        const buffer = await fs.promises.readFile(source_path)
+        const zip = await JSZip.loadAsync(buffer)
+
+        const docXmlFile = zip.file('word/document.xml')
+        if (!docXmlFile) {
+          return '错误：该 docx 文件结构异常，未找到 word/document.xml'
+        }
+
+        let xml = await docXmlFile.async('string')
+        console.log(`[modify_docx] xml length: ${xml.length}, first 500 chars: ${xml.substring(0, 500)}`)
+        let replaceCount = 0
+        let imageCount = 0
+
+        // ── 1. 文本替换 + 样式修改 ──
+        // 合并样式：在已有 rPr 基础上增/改指定属性，保留其余属性
+        const mergeRPr = (existingRPr: string, style: any): string => {
+          let rPr = existingRPr || '<w:rPr></w:rPr>'
+          // 确保有 <w:rPr> 包裹
+          if (!rPr.includes('<w:rPr>')) rPr = '<w:rPr></w:rPr>'
+
+          const upsert = (tag: string, value: string) => {
+            const tagBase = tag.replace(/\/.*$/, '') // '<w:b/>' -> '<w:b'
+            const re = new RegExp(`${tagBase}[^/]*?\\/>`, 'g')
+            if (rPr.match(re)) {
+              rPr = rPr.replace(re, value)
+            } else {
+              rPr = rPr.replace('</w:rPr>', value + '</w:rPr>')
+            }
+          }
+
+          if (style.bold !== undefined) {
+            if (style.bold) upsert('<w:b', '<w:b/><w:bCs/>')
+            else { rPr = rPr.replace(/<w:b\/>/g, '').replace(/<w:bCs\/>/g, '') }
+          }
+          if (style.italic !== undefined) {
+            if (style.italic) upsert('<w:i', '<w:i/><w:iCs/>')
+            else { rPr = rPr.replace(/<w:i\/>/g, '').replace(/<w:iCs\/>/g, '') }
+          }
+          if (style.underline !== undefined) {
+            upsert('<w:u', `<w:u w:val="${style.underline ? 'single' : 'none'}"/>`)
+          }
+          if (style.color) upsert('<w:color', `<w:color w:val="${style.color}"/>`)
+          if (style.fontSize) upsert('<w:sz', `<w:sz w:val="${style.fontSize}"/><w:szCs w:val="${style.fontSize}"/>`)
+          if (style.highlight) upsert('<w:highlight', `<w:highlight w:val="${style.highlight}"/>`)
+          return rPr
+        }
+
+        // 辅助函数：在 XML 中替换文字，支持跨 <w:r> 节点匹配
+        // 只在 <w:body> 内操作，排除元数据（dc:title 等）
+        // style: 要合并的样式对象（可选），合并到现有 rPr 上，不覆盖原有属性
+        const replaceInXml = (xmlStr: string, search: string, replaceText: string, style?: any): string => {
+          const bodyMatch = xmlStr.match(/([\s\S]*?<w:body[^>]*>)([\s\S]*?)(<\/w:body>[\s\S]*)/)
+          if (!bodyMatch) {
+            return replaceInXmlCore(xmlStr, search, replaceText, style)
+          }
+          const bodyPrefix = bodyMatch[1]
+          const bodyContent = bodyMatch[2]
+          const bodySuffix = bodyMatch[3]
+          const newBody = replaceInXmlCore(bodyContent, search, replaceText, style)
+          if (newBody !== bodyContent) return bodyPrefix + newBody + bodySuffix
+          return xmlStr
+        }
+
+        // 核心替换函数：在给定 XML 片段中搜索替换文字，支持跨 <w:r> 节点
+        // style: 要合并的样式对象（可选），会与 run 块的现有样式合并，不覆盖
+        const replaceInXmlCore = (xmlStr: string, search: string, replaceText: string, style?: any): string => {
+          // 快速路径：文字在同一个节点内
+          if (xmlStr.includes(search)) {
+            if (style) {
+              const runStart = '<w:r '
+              const runStartAlt = '<w:r>'
+              const runEnd = '</w:r>'
+              let pos = 0
+              while (pos < xmlStr.length) {
+                let rStart = xmlStr.indexOf(runStart, pos)
+                const rStartAlt = xmlStr.indexOf(runStartAlt, pos)
+                if (rStart === -1) rStart = rStartAlt
+                else if (rStartAlt !== -1 && rStartAlt < rStart) rStart = rStartAlt
+                if (rStart === -1) break
+
+                const rEnd = xmlStr.indexOf(runEnd, rStart)
+                if (rEnd === -1) break
+                const block = xmlStr.substring(rStart, rEnd + runEnd.length)
+
+                if (block.includes(search)) {
+                  let newBlock = block.replace(search, replaceText)
+                  // 提取现有 rPr，与新样式合并（保留原有字体、字号等）
+                  const existingRPrM = newBlock.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)
+                  const existingRPr = existingRPrM ? existingRPrM[0] : ''
+                  const mergedRPr = mergeRPr(existingRPr, style)
+                  if (existingRPr) {
+                    newBlock = newBlock.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, mergedRPr)
+                  } else {
+                    const rTagEnd = newBlock.indexOf('>')
+                    newBlock = newBlock.substring(0, rTagEnd + 1) + mergedRPr + newBlock.substring(rTagEnd + 1)
+                  }
+                  return xmlStr.substring(0, rStart) + newBlock + xmlStr.substring(rEnd + runEnd.length)
+                }
+                pos = rEnd + runEnd.length
+              }
+            }
+            return xmlStr.split(search).join(replaceText)
+          }
+
+          // 跨节点路径
+          const runStart = '<w:r '
+          const runStartAlt = '<w:r>'
+          const runEnd = '</w:r>'
+          const nodes: { type: 'run' | 'other'; content: string; text: string }[] = []
+          let scanPos = 0
+
+          while (scanPos < xmlStr.length) {
+            let rStart = xmlStr.indexOf(runStart, scanPos)
+            const rStartAlt = xmlStr.indexOf(runStartAlt, scanPos)
+            if (rStart === -1) rStart = rStartAlt
+            else if (rStartAlt !== -1 && rStartAlt < rStart) rStart = rStartAlt
+            if (rStart === -1) {
+              nodes.push({ type: 'other', content: xmlStr.substring(scanPos), text: '' })
+              break
+            }
+            if (rStart > scanPos) {
+              nodes.push({ type: 'other', content: xmlStr.substring(scanPos, rStart), text: '' })
+            }
+            const rEnd = xmlStr.indexOf(runEnd, rStart)
+            if (rEnd === -1) {
+              nodes.push({ type: 'other', content: xmlStr.substring(rStart), text: '' })
+              break
+            }
+            const block = xmlStr.substring(rStart, rEnd + runEnd.length)
+            const textM = block.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/)
+            nodes.push({ type: 'run', content: block, text: textM ? textM[1] : '' })
+            scanPos = rEnd + runEnd.length
+          }
+
+          const runNodes = nodes.filter(n => n.type === 'run')
+          let concat = ''
+          const charOffsets: number[] = []
+          for (const rn of runNodes) {
+            charOffsets.push(concat.length)
+            concat += rn.text
+          }
+
+          const idx = concat.indexOf(search)
+          if (idx === -1) return xmlStr
+
+          const endIdx = idx + search.length
+          const involved: number[] = []
+          for (let i = 0; i < runNodes.length; i++) {
+            const start = charOffsets[i]
+            const end = start + (runNodes[i].text?.length || 0)
+            if (start < endIdx && end > idx) involved.push(i)
+          }
+          if (involved.length === 0) return xmlStr
+
+          const first = involved[0]
+          const last = involved[involved.length - 1]
+          const prefix = (runNodes[first].text || '').slice(0, idx - charOffsets[first])
+          const suffix = (runNodes[last].text || '').slice(endIdx - charOffsets[last])
+
+          for (let i = 0; i <= last; i++) {
+            if (!involved.includes(i)) continue
+            const rn = runNodes[i]
+            if (i === first) {
+              let newContent = rn.content
+              newContent = newContent.replace(/(<w:t[^>]*>)[\s\S]*?(<\/w:t>)/, `$1${prefix}${replaceText}${suffix}$2`)
+              if (style) {
+                const existingRPrM = newContent.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)
+                const existingRPr = existingRPrM ? existingRPrM[0] : ''
+                const mergedRPr = mergeRPr(existingRPr, style)
+                if (existingRPr) {
+                  newContent = newContent.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, mergedRPr)
+                } else {
+                  const rTagEnd = newContent.indexOf('>')
+                  newContent = newContent.substring(0, rTagEnd + 1) + mergedRPr + newContent.substring(rTagEnd + 1)
+                }
+              }
+              rn.content = newContent
+              rn.text = prefix + replaceText + suffix
+            } else {
+              rn.content = rn.content.replace(/(<w:t[^>]*>)[\s\S]*?(<\/w:t>)/, '$1$2')
+              rn.text = ''
+            }
+          }
+
+          let result = ''
+          let runIdx = 0
+          for (const node of nodes) {
+            if (node.type === 'other') {
+              result += node.content
+            } else {
+              result += runNodes[runIdx].content
+              runIdx++
+            }
+          }
+          return result
+        }
+
+        if (modifications && Array.isArray(modifications)) {
+          for (const mod of modifications) {
+            if (!mod.search || typeof mod.search !== 'string') continue
+            const before = xml
+            const replacement = mod.replace ?? mod.search
+
+            if (mod.paragraphStyle) {
+              // 按段落样式过滤：只在匹配 <w:pStyle w:val="..."> 的段落中替换
+              const pStyleVal = mod.paragraphStyle
+              const paraRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g
+              let pm: RegExpExecArray | null
+              let newXml = ''
+              let lastPEnd = 0
+              while ((pm = paraRegex.exec(xml)) !== null) {
+                const paraBlock = pm[0]
+                const paraStart = pm.index
+                // 检查段落是否包含指定的 pStyle
+                const styleMatch = paraBlock.match(/<w:pStyle\s+w:val="([^"]+)"/)
+                const paraStyle = styleMatch ? styleMatch[1] : 'Normal'
+                // 保留段落前的非段落内容
+                newXml += xml.slice(lastPEnd, paraStart)
+                if (paraStyle === pStyleVal || paraStyle.toLowerCase() === pStyleVal.toLowerCase()) {
+                  // 在这个段落内执行替换
+                  newXml += replaceInXml(paraBlock, mod.search, replacement, rPr)
+                } else {
+                  newXml += paraBlock
+                }
+                lastPEnd = paraStart + paraBlock.length
+              }
+              newXml += xml.slice(lastPEnd)
+              xml = newXml
+            } else {
+              // 全文搜索替换
+              xml = replaceInXml(xml, mod.search, replacement, mod.style)
+            }
+
+            const changed = xml !== before
+            if (changed) replaceCount++
+            console.log(`[modify_docx] search="${mod.search}", pStyle=${mod.paragraphStyle || 'any'}, changed=${changed}`)
+          }
+        }
+
+        // ── 2. 图片嵌入 ──
+        if (images && Array.isArray(images)) {
+          // 读取或创建 rels 文件
+          let relsXml = ''
+          const relsFile = zip.file('word/_rels/document.xml.rels')
+          if (relsFile) {
+            relsXml = await relsFile.async('string')
+          } else {
+            relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+          }
+
+          // 读取或创建 [Content_Types].xml
+          let contentTypes = ''
+          const ctFile = zip.file('[Content_Types].xml')
+          if (ctFile) {
+            contentTypes = await ctFile.async('string')
+          }
+
+          for (const img of images) {
+            if (!img.search_text || !img.image_path) continue
+            if (!fs.existsSync(img.image_path)) continue
+
+            const imgBuffer = await fs.promises.readFile(img.image_path)
+            const imgExt = path.extname(img.image_path).toLowerCase().replace('.', '') || 'png'
+            const contentTypeMap: Record<string, string> = {
+              png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+              gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp'
+            }
+            const contentType = contentTypeMap[imgExt] || 'image/png'
+
+            // 计算图片序号
+            const existingMedia = Object.keys(zip.files).filter(f => f.startsWith('word/media/image'))
+            const imgIndex = existingMedia.length + 1
+            const imgFileName = `image${imgIndex}.${imgExt}`
+            const relId = `rIdImg${imgIndex}`
+
+            // 写入图片到 zip
+            zip.file(`word/media/${imgFileName}`, imgBuffer)
+
+            // 更新 rels
+            relsXml = relsXml.replace('</Relationships>',
+              `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${imgFileName}"/></Relationships>`)
+
+            // 更新 Content_Types（如果没有对应类型）
+            if (!contentTypes.includes(`Extension="${imgExt}"`)) {
+              contentTypes = contentTypes.replace('</Types>',
+                `<Default Extension="${imgExt}" ContentType="${contentType}"/></Types>`)
+            }
+
+            // 构建图片 XML 节点
+            const widthEmu = Math.round((img.width || 10) * 360000)
+            const heightEmu = Math.round((img.height || 8) * 360000)
+            const drawingXml = `<w:drawing>` +
+              `<wp:inline distT="0" distB="0" distL="0" distR="0">` +
+              `<wp:extent cx="${widthEmu}" cy="${heightEmu}"/>` +
+              `<wp:docPr id="${imgIndex}" name="Picture ${imgIndex}"/>` +
+              `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+              `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+              `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+              `<pic:nvPicPr><pic:cNvPr id="${imgIndex}" name="${imgFileName}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+              `<pic:blipFill><a:blip r:embed="${relId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+              `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${widthEmu}" cy="${heightEmu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+              `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
+
+            // 替换搜索文字为图片（支持跨节点匹配）
+            const beforeImg = xml
+            xml = replaceInXml(xml, img.search_text, drawingXml)
+            if (xml === beforeImg) {
+              // 最后尝试简单替换
+              xml = xml.replace(img.search_text, drawingXml)
+            }
+            imageCount++
+          }
+
+          zip.file('word/_rels/document.xml.rels', relsXml)
+          zip.file('[Content_Types].xml', contentTypes)
+        }
+
+        zip.file('word/document.xml', xml)
+        const outputBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+
+        const genDir = getGeneratedFilesDir(sessionId)
+        const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
+        const filePath = join(genDir, safeName)
+        await fs.promises.writeFile(filePath, outputBuffer)
+
+        const activeWin = agentWindow || mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+        if (activeWin) {
+          activeWin.webContents.send('api:generated-file-updated')
+        }
+
+        const parts = []
+        if (replaceCount > 0) parts.push(`${replaceCount} 处文本`)
+        if (imageCount > 0) parts.push(`${imageCount} 张图片`)
+        return JSON.stringify({
+          status: 'success',
+          message: `文件 "${safeName}" 已生成，修改了 ${parts.join('、')}`,
+          file_path: filePath,
+          file_name: safeName,
+          replaced: replaceCount,
+          images: imageCount
+        }, null, 2)
+      } catch (err: any) {
+        return `修改 docx 文件失败：${err.message || err}`
+      }
+    }
+
+    // 修改 xlsx 文件（支持样式、公式、合并单元格）
+    if (name === 'modify_xlsx_file') {
+      try {
+        const { source_path, output_name, modifications, merge_cells, add_sheet, column_widths } = args
+        if (!source_path || !output_name || !modifications || !Array.isArray(modifications)) {
+          return '错误：缺少必要参数 source_path、output_name 或 modifications'
+        }
+        if (!fs.existsSync(source_path)) {
+          return `错误：源文件不存在：${source_path}`
+        }
+
+        const ExcelJS = require('exceljs')
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.readFile(source_path)
+
+        // 添加新工作表
+        if (add_sheet) {
+          workbook.addWorksheet(add_sheet)
+        }
+
+        // 应用单元格修改
+        let modCount = 0
+        for (const mod of modifications) {
+          const ws = mod.sheet
+            ? workbook.getWorksheet(mod.sheet)
+            : workbook.worksheets[0]
+          if (!ws) continue
+
+          const cell = ws.getCell(mod.cell)
+          if (mod.formula) {
+            cell.value = { formula: mod.formula.replace(/^=/, '') }
+          } else if (mod.value !== undefined) {
+            cell.value = mod.value
+          }
+
+          if (mod.style) {
+            const s = mod.style
+            const font: any = {}
+            if (s.bold) font.bold = true
+            if (s.italic) font.italic = true
+            if (s.fontSize) font.size = s.fontSize
+            if (s.fontColor) font.color = { argb: 'FF' + s.fontColor.replace(/^#/, '') }
+            if (Object.keys(font).length > 0) cell.font = font
+
+            if (s.bgColor) {
+              cell.fill = {
+                type: 'pattern', pattern: 'solid',
+                fgColor: { argb: 'FF' + s.bgColor.replace(/^#/, '') }
+              }
+            }
+
+            if (s.borderStyle) {
+              const border: any = {}
+              const side = { style: s.borderStyle, color: s.borderColor ? { argb: 'FF' + s.borderColor.replace(/^#/, '') } : undefined }
+              border.top = side; border.bottom = side; border.left = side; border.right = side
+              cell.border = border
+            }
+
+            const alignment: any = {}
+            if (s.align) alignment.horizontal = s.align
+            if (s.valign) alignment.vertical = s.valign
+            if (s.wrapText) alignment.wrapText = true
+            if (Object.keys(alignment).length > 0) cell.alignment = alignment
+
+            if (s.numberFormat) cell.numFmt = s.numberFormat
+          }
+          modCount++
+        }
+
+        // 合并单元格
+        if (merge_cells && Array.isArray(merge_cells)) {
+          const ws = workbook.worksheets[0]
+          for (const range of merge_cells) {
+            try { ws.unmerge(range) } catch (e) { /* ignore if not merged */ }
+            ws.mergeCells(range)
+          }
+        }
+
+        // 设置列宽
+        if (column_widths && typeof column_widths === 'object') {
+          const ws = workbook.worksheets[0]
+          for (const [col, width] of Object.entries(column_widths)) {
+            const column = ws.getColumn(col)
+            column.width = width as number
+          }
+        }
+
+        const genDir = getGeneratedFilesDir(sessionId)
+        const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
+        const filePath = join(genDir, safeName)
+        await workbook.xlsx.writeFile(filePath)
+
+        const activeWin = agentWindow || mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+        if (activeWin) {
+          activeWin.webContents.send('api:generated-file-updated')
+        }
+
+        return JSON.stringify({
+          status: 'success',
+          message: `文件 "${safeName}" 已生成，修改了 ${modCount} 个单元格`,
+          file_path: filePath,
+          file_name: safeName,
+          modified: modCount
+        }, null, 2)
+      } catch (err: any) {
+        return `修改 xlsx 文件失败：${err.message || err}`
       }
     }
 
