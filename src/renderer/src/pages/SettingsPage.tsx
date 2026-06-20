@@ -588,7 +588,10 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                       const protoLabel = res.protocol ? `\n协议：${res.protocol}` : ''
                                       if (res.tools && res.tools.length > 0) {
                                         const names = res.tools.map((t: any) => t.name).join(', ')
-                                        alert(`✅ 测试成功！${protoLabel}\n\n共获取到 ${res.tools.length} 个方法：\n${names}`)
+                                        const sizeInfo = res.toolsSize
+                                          ? `\n\n📏 工具定义大小：\n- 字符数：${res.toolsSize.charCount.toLocaleString()}\n- 估算 tokens：~${res.toolsSize.estimatedTokens.toLocaleString()}`
+                                          : ''
+                                        alert(`✅ 测试成功！${protoLabel}\n\n共获取到 ${res.tools.length} 个方法：\n${names}${sizeInfo}`)
                                       } else {
                                         alert(`✅ 测试成功！${protoLabel}\n\n但该服务未提供任何可用方法。`)
                                       }

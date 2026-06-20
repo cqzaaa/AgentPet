@@ -199,7 +199,9 @@ const api = {
   },
   showTextContextMenu: (selectedText: string): void => {
     ipcRenderer.send('api:show-text-context-menu', selectedText)
-  }
+  },
+  getToolsDefinition: (): Promise<any[]> =>
+    ipcRenderer.invoke('api:get-tools-definition')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -4403,3 +4403,30 @@ body {
     opacity: 0.6;
   }
 }
+
+/* ── 提示词查看按钮样式 ────────────────────────────────────────────── */
+.msg-prompt-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #777);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0.75;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.msg-prompt-btn:hover {
+  background: var(--bg-menu-hover, rgba(0, 0, 0, 0.02));
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.msg-prompt-btn:active {
+  transform: scale(0.92);
+}

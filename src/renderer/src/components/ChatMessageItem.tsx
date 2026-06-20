@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { setInternalClipboard } from '../hooks/useAppStore'
 
+// 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
+function estimateTokens(text: string): number {
+  if (!text) return 0
+  return Math.max(1, Math.round(text.length * 0.5))
+}
+
+// 格式化 token 数显示
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return `${tokens} tokens`
+  if (tokens < 1000000) return `${(tokens / 1000).toFixed(1)}K tokens`
+  return `${(tokens / 1000000).toFixed(2)}M tokens`
+}
+
 // ── 复制代码块的高级代码面板组件 ─────────────────────────────────
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
@@ -272,13 +285,13 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
     const cleanUrl = lowerUrl.split('?')[0].split('#')[0]
 
     // 3. 检查常见图片后缀
-    const isCommonImageExt = 
-      cleanUrl.endsWith('.png') || 
-      cleanUrl.endsWith('.jpg') || 
-      cleanUrl.endsWith('.jpeg') || 
-      cleanUrl.endsWith('.gif') || 
-      cleanUrl.endsWith('.webp') || 
-      cleanUrl.endsWith('.bmp') || 
+    const isCommonImageExt =
+      cleanUrl.endsWith('.png') ||
+      cleanUrl.endsWith('.jpg') ||
+      cleanUrl.endsWith('.jpeg') ||
+      cleanUrl.endsWith('.gif') ||
+      cleanUrl.endsWith('.webp') ||
+      cleanUrl.endsWith('.bmp') ||
       cleanUrl.endsWith('.svg') ||
       cleanUrl.endsWith('.jfif') ||
       cleanUrl.endsWith('.tiff')
@@ -290,20 +303,20 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
     // 4. 特殊本地图片协议处理：如果是以 local-file:// 或 wechat-file:// 开头
     if (lowerUrl.startsWith('local-file://') || lowerUrl.startsWith('wechat-file://')) {
       // 排除一些明显的非图片格式后缀，其余默认当做图片预览
-      const isNonImageExt = 
-        cleanUrl.endsWith('.txt') || 
-        cleanUrl.endsWith('.json') || 
-        cleanUrl.endsWith('.md') || 
-        cleanUrl.endsWith('.zip') || 
-        cleanUrl.endsWith('.rar') || 
-        cleanUrl.endsWith('.pdf') || 
-        cleanUrl.endsWith('.doc') || 
-        cleanUrl.endsWith('.docx') || 
-        cleanUrl.endsWith('.xls') || 
-        cleanUrl.endsWith('.xlsx') || 
-        cleanUrl.endsWith('.ppt') || 
-        cleanUrl.endsWith('.pptx') || 
-        cleanUrl.endsWith('.mp3') || 
+      const isNonImageExt =
+        cleanUrl.endsWith('.txt') ||
+        cleanUrl.endsWith('.json') ||
+        cleanUrl.endsWith('.md') ||
+        cleanUrl.endsWith('.zip') ||
+        cleanUrl.endsWith('.rar') ||
+        cleanUrl.endsWith('.pdf') ||
+        cleanUrl.endsWith('.doc') ||
+        cleanUrl.endsWith('.docx') ||
+        cleanUrl.endsWith('.xls') ||
+        cleanUrl.endsWith('.xlsx') ||
+        cleanUrl.endsWith('.ppt') ||
+        cleanUrl.endsWith('.pptx') ||
+        cleanUrl.endsWith('.mp3') ||
         cleanUrl.endsWith('.mp4') ||
         cleanUrl.endsWith('.js') ||
         cleanUrl.endsWith('.ts')
@@ -494,6 +507,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [copied, setCopied] = useState(false)
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const [showPromptModal, setShowPromptModal] = useState(false)
 
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const renderedText = useMemo(() => {
@@ -703,6 +717,218 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
             {copied ? '✓' : '📋'}
           </button>
+          {msg.sender === 'user' && msg.promptInfo && (
+            <button
+              className="msg-prompt-btn"
+              onClick={() => setShowPromptModal(true)}
+              title="查看传给 Agent 的完整内容"
+            >
+              🔍
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 提示词弹框 */}
+      {showPromptModal && msg.promptInfo && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            zIndex: 99998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          onClick={() => setShowPromptModal(false)}
+        >
+          <div
+            style={{
+              width: '80vw',
+              maxWidth: '900px',
+              height: '80vh',
+              backgroundColor: 'var(--color-bg-primary, #fff)',
+              borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              cursor: 'default'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹框头部 */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--color-border, #e0e0e0)',
+                backgroundColor: 'var(--color-bg-secondary, #f5f5f5)'
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
+                🔍 本次提问传给 Agent 的完整内容
+              </h3>
+              <button
+                onClick={() => setShowPromptModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '20px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  color: 'var(--color-text-primary, #333)'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 弹框内容 */}
+            <div
+              style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '20px'
+              }}
+            >
+              {/* 说明信息 */}
+              <div
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px 16px',
+                  backgroundColor: 'rgba(96, 165, 250, 0.08)',
+                  border: '1px solid rgba(96, 165, 250, 0.2)',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  color: '#3b82f6'
+                }}
+              >
+                💡 以下是本次提问调用 <code>callLLM()</code> 时传入的完整参数，包括系统提示词、历史对话上下文、工具定义和模型配置。
+              </div>
+
+              {/* 模型配置信息 */}
+              <div
+                style={{
+                  marginBottom: '20px',
+                  padding: '12px 16px',
+                  backgroundColor: 'var(--color-bg-tertiary, #f0f0f0)',
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '8px' }}>📊 模型配置</div>
+                <div>模型: {msg.promptInfo.model || '未知'}</div>
+                <div>提供商: {msg.promptInfo.provider || '未知'}</div>
+                <div>温度: {msg.promptInfo.temperature ?? '默认'}</div>
+                <div>最大 Token: {msg.promptInfo.maxTokens ?? '默认'}</div>
+              </div>
+
+              {/* Token 估算统计 */}
+              <div
+                style={{
+                  marginBottom: '20px',
+                  padding: '12px 16px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#10b981' }}>📏 Token 估算统计</div>
+                <div>系统提示词: ~{formatTokens(estimateTokens(msg.promptInfo.systemPrompt || ''))}</div>
+                <div>历史对话 ({msg.promptInfo.chatMessages.length - 1} 条): ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))))}</div>
+                <div>工具定义 ({msg.promptInfo.toolsDefinition?.length || 0} 个): ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || [])))}</div>
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(16, 185, 129, 0.2)', fontWeight: 600 }}>
+                  总计估算: ~{formatTokens(
+                    estimateTokens(msg.promptInfo.systemPrompt || '') +
+                    estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))) +
+                    estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || []))
+                  )}
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                  💡 估算方式：字符数 × 0.5（与日志中 Prompt 输入的降级估算策略一致）
+                </div>
+              </div>
+
+              {/* 完整 chatMessages 数组 */}
+              <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    color: 'var(--color-text-primary, #333)'
+                  }}
+                >
+                  📦 完整 chatMessages 数组 (共 {msg.promptInfo.chatMessages.length} 条消息)
+                </div>
+                <div
+                  style={{
+                    border: '1px solid var(--color-border, #e0e0e0)',
+                    borderRadius: '8px',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {msg.promptInfo.chatMessages.map((m: any, idx: number) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom: idx < msg.promptInfo.chatMessages.length - 1 ? '1px solid var(--color-border, #e0e0e0)' : 'none',
+                        backgroundColor: m.role === 'system'
+                          ? 'var(--color-bg-system, #fff3cd)'
+                          : m.role === 'user'
+                            ? 'var(--color-bg-user, #e3f2fd)'
+                            : 'var(--color-bg-assistant, #f3e5f5)'
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          fontSize: '12px',
+                          marginBottom: '4px',
+                          color: 'var(--color-text-secondary, #666)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        {m.role === 'system' ? '⚙️ 系统' : m.role === 'user' ? '👤 用户' : '🤖 助手'}
+                        <span style={{ fontSize: '11px', color: '#999' }}>
+                          (#{idx + 1} · ~{formatTokens(estimateTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))})
+                        </span>
+                      </div>
+                      <pre
+                        style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          lineHeight: '1.6',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          fontFamily: 'inherit',
+                          maxHeight: '200px',
+                          overflow: 'auto'
+                        }}
+                      >
+                        {typeof m.content === 'string'
+                          ? m.content
+                          : JSON.stringify(m.content, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

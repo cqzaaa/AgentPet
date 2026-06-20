@@ -3746,6 +3746,7 @@ if (-not $task.Wait(15000)) {
     const sendTokenEvent = () => {
       try {
         if (event && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
+          console.log(`[Token] Total - prompt: ${totalPromptTokens}, completion: ${totalCompletionTokens}, total: ${totalPromptTokens + totalCompletionTokens}`)
           event.sender.send('api:llm-token-usage', {
             model: body.model || model,
             provider,
@@ -3757,7 +3758,7 @@ if (-not $task.Wait(15000)) {
           })
         }
       } catch (se) {
-        console.error('发送 token usage 事件失败', se)
+        console.error('send token usage event failed', se)
       }
     }
 
@@ -3786,11 +3787,14 @@ if (-not $task.Wait(15000)) {
         }
 
         const data: any = await response.json()
-        
+
         // 累加 token 消耗
         if (data.usage) {
-          totalPromptTokens += data.usage.prompt_tokens || 0
-          totalCompletionTokens += data.usage.completion_tokens || 0
+          const apiPromptTokens = data.usage.prompt_tokens || 0
+          const apiCompletionTokens = data.usage.completion_tokens || 0
+          totalPromptTokens += apiPromptTokens
+          totalCompletionTokens += apiCompletionTokens
+          console.log(`[Token] API usage - prompt: ${apiPromptTokens}, completion: ${apiCompletionTokens}`)
         } else if (data.choices?.[0]?.message?.content) {
           const textOut = data.choices[0].message.content || ''
           const textIn = chatHistory.map((m: any) => {
@@ -3799,8 +3803,13 @@ if (-not $task.Wait(15000)) {
             }
             return m.content || ''
           }).join('')
-          totalPromptTokens += Math.max(1, Math.round(textIn.length * 0.5))
-          totalCompletionTokens += Math.max(1, Math.round(textOut.length * 0.8))
+          const estimatedPrompt = Math.max(1, Math.round(textIn.length * 0.5))
+          const estimatedCompletion = Math.max(1, Math.round(textOut.length * 0.8))
+          totalPromptTokens += estimatedPrompt
+          totalCompletionTokens += estimatedCompletion
+          console.log(`[Token] Estimated - prompt: ${estimatedPrompt} (chars: ${textIn.length}), completion: ${estimatedCompletion} (chars: ${textOut.length})`)
+        } else {
+          console.log(`[Token] No usage data - hasUsage: ${!!data.usage}, hasContent: ${!!data.choices?.[0]?.message?.content}`)
         }
 
         const message = data.choices?.[0]?.message
@@ -3886,6 +3895,17 @@ if (-not $task.Wait(15000)) {
   // 大模型对外代理调用
   ipcMain.handle('api:call-llm', async (event, config, messages, workspacePath) => {
     return callLlmInternal(config, messages, workspacePath, event)
+  })
+
+  // 获取当前可用的工具定义（用于明盒化展示）
+  ipcMain.handle('api:get-tools-definition', async () => {
+    try {
+      const tools = getFormattedTools(true)
+      return tools
+    } catch (err) {
+      console.error('获取工具定义失败:', err)
+      return []
+    }
   })
 
   // 微信智能助手接口通道注册
@@ -3974,7 +3994,21 @@ if (-not $task.Wait(15000)) {
       const response = await client.listTools()
       await client.close()
 
-      return { success: true, tools: response.tools || [], protocol: usedProtocol }
+      // 计算工具定义的大小
+      const tools = response.tools || []
+      const toolsJson = JSON.stringify(tools)
+      const toolsCharCount = toolsJson.length
+      const estimatedTokens = Math.round(toolsCharCount * 0.5)
+
+      return {
+        success: true,
+        tools,
+        protocol: usedProtocol,
+        toolsSize: {
+          charCount: toolsCharCount,
+          estimatedTokens
+        }
+      }
     } catch (err: any) {
       console.error('MCP Test Error:', err)
       return { success: false, error: err.message || err.toString() }

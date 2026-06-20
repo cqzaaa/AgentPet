@@ -877,11 +877,11 @@ export function useAppStore() {
     
     const fileNames = attachedFiles.map(f => f.name).join(', ')
     // 1. 构建用户发送的消息
-    const userMsg: any = { 
-      id: Date.now(), 
-      sender: 'user', 
-      text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''), 
-      time: timeStr 
+    const userMsg: any = {
+      id: Date.now(),
+      sender: 'user',
+      text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''),
+      time: timeStr
     }
     if (attachedFiles.length > 0) {
       userMsg.fileInfos = attachedFiles.map(f => ({
@@ -1004,9 +1004,17 @@ export function useAppStore() {
       const skillsContext = skillsList.length > 0
         ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
         : '你当前尚未安装配备任何第三方扩展技能。'
-      const stylePrompt = currentAvatarStyle === 'cute' 
+      const stylePrompt = currentAvatarStyle === 'cute'
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
         : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
+
+      // MCP 服务上下文
+      const enabledMcpServers = (mcpConfig?.servers || []).filter((s: any) => s.enabled)
+      const mcpContext = enabledMcpServers.length > 0
+        ? `\n\n🔗 你还可以通过 MCP（Model Context Protocol）协议调用以下外部扩展服务：
+${enabledMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'}`).join('\n')}
+当主人的问题涉及这些服务的功能时（如网页搜索、地图导航、天气查询等），请主动调用对应的 MCP 服务来获取实时信息。`
+        : ''
 
       const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
 ${stylePrompt}
@@ -1025,10 +1033,41 @@ ${skillsContext}
 6. modify_docx_file — 修改已上传的 docx 文件（保留原格式）
 7. modify_xlsx_file — 修改已上传的 xlsx 文件（保留原格式，批量在表尾追加行数据，必须优先使用其中的 append_rows 参数而非 modifications）
 8. read_file — 读取文件内容（xlsx/docx/pdf/csv/文本等）
-以上是全部可用工具，不存在其他工具。如需获取日期、时间、网络信息等，请使用 run_terminal_command 执行相应系统命令。`
+以上是全部可用工具，不存在其他工具。如需获取日期、时间、网络信息等，请使用 run_terminal_command 执行相应系统命令。
+${mcpContext}`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })
+
+      // 获取工具定义
+      let toolsDefinition: any[] = []
+      try {
+        toolsDefinition = await window.api.getToolsDefinition()
+      } catch (err) {
+        console.error('获取工具定义失败:', err)
+      }
+
+      // 存储提示词信息到用户消息中，用于"明盒化"功能
+      const promptInfo = {
+        systemPrompt,
+        chatMessages: [...chatMessages],
+        toolsDefinition,
+        model: llmConfig.model,
+        provider: llmConfig.provider,
+        temperature: llmConfig.temperature,
+        maxTokens: llmConfig.maxTokens
+      }
+
+      // 更新用户消息，添加 promptInfo 字段
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map(m => m.id === userMsg.id ? { ...m, promptInfo } : m)
+          }
+        }
+        return s
+      }))
 
       // 调用大模型接口，传入 workspacePath 参数，同时把 sessionId 和 messageId 传进去
       const response = await window.api.callLLM(
