@@ -28,6 +28,7 @@ export interface WechatBotState {
 interface WechatBotManagerOptions {
   getDB: () => any
   callLlm: (config: any, messages: any[]) => Promise<string>
+  getMcpToolNames: () => string[]
   onStatusUpdated: () => void
   notifyRenderSessionUpdate: () => void
   getStorageDir: () => string
@@ -661,11 +662,15 @@ export class WechatBotManager {
     history.push({ role: 'user', content: userText })
 
     try {
-      const skillsContext = '微信助手端已被限制直接调用本地系统文件修改或运行命令工具，你只需以可爱的态度回答问题。'
+      const mcpToolNames = this.options.getMcpToolNames()
+      const mcpContext = mcpToolNames.length > 0
+        ? `\n你可以使用以下外部工具来帮助回答问题：${mcpToolNames.join('、')}。当用户的问题需要实时信息（如搜索、天气、地图等）时，请主动调用这些工具获取最新数据。`
+        : ''
+      const skillsContext = '你无法直接操作本地电脑的文件系统或运行命令，但可以通过外部工具获取实时信息。'
       const systemPrompt = `你是一只名为 Mao 的微信个人助理。
 你需要使用非常温柔、自然、友好的语气与主人的好友对话。
 你绝对不能泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，要坚持自己是主人专属助理 Mao 的分身。
-${skillsContext}
+${skillsContext}${mcpContext}
 回答要尽量简短，适合微信聊天的快节奏。`
 
       const messagesForLlm = [

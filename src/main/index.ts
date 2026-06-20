@@ -4006,6 +4006,9 @@ if (-not $task.Wait(15000)) {
 
       return callLlmInternal(effectiveConfig, messages, getActiveStorageDir())
     },
+    getMcpToolNames: () => {
+      return mcpManager.getTools().map((t: any) => t.name)
+    },
     onStatusUpdated: () => {
       if (agentWindow && !agentWindow.isDestroyed()) {
         agentWindow.webContents.send('api:wechat-status-updated', wechatBotManager?.getState())
