@@ -2395,10 +2395,11 @@ app.whenReady().then(() => {
     }
   ]
 
-  function getFormattedTools(isFrontend: boolean): any[] {
+  function getFormattedTools(isFrontend: boolean, simplify = false): any[] {
     const list: any[] = []
     
     if (isFrontend) {
+      // 本地内置工具不进行简化，保持原样，以避免对常规工具（如终端命令、文件读取）增加额外的 API 填充开销
       list.push(...toolDefinitions)
     } else {
       // 后端（如微信机器人）不注入本地工具，仅使用 MCP 工具
@@ -2411,12 +2412,17 @@ app.whenReady().then(() => {
         function: {
           name: tool.name,
           description: tool.description || '',
-          parameters: tool.inputSchema || { type: 'object', properties: {} }
+          parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
         }
       })
     }
 
     return list
+  }
+
+  function getFullToolDefinitionByName(name: string, isFrontend: boolean): any | null {
+    const fullTools = getFormattedTools(isFrontend, false)
+    return fullTools.find((t: any) => t.function.name === name) || null
   }
 
   // 判定是否为只读或无害查询命令，用于免弹窗自动放行
@@ -3704,8 +3710,8 @@ if (-not $task.Wait(15000)) {
     let totalPromptTokens = 0
     let totalCompletionTokens = 0
 
-    // 直接加载全部工具（本地 + MCP）
-    const effectiveTools = getFormattedTools(!!event)
+    // 直接加载简化版工具列表进行第一阶段路由（本地 + MCP，减少首轮 Token 消耗）
+    const effectiveTools = getFormattedTools(!!event, true)
 
     if (effectiveTools.length > 0) {
       body.tools = effectiveTools
@@ -3821,6 +3827,76 @@ if (-not $task.Wait(15000)) {
 
         const toolCalls = message.tool_calls
         if (toolCalls && toolCalls.length > 0) {
+          // 第二阶段参数填充逻辑：对于每个被调用的工具，若其包含非空 properties 参数定义，则按需填充
+          for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i]
+            const toolName = toolCall.function.name
+            const fullTool = getFullToolDefinitionByName(toolName, !!event)
+            
+            const isMcpTool = mcpManager.hasTool(toolName)
+            if (isMcpTool && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
+              console.log(`[Two-Stage] 检测到简化工具调用: ${toolName}，正在启动第二阶段参数填充...`)
+              try {
+                const tempHistory = [
+                  ...chatHistory,
+                  message,
+                  {
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    name: toolName,
+                    content: `【系统提示】此工具需要输入参数。请根据以下 JSON Schema 定义重新生成此工具调用，并提供正确的 arguments 参数字段：\n${JSON.stringify(fullTool.function.parameters)}`
+                  }
+                ]
+                
+                const fillBody: any = {
+                  model: body.model,
+                  temperature: 0.1, // 降低随机性确保参数填充精度
+                  messages: tempHistory,
+                  tools: [fullTool],
+                  tool_choice: { type: 'function', function: { name: toolName } }
+                }
+                if (body.max_tokens) {
+                  fillBody.max_tokens = body.max_tokens
+                }
+
+                const fillResponse = await net.fetch(url, {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify(fillBody),
+                  signal: currentLlmAbortController?.signal
+                })
+
+                if (!fillResponse.ok) {
+                  const errorText = await fillResponse.text()
+                  throw new Error(`参数填充请求失败 HTTP ${fillResponse.status}: ${errorText}`)
+                }
+
+                const fillData: any = await fillResponse.json()
+                
+                if (fillData.usage) {
+                  const apiPromptTokens = fillData.usage.prompt_tokens || 0
+                  const apiCompletionTokens = fillData.usage.completion_tokens || 0
+                  totalPromptTokens += apiPromptTokens
+                  totalCompletionTokens += apiCompletionTokens
+                  console.log(`[Two-Stage Token] API usage - prompt: ${apiPromptTokens}, completion: ${apiCompletionTokens}`)
+                }
+
+                const fillMessage = fillData.choices?.[0]?.message
+                const fillToolCalls = fillMessage?.tool_calls
+                const matchedCall = fillToolCalls?.find((tc: any) => tc.function.name === toolName)
+                
+                if (matchedCall && matchedCall.function.arguments) {
+                  console.log(`[Two-Stage] 成功获取参数:`, matchedCall.function.arguments)
+                  toolCall.function.arguments = matchedCall.function.arguments
+                } else {
+                  console.warn(`[Two-Stage] 未能从模型返回中获取到匹配的参数`)
+                }
+              } catch (fillErr) {
+                console.error(`[Two-Stage] 参数填充出错:`, fillErr)
+              }
+            }
+          }
+
           chatHistory.push(message)
 
           for (const toolCall of toolCalls) {

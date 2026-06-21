@@ -252,8 +252,11 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 // 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
   const parts: React.ReactNode[] = []
-  // 匹配 ![alt](url) 或者 [alt](url)
-  const linkOrImgRegex = /(!)?\[(.*?)\]\((.*?)\)/g
+  // 匹配三种模式：
+  //   1. ![alt](url)  — 显式图片
+  //   2. [text](url)  — markdown 链接
+  //   3. https://...   — 裸 URL（不在 markdown 语法内的独立 URL）
+  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/)[^\s\])<>"]+)/g
   let match
   let lastIndex = 0
 
@@ -344,21 +347,43 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
       parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textBefore} />)
     }
 
-    const isExplicitImg = !!match[1]
-    const alt = match[2]
-    const rawSrc = match[3]
-    const src = normalizeLocalSrc(rawSrc)
+    if (match[1]) {
+      // 分支1：匹配到 markdown 格式 ![alt](url) 或 [text](url)
+      const mdMatch = match[1].match(/^(!?)\[(.*?)\]\((.*?)\)$/)
+      if (mdMatch) {
+        const isExplicitImg = mdMatch[1] === '!'
+        const alt = mdMatch[2]
+        const rawSrc = mdMatch[3]
+        const src = normalizeLocalSrc(rawSrc)
 
-    if (isExplicitImg || isImageSrc(src)) {
-      parts.push(
-        <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
-      )
-    } else {
-      parts.push(
-        <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
-          {alt}
-        </a>
-      )
+        if (isExplicitImg || isImageSrc(src)) {
+          parts.push(
+            <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
+          )
+        } else {
+          parts.push(
+            <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
+              {alt}
+            </a>
+          )
+        }
+      }
+    } else if (match[2]) {
+      // 分支2：匹配到裸 URL
+      const rawUrl = match[2]
+      const src = normalizeLocalSrc(rawUrl)
+
+      if (isImageSrc(src)) {
+        parts.push(
+          <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt="image" />
+        )
+      } else {
+        parts.push(
+          <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
+            {rawUrl}
+          </a>
+        )
+      }
     }
 
     lastIndex = linkOrImgRegex.lastIndex
