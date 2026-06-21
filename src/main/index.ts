@@ -3699,13 +3699,18 @@ if (-not $task.Wait(15000)) {
       body.max_tokens = maxTokens
     }
 
+    let chatHistory = JSON.parse(JSON.stringify(messages)) // 深拷贝避免污染
+
+    let totalPromptTokens = 0
+    let totalCompletionTokens = 0
+
+    // 直接加载全部工具（本地 + MCP）
     const effectiveTools = getFormattedTools(!!event)
+
     if (effectiveTools.length > 0) {
       body.tools = effectiveTools
       body.tool_choice = 'auto'
     }
-
-    let chatHistory = JSON.parse(JSON.stringify(messages)) // 深拷贝避免污染
 
     // 在发送前解析本地图片路径为 base64 多模态格式
     for (const msg of chatHistory) {
@@ -3737,12 +3742,6 @@ if (-not $task.Wait(15000)) {
       }
     }
 
-    let loopCount = 0
-    const maxLoops = 40
-
-    let totalPromptTokens = 0
-    let totalCompletionTokens = 0
-
     const sendTokenEvent = () => {
       try {
         if (event && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
@@ -3761,6 +3760,9 @@ if (-not $task.Wait(15000)) {
         console.error('send token usage event failed', se)
       }
     }
+
+    let loopCount = 0
+    const maxLoops = 40
 
     while (loopCount < maxLoops) {
       loopCount++

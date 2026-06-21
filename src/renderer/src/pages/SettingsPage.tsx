@@ -53,6 +53,11 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editAvatarName, setEditAvatarName] = React.useState('')
   const [editAvatarStyle, setEditAvatarStyle] = React.useState('normal')
 
+  // MCP 测试结果弹框状态
+  const [showTestResultModal, setShowTestResultModal] = React.useState(false)
+  const [testResultData, setTestResultData] = React.useState<any>(null)
+  const [testResultServerName, setTestResultServerName] = React.useState('')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       {/* Sub Nav */}
@@ -584,20 +589,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                       apiKey: server.apiKey,
                                       type: server.type || 'stream'
                                     })
-                                    if (res.success) {
-                                      const protoLabel = res.protocol ? `\n协议：${res.protocol}` : ''
-                                      if (res.tools && res.tools.length > 0) {
-                                        const names = res.tools.map((t: any) => t.name).join(', ')
-                                        const sizeInfo = res.toolsSize
-                                          ? `\n\n📏 工具定义大小：\n- 字符数：${res.toolsSize.charCount.toLocaleString()}\n- 估算 tokens：~${res.toolsSize.estimatedTokens.toLocaleString()}`
-                                          : ''
-                                        alert(`✅ 测试成功！${protoLabel}\n\n共获取到 ${res.tools.length} 个方法：\n${names}${sizeInfo}`)
-                                      } else {
-                                        alert(`✅ 测试成功！${protoLabel}\n\n但该服务未提供任何可用方法。`)
-                                      }
-                                    } else {
-                                      alert(`❌ 测试失败：\n${res.error}`)
-                                    }
+                                    setTestResultData(res)
+                                    setTestResultServerName(server.name)
+                                    setShowTestResultModal(true)
                                   } catch (err: any) {
                                     alert(`❌ 测试异常：\n${err.message || err}`)
                                   }
@@ -928,6 +922,228 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
               >
                 保存修改
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MCP 测试结果弹框 */}
+      {showTestResultModal && testResultData && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            zIndex: 99998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          onClick={() => setShowTestResultModal(false)}
+        >
+          <div
+            style={{
+              width: '80vw',
+              maxWidth: '900px',
+              height: '80vh',
+              backgroundColor: 'var(--color-bg-primary, #fff)',
+              borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              cursor: 'default'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹框头部 */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--color-border, #e0e0e0)',
+                backgroundColor: 'var(--color-bg-secondary, #f5f5f5)'
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
+                🔌 MCP 测试结果 - {testResultServerName}
+              </h3>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(testResultData, null, 2))
+                    showToast('已复制到剪贴板', 'success')
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+                    border: 'none',
+                    color: '#fff',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  📋 复制全部
+                </button>
+                <button
+                  onClick={() => setShowTestResultModal(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    color: 'var(--color-text-primary, #333)'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* 弹框内容 */}
+            <div
+              style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '20px'
+              }}
+            >
+              {/* 测试状态 */}
+              <div
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px 16px',
+                  backgroundColor: testResultData.success ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                  border: `1px solid ${testResultData.success ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: testResultData.success ? '#10b981' : '#ef4444' }}>
+                  {testResultData.success ? '✅ 测试成功' : '❌ 测试失败'}
+                </div>
+                {testResultData.protocol && <div>协议: {testResultData.protocol}</div>}
+                {testResultData.error && <div>错误: {testResultData.error}</div>}
+                {testResultData.toolsSize && (
+                  <div>
+                    工具定义大小: {testResultData.toolsSize.charCount.toLocaleString()} 字符
+                    (~{testResultData.toolsSize.estimatedTokens.toLocaleString()} tokens)
+                  </div>
+                )}
+              </div>
+
+              {/* 工具列表 */}
+              {testResultData.tools && testResultData.tools.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      marginBottom: '8px',
+                      fontSize: '14px',
+                      color: 'var(--color-text-primary, #333)'
+                    }}
+                  >
+                    🔧 工具列表 (共 {testResultData.tools.length} 个)
+                  </div>
+                  <div
+                    style={{
+                      border: '1px solid var(--color-border, #e0e0e0)',
+                      borderRadius: '8px',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {testResultData.tools.map((tool: any, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '12px 16px',
+                          borderBottom: idx < testResultData.tools.length - 1 ? '1px solid var(--color-border, #e0e0e0)' : 'none',
+                          backgroundColor: 'var(--color-bg-secondary, #f8f9fa)'
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            marginBottom: '4px',
+                            color: '#3b82f6'
+                          }}
+                        >
+                          {tool.name}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: 'var(--color-text-secondary, #666)',
+                            marginBottom: '8px'
+                          }}
+                        >
+                          {tool.description || '无描述'}
+                        </div>
+                        <pre
+                          style={{
+                            margin: 0,
+                            fontSize: '11px',
+                            lineHeight: '1.4',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            fontFamily: 'monospace',
+                            backgroundColor: 'var(--color-bg-code, #f0f0f0)',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            maxHeight: '150px',
+                            overflow: 'auto'
+                          }}
+                        >
+                          {JSON.stringify(tool.inputSchema || {}, null, 2)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 完整 JSON 响应 */}
+              <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    color: 'var(--color-text-primary, #333)'
+                  }}
+                >
+                  📄 完整 JSON 响应
+                </div>
+                <pre
+                  style={{
+                    margin: 0,
+                    fontSize: '12px',
+                    lineHeight: '1.5',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'monospace',
+                    backgroundColor: 'var(--color-bg-code, #f0f0f0)',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    maxHeight: '400px',
+                    overflow: 'auto',
+                    border: '1px solid var(--color-border, #e0e0e0)'
+                  }}
+                >
+                  {JSON.stringify(testResultData, null, 2)}
+                </pre>
+              </div>
             </div>
           </div>
         </div>
