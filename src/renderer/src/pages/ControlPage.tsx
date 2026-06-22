@@ -302,6 +302,54 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                         <span className="detail-val" style={{ color: '#10b981', fontWeight: 600 }}>{wechatState.messagesSent} 条</span>
                       </div>
                     </div>
+
+                    {/* 当前活跃的微信聊天窗口 */}
+                    {wechatState.activeChats && wechatState.activeChats.length > 0 && (
+                      <div style={{ marginTop: '16px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary, #1f2937)' }}>
+                          当前活跃的聊天窗口
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {wechatState.activeChats.map((chat: any) => (
+                            <div
+                              key={chat.userId}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                padding: '10px 12px',
+                                background: 'var(--bg-card-sub, rgba(128,128,128,0.04))',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color, rgba(128,128,128,0.1))'
+                              }}
+                            >
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                background: 'linear-gradient(135deg, #3b82f6, #10b981)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#fff',
+                                fontSize: '14px',
+                                flexShrink: 0
+                              }}>
+                                💬
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary, #1f2937)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {chat.nickname}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                  最近消息：{new Date(chat.lastMessageTime).toLocaleString('zh-CN')}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

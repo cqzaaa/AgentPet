@@ -23,6 +23,7 @@ export interface WechatBotState {
   llmConfig: WechatLlmConfig
   autoReplyText: string
   enableAutoReply: boolean
+  activeChats: Array<{ userId: string; nickname: string; lastMessageTime: string }>
 }
 
 interface WechatBotManagerOptions {
@@ -359,7 +360,8 @@ export class WechatBotManager {
       useSystemConfig: true
     },
     autoReplyText: '你好，我是 Mao 的微信集成助手。',
-    enableAutoReply: true
+    enableAutoReply: true,
+    activeChats: []
   }
 
   // 微信好友上下文缓存 (from_user_id -> Array of messages)
@@ -390,6 +392,59 @@ export class WechatBotManager {
       this.state.logs.pop()
     }
     this.options.onStatusUpdated()
+  }
+
+  // 生成安全的会话目录名（与普通 chat 目录规则一致）
+  private safeSessionId(userId: string): string {
+    return `wechat_${userId}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+  }
+
+  // 获取某个微信好友的专属文件目录：base/chat/wechat_<userId>/wechat_files
+  private getWechatFilesDir(fromUserId: string): string {
+    const safeSessionId = this.safeSessionId(fromUserId)
+    const dir = join(this.options.getStorageDir(), 'chat', safeSessionId, 'wechat_files')
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    return dir
+  }
+
+  // 解析 wechat-file 协议 URL，兼容旧格式 wechat-file://local/<fileName>
+  // 和新格式 wechat-file://local/<safeSessionId>/<fileName>
+  private resolveWechatFilePath(fileUrl: string): { filePath: string; fileName: string } | null {
+    const relativePath = fileUrl.replace('wechat-file://', '').replace(/^\/+/, '')
+    const segments = relativePath.split('/')
+    if (segments.length >= 2 && segments[0] === 'local') {
+      if (segments.length >= 3) {
+        // 新格式：local/<safeSessionId>/<fileName>
+        const safeSessionId = segments[1]
+        const fileName = segments.slice(2).join('/')
+        const filePath = join(this.options.getStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
+        return { filePath, fileName }
+      }
+      // 旧格式：local/<fileName>
+      const fileName = segments.slice(1).join('/')
+      const filePath = join(this.options.getStorageDir(), 'wechat_files', fileName)
+      return { filePath, fileName }
+    }
+    return null
+  }
+
+  // 维护最近活跃的微信聊天窗口列表
+  private updateActiveChat(userId: string, nickname: string) {
+    const idx = this.state.activeChats.findIndex(c => c.userId === userId)
+    const chat = {
+      userId,
+      nickname,
+      lastMessageTime: new Date().toISOString()
+    }
+    if (idx >= 0) {
+      this.state.activeChats.splice(idx, 1)
+    }
+    this.state.activeChats.unshift(chat)
+    if (this.state.activeChats.length > 20) {
+      this.state.activeChats.pop()
+    }
   }
 
   // 加载局部配置文件
@@ -637,7 +692,7 @@ export class WechatBotManager {
           }
 
           const nickname = message.from_user_nickname || `微信好友 (${fromUserId})`
-          const { text, mediaUrls } = await this.processMessageContent(message)
+          const { text, mediaUrls } = await this.processMessageContent(message, fromUserId)
           if (!text) continue
 
           // 构建唯一去重 Key，防止微信服务器重试或长轮询引发的重复处理
@@ -660,6 +715,9 @@ export class WechatBotManager {
 
           this.state.messagesReceived++
           const logText = text.replace(/!\[图片\]\(wechat-file:\/\/local\/.*?\)/g, '[图片]')
+
+          // 更新活跃聊天窗口记录，再记录日志（日志会触发 UI 刷新）
+          this.updateActiveChat(fromUserId, nickname)
           this.addLog('in', `[${nickname}]: ${logText}`)
 
           // 1. 在 SQLite 中保存用户的消息
@@ -789,27 +847,21 @@ export class WechatBotManager {
                       if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
                       localPath = decodeURIComponent(localPath)
                     } else if (localPath.startsWith('wechat-file://')) {
-                      const wechatFilesDir = join(this.options.getStorageDir(), 'wechat_files')
-                      let fileName = decodeURIComponent(localPath.replace('wechat-file://', '').replace(/^\/+/, ''))
-                      if (fileName.startsWith('local/')) {
-                        fileName = fileName.substring(6)
+                      const resolved = this.resolveWechatFilePath(localPath)
+                      if (resolved) {
+                        localPath = resolved.filePath
+                      } else {
+                        localPath = ''
                       }
-                      localPath = join(wechatFilesDir, fileName)
                     }
 
-                    const isLocalFile = url.startsWith('local-file://') || 
-                                       url.startsWith('wechat-file://') || 
-                                       fs.existsSync(localPath) || 
-                                       fs.existsSync(join(this.options.getStorageDir(), 'wechat_files', localPath))
+                    const isLocalFile = url.startsWith('local-file://') ||
+                                       url.startsWith('wechat-file://') ||
+                                       (localPath && fs.existsSync(localPath))
 
                     if (isLocalFile) {
-                      if (fs.existsSync(localPath)) {
+                      if (localPath && fs.existsSync(localPath)) {
                         buffer = fs.readFileSync(localPath)
-                      } else {
-                        const fallbackPath = join(this.options.getStorageDir(), 'wechat_files', localPath)
-                        if (fs.existsSync(fallbackPath)) {
-                          buffer = fs.readFileSync(fallbackPath)
-                        }
                       }
                     } else if (url.startsWith('data:')) {
                       const b64 = url.split(',')[1]
@@ -1047,12 +1099,9 @@ ${skillsContext}${mcpContext}${filePrompt}
   // ── 微信媒体解密与下载服务 ────────────────────────────────────────────
 
   // 下载并解密微信媒体文件
-  private async downloadAndDecryptMedia(cdnUrl: string, aesKeyStr: string, ext = 'png'): Promise<string> {
+  private async downloadAndDecryptMedia(cdnUrl: string, aesKeyStr: string, ext = 'png', fromUserId: string): Promise<string> {
     try {
-      const wechatFilesDir = join(this.options.getStorageDir(), 'wechat_files')
-      if (!fs.existsSync(wechatFilesDir)) {
-        fs.mkdirSync(wechatFilesDir, { recursive: true })
-      }
+      const wechatFilesDir = this.getWechatFilesDir(fromUserId)
 
       // 1. 下载加密的 CDN 文件
       const resp = await fetch(cdnUrl)
@@ -1072,8 +1121,10 @@ ${skillsContext}${mcpContext}${filePrompt}
       const filePath = join(wechatFilesDir, fileName)
       fs.writeFileSync(filePath, decryptedBuffer)
 
+      // 5. 返回携带会话隔离信息的 wechat-file URL
+      const safeSessionId = this.safeSessionId(fromUserId)
       this.addLog('info', `微信媒体文件已下载解密并保存成功: ${fileName}`)
-      return `wechat-file://local/${fileName}`
+      return `wechat-file://local/${safeSessionId}/${fileName}`
     } catch (e: any) {
       this.addLog('info', `处理微信多媒体文件下载解密失败: ${e.message || e}`)
       return ''
@@ -1103,7 +1154,7 @@ ${skillsContext}${mcpContext}${filePrompt}
   }
 
   // 处理微信消息的完整内容（包括多模态文件下载与解密）
-  private async processMessageContent(message: any): Promise<{ text: string; mediaUrls: string[] }> {
+  private async processMessageContent(message: any, fromUserId: string): Promise<{ text: string; mediaUrls: string[] }> {
     let textParts: string[] = []
     const mediaUrls: string[] = []
 
@@ -1135,7 +1186,7 @@ ${skillsContext}${mcpContext}${filePrompt}
           const cdnUrl = imageItem.url || imageItem.cdn_url || imageItem.media?.full_url || ''
           if (cdnUrl && aesKey) {
             this.addLog('info', '检测到微信图片消息，开始下载解密...')
-            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, 'png')
+            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, 'png', fromUserId)
             if (localUrl) {
               mediaUrls.push(localUrl)
               textParts.push(`![图片](${localUrl})`)
@@ -1160,7 +1211,7 @@ ${skillsContext}${mcpContext}${filePrompt}
           const ext = fileName.split('.').pop() || 'dat'
           if (cdnUrl && aesKey) {
             this.addLog('info', `检测到微信文件消息 [${fileName}]，开始下载解密...`)
-            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, ext)
+            const localUrl = await this.downloadAndDecryptMedia(cdnUrl, aesKey, ext, fromUserId)
             if (localUrl) {
               mediaUrls.push(localUrl)
               textParts.push(`[文件: ${fileName}](${localUrl})`)
@@ -1203,14 +1254,13 @@ ${skillsContext}${mcpContext}${filePrompt}
       }
 
       const fileUrl = match[1]
-      const fileName = fileUrl.replace('wechat-file://local/', '')
-      const filePath = join(this.options.getStorageDir(), 'wechat_files', fileName)
+      const resolved = this.resolveWechatFilePath(fileUrl)
 
       try {
-        if (fs.existsSync(filePath)) {
-          const imageBuffer = fs.readFileSync(filePath)
+        if (resolved && fs.existsSync(resolved.filePath)) {
+          const imageBuffer = fs.readFileSync(resolved.filePath)
           const base64 = imageBuffer.toString('base64')
-          const ext = fileName.split('.').pop() || 'png'
+          const ext = resolved.fileName.split('.').pop() || 'png'
           const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
           parts.push({
             type: 'image_url',

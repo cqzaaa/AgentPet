@@ -699,18 +699,36 @@ app.whenReady().then(() => {
   protocol.handle('wechat-file', async (request) => {
     try {
       const url = new URL(request.url)
-      const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-      let fileName = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
-      if (fileName.startsWith('local/')) {
-        fileName = fileName.substring(6)
+      const relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      const segments = relativePath.split('/')
+      let filePath = ''
+
+      if (segments.length >= 2 && segments[0] === 'local') {
+        if (segments.length >= 3) {
+          // 新格式：wechat-file://local/<safeSessionId>/<fileName>
+          const safeSessionId = segments[1]
+          const fileName = segments.slice(2).join('/')
+          filePath = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
+        } else {
+          // 旧格式：wechat-file://local/<fileName>
+          const fileName = segments.slice(1).join('/')
+          filePath = join(getActiveStorageDir(), 'wechat_files', fileName)
+        }
       }
-      const filePath = join(wechatFilesDir, fileName)
-      
-      // 安全检查：防止目录遍历漏洞
-      if (!filePath.startsWith(wechatFilesDir)) {
+
+      if (!filePath) {
+        return new Response('Bad Request', { status: 400 })
+      }
+
+      // 安全检查：文件必须位于允许的目录内
+      const allowedBases = [
+        join(getActiveStorageDir(), 'chat'),
+        join(getActiveStorageDir(), 'wechat_files')
+      ]
+      if (!allowedBases.some(base => filePath.startsWith(base))) {
         return new Response('Access Denied', { status: 403 })
       }
-      
+
       const fileUrl = pathToFileURL(filePath).toString()
       const response = await net.fetch(fileUrl)
       const headers = new Headers(response.headers)
@@ -813,12 +831,18 @@ app.whenReady().then(() => {
       if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
       resolved = decodeURIComponent(resolved)
     } else if (resolved.startsWith('wechat-file://')) {
-      const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-      let fileName = decodeURIComponent(resolved.replace('wechat-file://', '').replace(/^\/+/, ''))
-      if (fileName.startsWith('local/')) {
-        fileName = fileName.substring(6)
+      const relativePath = decodeURIComponent(resolved.replace('wechat-file://', '').replace(/^\/+/, ''))
+      const segments = relativePath.split('/')
+      if (segments.length >= 3 && segments[0] === 'local') {
+        // 新格式：wechat-file://local/<safeSessionId>/<fileName>
+        const safeSessionId = segments[1]
+        const fileName = segments.slice(2).join('/')
+        resolved = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
+      } else if (segments.length >= 2 && segments[0] === 'local') {
+        // 旧格式：wechat-file://local/<fileName>
+        const fileName = segments.slice(1).join('/')
+        resolved = join(getActiveStorageDir(), 'wechat_files', fileName)
       }
-      resolved = join(wechatFilesDir, fileName)
     }
     return resolved
   }
@@ -1099,12 +1123,19 @@ app.whenReady().then(() => {
         if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
         img = nativeImage.createFromPath(filePath)
       } else if (imageUrl.startsWith('wechat-file://')) {
-        const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-        let fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
-        if (fileName.startsWith('local/')) {
-          fileName = fileName.substring(6)
+        const relativePath = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+        const segments = relativePath.split('/')
+        let filePath = ''
+        if (segments.length >= 3 && segments[0] === 'local') {
+          // 新格式：wechat-file://local/<safeSessionId>/<fileName>
+          const safeSessionId = segments[1]
+          const fileName = segments.slice(2).join('/')
+          filePath = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
+        } else if (segments.length >= 2 && segments[0] === 'local') {
+          // 旧格式：wechat-file://local/<fileName>
+          const fileName = segments.slice(1).join('/')
+          filePath = join(getActiveStorageDir(), 'wechat_files', fileName)
         }
-        const filePath = join(wechatFilesDir, fileName)
         img = nativeImage.createFromPath(filePath)
       } else if (imageUrl.startsWith('data:image/')) {
         // base64 data URL
@@ -1208,12 +1239,20 @@ app.whenReady().then(() => {
               if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
               img = nativeImage.createFromPath(filePath)
             } else if (imageUrl.startsWith('wechat-file://')) {
-              const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-              let fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
-              if (fileName.startsWith('local/')) {
-                fileName = fileName.substring(6)
+              const relativePath = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+              const segments = relativePath.split('/')
+              let filePath = ''
+              if (segments.length >= 3 && segments[0] === 'local') {
+                // 新格式：wechat-file://local/<safeSessionId>/<fileName>
+                const safeSessionId = segments[1]
+                const fileName = segments.slice(2).join('/')
+                filePath = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
+              } else if (segments.length >= 2 && segments[0] === 'local') {
+                // 旧格式：wechat-file://local/<fileName>
+                const fileName = segments.slice(1).join('/')
+                filePath = join(getActiveStorageDir(), 'wechat_files', fileName)
               }
-              img = nativeImage.createFromPath(join(wechatFilesDir, fileName))
+              img = nativeImage.createFromPath(filePath)
             } else if (imageUrl.startsWith('data:image/')) {
               img = nativeImage.createFromDataURL(imageUrl)
             } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
