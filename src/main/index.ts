@@ -1639,6 +1639,7 @@ app.whenReady().then(() => {
           id TEXT PRIMARY KEY,
           name TEXT,
           time TEXT,
+          pinned INTEGER DEFAULT 0,
           user_id TEXT DEFAULT 'system'
         );
         CREATE TABLE IF NOT EXISTS messages (
@@ -1687,6 +1688,17 @@ app.whenReady().then(() => {
           console.log("成功升级 SQLite messages 表结构，加入 file_infos 列")
         } catch (alterErr) {
           console.error("升级 messages 表结构添加 file_infos 失败", alterErr)
+        }
+      }
+      // 动态升级：为老数据库添加 pinned 列（会话置顶）
+      try {
+        db.prepare("SELECT pinned FROM sessions LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE sessions ADD COLUMN pinned INTEGER DEFAULT 0")
+          console.log("成功升级 SQLite sessions 表结构，加入 pinned 列")
+        } catch (alterErr) {
+          console.error("升级 sessions 表结构添加 pinned 失败", alterErr)
         }
       }
     }
@@ -1814,6 +1826,7 @@ app.whenReady().then(() => {
           id: s.id,
           name: s.name,
           time: s.time,
+          pinned: s.pinned === 1,
           userId: s.user_id || 'system',
           messages
         })
@@ -1830,17 +1843,17 @@ app.whenReady().then(() => {
     try {
       const database = getDB()
 
-      const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
+      const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, ?, ?)')
       const insertMessage = database.prepare(`
-        INSERT OR REPLACE INTO messages 
-        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id) 
+        INSERT OR REPLACE INTO messages
+        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const sessionIds = sessions.map(s => s.id)
 
       const transaction = database.transaction((sessList: any[]) => {
-        // 1. 删除已被删除的 sessions 
+        // 1. 删除已被删除的 sessions
         if (sessionIds.length > 0) {
           const placeholders = sessionIds.map(() => '?').join(',')
           database.prepare(`DELETE FROM sessions WHERE id NOT IN (${placeholders})`).run(...sessionIds)
@@ -1849,7 +1862,7 @@ app.whenReady().then(() => {
         }
 
         for (const s of sessList) {
-          insertSession.run(s.id, s.name, s.time, s.userId || 'system')
+          insertSession.run(s.id, s.name, s.time, s.pinned ? 1 : 0, s.userId || 'system')
 
           // 收集当前 session 里的所有 message ID，用于删除已经不存在的 message
           const msgList = s.messages || []

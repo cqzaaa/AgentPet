@@ -4,9 +4,10 @@ import { ChatPage } from '../pages/ChatPage'
 import { ControlPage } from '../pages/ControlPage'
 import { AgentPage } from '../pages/AgentPage'
 import { SettingsPage } from '../pages/SettingsPage'
-import { ChatIcon, OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
+import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import { LogsPage } from '../pages/LogsPage'
 import iconFromImage from '../assets/icon.png'
+import { RecentSessionList } from './RecentSessionList'
 
 function LogsIcon(): React.JSX.Element {
   return (
@@ -41,7 +42,7 @@ export function AgentWindow(): React.JSX.Element {
     isCollapsed, setIsCollapsed,
     activeTab, setActiveTab,
     sessions, activeSessionId, setActiveSessionId,
-    handleCreateNewSession, handleDeleteSession,
+    handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession,
     llmConfig,
     customModelFile,
     skillsList, contextRounds,
@@ -56,6 +57,13 @@ export function AgentWindow(): React.JSX.Element {
 
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
+
+  // 侧边栏下方菜单组（控制/代理/日志/设置）默认收起，把空间让给最近会话
+  const [menuCollapsed, setMenuCollapsed] = useState(true)
+  useEffect(() => {
+    // 当前不在聊天页时自动展开菜单，便于看到高亮项
+    if (activeTab !== 'chat') setMenuCollapsed(false)
+  }, [activeTab])
 
   // ── 已生成文件 & 预览面板状态 ──
   const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
@@ -317,63 +325,55 @@ export function AgentWindow(): React.JSX.Element {
             </button>
           </div>
 
-          {/* 最近会话滚动列表 */}
-          {!isCollapsed && <div className="sidebar-recent-title">最近会话</div>}
+          {/* 最近会话列表（搜索 / 分组 / 置顶 / 重命名 / 虚拟滚动） */}
           {!isCollapsed && (
-            <div className="sidebar-recent-container">
-              {sessions.map(session => (
-                <div
-                  key={session.id}
-                  className={`recent-item ${activeSessionId === session.id ? 'active' : ''}`}
-                  onClick={() => { setActiveSessionId(session.id); setActiveTab('chat') }}
-                  title={session.name}
-                >
-                  <span className="recent-dot"></span>
-                  <div className="recent-meta">
-                    <span className="recent-title" title={session.name}>{session.name}</span>
-                    <span className="recent-time">{session.time}</span>
-                  </div>
-                  <button
-                    className="recent-delete-btn"
-                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id) }}
-                    title="删除会话"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              ))}
+            <div className="sidebar-recent-title">
+              <span>最近会话</span>
+              {activePermissionRequest && (
+                <span className="menu-sandbox-badge" title="有待审批的终端命令" onClick={() => setActiveTab('chat')}>●</span>
+              )}
             </div>
           )}
+          {!isCollapsed && (
+            <RecentSessionList
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelect={(id) => { setActiveSessionId(id); setActiveTab('chat') }}
+              onDelete={handleDeleteSession}
+              onTogglePin={handleTogglePinSession}
+              onRename={handleRenameSession}
+            />
+          )}
 
-          {/* Menu Items */}
-          <div className="sidebar-menu">
-            <div className={`menu-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')} title="会话">
-              <div className="menu-item-left">
-                <ChatIcon />
-                <span>聊天</span>
-                {activePermissionRequest && (
-                  <span className="menu-sandbox-badge" title="有待审批的终端命令">●</span>
-                )}
-              </div>
-              <span className="menu-item-arrow">&gt;</span>
-            </div>
-            <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="控制">
-              <div className="menu-item-left"><OverviewIcon /><span>控制</span></div>
-              <span className="menu-item-arrow">&gt;</span>
-            </div>
-            <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
-              <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
-              <span className="menu-item-arrow">&gt;</span>
-            </div>
-            <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
-              <div className="menu-item-left"><LogsIcon /><span>日志</span></div>
-              <span className="menu-item-arrow">&gt;</span>
-            </div>
-            <div className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} title="设置">
-              <div className="menu-item-left"><SettingsIcon /><span>设置</span></div>
-              <span className="menu-item-arrow">&gt;</span>
-            </div>
+          {/* 可折叠菜单组：控制 / 代理 / 日志 / 设置 */}
+          <div
+            className={`sidebar-menu-header ${menuCollapsed ? 'collapsed' : ''}`}
+            onClick={() => setMenuCollapsed(!menuCollapsed)}
+            title={menuCollapsed ? '展开菜单' : '收起菜单'}
+          >
+            <span className="sidebar-menu-arrow">{menuCollapsed ? '▸' : '▾'}</span>
+            <span>菜单</span>
           </div>
+          {!menuCollapsed && (
+            <div className="sidebar-menu">
+              <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="控制">
+                <div className="menu-item-left"><OverviewIcon /><span>控制</span></div>
+                <span className="menu-item-arrow">&gt;</span>
+              </div>
+              <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
+                <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
+                <span className="menu-item-arrow">&gt;</span>
+              </div>
+              <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
+                <div className="menu-item-left"><LogsIcon /><span>日志</span></div>
+                <span className="menu-item-arrow">&gt;</span>
+              </div>
+              <div className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} title="设置">
+                <div className="menu-item-left"><SettingsIcon /><span>设置</span></div>
+                <span className="menu-item-arrow">&gt;</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar Footer */}

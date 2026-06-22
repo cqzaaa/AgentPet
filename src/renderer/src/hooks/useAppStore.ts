@@ -26,6 +26,7 @@ export interface Session {
   name: string
   time: string
   messages: any[]
+  pinned?: boolean
 }
 
 export interface TokenLog {
@@ -244,6 +245,7 @@ export function useAppStore() {
           // 清除残留的 is_thinking 状态（应用异常退出时可能遗留在缓存中）
           return parsed.map((s: any) => ({
             ...s,
+            pinned: s.pinned === true,
             messages: (s.messages || []).map((m: any) =>
               m.isThinking
                 ? { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
@@ -706,6 +708,31 @@ export function useAppStore() {
     }
     setSessions(nextSessions)
     if (activeSessionId === id) setActiveSessionId(nextSessions[0].id)
+  }
+
+  // 切换会话置顶状态
+  const handleTogglePinSession = (id: string): void => {
+    setSessions(prev => {
+      const target = prev.find(s => s.id === id)
+      if (!target) return prev
+      const toggled = { ...target, pinned: !target.pinned }
+      // 置顶的排到最前；取消置顶的回到非置顶组的开头
+      const rest = prev.filter(s => s.id !== id)
+      if (toggled.pinned) {
+        // 把它放到所有已置顶项之后、非置顶项之前
+        const pinnedRest = rest.filter(s => s.pinned)
+        const unpinnedRest = rest.filter(s => !s.pinned)
+        return [...pinnedRest, toggled, ...unpinnedRest]
+      }
+      return [...rest, toggled]
+    })
+  }
+
+  // 重命名会话
+  const handleRenameSession = (id: string, name: string): void => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setSessions(prev => prev.map(s => (s.id === id ? { ...s, name: trimmed } : s)))
   }
 
   const handleCreateNewSession = (): void => {
@@ -1493,7 +1520,7 @@ ${skillsContext}
     inputValue, setInputValue,
     isSending,
     chatEndRef,
-    handleCreateNewSession, handleDeleteSession, handleSendChat,
+    handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession, handleSendChat,
     // workspace & attached file
     workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
     attachedFiles, setAttachedFiles, handlePasteFiles, handleUploadFile,

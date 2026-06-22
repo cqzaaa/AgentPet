@@ -39,6 +39,7 @@
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "pptxgenjs": "^4.0.1",
+    "react-virtuoso": "^4.18.7",
     "three": "^0.184.0",
     "ws": "^8.21.0",
     "x-data-spreadsheet": "^1.1.9",
