@@ -354,7 +354,7 @@ export function AgentWindow(): React.JSX.Element {
             <span className="sidebar-menu-arrow">{menuCollapsed ? '▸' : '▾'}</span>
             <span>菜单</span>
           </div>
-          {!menuCollapsed && (
+          {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
               <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="控制">
                 <div className="menu-item-left"><OverviewIcon /><span>控制</span></div>

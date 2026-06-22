@@ -604,13 +604,25 @@ body {
   display: none;
 }
 
-.sidebar-recent-container::-webkit-scrollbar {
+.sidebar-recent-container::-webkit-scrollbar,
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar {
   width: 3px;
 }
 
-.sidebar-recent-container::-webkit-scrollbar-thumb {
-  background: rgba(96, 165, 250, 0.1);
-  border-radius: 1.5px;
+.sidebar-recent-container::-webkit-scrollbar-track,
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-recent-container::-webkit-scrollbar-thumb,
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.35);
+  border-radius: 2px;
+}
+
+.sidebar-recent-container::-webkit-scrollbar-thumb:hover,
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.6);
 }
 
 /* 分组标题 */
