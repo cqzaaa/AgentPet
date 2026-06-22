@@ -590,6 +590,24 @@ export function useAppStore() {
     return () => unsubscribe()
   }, [])
 
+  // 微信 Bot 链接成功时，把当前会话置顶，方便在最近会话列表顶部快速找到
+  useEffect(() => {
+    if (!window.api.onWechatStatusUpdated) return
+    const unsubscribe = window.api.onWechatStatusUpdated((data: any) => {
+      if (data?.status !== 'connected') return
+      setSessions(prev => {
+        const target = prev.find(s => s.id === activeSessionId)
+        if (!target || target.pinned) return prev
+        const toggled = { ...target, pinned: true }
+        const rest = prev.filter(s => s.id !== activeSessionId)
+        const pinnedRest = rest.filter(s => s.pinned)
+        const unpinnedRest = rest.filter(s => !s.pinned)
+        return [...pinnedRest, toggled, ...unpinnedRest]
+      })
+    })
+    return () => unsubscribe()
+  }, [activeSessionId])
+
   // Load sessions from local file
   useEffect(() => {
     refreshSessions(true)

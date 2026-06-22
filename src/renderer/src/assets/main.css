@@ -561,7 +561,7 @@ body {
   font-size: 12px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
-  background: var(--bg-menu-hover, rgba(255, 255, 255, 0.04));
+  background: var(--bg-input);
   color: var(--text-primary);
   outline: none;
   transition: border-color 0.15s ease;
@@ -734,7 +734,7 @@ body {
   font-weight: 600;
   border: 1px solid #60a5fa;
   border-radius: 4px;
-  background: var(--bg-primary, #fff);
+  background: var(--bg-input);
   color: var(--text-primary);
   outline: none;
 }
@@ -780,8 +780,8 @@ body {
   min-width: 120px;
   padding: 4px;
   border-radius: 8px;
-  background: var(--bg-primary, #1f2937);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   font-size: 12.5px;
   color: var(--text-primary);
