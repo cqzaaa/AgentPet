@@ -20,7 +20,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     currentAvatarName,
     // cron
     cronTasks,
-    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
+    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs, handleAddCronTask, handleEditCronTask,
     selectedTaskForLog, setSelectedTaskForLog,
     selectedCronLogDetails, setSelectedCronLogDetails,
     // mcp
@@ -45,6 +45,34 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [showTestResultModal, setShowTestResultModal] = React.useState(false)
   const [testResultData, setTestResultData] = React.useState<any>(null)
   const [testResultServerName, setTestResultServerName] = React.useState('')
+
+  // 定时任务编辑/新增状态
+  const [showCronModal, setShowCronModal] = React.useState(false)
+  const [editingCron, setEditingCron] = React.useState<any>(null)
+  const [cronName, setCronName] = React.useState('')
+  const [cronHours, setCronHours] = React.useState<number>(0)
+  const [cronMinutes, setCronMinutes] = React.useState<number>(1)
+  const [cronSeconds, setCronSeconds] = React.useState<number>(0)
+  const [cronAction, setCronAction] = React.useState('')
+  const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null)
+
+  // 点击空白处关闭下拉菜单
+  React.useEffect(() => {
+    const handleClick = () => setOpenDropdownId(null)
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [])
+
+  const formatInterval = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600)
+    const m = Math.floor((totalSeconds % 3600) / 60)
+    const s = totalSeconds % 60
+    let res = ''
+    if (h > 0) res += `${h}小时 `
+    if (m > 0) res += `${m}分钟 `
+    if (s > 0 || (h === 0 && m === 0)) res += `${s}秒`
+    return res.trim()
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -226,28 +254,30 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
         {/* ── 定时任务 ── */}
         {agentSubTab === 'cron' && (
           <div>
-            <div className="cron-info-banner" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '16px',
-              background: 'rgba(59, 130, 246, 0.08)',
-              border: '1px solid rgba(59, 130, 246, 0.2)',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              color: 'var(--text-secondary)',
-              fontSize: '13px',
-              lineHeight: '1.5'
-            }}>
-              <span style={{ fontSize: '24px' }}>🤖</span>
-              <div>
-                <strong>定时任务已托管</strong><br />
-                为了确保人设一致性与操作安全，本页面禁止手动创建定时任务。请移步到 <strong>对话/Chat</strong> 页面，对大模型发出指令（例如：“帮我创建一个每30秒检测一次系统CPU负载状态的定时任务”）来让助手为您创建！
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="settings-section-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>
+                已配置的定时任务 ({cronTasks.length})
               </div>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setEditingCron(null)
+                  setCronName('')
+                  setCronHours(0)
+                  setCronMinutes(1)
+                  setCronSeconds(0)
+                  setCronAction('')
+                  setShowCronModal(true)
+                }}
+                style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                ➕ 新增任务
+              </button>
             </div>
 
-            <div className="skills-table-wrapper">
-              <table className="cron-table">
+            <div className="skills-table-wrapper" style={{ overflow: 'visible' }}>
+              <table className="cron-table" style={{ overflow: 'visible' }}>
                 <thead>
                   <tr>
                     <th>任务名称</th>
@@ -262,7 +292,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   {cronTasks.map(task => (
                     <tr key={task.id}>
                       <td style={{ fontWeight: 600 }}>{task.name}</td>
-                      <td>{task.interval} 秒</td>
+                      <td>{formatInterval(task.interval)}</td>
                       <td>{task.lastTriggered}</td>
                       <td><span className="cron-badge-trigger">{task.triggerCount} 次</span></td>
                       <td>
@@ -270,7 +300,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           {task.isActive ? '运行中' : '已暂停'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', position: 'relative' }}>
                         <button
                           type="button"
                           className="btn-secondary"
@@ -285,14 +315,77 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         <button
                           type="button"
                           className="btn-secondary"
-                          style={{ padding: '4px 8px', fontSize: '11px', marginRight: '8px' }}
-                          onClick={() => handleToggleCronTask(task.id)}
+                          style={{ padding: '4px 8px', fontSize: '11px' }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenDropdownId(openDropdownId === task.id ? null : task.id)
+                          }}
                         >
-                          {task.isActive ? '⏸ 暂停' : '▶ 启动'}
+                          ⚙️ 操作 ▾
                         </button>
-                        <button type="button" className="delete-btn" onClick={() => handleDeleteCronTask(task.id)}>
-                          🗑 移除
-                        </button>
+                        
+                        {openDropdownId === task.id && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '100%',
+                              right: '0',
+                              marginTop: '4px',
+                              background: 'var(--bg-card)',
+                              border: '1px solid var(--border-card)',
+                              borderRadius: '6px',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                              zIndex: 10,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              minWidth: '100px',
+                              overflow: 'hidden'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div 
+                              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onClick={() => {
+                                setEditingCron(task)
+                                setCronName(task.name)
+                                setCronHours(Math.floor(task.interval / 3600))
+                                setCronMinutes(Math.floor((task.interval % 3600) / 60))
+                                setCronSeconds(task.interval % 60)
+                                setCronAction(task.action || '')
+                                setShowCronModal(true)
+                                setOpenDropdownId(null)
+                              }}
+                            >
+                              ✏️ 编辑
+                            </div>
+                            <div 
+                              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onClick={() => {
+                                handleToggleCronTask(task.id)
+                                setOpenDropdownId(null)
+                              }}
+                            >
+                              {task.isActive ? '⏸ 暂停' : '▶ 启动'}
+                            </div>
+                            {task.name !== '系统画像提纯与经验沉淀' && (
+                              <div 
+                                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', color: '#ef4444', borderTop: '1px solid var(--border-card)', display: 'flex', gap: '8px', alignItems: 'center' }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                onClick={() => {
+                                  handleDeleteCronTask(task.id)
+                                  setOpenDropdownId(null)
+                                }}
+                              >
+                                🗑 移除
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -331,7 +424,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)' }}>
                       ⏰ 定时任务日志: {selectedTaskForLog.name}
                     </h3>
-                    <button 
+                    <button
                       onClick={() => {
                         setSelectedTaskForLog(null)
                         setSelectedCronLogDetails(null)
@@ -349,9 +442,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       <br />
                       <strong>动作指令</strong>：<code style={{ background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '4px' }}>{selectedTaskForLog.action || '无'}</code>
                     </div>
-                    
+
                     <h4 style={{ margin: '16px 0 8px 0', fontSize: '13px', fontWeight: '600' }}>📄 执行历史日志</h4>
-                    
+
                     {selectedTaskForLog.logs && selectedTaskForLog.logs.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {selectedTaskForLog.logs.map((log: any) => {
@@ -404,11 +497,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       </div>
                     )}
                   </div>
- 
+
                   {/* Modal Footer */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-card)', paddingTop: '16px' }}>
-                    <button 
-                      className="delete-btn" 
+                    <button
+                      className="delete-btn"
                       style={{ border: '1px solid rgba(248,113,113,0.3)', padding: '6px 12px', borderRadius: '6px', fontSize: '12.5px' }}
                       onClick={async () => {
                         if (confirm('确认清空该任务的执行日志吗？')) {
@@ -421,8 +514,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     >
                       🗑 清空日志
                     </button>
-                    <button 
-                      className="btn-primary" 
+                    <button
+                      className="btn-primary"
                       style={{ padding: '6px 16px', borderRadius: '6px', fontSize: '12.5px' }}
                       onClick={() => {
                         setSelectedTaskForLog(null)
@@ -468,7 +561,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)' }}>
                       📋 任务执行详情 ({selectedCronLogDetails.time})
                     </h3>
-                    <button 
+                    <button
                       onClick={() => setSelectedCronLogDetails(null)}
                       style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '18px' }}
                     >
@@ -489,12 +582,120 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
 
                   {/* Footer */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-card)', paddingTop: '16px' }}>
-                    <button 
-                      className="btn-primary" 
+                    <button
+                      className="btn-primary"
                       style={{ padding: '6px 20px', borderRadius: '6px', fontSize: '12.5px' }}
                       onClick={() => setSelectedCronLogDetails(null)}
                     >
                       确定
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 新增/编辑定时任务 Modal */}
+            {showCronModal && (
+              <div className="cron-modal-overlay" style={{
+                position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+                backgroundColor: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(8px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1002
+              }}>
+                <div className="mcp-modal-card" onClick={e => e.stopPropagation()} style={{ width: '450px' }}>
+                  <div className="mcp-modal-header">
+                    <div className="mcp-modal-title">
+                      <span>{editingCron ? '✏️ 编辑定时任务' : '➕ 新增定时任务'}</span>
+                    </div>
+                    <button className="mcp-modal-close-btn" onClick={() => setShowCronModal(false)}>×</button>
+                  </div>
+                  <div className="mcp-modal-body">
+                    <div style={{ marginBottom: '12px' }}>
+                      <label className="mcp-form-label">任务名称</label>
+                      <input
+                        type="text"
+                        className="mcp-input-fancy"
+                        placeholder="如：定时清理日志、系统状态巡检"
+                        value={cronName}
+                        onChange={e => setCronName(e.target.value)}
+                        disabled={editingCron?.name === '系统画像提纯与经验沉淀'}
+                        style={editingCron?.name === '系统画像提纯与经验沉淀' ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '12px' }}>
+                      <label className="mcp-form-label">执行频率</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                          <input type="number" min="0" className="mcp-input-fancy" placeholder="小时" value={cronHours || ''} onChange={e => setCronHours(Number(e.target.value) || 0)} />
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>时</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                          <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="分钟" value={cronMinutes || ''} onChange={e => setCronMinutes(Number(e.target.value) || 0)} />
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>分</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                          <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="秒" value={cronSeconds || ''} onChange={e => setCronSeconds(Number(e.target.value) || 0)} />
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>秒</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mcp-form-label">动作指令 / 提示词</label>
+                      <textarea
+                        className="mcp-input-fancy"
+                        style={{ minHeight: '80px', resize: 'vertical', ...(editingCron?.name === '系统画像提纯与经验沉淀' ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                        placeholder="给助手的执行指令，例如：检查当前系统 CPU 状态"
+                        value={cronAction}
+                        onChange={e => setCronAction(e.target.value)}
+                        disabled={editingCron?.name === '系统画像提纯与经验沉淀'}
+                      />
+                    </div>
+                  </div>
+                  <div className="mcp-modal-footer">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setShowCronModal(false)}
+                      style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={async () => {
+                        if (!cronName.trim()) {
+                          showToast('请填写任务名称', 'error')
+                          return
+                        }
+                        if (!cronAction.trim()) {
+                          showToast('请填写动作指令/提示词', 'error')
+                          return
+                        }
+                        const totalInterval = cronHours * 3600 + cronMinutes * 60 + cronSeconds
+                        if (totalInterval < 5) {
+                          showToast('执行频率不能少于 5 秒', 'error')
+                          return
+                        }
+                        
+                        if (editingCron) {
+                          await handleEditCronTask(editingCron.id, {
+                            name: cronName.trim(),
+                            interval: totalInterval,
+                            action: cronAction.trim()
+                          })
+                        } else {
+                          await handleAddCronTask({
+                            name: cronName.trim(),
+                            interval: totalInterval,
+                            action: cronAction.trim(),
+                            isActive: true
+                          })
+                        }
+                        setShowCronModal(false)
+                      }}
+                      style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      保存任务
                     </button>
                   </div>
                 </div>

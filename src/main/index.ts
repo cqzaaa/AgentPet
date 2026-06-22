@@ -207,6 +207,20 @@ class McpManager {
     return allTools
   }
 
+  public getActiveServers(): any[] {
+    const list: any[] = []
+    for (const conn of this.connections.values()) {
+      list.push({
+        id: conn.config.id,
+        name: conn.config.name,
+        url: conn.config.url,
+        description: conn.config.description || '',
+        toolsCount: conn.tools.length
+      })
+    }
+    return list
+  }
+
   public hasTool(name: string): boolean {
     for (const conn of this.connections.values()) {
       if (conn.tools.some(t => t.name === name)) {
@@ -1617,7 +1631,6 @@ app.whenReady().then(() => {
     const chatDir = getActiveChatDir()
     const dbPath = join(chatDir, 'chat.db')
 
-    // 如果数据库连接已经存在，但对应的文件路径发生了变化，说明需要重新打开
     if (db) {
       if (db.name !== dbPath) {
         try {
@@ -1654,7 +1667,18 @@ app.whenReady().then(() => {
           file_infos TEXT,
           is_error INTEGER DEFAULT 0,
           user_id TEXT DEFAULT 'system',
+          is_summarized INTEGER DEFAULT 0,
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS persona_memories (
+          id TEXT PRIMARY KEY,
+          fact TEXT NOT NULL,
+          strength REAL DEFAULT 1.0,
+          last_accessed_at INTEGER,
+          created_at INTEGER,
+          category TEXT DEFAULT 'profile',
+          keywords TEXT,
+          embedding TEXT
         );
       `)
 
@@ -1701,7 +1725,50 @@ app.whenReady().then(() => {
           console.error("升级 sessions 表结构添加 pinned 失败", alterErr)
         }
       }
+      // 动态升级：为老数据库添加 is_summarized 列（用于上下文总结）
+      try {
+        db.prepare("SELECT is_summarized FROM messages LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE messages ADD COLUMN is_summarized INTEGER DEFAULT 0")
+          console.log("成功升级 SQLite messages 表结构，加入 is_summarized 列")
+        } catch (alterErr) {
+          console.error("升级 messages 表结构添加 is_summarized 失败", alterErr)
+        }
+      }
+      // 动态升级：为 persona_memories 添加 category, keywords, embedding 字段
+      try {
+        db.prepare("SELECT category FROM persona_memories LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE persona_memories ADD COLUMN category TEXT DEFAULT 'profile'")
+          console.log("成功升级 SQLite persona_memories 表结构，加入 category 列")
+        } catch (alterErr) {
+          console.error("升级 persona_memories 表结构添加 category 失败", alterErr)
+        }
+      }
+      try {
+        db.prepare("SELECT keywords FROM persona_memories LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE persona_memories ADD COLUMN keywords TEXT")
+          console.log("成功升级 SQLite persona_memories 表结构，加入 keywords 列")
+        } catch (alterErr) {
+          console.error("升级 persona_memories 表结构添加 keywords 失败", alterErr)
+        }
+      }
+      try {
+        db.prepare("SELECT embedding FROM persona_memories LIMIT 1").all()
+      } catch (e) {
+        try {
+          db.exec("ALTER TABLE persona_memories ADD COLUMN embedding TEXT")
+          console.log("成功升级 SQLite persona_memories 表结构，加入 embedding 列")
+        } catch (alterErr) {
+          console.error("升级 persona_memories 表结构添加 embedding 失败", alterErr)
+        }
+      }
     }
+
     return db
   }
 
@@ -1721,8 +1788,8 @@ app.whenReady().then(() => {
           const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
           const insertMessage = database.prepare(`
             INSERT OR REPLACE INTO messages 
-            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
 
           const transaction = database.transaction((sessList: any[]) => {
@@ -1743,8 +1810,9 @@ app.whenReady().then(() => {
                     : null
                   const isError = m.isError ? 1 : 0
                   const userId = m.userId || 'system'
+                  const isSummarized = m.isSummarized ? 1 : 0
 
-                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId)
+                  insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized)
                 }
               }
             }
@@ -1818,7 +1886,8 @@ app.whenReady().then(() => {
             fileInfo,
             fileInfos,
             isError: m.is_error === 1,
-            userId: m.user_id || 'system'
+            userId: m.user_id || 'system',
+            isSummarized: m.is_summarized === 1
           }
         })
 
@@ -1846,14 +1915,14 @@ app.whenReady().then(() => {
       const insertSession = database.prepare('INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, ?, ?)')
       const insertMessage = database.prepare(`
         INSERT OR REPLACE INTO messages
-        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const sessionIds = sessions.map(s => s.id)
 
       const transaction = database.transaction((sessList: any[]) => {
-        // 1. 删除已被删除的 sessions
+        // 1. 删除已被删除 of sessions
         if (sessionIds.length > 0) {
           const placeholders = sessionIds.map(() => '?').join(',')
           database.prepare(`DELETE FROM sessions WHERE id NOT IN (${placeholders})`).run(...sessionIds)
@@ -1889,8 +1958,9 @@ app.whenReady().then(() => {
               : null
             const isError = m.isError ? 1 : 0
             const userId = m.userId || 'system'
+            const isSummarized = m.isSummarized ? 1 : 0
 
-            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId)
+            insertMessage.run(msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized)
           }
         }
       })
@@ -1899,6 +1969,432 @@ app.whenReady().then(() => {
       return true
     } catch (e) {
       console.error('保存聊天记录到 SQLite 失败', e)
+      return false
+    }
+  })
+
+  // 追加写入每日 Markdown 摘要（用会话文件夹进行隔离）
+  ipcMain.handle('api:append-memory-summary', async (_, sessionId: string, text: string) => {
+    try {
+      if (!sessionId) return false
+      const chatDir = getActiveChatDir()
+      const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
+      const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
+      
+      if (!fs.existsSync(sessionMemoryDir)) {
+        await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
+      }
+
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = String(now.getMonth() + 1).padStart(2, '0')
+      const day = String(now.getDate()).padStart(2, '0')
+      const fileName = `${year}-${month}-${day}.md`
+      const filePath = join(sessionMemoryDir, fileName)
+
+      await fs.promises.appendFile(filePath, text + '\n\n', 'utf-8')
+      return true
+    } catch (e) {
+      console.error('追加写入每日摘要失败', e)
+      return false
+    }
+  })
+
+  // 计算两个向量的余弦相似度
+  function cosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (vecA.length !== vecB.length) return 0
+    let dotProduct = 0
+    let normA = 0
+    let normB = 0
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i]
+      normA += vecA[i] * vecA[i]
+      normB += vecB[i] * vecB[i]
+    }
+    if (normA === 0 || normB === 0) return 0
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+  }
+
+  // 获取文本的 Embedding 向量，支持优雅降级
+  async function getEmbeddingInternal(
+    config: { 
+      provider: string; 
+      apiKey: string; 
+      baseUrl: string; 
+      model: string; 
+    }, 
+    text: string
+  ): Promise<number[] | null> {
+    try {
+      const { provider, apiKey, baseUrl } = config
+      if (!apiKey && provider !== 'ollama') {
+        return null
+      }
+      let url = ''
+      const headers: any = {
+        'Content-Type': 'application/json'
+      }
+      const body: any = {
+        input: text
+      }
+
+      if (provider === 'gemini') {
+        const effectiveBaseUrl = baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'
+        url = `${effectiveBaseUrl}/embeddings`
+        headers['Authorization'] = `Bearer ${apiKey}`
+        body.model = 'text-embedding-004'
+      } else if (provider === 'openai') {
+        const effectiveBaseUrl = baseUrl || 'https://api.openai.com/v1'
+        url = `${effectiveBaseUrl}/embeddings`
+        headers['Authorization'] = `Bearer ${apiKey}`
+        body.model = 'text-embedding-3-small'
+      } else if (provider === 'deepseek') {
+        // Deepseek 目前官方不提供 embedding API
+        return null
+      } else if (provider === 'ollama') {
+        const effectiveBaseUrl = baseUrl || 'http://localhost:11434/v1'
+        url = `${effectiveBaseUrl}/embeddings`
+        body.model = 'nomic-embed-text'
+      } else {
+        url = `${baseUrl}/embeddings`
+        if (apiKey) {
+          headers['Authorization'] = `Bearer ${apiKey}`
+        }
+        body.model = 'text-embedding-3-small'
+      }
+
+      const response = await net.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000)
+      })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const data: any = await response.json()
+      if (data && data.data && data.data[0] && data.data[0].embedding) {
+        return data.data[0].embedding
+      }
+      return null
+    } catch (err) {
+      console.warn('[Embedding] 无法获取向量，降级为纯文本模糊搜索', err)
+      return null
+    }
+  }
+
+  // 获取顶级全局画像 profile.md
+  ipcMain.handle('api:get-memory-profile', async () => {
+    try {
+      const filePath = join(getActiveStorageDir(), 'memory', 'profile.md')
+      if (fs.existsSync(filePath)) {
+        return await fs.promises.readFile(filePath, 'utf-8')
+      }
+      return ''
+    } catch (e) {
+      console.error('读取 profile.md 失败', e)
+      return ''
+    }
+  })
+
+  // 覆盖写入顶级全局画像 profile.md
+  ipcMain.handle('api:write-memory-profile', async (_, text: string) => {
+    try {
+      const dirPath = join(getActiveStorageDir(), 'memory')
+      if (!fs.existsSync(dirPath)) {
+        await fs.promises.mkdir(dirPath, { recursive: true })
+      }
+      const filePath = join(dirPath, 'profile.md')
+      await fs.promises.writeFile(filePath, text, 'utf-8')
+      return true
+    } catch (e) {
+      console.error('写入 profile.md 失败', e)
+      return false
+    }
+  })
+
+  // 第三层：系统内置画像整理与避坑经验沉淀的后台 pipeline
+  ipcMain.handle('api:purify-memory-pipeline', async () => {
+    try {
+      const chatDir = getActiveChatDir()
+      const database = getDB()
+      const sessions = database.prepare('SELECT id, name FROM sessions').all() as { id: string; name: string }[]
+      
+      let allSummariesCombined = ''
+      const processedFiles: string[] = []
+      
+      // 搜集所有会话下的 memory 文件夹内的 md 摘要
+      for (const sess of sessions) {
+        const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
+        const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
+        if (fs.existsSync(sessionMemoryDir)) {
+          const files = await fs.promises.readdir(sessionMemoryDir)
+          const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
+          for (const file of mdFiles) {
+            const filePath = join(sessionMemoryDir, file)
+            const content = await fs.promises.readFile(filePath, 'utf-8')
+            allSummariesCombined += `\n### 会话: ${sess.name} (日期: ${file.replace(/\.md$/i, '')})\n${content}\n`
+            processedFiles.push(filePath)
+          }
+        }
+      }
+
+      if (!allSummariesCombined.trim()) {
+        console.log('[Purify] 无摘要历史，跳过大模型合并，只执行数据库状态清理。')
+        return { success: true, count: 0, insertCount: 0 }
+      }
+
+      // 1. 合并更新全局画像 profile.md
+      const currentProfilePath = join(getActiveStorageDir(), 'memory', 'profile.md')
+      let currentProfile = ''
+      if (fs.existsSync(currentProfilePath)) {
+        currentProfile = await fs.promises.readFile(currentProfilePath, 'utf-8')
+      }
+
+      const profileSystemPrompt = `你是一个高级人物画像整理专家。你的任务是分析主人（用户）最近的对话摘要，提纯、合并并更新主人的全局长期人物画像。
+人物画像必须严格按照以下五个维度进行整理：
+1. 工作背景
+2. 个人背景
+3. 当前关注
+4. 近期动态
+5. 避坑重点与习惯
+
+请合并新摘要中体现的信息，如果与过去的信息有冲突，以新的为准。
+请以 Markdown 格式输出最新的全局人物画像（不要包含任何思考过程、JSON、多余的分析或客套话，直接输出画像的 Markdown 文本内容）。`
+
+      const profileMessages = [
+        { role: 'system', content: profileSystemPrompt },
+        { role: 'user', content: `【当前的全局人物画像】\n${currentProfile || '（暂无）'}\n\n【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请根据上面的对话摘要，对当前的全局人物画像进行提纯、增量合并和覆盖更新，输出最新版本的画像。` }
+      ]
+
+      console.log('[Purify] 正在调用大模型更新人物画像...')
+      const updatedProfile = await callLlmInternal(systemLlmConfig, profileMessages, getActiveStorageDir())
+      
+      const globalMemoryDir = join(getActiveStorageDir(), 'memory')
+      if (!fs.existsSync(globalMemoryDir)) {
+        await fs.promises.mkdir(globalMemoryDir, { recursive: true })
+      }
+      await fs.promises.writeFile(join(globalMemoryDir, 'profile.md'), updatedProfile.trim(), 'utf-8')
+      console.log('[Purify] 人物画像 profile.md 覆盖更新成功。')
+
+      // 2. 提取报错与避坑经验，写入 persona_memories
+      const experienceSystemPrompt = `你是一个任务纠错与避坑经验沉淀专家。请分析主人最近的对话摘要（特别是工具执行失败或报错的部分），提取并总结出结构化的“纠错避坑经验”。
+对于每一条经验，你必须输出为 JSON 格式的数组。格式如下：
+[
+  {
+    "fact": "简明扼要的经验/事实描述，例如：在Windows下用read_file读写Excel时，如果Office软件正在占用，应先提示主人手动关闭。",
+    "keywords": ["read_file", "excel", "permission", "locked"]
+  }
+]
+如果你没有发现任何有价值的避坑经验或工具报错，请直接输出空数组 []。
+请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 数组本身。`
+
+      const experienceMessages = [
+        { role: 'system', content: experienceSystemPrompt },
+        { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取避坑经验并输出为 JSON 数组。` }
+      ]
+
+      console.log('[Purify] 正在调用大模型提炼避坑经验...')
+      const experienceRawJson = await callLlmInternal(systemLlmConfig, experienceMessages, getActiveStorageDir())
+      
+      let jsonText = experienceRawJson.trim()
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(json)?/, '').replace(/```$/, '').trim()
+      }
+      
+      let experiences: any[] = []
+      try {
+        experiences = JSON.parse(jsonText)
+      } catch (je) {
+        console.error('[Purify] 解析避坑经验 JSON 失败, raw response:', experienceRawJson, je)
+      }
+
+      let insertCount = 0
+      if (Array.isArray(experiences) && experiences.length > 0) {
+        for (const item of experiences) {
+          if (!item.fact) continue
+          
+          let emb: number[] | null = null
+          try {
+            emb = await getEmbeddingInternal(systemLlmConfig, item.fact)
+          } catch (ee) {
+            console.error('[Purify] 获取向量失败', ee)
+          }
+
+          // 查询是否有相似的已有经验
+          const rows = database.prepare("SELECT id, fact, embedding FROM persona_memories WHERE category = 'experience'").all() as any[]
+          
+          let matchedId: string | null = null
+          if (emb && rows.length > 0) {
+            for (const row of rows) {
+              if (row.embedding) {
+                try {
+                  const dbEmb = JSON.parse(row.embedding)
+                  if (Array.isArray(dbEmb)) {
+                    const sim = cosineSimilarity(emb, dbEmb)
+                    if (sim > 0.85) {
+                      matchedId = row.id
+                      break
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          if (!matchedId) {
+            const exactMatch = rows.find(r => r.fact.trim() === item.fact.trim())
+            if (exactMatch) {
+              matchedId = exactMatch.id
+            }
+          }
+
+          const now = Date.now()
+          if (matchedId) {
+            database.prepare("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ? WHERE id = ?")
+              .run(now, matchedId)
+            console.log(`[Purify] 强化已有避坑经验 (ID: ${matchedId})`)
+          } else {
+            const newId = `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
+            database.prepare(`
+              INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding)
+              VALUES (?, ?, 1.0, ?, ?, 'experience', ?, ?)
+            `).run(
+              newId,
+              item.fact,
+              now,
+              now,
+              JSON.stringify(item.keywords || []),
+              emb ? JSON.stringify(emb) : null
+            )
+            insertCount++
+            console.log(`[Purify] 写入新避坑经验 (ID: ${newId}): ${item.fact}`)
+          }
+        }
+      }
+
+      // 全部提纯并抽取完成，标记已处理文件
+      for (const filePath of processedFiles) {
+        try {
+          const newFilePath = filePath.replace(/\.md$/i, '_已更新.md')
+          await fs.promises.rename(filePath, newFilePath)
+        } catch (renameErr) {
+          console.error(`[Purify] 标记文件为已更新失败: ${filePath}`, renameErr)
+        }
+      }
+
+      return { success: true, count: processedFiles.length, insertCount }
+    } catch (e: any) {
+      console.error('画像整理 pipeline 失败', e)
+      throw new Error(`画像整理 Pipeline 失败: ${e.message || e}`)
+    }
+  })
+
+  // 第四层：多路混合检索召回相关避坑经验
+  ipcMain.handle('api:recall-experiences', async (_, queryText: string) => {
+    try {
+      if (!queryText || !queryText.trim()) return []
+      const database = getDB()
+      const rows = database.prepare("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding FROM persona_memories WHERE category = 'experience'").all() as any[]
+      
+      if (rows.length === 0) return []
+
+      const now = Date.now()
+      
+      let queryEmb: number[] | null = null
+      try {
+        queryEmb = await getEmbeddingInternal(systemLlmConfig, queryText)
+      } catch (e) {
+        console.error('召回计算向量失败', e)
+      }
+
+      const scoredResults = rows.map(row => {
+        // A. 指数衰退后的实际强度
+        const lastAccess = row.last_accessed_at || row.created_at || now
+        const deltaDays = (now - lastAccess) / (1000 * 60 * 60 * 24)
+        const sNow = Math.max(0, row.strength * Math.exp(-0.1 * deltaDays))
+
+        if (sNow < 0.2) {
+          return { ...row, sNow, score: 0 }
+        }
+
+        // B. 关键词匹配得分 (Keyword Score)
+        let keywordScore = 0
+        let keywords: string[] = []
+        try {
+          keywords = JSON.parse(row.keywords || '[]')
+        } catch {}
+
+        if (keywords.length > 0) {
+          let matchedCount = 0
+          const lowerQuery = queryText.toLowerCase()
+          for (const kw of keywords) {
+            if (lowerQuery.includes(kw.toLowerCase())) {
+              matchedCount++
+            }
+          }
+          keywordScore = matchedCount / keywords.length
+        }
+
+        // C. 向量相似度得分 (Vector Score)
+        let vectorScore = 0
+        if (queryEmb && row.embedding) {
+          try {
+            const dbEmb = JSON.parse(row.embedding)
+            if (Array.isArray(dbEmb)) {
+              vectorScore = cosineSimilarity(queryEmb, dbEmb)
+              vectorScore = (vectorScore + 1) / 2
+            }
+          } catch {}
+        }
+
+        // D. 综合得分
+        let score = 0
+        if (queryEmb && row.embedding) {
+          score = 0.5 * vectorScore + 0.3 * keywordScore + 0.2 * sNow
+        } else {
+          score = 0.7 * keywordScore + 0.3 * sNow
+        }
+
+        return {
+          id: row.id,
+          fact: row.fact,
+          sNow,
+          score
+        }
+      })
+
+      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.05)
+      activeResults.sort((a, b) => b.score - a.score)
+      const top3 = activeResults.slice(0, 3)
+
+      console.log(`[Recall] 成功召回了 ${top3.length} 条相关经验`)
+      return top3
+    } catch (err) {
+      console.error('召回经验失败', err)
+      return []
+    }
+  })
+
+  // 强化被大模型复习的经验（重置强度）
+  ipcMain.handle('api:strengthen-experiences', async (_, ids: string[]) => {
+    try {
+      if (!Array.isArray(ids) || ids.length === 0) return true
+      const database = getDB()
+      const now = Date.now()
+      const stmt = database.prepare("UPDATE persona_memories SET strength = 1.0, last_accessed_at = ? WHERE id = ?")
+      const transaction = database.transaction((targetIds: string[]) => {
+        for (const id of targetIds) {
+          stmt.run(now, id)
+        }
+      })
+      transaction(ids)
+      console.log(`[Recall] 成功强化复习了记忆: ${ids.join(', ')}`)
+      return true
+    } catch (err) {
+      console.error('强化记忆失败', err)
       return false
     }
   })
@@ -4228,6 +4724,10 @@ if (-not $task.Wait(15000)) {
 
   ipcMain.handle('api:get-mcp-config', () => {
     return systemMcpConfig
+  })
+
+  ipcMain.handle('api:get-active-mcp-servers', () => {
+    return mcpManager.getActiveServers()
   })
 
   // 初始化微信 Bot 服务

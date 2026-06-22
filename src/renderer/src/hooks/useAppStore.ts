@@ -1078,6 +1078,26 @@ export function useAppStore() {
         }
       })
 
+      // 获取长期画像与避坑经验
+      let profileContent = ''
+      try {
+        profileContent = await window.api.getMemoryProfile()
+      } catch (err) {
+        console.error('获取人物画像失败:', err)
+      }
+
+      let relevantExperiences: any[] = []
+      try {
+        relevantExperiences = await window.api.recallExperiences(inputText)
+      } catch (err) {
+        console.error('获取避坑经验失败:', err)
+      }
+
+      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` + 
+        (relevantExperiences.length > 0 
+          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}`).join('\n')}`
+          : '')
+
       // 动态拼装系统人设与技能感知上下文
       const skillsContext = skillsList.length > 0
         ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
@@ -1086,17 +1106,24 @@ export function useAppStore() {
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
         : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
 
-      // MCP 服务上下文
-      const enabledMcpServers = (mcpConfig?.servers || []).filter((s: any) => s.enabled)
-      const mcpContext = enabledMcpServers.length > 0
+      // MCP 服务上下文 (只注入当前后端真正成功连接并加载了工具的服务，避免对大模型产生误导)
+      let activeMcpServers: any[] = []
+      try {
+        activeMcpServers = await window.api.getActiveMcpServers()
+      } catch (err) {
+        console.error('获取可用 MCP 服务列表失败:', err)
+      }
+
+      const mcpContext = activeMcpServers.length > 0
         ? `\n\n🔗 你还可以通过 MCP（Model Context Protocol）协议调用以下外部扩展服务：
-${enabledMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'}`).join('\n')}
+${activeMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'} (已成功加载 ${s.toolsCount} 个工具)`).join('\n')}
 当主人的问题涉及这些服务的功能时（如网页搜索、地图导航、天气查询等），请主动调用对应的 MCP 服务来获取实时信息。`
         : ''
 
       const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
 ${stylePrompt}
 当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
+${memoryContext}
 ${skillsContext}
 在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
 ⚠️ 极重要约束：只有当主人的指令或问题明确指示进行”查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。
@@ -1159,15 +1186,26 @@ ${mcpContext}`
       )
       
       // 更新该 replyId 占位消息的 text 并结束思考状态
-      setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
-          return {
-            ...s,
-            messages: s.messages.map(m => m.id === replyId ? { ...m, text: response, isThinking: false } : m)
+      let latestSessions: any[] = []
+      setSessions(prev => {
+        latestSessions = prev.map(s => {
+          if (s.id === activeSessionId) {
+            return {
+              ...s,
+              messages: s.messages.map(m => m.id === replyId ? { ...m, text: response, isThinking: false } : m)
+            }
           }
+          return s
+        })
+        return latestSessions
+      })
+
+      // 异步检测并触发记忆总结
+      setTimeout(() => {
+        if (latestSessions.length > 0) {
+          triggerSessionSummary(activeSessionId, latestSessions)
         }
-        return s
-      }))
+      }, 500)
     } catch (e: any) {
       console.error(e)
       const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
@@ -1185,6 +1223,111 @@ ${mcpContext}`
       }))
     } finally {
       setIsSending(false)
+    }
+  }
+
+  const triggerSessionSummary = async (sessionId: string, latestSessions: any[]): Promise<void> => {
+    const sessionObj = latestSessions.find(s => s.id === sessionId)
+    if (!sessionObj) return
+
+    // 过滤出有效且未进行总结的历史对话消息
+    // 有效消息：sender === 'user' 或者是 sender === 'agent'，且 !m.isThinking 且 !m.isError
+    const filtered = (sessionObj.messages || []).filter(m => 
+      (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError
+    )
+
+    // 筛选未总结的消息
+    const unsummarized = filtered.filter(m => !m.isSummarized)
+
+    // 根据用户配置的单次会话记忆上下文轮数，动态计算触发总结的消息数
+    // 1 轮对答 = 1 条用户消息 + 1 条助手消息，即 contextRounds * 2
+    const TRIGGER_COUNT = contextRounds * 2
+    if (unsummarized.length < TRIGGER_COUNT) {
+      console.log(`[Summary] 未总结消息条数 (${unsummarized.length}/${TRIGGER_COUNT})，暂不触发总结。`)
+      return
+    }
+
+    // 提取出刚好用于这次总结的 20 条消息
+    const summaryBatch = unsummarized.slice(0, TRIGGER_COUNT)
+
+    // 拼装对话及工具调用/异常日志
+    let chatLogStr = ''
+    summaryBatch.forEach((m) => {
+      const roleName = m.sender === 'user' ? '用户 (User)' : '助手 (Agent)'
+      chatLogStr += `[${roleName}]：${m.text}\n`
+      
+      if (m.toolSteps && m.toolSteps.length > 0) {
+        chatLogStr += `  工具调用过程:\n`
+        m.toolSteps.forEach((step: any) => {
+          if (step.type === 'call') {
+            chatLogStr += `    - 尝试执行工具 [${step.name}]，参数: ${JSON.stringify(step.detail)}\n`
+          } else if (step.type === 'result') {
+            const isErrResult = m.isError || String(step.detail).toLowerCase().includes('error') || String(step.detail).toLowerCase().includes('fail')
+            chatLogStr += `    - 工具 [${step.name}] 执行${isErrResult ? '失败' : '成功'}，返回结果: ${String(step.detail).slice(0, 1000)}\n`
+          }
+        })
+      }
+      chatLogStr += '\n'
+    })
+
+    console.log('[Summary] 开始生成这 20 条消息的记忆摘要与纠错沉淀...')
+
+    const summarySystemPrompt = `你是一个经验丰富的 AI 对话与开发任务总结助手。
+请你仔细阅读以下【一轮包含了用户提问、助手回答及本地系统工具调用的对话日志】，并为他们生成一段精炼、实用的 Markdown 摘要。
+
+请遵循以下总结规则：
+1. 用一到两句话提炼这部分对话中的核心任务或日常交流主题。
+2. **非常重要**：请检索这部分对话中是否存在任何“工具调用（Terminal终端命令、MCP工具、文档读写等）执行失败或产生报错（Error）”的情况。
+3. 如果有调用报错：
+   - 提取出发生了什么错误，哪一步失败了。
+   - 提取出最终是如何解决的（若已解决），或者总结出在此类任务中需要注意的“避坑教训/经验沉淀”。
+   - 将这部分写在特定的“### 🛠 任务执行与避坑经验沉淀”标题下。
+4. 如果没有报错，则不需要写避坑经验小节。
+5. 不要包含过多的寒暄，直接输出 Markdown 总结内容。
+
+以下是对话日志：
+----------------------
+${chatLogStr}
+----------------------`
+
+    try {
+      const summaryResult = await window.api.callLLM(
+        {
+          ...llmConfig,
+          temperature: 0.3
+        },
+        [
+          { role: 'system', content: summarySystemPrompt },
+          { role: 'user', content: '请为以上对话日志生成 Markdown 摘要与经验沉淀。' }
+        ]
+      )
+
+      const timeStr = formatDateTime()
+      const finalMarkdownText = `## [${timeStr}] 记忆摘要与纠错沉淀\n${summaryResult.trim()}`
+
+      const appendSuccess = await window.api.appendMemorySummary(sessionId, finalMarkdownText)
+      if (appendSuccess) {
+        console.log('[Summary] 成功追加到本地 Markdown 记忆日志文件。')
+
+        const batchIds = summaryBatch.map(m => m.id)
+        setSessions(prev => {
+          const updated = prev.map(s => {
+            if (s.id === sessionId) {
+              return {
+                ...s,
+                messages: s.messages.map(m => batchIds.includes(m.id) ? { ...m, isSummarized: true } : m)
+              }
+            }
+            return s
+          })
+          if (autoSaveHistory) {
+            window.api.saveLocalSessions(updated)
+          }
+          return updated
+        })
+      }
+    } catch (err) {
+      console.error('[Summary] 生成对话总结失败:', err)
     }
   }
 
@@ -1298,6 +1441,29 @@ ${mcpContext}`
     showToast('定时任务日志已清空', 'success')
   }
 
+  const handleAddCronTask = async (taskData: Omit<CronTask, 'id' | 'lastTriggered' | 'triggerCount' | 'logs'>): Promise<void> => {
+    const newTask: CronTask = {
+      ...taskData,
+      id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      lastTriggered: '从未执行',
+      triggerCount: 0,
+      logs: []
+    }
+    const updated = [...cronTasks, newTask]
+    setCronTasks(updated)
+    localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
+    await window.api.saveCronTasks(updated)
+    showToast('定时任务添加成功', 'success')
+  }
+
+  const handleEditCronTask = async (id: string, updates: Partial<CronTask>): Promise<void> => {
+    const updated = cronTasks.map(t => t.id === id ? { ...t, ...updates } : t)
+    setCronTasks(updated)
+    localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
+    await window.api.saveCronTasks(updated)
+    showToast('定时任务已更新', 'success')
+  }
+
   const handleClearTokenLogs = (): void => {
     setTokenLogs([])
     localStorage.removeItem('agentpet_token_logs')
@@ -1336,15 +1502,21 @@ ${skillsContext}
         { role: 'user', content: `执行定时任务指令: ${taskToRun.action || '无'}` }
       ]
 
-      const response = await window.api.callLLM(
-        {
-          ...llmConfig,
-          sessionId: tempSessionId,
-          messageId: Date.now()
-        },
-        chatMessages,
-        workspacePath
-      )
+      let response = ''
+      if (taskToRun.name === '系统画像提纯与经验沉淀') {
+        const result = await window.api.purifyMemoryPipeline()
+        response = `内置系统画像与避坑经验提纯分析已完成。\n本次共合并处理了 ${result.count} 份未更新的对话摘要，并从中抽取/强化了 ${result.insertCount || 0} 条避坑经验。相关源文件已标记为已更新。`
+      } else {
+        response = await window.api.callLLM(
+          {
+            ...llmConfig,
+            sessionId: tempSessionId,
+            messageId: Date.now()
+          },
+          chatMessages,
+          workspacePath
+        )
+      }
 
       const runningLog = cronRunningLogsRef.current[tempSessionId]
       if (runningLog) {
@@ -1528,7 +1700,7 @@ ${skillsContext}
     testStatus,
     // cron
     cronTasks,
-    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
+    handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs, handleAddCronTask, handleEditCronTask,
     selectedTaskForLog, setSelectedTaskForLog,
     selectedCronLogDetails, setSelectedCronLogDetails,
     // sessions

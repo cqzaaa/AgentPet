@@ -42,6 +42,13 @@ declare global {
       getModels: (config: any) => Promise<string[]>
       getLocalSessions: () => Promise<any[] | null>
       saveLocalSessions: (sessions: any[]) => Promise<boolean>
+      appendMemorySummary: (sessionId: string, text: string) => Promise<boolean>
+      getMemoryProfile: () => Promise<string>
+      writeMemoryProfile: (text: string) => Promise<boolean>
+      purifyMemoryPipeline: () => Promise<{ success: boolean; count: number; insertCount?: number }>
+      recallExperiences: (queryText: string) => Promise<any[]>
+      strengthenExperiences: (ids: string[]) => Promise<boolean>
+      getActiveMcpServers: () => Promise<any[]>
       getAvatarsList: () => Promise<any[]>
       saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }) => Promise<boolean>
       switchAvatar: (params: { dir: string; configFile: string }) => Promise<any>

@@ -97,6 +97,20 @@ const api = {
     ipcRenderer.invoke('api:get-local-sessions'),
   saveLocalSessions: (sessions: any[]): Promise<boolean> =>
     ipcRenderer.invoke('api:save-local-sessions', sessions),
+  appendMemorySummary: (sessionId: string, text: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:append-memory-summary', sessionId, text),
+  getMemoryProfile: (): Promise<string> =>
+    ipcRenderer.invoke('api:get-memory-profile'),
+  writeMemoryProfile: (text: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:write-memory-profile', text),
+  purifyMemoryPipeline: (): Promise<{ success: boolean; count: number; insertCount?: number }> =>
+    ipcRenderer.invoke('api:purify-memory-pipeline'),
+  recallExperiences: (queryText: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:recall-experiences', queryText),
+  strengthenExperiences: (ids: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('api:strengthen-experiences', ids),
+  getActiveMcpServers: (): Promise<any[]> =>
+    ipcRenderer.invoke('api:get-active-mcp-servers'),
   getAvatarsList: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-avatars-list'),
   saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }): Promise<boolean> =>
