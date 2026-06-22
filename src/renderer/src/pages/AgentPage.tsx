@@ -22,8 +22,29 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     cronTasks,
     handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs,
     selectedTaskForLog, setSelectedTaskForLog,
-    selectedCronLogDetails, setSelectedCronLogDetails
+    selectedCronLogDetails, setSelectedCronLogDetails,
+    // mcp
+    mcpConfig, saveMcpConfig, showToast
   } = store
+
+  const [mcpNewName, setMcpNewName] = React.useState('')
+  const [mcpNewUrl, setMcpNewUrl] = React.useState('')
+  const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
+  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+  const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
+
+  // 编辑弹窗相关状态
+  const [showEditModal, setShowEditModal] = React.useState(false)
+  const [editingServer, setEditingServer] = React.useState<any>(null)
+  const [editName, setEditName] = React.useState('')
+  const [editUrl, setEditUrl] = React.useState('')
+  const [editApiKey, setEditApiKey] = React.useState('')
+  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+
+  // MCP 测试结果弹框状态
+  const [showTestResultModal, setShowTestResultModal] = React.useState(false)
+  const [testResultData, setTestResultData] = React.useState<any>(null)
+  const [testResultServerName, setTestResultServerName] = React.useState('')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -37,6 +58,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
         </div>
         <div className={`sub-tab-item ${agentSubTab === 'cron' ? 'active' : ''}`} onClick={() => setAgentSubTab('cron')}>
           定时任务
+        </div>
+        <div className={`sub-tab-item ${agentSubTab === 'mcp' ? 'active' : ''}`} onClick={() => setAgentSubTab('mcp')}>
+          MCP 服务
         </div>
       </div>
 
@@ -478,7 +502,591 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
             )}
           </div>
         )}
+
+        {/* ── MCP 服务 ── */}
+        {agentSubTab === 'mcp' && (
+          <div className="settings-sub-panel">
+            <div className="form-desc-text" style={{ marginBottom: '12px' }}>
+              配置并管理 Model Context Protocol (MCP) 服务列表。大模型及微信助手可自动并发连接并调用列表中处于启用状态的所有工具。
+            </div>
+
+            <div style={{ background: 'var(--bg-card-sub, rgba(128,128,128,0.02))', padding: '14px 18px', borderRadius: '8px', border: '1px solid var(--border-color, rgba(128,128,128,0.1))', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '2px', color: 'var(--text-color-strong)' }}>💡 发现更多外部 MCP 服务</div>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>探索由开发者社区提供的丰富工具包</div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <a href="https://mcpmarket.cn/" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
+                  🇨🇳 MCP 中文市场 ↗
+                </a>
+                <span style={{ color: 'rgba(128,128,128,0.3)', fontSize: '12px' }}>|</span>
+                <a href="https://www.modelscope.cn/mcp" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
+                  🔮 魔塔 ↗
+                </a>
+              </div>
+            </div>
+
+            {/* MCP 服务列表区 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div className="settings-section-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>
+                已连接的服务列表 ({(mcpConfig?.servers || []).length})
+              </div>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setShowAddMcpForm(true)}
+                style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                ➕ 添加自定义
+              </button>
+            </div>
+
+            <div className="mcp-glass-card">
+              {(mcpConfig?.servers || []).length === 0 ? (
+                <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: '13px' }}>
+                  👻 暂无已添加的服务，请通过右上角"添加自定义"按钮添加。
+                </div>
+              ) : (
+                <div className="mcp-table-container">
+                  <table className="mcp-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '150px' }}>服务名称</th>
+                        <th>终结点地址 (Endpoint)</th>
+                        <th style={{ width: '100px', textAlign: 'center' }}>协议类型</th>
+                        <th style={{ width: '100px', textAlign: 'center' }}>鉴权密钥</th>
+                        <th style={{ width: '90px', textAlign: 'center' }}>启用状态</th>
+                        <th style={{ width: '230px', textAlign: 'center' }}>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(mcpConfig.servers).map((server: any) => (
+                        <tr key={server.id} className="mcp-table-row">
+                          <td style={{ fontWeight: 600, color: 'var(--text-color-strong)' }}>
+                            {server.name}
+                          </td>
+                          <td>
+                            <span className="mcp-url-text" title={server.url}>
+                              {server.url}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className={`mcp-badge ${server.type === 'sse' ? 'none' : 'configured'}`}>
+                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : 'Stream'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className={`mcp-badge ${server.apiKey ? 'configured' : 'none'}`}>
+                              {server.apiKey ? '已配置' : '无'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="mcp-switch-container">
+                              <label className="mcp-switch-label">
+                                <input
+                                  type="checkbox"
+                                  checked={server.enabled}
+                                  onChange={e => {
+                                    const newServers = mcpConfig.servers.map((s: any) => s.id === server.id ? { ...s, enabled: e.target.checked } : s)
+                                    saveMcpConfig({ servers: newServers })
+                                  }}
+                                />
+                                <span className="mcp-switch-slider" />
+                              </label>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="mcp-btn-action-group">
+                              <button
+                                type="button"
+                                className="mcp-btn-action test"
+                                onClick={async () => {
+                                  try {
+                                    showToast(`正在测试连接 [${server.name}]...`, 'info')
+                                    const res = await window.api.testMcpServer({
+                                      url: server.url,
+                                      apiKey: server.apiKey,
+                                      type: server.type || 'stream'
+                                    })
+                                    setTestResultData(res)
+                                    setTestResultServerName(server.name)
+                                    setShowTestResultModal(true)
+                                  } catch (err: any) {
+                                    alert(`❌ 测试异常：\n${err.message || err}`)
+                                  }
+                                }}
+                              >
+                                🔌 测试
+                              </button>
+                              <button
+                                type="button"
+                                className="mcp-btn-action edit"
+                                onClick={() => {
+                                  setEditingServer(server)
+                                  setEditName(server.name)
+                                  setEditUrl(server.url)
+                                  setEditApiKey(server.apiKey || '')
+                                  setEditType(server.type || 'stream')
+                                  setShowEditModal(true)
+                                }}
+                              >
+                                ✏️ 编辑
+                              </button>
+                              <button
+                                type="button"
+                                className="mcp-btn-action delete"
+                                onClick={() => {
+                                  if (confirm(`确认要删除 [${server.name}] 服务吗？`)) {
+                                    const newServers = mcpConfig.servers.filter((s: any) => s.id !== server.id)
+                                    saveMcpConfig({ servers: newServers })
+                                    showToast(`已删除 [${server.name}] 服务。`, 'success')
+                                  }
+                                }}
+                              >
+                                🗑️ 删除
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* 编辑弹窗 Modal */}
+      {showEditModal && editingServer && (
+        <div className="mcp-modal-overlay">
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <span>✏️ 编辑 MCP 服务</span>
+              </div>
+              <button className="mcp-modal-close-btn" onClick={() => { setShowEditModal(false); setEditingServer(null); }}>×</button>
+            </div>
+            <div className="mcp-modal-body">
+              <div>
+                <label className="mcp-form-label">服务名称</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="如：Bing搜索"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">SSE Endpoint 地址</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="https://mcpmarket.cn/mcp/..."
+                  value={editUrl}
+                  onChange={e => setEditUrl(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                <input
+                  type="password"
+                  className="mcp-input-fancy"
+                  placeholder="默认留空"
+                  value={editApiKey}
+                  onChange={e => setEditApiKey(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">传输协议类型</label>
+                <select
+                  className="mcp-input-fancy"
+                  value={editType}
+                  onChange={e => setEditType(e.target.value as any)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="stream">Streamable HTTP (推荐)</option>
+                  <option value="sse">Server-Sent Events</option>
+                  <option value="auto">自动探测</option>
+                </select>
+              </div>
+            </div>
+            <div className="mcp-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setShowEditModal(false); setEditingServer(null); }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  if (!editName.trim() || !editUrl.trim()) {
+                    showToast('请完整填写服务名称和地址！', 'error')
+                    return
+                  }
+                  const newServers = mcpConfig.servers.map((s: any) =>
+                    s.id === editingServer.id
+                      ? { ...s, name: editName.trim(), url: editUrl.trim(), apiKey: editApiKey.trim(), type: editType }
+                      : s
+                  )
+                  saveMcpConfig({ servers: newServers })
+                  setShowEditModal(false)
+                  setEditingServer(null)
+                  showToast('服务配置已更新并重新连接！', 'success')
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 新增弹窗 Modal */}
+      {showAddMcpForm && (
+        <div className="mcp-modal-overlay">
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <span>➕ 新增 MCP 服务配置</span>
+              </div>
+              <button className="mcp-modal-close-btn" onClick={() => {
+                setShowAddMcpForm(false)
+                setMcpNewName('')
+                setMcpNewUrl('')
+                setMcpNewApiKey('')
+                setMcpNewType('stream')
+              }}>×</button>
+            </div>
+            <div className="mcp-modal-body">
+              <div>
+                <label className="mcp-form-label">服务名称</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="如：自定义服务、我的数据库助手"
+                  value={mcpNewName}
+                  onChange={e => setMcpNewName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">SSE Endpoint 地址</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="https://mcpmarket.cn/mcp/..."
+                  value={mcpNewUrl}
+                  onChange={e => setMcpNewUrl(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                <input
+                  type="password"
+                  className="mcp-input-fancy"
+                  placeholder="默认留空"
+                  value={mcpNewApiKey}
+                  onChange={e => setMcpNewApiKey(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mcp-form-label">传输协议类型</label>
+                <select
+                  className="mcp-input-fancy"
+                  value={mcpNewType}
+                  onChange={e => setMcpNewType(e.target.value as any)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="stream">Streamable HTTP (推荐)</option>
+                  <option value="sse">Server-Sent Events</option>
+                  <option value="auto">自动探测</option>
+                </select>
+              </div>
+            </div>
+            <div className="mcp-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowAddMcpForm(false)
+                  setMcpNewName('')
+                  setMcpNewUrl('')
+                  setMcpNewApiKey('')
+                  setMcpNewType('stream')
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  if (!mcpNewName.trim() || !mcpNewUrl.trim()) {
+                    showToast('请完整填写服务名称和地址！', 'error')
+                    return
+                  }
+                  const servers = mcpConfig?.servers || []
+                  const newServers = [...servers, {
+                    id: `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+                    name: mcpNewName.trim(),
+                    url: mcpNewUrl.trim(),
+                    apiKey: mcpNewApiKey.trim(),
+                    type: mcpNewType,
+                    enabled: true
+                  }]
+                  saveMcpConfig({ servers: newServers })
+
+                  setShowAddMcpForm(false)
+                  setMcpNewName('')
+                  setMcpNewUrl('')
+                  setMcpNewApiKey('')
+                  setMcpNewType('stream')
+                  showToast('已成功添加新 MCP 服务！', 'success')
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                保存并连接
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MCP 测试结果弹框 */}
+      {showTestResultModal && testResultData && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            zIndex: 99998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          onClick={() => setShowTestResultModal(false)}
+        >
+          <div
+            style={{
+              width: '80vw',
+              maxWidth: '900px',
+              height: '80vh',
+              backgroundColor: 'var(--color-bg-primary, #fff)',
+              borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              cursor: 'default'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹框头部 */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--color-border, #e0e0e0)',
+                backgroundColor: 'var(--color-bg-secondary, #f5f5f5)'
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
+                🔌 MCP 测试结果 - {testResultServerName}
+              </h3>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(testResultData, null, 2))
+                    showToast('已复制到剪贴板', 'success')
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+                    border: 'none',
+                    color: '#fff',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  📋 复制全部
+                </button>
+                <button
+                  onClick={() => setShowTestResultModal(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    color: 'var(--color-text-primary, #333)'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* 弹框内容 */}
+            <div
+              style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '20px'
+              }}
+            >
+              {/* 测试状态 */}
+              <div
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px 16px',
+                  backgroundColor: testResultData.success ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                  border: `1px solid ${testResultData.success ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: testResultData.success ? '#10b981' : '#ef4444' }}>
+                  {testResultData.success ? '✅ 测试成功' : '❌ 测试失败'}
+                </div>
+                {testResultData.protocol && <div>协议: {testResultData.protocol}</div>}
+                {testResultData.error && <div>错误: {testResultData.error}</div>}
+                {testResultData.toolsSize && (
+                  <div>
+                    工具定义大小: {testResultData.toolsSize.charCount.toLocaleString()} 字符
+                    (~{testResultData.toolsSize.estimatedTokens.toLocaleString()} tokens)
+                  </div>
+                )}
+              </div>
+
+              {/* 工具列表 */}
+              {testResultData.tools && testResultData.tools.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      marginBottom: '8px',
+                      fontSize: '14px',
+                      color: 'var(--color-text-primary, #333)'
+                    }}
+                  >
+                    🔧 工具列表 (共 {testResultData.tools.length} 个)
+                  </div>
+                  <div
+                    style={{
+                      border: '1px solid var(--color-border, #e0e0e0)',
+                      borderRadius: '8px',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {testResultData.tools.map((tool: any, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '12px 16px',
+                          borderBottom: idx < testResultData.tools.length - 1 ? '1px solid var(--color-border, #e0e0e0)' : 'none',
+                          backgroundColor: 'var(--color-bg-secondary, #f8f9fa)'
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            marginBottom: '4px',
+                            color: '#3b82f6'
+                          }}
+                        >
+                          {tool.name}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: 'var(--color-text-secondary, #666)',
+                            marginBottom: '8px'
+                          }}
+                        >
+                          {tool.description || '无描述'}
+                        </div>
+                        <pre
+                          style={{
+                            margin: 0,
+                            fontSize: '11px',
+                            lineHeight: '1.4',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            fontFamily: 'monospace',
+                            backgroundColor: 'var(--color-bg-code, #f0f0f0)',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            maxHeight: '150px',
+                            overflow: 'auto'
+                          }}
+                        >
+                          {JSON.stringify(tool.inputSchema || {}, null, 2)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 完整 JSON 响应 */}
+              <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    color: 'var(--color-text-primary, #333)'
+                  }}
+                >
+                  📄 完整 JSON 响应
+                </div>
+                <pre
+                  style={{
+                    margin: 0,
+                    fontSize: '12px',
+                    lineHeight: '1.5',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'monospace',
+                    backgroundColor: 'var(--color-bg-code, #f0f0f0)',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    maxHeight: '400px',
+                    overflow: 'auto',
+                    border: '1px solid var(--color-border, #e0e0e0)'
+                  }}
+                >
+                  {JSON.stringify(testResultData, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
