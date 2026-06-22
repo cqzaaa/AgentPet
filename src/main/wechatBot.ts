@@ -27,7 +27,11 @@ export interface WechatBotState {
 
 interface WechatBotManagerOptions {
   getDB: () => any
-  callLlm: (config: any, messages: any[]) => Promise<string>
+  callLlm: (
+    config: any,
+    messages: any[],
+    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string }) => void
+  ) => Promise<string>
   getMcpToolNames: () => string[]
   onStatusUpdated: () => void
   notifyRenderSessionUpdate: () => void
@@ -196,6 +200,112 @@ class WechatIlinkClient {
         ]
       }
     })
+  }
+
+  // 5. 上传媒体文件到微信 CDN
+  public async uploadMedia(fileBuffer: Buffer, mediaType: number, toUserId: string): Promise<any> {
+    const aeskeyBuffer = crypto.randomBytes(16)
+    const aeskeyHex = aeskeyBuffer.toString('hex')
+    const rawfilemd5 = crypto.createHash('md5').update(fileBuffer).digest('hex')
+    const rawsize = fileBuffer.length
+    const filekey = rawfilemd5
+
+    const getUrlResp = await this.doPost('ilink/bot/getuploadurl', {
+      filekey,
+      media_type: mediaType,
+      to_user_id: toUserId,
+      rawsize,
+      rawfilemd5,
+      filesize: rawsize,
+      aeskey: aeskeyHex,
+      no_need_thumb: true,
+      base_info: { channel_version: '2.1.6' }
+    })
+
+    console.log('[uploadMedia] getuploadurl 完整响应:', JSON.stringify(getUrlResp, null, 2))
+
+    if (!getUrlResp || (!getUrlResp.upload_full_url && !getUrlResp.upload_url && !getUrlResp.url)) {
+      throw new Error(`获取上传链接失败: ${JSON.stringify(getUrlResp)}`)
+    }
+
+    const uploadUrl = getUrlResp.upload_full_url || getUrlResp.upload_url || getUrlResp.url
+    // CDN 访问地址（下载/展示用），优先取响应中独立的 cdn_url / download_url 字段
+    const cdnUrl = getUrlResp.cdn_url || getUrlResp.download_url || getUrlResp.full_url || uploadUrl
+    const uploadParam = getUrlResp.upload_param || ''
+    
+    let encryptParam = ''
+    try {
+      const parsedUrl = new URL(uploadUrl)
+      encryptParam = parsedUrl.searchParams.get('encrypted_query_param') || parsedUrl.searchParams.get('upload_param') || ''
+    } catch (e) {
+      // ignore
+    }
+
+    const cipher = crypto.createCipheriv('aes-128-ecb', aeskeyBuffer, null)
+    cipher.setAutoPadding(true)
+    const encryptedBuffer = Buffer.concat([cipher.update(fileBuffer), cipher.final()])
+
+    let fullUrl = uploadUrl
+    if (!encryptParam && uploadParam) {
+      const sep = fullUrl.includes('?') ? '&' : '?'
+      fullUrl += `${sep}upload_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`
+      encryptParam = uploadParam
+    }
+
+    const uploadResp = await fetch(fullUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: encryptedBuffer
+    })
+
+    if (!uploadResp.ok) {
+      throw new Error(`上传 CDN 失败 HTTP ${uploadResp.status}`)
+    }
+
+    if (!encryptParam) {
+      encryptParam = uploadResp.headers.get('x-encrypted-param') || ''
+    }
+    if (!encryptParam) {
+      try {
+        const bd = await uploadResp.json()
+        encryptParam = bd.encrypt_param || bd.encrypted_param || ''
+      } catch (e) { /* ignore */ }
+    }
+
+    const result = {
+      aeskey: aeskeyHex,
+      encrypt_param: encryptParam,
+      filekey,
+      cdn_url: cdnUrl,
+      url: cdnUrl,
+      rawsize,
+      rawfilemd5
+    }
+    console.log('[uploadMedia] 上传结果:', JSON.stringify(result, null, 2))
+    return result
+  }
+
+  // 6. 发送多类型消息
+  public async sendMessageItems(toUserId: string, contextToken: string, itemList: any[]): Promise<any> {
+    const clientId = `openclaw-weixin:${Date.now()}-${randomBytes(4).toString('hex')}`
+    const resp = await this.doPost('ilink/bot/sendmessage', {
+      base_info: { channel_version: '2.1.6' },
+      msg: {
+        from_user_id: '',
+        to_user_id: toUserId,
+        client_id: clientId,
+        message_type: 2,
+        message_state: 2,
+        context_token: contextToken,
+        item_list: itemList
+      }
+    })
+    console.log('[sendMessage] 服务器响应:', JSON.stringify(resp, null, 2))
+    const ret = Number(resp?.ret ?? resp?.errcode ?? 0)
+    if (ret !== 0) {
+      throw new Error(`发送失败 (ret=${ret}): ${JSON.stringify(resp)}`)
+    }
+    return resp
   }
 }
 
@@ -560,10 +670,34 @@ export class WechatBotManager {
               isThinking: true
             })
 
+            // 工具调用步骤收集器
+            const toolSteps: any[] = []
+            let toolStepCounter = 0
+            const onToolEvent = (evt: { type: string; name: string; args?: any; result?: string }) => {
+              toolStepCounter++
+              toolSteps.push({
+                id: `wxtool-${toolStepCounter}`,
+                type: evt.type === 'tool_call' ? 'call' : 'result',
+                name: evt.name,
+                detail: evt.type === 'tool_call' ? (evt.args || {}) : (evt.result || '')
+              })
+              // 实时更新 DB 中的 tool_steps，让渲染进程可以刷新
+              this.saveMessageToDB({
+                sessionId: `wechat:${fromUserId}`,
+                sessionName: nickname,
+                messageId: agentMsgId,
+                sender: 'agent',
+                text: '',
+                userId: fromUserId,
+                isThinking: true,
+                toolSteps
+              })
+            }
+
             let replyText = ''
             let isError = false
             try {
-              replyText = await this.generateAiReply(fromUserId, text)
+              replyText = await this.generateAiReply(fromUserId, text, onToolEvent)
             } catch (err: any) {
               replyText = `⚠️ 自动回复生成失败: ${err.message || err}`
               isError = true
@@ -600,7 +734,98 @@ export class WechatBotManager {
                   isError: true
                 })
               } else {
-                await this.client.sendText(fromUserId, replyText, token)
+                const items: any[] = []
+                const mediaRegex = /(!?)\[(.*?)\]\((.*?)\)/g
+                let lastIdx = 0
+                let match: RegExpExecArray | null
+
+                while ((match = mediaRegex.exec(replyText)) !== null) {
+                  if (match.index > lastIdx) {
+                    const textPart = replyText.substring(lastIdx, match.index)
+                    if (textPart.trim()) items.push({ type: 1, text_item: { text: textPart } })
+                  }
+                  const isImage = match[1] === '!'
+                  const label = match[2]
+                  const url = match[3]
+
+                  try {
+                    let buffer: Buffer | null = null
+                    if (url.startsWith('local-file://') || url.startsWith('wechat-file://local/')) {
+                      let localPath = url.replace('local-file://', '').replace('wechat-file://local/', '')
+                      if (localPath.startsWith('/C:/') || /^\\?[A-Za-z]:[\\/]/.test(localPath)) localPath = localPath.replace(/^\\?/, '')
+                      localPath = decodeURIComponent(localPath)
+                      if (fs.existsSync(localPath)) buffer = fs.readFileSync(localPath)
+                      else if (fs.existsSync(join(this.options.getStorageDir(), 'wechat_files', localPath))) {
+                        buffer = fs.readFileSync(join(this.options.getStorageDir(), 'wechat_files', localPath))
+                      }
+                    } else if (url.startsWith('data:')) {
+                      const b64 = url.split(',')[1]
+                      if (b64) buffer = Buffer.from(b64, 'base64')
+                    } else if (url.startsWith('http')) {
+                      const resp = await fetch(url)
+                      if (resp.ok) buffer = Buffer.from(await resp.arrayBuffer())
+                    }
+
+                    if (buffer) {
+                      const mediaType = isImage ? 1 : 4 // 1=IMAGE, 4=FILE
+                      this.addLog('info', `正在上传${isImage ? '图片' : '文件'}到微信 CDN: ${label || '未命名'}`)
+                      const uploadRes = await this.client!.uploadMedia(buffer, mediaType, fromUserId)
+
+                      if (isImage) {
+                        const imageItem = {
+                          type: 2,
+                          image_item: {
+                            aeskey: uploadRes.aeskey,
+                            encrypt_param: uploadRes.encrypt_param,
+                            filekey: uploadRes.filekey,
+                            rawfilemd5: uploadRes.rawfilemd5,
+                            rawsize: uploadRes.rawsize,
+                            size: uploadRes.rawsize,
+                            media: { encrypt_query_param: uploadRes.encrypt_param },
+                            cdn_url: uploadRes.url,
+                            url: uploadRes.url
+                          }
+                        }
+                        console.log('[sendImage] 发送图片 item:', JSON.stringify(imageItem, null, 2))
+                        items.push(imageItem)
+                      } else {
+                        items.push({
+                          type: 4,
+                          file_item: {
+                            name: label || 'file.dat',
+                            size: uploadRes.rawsize,
+                            rawsize: uploadRes.rawsize,
+                            aeskey: uploadRes.aeskey,
+                            filekey: uploadRes.filekey,
+                            rawfilemd5: uploadRes.rawfilemd5,
+                            media: { encrypt_query_param: uploadRes.encrypt_param },
+                            cdn_url: uploadRes.url,
+                            url: uploadRes.url
+                          }
+                        })
+                      }
+                      this.addLog('info', `${isImage ? '图片' : '文件'}已上传成功并加入发送队列`)
+                    } else {
+                      items.push({ type: 1, text_item: { text: match[0] } })
+                    }
+                  } catch (err: any) {
+                    this.addLog('info', `发送媒体失败: ${err.message}`)
+                    items.push({ type: 1, text_item: { text: match[0] } })
+                  }
+                  lastIdx = mediaRegex.lastIndex
+                }
+
+                if (lastIdx < replyText.length) {
+                  const textPart = replyText.substring(lastIdx)
+                  if (textPart.trim()) items.push({ type: 1, text_item: { text: textPart } })
+                }
+
+                if (items.length === 0) {
+                  items.push({ type: 1, text_item: { text: replyText || ' ' } })
+                }
+
+                await this.client.sendMessageItems(fromUserId, token, items)
+
                 this.state.messagesSent++
                 this.addLog('out', `[回复 ${nickname}]: ${replyText}`)
 
@@ -612,7 +837,8 @@ export class WechatBotManager {
                   sender: 'agent',
                   text: replyText,
                   userId: fromUserId,
-                  isThinking: false
+                  isThinking: false,
+                  toolSteps: toolSteps.length > 0 ? toolSteps : undefined
                 })
               }
             } catch (pushErr: any) {
@@ -650,7 +876,11 @@ export class WechatBotManager {
   }
 
   // 大模型自动回复生成
-  private async generateAiReply(fromUserId: string, userText: string): Promise<string> {
+  private async generateAiReply(
+    fromUserId: string,
+    userText: string,
+    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string }) => void
+  ): Promise<string> {
     const llm = this.state.llmConfig
     
     // 多轮对话上下文构造 (限制最多 15 轮历史)
@@ -686,7 +916,7 @@ ${skillsContext}${mcpContext}
         })
       ]
 
-      const response = await this.options.callLlm(llm, messagesForLlm)
+      const response = await this.options.callLlm(llm, messagesForLlm, onToolEvent)
       
       if (response && response !== '智能代理执行工具链已达到最大轮数上限。') {
         history.push({ role: 'assistant', content: response })
@@ -714,6 +944,7 @@ ${skillsContext}${mcpContext}
     userId: string
     isThinking?: boolean
     isError?: boolean
+    toolSteps?: any[]
   }) {
     try {
       const database = this.options.getDB()
@@ -727,12 +958,13 @@ ${skillsContext}${mcpContext}
 
       const isThinkingVal = params.isThinking ? 1 : 0
       const isErrorVal = params.isError ? 1 : 0
+      const toolStepsJson = params.toolSteps ? JSON.stringify(params.toolSteps) : null
 
       // 2. 插入或更新消息
       database.prepare(`
         INSERT OR REPLACE INTO messages 
         (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
-        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `).run(
         params.messageId,
         params.sessionId,
@@ -740,12 +972,13 @@ ${skillsContext}${mcpContext}
         params.text,
         timeStr,
         isThinkingVal,
+        toolStepsJson,
         isErrorVal,
         params.userId
       )
 
       // 3. 通知渲染进程会话已更新，让聊天页可以刷新
-      this.options.notifyRenderSessionUpdate()
+      this.options.notifyRenderSessionUpdate(params.sessionId)
     } catch (dbErr) {
       this.addLog('info', `保存微信聊天记录到 SQLite 失败: ${dbErr}`)
     }

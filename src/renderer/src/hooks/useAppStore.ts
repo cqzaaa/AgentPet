@@ -543,20 +543,24 @@ export function useAppStore() {
     return () => unsubscribe()
   }, [])
 
-  const refreshSessions = async (): Promise<void> => {
+  const refreshSessions = async (clearThinking = false): Promise<void> => {
     try {
       const localSess = await window.api.getLocalSessions()
       if (localSess && localSess.length > 0) {
-        // 清除残留的 is_thinking 状态（应用异常退出时可能遗留在数据库中）
-        const cleaned = localSess.map((s: any) => ({
-          ...s,
-          messages: (s.messages || []).map((m: any) =>
-            m.isThinking
-              ? { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
-              : m
-          )
-        }))
-        setSessions(cleaned)
+        if (clearThinking) {
+          // 清除残留的 is_thinking 状态（应用异常退出时可能遗留在数据库中）
+          const cleaned = localSess.map((s: any) => ({
+            ...s,
+            messages: (s.messages || []).map((m: any) =>
+              m.isThinking
+                ? { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
+                : m
+            )
+          }))
+          setSessions(cleaned)
+        } else {
+          setSessions(localSess)
+        }
       }
     } catch (e) { console.error('从本地文件载入会话记录失败', e) }
   }
@@ -570,15 +574,23 @@ export function useAppStore() {
   // 监听微信聊天会话更新通知
   useEffect(() => {
     if (!window.api.onWechatSessionUpdated) return
-    const unsubscribe = window.api.onWechatSessionUpdated(() => {
-      refreshSessions()
+    const unsubscribe = window.api.onWechatSessionUpdated((sessionId?: string) => {
+      refreshSessions().then(() => {
+        if (sessionId) {
+          setActiveTab('chat')
+          setActiveSessionId(sessionId)
+          setTimeout(() => {
+            chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+          }, 100)
+        }
+      })
     })
     return () => unsubscribe()
   }, [])
 
   // Load sessions from local file
   useEffect(() => {
-    refreshSessions()
+    refreshSessions(true)
   }, [])
 
   const [isSessionSwitching, setIsSessionSwitching] = useState(false)

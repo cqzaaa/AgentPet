@@ -3653,7 +3653,8 @@ if (-not $task.Wait(15000)) {
     }, 
     messages: any[], 
     workspacePath?: string,
-    event?: Electron.IpcMainInvokeEvent
+    event?: Electron.IpcMainInvokeEvent,
+    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string }) => void
   ): Promise<string> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, messageId } = config
     // 清理上一次可能残留的 abort controller
@@ -3750,9 +3751,9 @@ if (-not $task.Wait(15000)) {
 
     const sendTokenEvent = () => {
       try {
-        if (event && (totalPromptTokens > 0 || totalCompletionTokens > 0)) {
+        if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
           console.log(`[Token] Total - prompt: ${totalPromptTokens}, completion: ${totalCompletionTokens}, total: ${totalPromptTokens + totalCompletionTokens}`)
-          event.sender.send('api:llm-token-usage', {
+          const payload = {
             model: body.model || model,
             provider,
             promptTokens: totalPromptTokens,
@@ -3760,7 +3761,16 @@ if (-not $task.Wait(15000)) {
             timestamp: Date.now(),
             sessionId,
             messageId
-          })
+          }
+          if (event) {
+            event.sender.send('api:llm-token-usage', payload)
+          } else {
+            if (agentWindow && !agentWindow.isDestroyed()) {
+              agentWindow.webContents.send('api:llm-token-usage', payload)
+            } else if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('api:llm-token-usage', payload)
+            }
+          }
         }
       } catch (se) {
         console.error('send token usage event failed', se)
@@ -3916,6 +3926,9 @@ if (-not $task.Wait(15000)) {
                 sessionId
               })
             }
+            if (onToolEvent) {
+              onToolEvent({ type: 'tool_call', name: toolName, args: toolArgs })
+            }
 
             let toolResult = ''
             if (mcpManager.hasTool(toolName)) {
@@ -3931,6 +3944,9 @@ if (-not $task.Wait(15000)) {
                 result: toolResult,
                 sessionId
               })
+            }
+            if (onToolEvent) {
+              onToolEvent({ type: 'tool_result', name: toolName, result: toolResult })
             }
 
             chatHistory.push({
@@ -4100,7 +4116,7 @@ if (-not $task.Wait(15000)) {
   // 初始化微信 Bot 服务
   wechatBotManager = new WechatBotManager({
     getDB,
-    callLlm: async (config, messages) => {
+    callLlm: async (config, messages, onToolEvent) => {
       const effectiveConfig = config.useSystemConfig
         ? {
             ...systemLlmConfig,
@@ -4116,7 +4132,7 @@ if (-not $task.Wait(15000)) {
         throw new Error('微信 Bot 未配置大模型密钥 (API Key)')
       }
 
-      return callLlmInternal(effectiveConfig, messages, getActiveStorageDir())
+      return callLlmInternal(effectiveConfig, messages, getActiveStorageDir(), undefined, onToolEvent)
     },
     getMcpToolNames: () => {
       return mcpManager.getTools().map((t: any) => t.name)
@@ -4126,12 +4142,12 @@ if (-not $task.Wait(15000)) {
         agentWindow.webContents.send('api:wechat-status-updated', wechatBotManager?.getState())
       }
     },
-    notifyRenderSessionUpdate: () => {
+    notifyRenderSessionUpdate: (sessionId?: string) => {
       if (agentWindow && !agentWindow.isDestroyed()) {
-        agentWindow.webContents.send('api:wechat-session-updated')
+        agentWindow.webContents.send('api:wechat-session-updated', sessionId)
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('api:wechat-session-updated')
+        mainWindow.webContents.send('api:wechat-session-updated', sessionId)
       }
     },
     getStorageDir: getActiveStorageDir

@@ -65,7 +65,7 @@ declare global {
       wechatSaveSettings: (settings: any) => Promise<boolean>
       syncLlmConfig: (config: any) => Promise<boolean>
       onWechatStatusUpdated: (callback: (data: any) => void) => () => void
-      onWechatSessionUpdated: (callback: () => void) => () => void
+      onWechatSessionUpdated: (callback: (sessionId?: string) => void) => () => void
       syncMcpConfig: (config: any) => Promise<boolean>
       testMcpServer: (config: any) => Promise<any>
       getMcpConfig: () => Promise<any>

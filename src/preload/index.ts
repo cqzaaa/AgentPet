@@ -167,12 +167,10 @@ const api = {
       ipcRenderer.removeListener('api:wechat-status-updated', subscription)
     }
   },
-  onWechatSessionUpdated: (callback: () => void): (() => void) => {
-    const subscription = () => callback()
-    ipcRenderer.on('api:wechat-session-updated', subscription)
-    return () => {
-      ipcRenderer.removeListener('api:wechat-session-updated', subscription)
-    }
+  onWechatSessionUpdated: (callback: (sessionId?: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId?: string): void => callback(sessionId)
+    ipcRenderer.on('api:wechat-session-updated', handler)
+    return (): void => { ipcRenderer.removeListener('api:wechat-session-updated', handler) }
   },
   syncMcpConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-mcp-config', config),
   testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
