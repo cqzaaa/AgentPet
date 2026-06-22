@@ -210,7 +210,7 @@ class WechatIlinkClient {
     const rawfilemd5 = crypto.createHash('md5').update(fileBuffer).digest('hex')
     const rawsize = fileBuffer.length
     const filesize = Math.ceil((rawsize + 1) / 16) * 16
-    const filekey = rawfilemd5
+    const filekey = crypto.randomBytes(16).toString('hex') // 文档要求：32位随机 hex
 
     const getUrlResp = await this.doPost('ilink/bot/getuploadurl', {
       filekey,
@@ -231,28 +231,19 @@ class WechatIlinkClient {
     }
 
     const uploadUrl = getUrlResp.upload_full_url || getUrlResp.upload_url || getUrlResp.url
-    // CDN 访问地址（下载/展示用），优先取响应中独立的 cdn_url / download_url 字段
     const cdnUrl = getUrlResp.cdn_url || getUrlResp.download_url || getUrlResp.full_url || uploadUrl
     const uploadParam = getUrlResp.upload_param || ''
-    
-    let encryptParam = ''
-    try {
-      const parsedUrl = new URL(uploadUrl)
-      encryptParam = parsedUrl.searchParams.get('encrypted_query_param') || parsedUrl.searchParams.get('upload_param') || ''
-    } catch (e) {
-      // ignore
+
+    // 按文档构造 CDN 上传 URL：base_url?encrypted_query_param={upload_param}&filekey={filekey}
+    let fullUrl = uploadUrl
+    if (uploadParam) {
+      const sep = fullUrl.includes('?') ? '&' : '?'
+      fullUrl += `${sep}encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`
     }
 
     const cipher = crypto.createCipheriv('aes-128-ecb', aeskeyBuffer, null)
     cipher.setAutoPadding(true)
     const encryptedBuffer = Buffer.concat([cipher.update(fileBuffer), cipher.final()])
-
-    let fullUrl = uploadUrl
-    if (!encryptParam && uploadParam) {
-      const sep = fullUrl.includes('?') ? '&' : '?'
-      fullUrl += `${sep}upload_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`
-      encryptParam = uploadParam
-    }
 
     const uploadResp = await fetch(fullUrl, {
       method: 'POST',
@@ -264,22 +255,24 @@ class WechatIlinkClient {
       throw new Error(`上传 CDN 失败 HTTP ${uploadResp.status}`)
     }
 
-    if (!encryptParam) {
-      encryptParam = uploadResp.headers.get('x-encrypted-param') || ''
-    }
-    if (!encryptParam) {
-      try {
-        const bd = await uploadResp.json()
-        encryptParam = bd.encrypt_param || bd.encrypted_param || ''
-      } catch (e) { /* ignore */ }
-    }
+    // 下载参数（encrypt_query_param）必须来自 CDN 上传响应，不能用上传 URL 里的参数
+    let encryptParam = uploadResp.headers.get('x-encrypted-param') || ''
+    let uploadRespBody: any = null
+    try {
+      uploadRespBody = await uploadResp.json()
+      if (!encryptParam) {
+        encryptParam = uploadRespBody.encrypt_param || uploadRespBody.encrypted_param || ''
+      }
+    } catch (e) { /* 响应可能不是 JSON，忽略 */ }
+
+    const finalCdnUrl = (uploadRespBody && (uploadRespBody.cdn_url || uploadRespBody.download_url || uploadRespBody.full_url)) || cdnUrl
 
     const result = {
       aeskey: aeskeyHex,
       encrypt_param: encryptParam,
       filekey,
-      cdn_url: cdnUrl,
-      url: cdnUrl,
+      cdn_url: finalCdnUrl,
+      url: finalCdnUrl,
       rawsize,
       filesize,
       rawfilemd5
@@ -831,53 +824,31 @@ export class WechatBotManager {
                       this.addLog('info', `正在上传${isImage ? '图片' : '文件'}到微信 CDN: ${label || '未命名'}`)
                       const uploadRes = await this.client!.uploadMedia(buffer, mediaType, fromUserId)
 
+                      // 文档要求：hex string → UTF-8 bytes → base64
                       const aesKeyBase64 = Buffer.from(uploadRes.aeskey, 'utf8').toString('base64')
 
                       if (isImage) {
                         mediaItems.push({
                           type: 2,
                           image_item: {
-                            aeskey: uploadRes.aeskey,
-                            encrypt_param: uploadRes.encrypt_param,
-                            filekey: uploadRes.filekey,
-                            rawfilemd5: uploadRes.rawfilemd5,
-                            rawsize: uploadRes.rawsize,
-                            size: uploadRes.rawsize,
-                            mid_size: uploadRes.filesize,
                             media: {
                               encrypt_query_param: uploadRes.encrypt_param,
                               aes_key: aesKeyBase64,
                               encrypt_type: 1
-                            },
-                            cdn_url: uploadRes.url,
-                            url: uploadRes.url
+                            }
                           }
                         })
                       } else {
-                        const ext = (label || 'file.dat').split('.').pop() || 'dat'
                         mediaItems.push({
                           type: 4,
                           file_item: {
-                            name: label || 'file.dat',
-                            title: label || 'file.dat',
-                            file_name: label || 'file.dat',
-                            filename: label || 'file.dat',
-                            ext: ext,
-                            file_ext: ext,
-                            size: uploadRes.rawsize,
-                            rawsize: uploadRes.rawsize,
-                            aeskey: uploadRes.aeskey,
-                            encrypt_param: uploadRes.encrypt_param,
-                            filekey: uploadRes.filekey,
-                            rawfilemd5: uploadRes.rawfilemd5,
                             media: {
                               encrypt_query_param: uploadRes.encrypt_param,
                               aes_key: aesKeyBase64,
                               encrypt_type: 1
                             },
-                            len: String(uploadRes.rawsize),
-                            cdn_url: uploadRes.cdn_url || uploadRes.url,
-                            url: uploadRes.url
+                            file_name: label || 'file.dat',
+                            len: String(uploadRes.rawsize)
                           }
                         })
                       }
