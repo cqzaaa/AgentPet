@@ -7,7 +7,7 @@ interface ControlPageProps {
 }
 
 export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
-  const { showToast } = store
+  const { showToast, setActiveTab, setActiveSessionId } = store
 
   // 集成子 Tab 状态
   const [activeSubTab, setActiveSubTab] = useState<'wechat' | 'lark'>('wechat')
@@ -313,6 +313,11 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                           {wechatState.activeChats.map((chat: any) => (
                             <div
                               key={chat.userId}
+                              onClick={() => {
+                                const sessionId = `wechat:${chat.userId}`
+                                setActiveSessionId(sessionId)
+                                setActiveTab('chat')
+                              }}
                               style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -320,8 +325,19 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                                 padding: '10px 12px',
                                 background: 'var(--bg-card-sub, rgba(128,128,128,0.04))',
                                 borderRadius: '8px',
-                                border: '1px solid var(--border-color, rgba(128,128,128,0.1))'
+                                border: '1px solid var(--border-color, rgba(128,128,128,0.1))',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
                               }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'var(--bg-card-hover, rgba(128,128,128,0.08))'
+                                e.currentTarget.style.borderColor = 'var(--border-color-hover, rgba(128,128,128,0.2))'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'var(--bg-card-sub, rgba(128,128,128,0.04))'
+                                e.currentTarget.style.borderColor = 'var(--border-color, rgba(128,128,128,0.1))'
+                              }}
+                              title="点击跳转到该微信会话"
                             >
                               <div style={{
                                 width: '32px',

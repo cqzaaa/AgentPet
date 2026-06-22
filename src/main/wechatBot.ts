@@ -342,7 +342,8 @@ export class WechatBotManager {
   private configPath: string
   private tokenPath: string
   private syncBufPath: string
-  
+  private activeChatsPath: string
+
   // 内存状态
   private state: WechatBotState = {
     status: 'disconnected',
@@ -379,8 +380,10 @@ export class WechatBotManager {
     this.configPath = join(userData, 'wechat_config.json')
     this.tokenPath = join(userData, 'wechat_token.json')
     this.syncBufPath = join(userData, 'wechat_sync_buf.dat')
+    this.activeChatsPath = join(userData, 'wechat_active_chats.json')
 
     this.loadConfig()
+    this.loadActiveChats()
     this.addLog('info', '微信 Bot 管理服务已初始化')
   }
 
@@ -444,6 +447,31 @@ export class WechatBotManager {
     this.state.activeChats.unshift(chat)
     if (this.state.activeChats.length > 20) {
       this.state.activeChats.pop()
+    }
+    this.saveActiveChats()
+  }
+
+  // 持久化活跃聊天窗口列表
+  private saveActiveChats() {
+    try {
+      fs.writeFileSync(this.activeChatsPath, JSON.stringify(this.state.activeChats, null, 2), 'utf8')
+    } catch (e) {
+      console.error('保存微信活跃聊天窗口失败:', e)
+    }
+  }
+
+  // 恢复活跃聊天窗口列表
+  private loadActiveChats() {
+    try {
+      if (fs.existsSync(this.activeChatsPath)) {
+        const data = fs.readFileSync(this.activeChatsPath, 'utf8')
+        const parsed = JSON.parse(data)
+        if (Array.isArray(parsed)) {
+          this.state.activeChats = parsed
+        }
+      }
+    } catch (e) {
+      console.error('加载微信活跃聊天窗口失败:', e)
     }
   }
 

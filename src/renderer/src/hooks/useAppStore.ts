@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type FormEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
 
 // ── 类型定义 ─────────────────────────────────────────────────
@@ -595,34 +595,55 @@ export function useAppStore() {
 
   const [isSessionSwitching, setIsSessionSwitching] = useState(false)
   const prevSessionIdRef = useRef<string | null>(null)
+  const prevActiveTabRef = useRef<string | null>(null)
   const justSwitchedRef = useRef(false)
+
+  // 统一的骨架屏触发函数
+  const triggerChatSkeleton = useCallback(() => {
+    setIsSessionSwitching(true)
+
+    // 切换会话时清空输入框和附件
+    setInputValue('')
+    setAttachedFiles([])
+
+    const skeletonTimer = setTimeout(() => {
+      setIsSessionSwitching(false)
+      justSwitchedRef.current = true
+
+      // 让 React 有时间把骨架屏替换为真实聊天 DOM 后再滚动定位
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
+        justSwitchedRef.current = false
+      }, 50)
+    }, 400) // 显示 400ms 骨架屏
+
+    return skeletonTimer
+  }, [chatEndRef])
 
   // 1. 处理会话切换时的骨架屏和定位
   useEffect(() => {
     if (prevSessionIdRef.current !== activeSessionId) {
-      setIsSessionSwitching(true)
       prevSessionIdRef.current = activeSessionId
-
-      // 切换会话时清空输入框和附件
-      setInputValue('')
-      setAttachedFiles([])
-
-      const skeletonTimer = setTimeout(() => {
-        setIsSessionSwitching(false)
-        justSwitchedRef.current = true
-
-        // 让 React 有时间把骨架屏替换为真实聊天 DOM 后再滚动定位
-        setTimeout(() => {
-          chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
-          justSwitchedRef.current = false
-        }, 50)
-      }, 400) // 显示 400ms 骨架屏
-
-      return () => clearTimeout(skeletonTimer)
+      // 仅在已经位于 chat 页面时由 session 变化触发骨架屏，
+      // 避免与 tab 切换的骨架屏重复。
+      if (activeTab === 'chat') {
+        const timer = triggerChatSkeleton()
+        return () => clearTimeout(timer)
+      }
     }
-  }, [activeSessionId])
+  }, [activeSessionId, activeTab, triggerChatSkeleton])
 
-  // 2. 处理正常收到或发送新消息时的平滑滚动
+  // 2. 处理从其他 tab 切换到 chat 页面时的骨架屏
+  useEffect(() => {
+    if (activeTab === 'chat' && prevActiveTabRef.current !== 'chat' && prevActiveTabRef.current !== null) {
+      const timer = triggerChatSkeleton()
+      prevActiveTabRef.current = activeTab
+      return () => clearTimeout(timer)
+    }
+    prevActiveTabRef.current = activeTab
+  }, [activeTab, triggerChatSkeleton])
+
+  // 3. 处理正常收到或发送新消息时的平滑滚动
   useEffect(() => {
     // 只有在非切换状态下才执行平滑滚动
     if (!isSessionSwitching && !justSwitchedRef.current) {
