@@ -361,8 +361,29 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
             <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
           )
         } else {
+          const isLocal = src.startsWith('local-file://') || src.startsWith('wechat-file://')
+          const handleLocalClick = async (e: React.MouseEvent) => {
+            if (isLocal) {
+              e.preventDefault()
+              if (window.api && typeof window.api.openLocalFile === 'function') {
+                const res = await window.api.openLocalFile(src)
+                if (res && !res.success) {
+                  alert(res.error || '无法打开此本地文件')
+                }
+              } else {
+                alert('当前环境不支持直接打开本地文件')
+              }
+            }
+          }
           parts.push(
-            <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
+            <a
+              key={`link-${keyIdxStart.val++}`}
+              href={src}
+              target={isLocal ? undefined : "_blank"}
+              rel="noreferrer"
+              className="markdown-link"
+              onClick={handleLocalClick}
+            >
               {alt}
             </a>
           )
@@ -378,8 +399,29 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
           <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt="image" />
         )
       } else {
+        const isLocal = src.startsWith('local-file://') || src.startsWith('wechat-file://')
+        const handleLocalClick = async (e: React.MouseEvent) => {
+          if (isLocal) {
+            e.preventDefault()
+            if (window.api && typeof window.api.openLocalFile === 'function') {
+              const res = await window.api.openLocalFile(src)
+              if (res && !res.success) {
+                alert(res.error || '无法打开此本地文件')
+              }
+            } else {
+              alert('当前环境不支持直接打开本地文件')
+            }
+          }
+        }
         parts.push(
-          <a key={`link-${keyIdxStart.val++}`} href={src} target="_blank" rel="noreferrer" className="markdown-link">
+          <a
+            key={`link-${keyIdxStart.val++}`}
+            href={src}
+            target={isLocal ? undefined : "_blank"}
+            rel="noreferrer"
+            className="markdown-link"
+            onClick={handleLocalClick}
+          >
             {rawUrl}
           </a>
         )

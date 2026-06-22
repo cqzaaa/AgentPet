@@ -76,6 +76,7 @@ declare global {
       copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
+      openLocalFile: (url: string) => Promise<{ success: boolean; error?: string }>
     }
   }
 }

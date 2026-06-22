@@ -199,7 +199,9 @@ const api = {
     ipcRenderer.send('api:show-text-context-menu', selectedText)
   },
   getToolsDefinition: (): Promise<any[]> =>
-    ipcRenderer.invoke('api:get-tools-definition')
+    ipcRenderer.invoke('api:get-tools-definition'),
+  openLocalFile: (url: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('api:open-local-file', url)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

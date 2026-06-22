@@ -30,6 +30,7 @@ interface WechatBotManagerOptions {
   callLlm: (
     config: any,
     messages: any[],
+    sessionId?: string,
     onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string }) => void
   ) => Promise<string>
   getMcpToolNames: () => string[]
@@ -208,6 +209,7 @@ class WechatIlinkClient {
     const aeskeyHex = aeskeyBuffer.toString('hex')
     const rawfilemd5 = crypto.createHash('md5').update(fileBuffer).digest('hex')
     const rawsize = fileBuffer.length
+    const filesize = Math.ceil((rawsize + 1) / 16) * 16
     const filekey = rawfilemd5
 
     const getUrlResp = await this.doPost('ilink/bot/getuploadurl', {
@@ -216,7 +218,7 @@ class WechatIlinkClient {
       to_user_id: toUserId,
       rawsize,
       rawfilemd5,
-      filesize: rawsize,
+      filesize,
       aeskey: aeskeyHex,
       no_need_thumb: true,
       base_info: { channel_version: '2.1.6' }
@@ -279,6 +281,7 @@ class WechatIlinkClient {
       cdn_url: cdnUrl,
       url: cdnUrl,
       rawsize,
+      filesize,
       rawfilemd5
     }
     console.log('[uploadMedia] 上传结果:', JSON.stringify(result, null, 2))
@@ -371,6 +374,9 @@ export class WechatBotManager {
   
   // 是否正在进行长轮询
   private isMonitoring = false
+
+  // 微信消息去重集合，缓存最近处理过的消息指纹以防重复消费
+  private processedMsgKeys: Set<string> = new Set()
 
   constructor(options: WechatBotManagerOptions) {
     this.options = options
@@ -641,6 +647,24 @@ export class WechatBotManager {
           const { text, mediaUrls } = await this.processMessageContent(message)
           if (!text) continue
 
+          // 构建唯一去重 Key，防止微信服务器重试或长轮询引发的重复处理
+          const textContent = message.item_list?.map((it: any) => it.text_item?.text || '').join('_') || ''
+          const msgKey = message.msg_id || message.msgid || message.client_id || 
+                         `${fromUserId}_${message.create_time || message.time || ''}_${textContent}`
+          
+          if (this.processedMsgKeys.has(msgKey)) {
+            console.log(`[wechatBot] 检测到重复消息，已自动忽略。Key: ${msgKey}`)
+            continue
+          }
+
+          this.processedMsgKeys.add(msgKey)
+          if (this.processedMsgKeys.size > 200) {
+            const firstKey = this.processedMsgKeys.values().next().value
+            if (firstKey !== undefined) {
+              this.processedMsgKeys.delete(firstKey)
+            }
+          }
+
           this.state.messagesReceived++
           const logText = text.replace(/!\[图片\]\(wechat-file:\/\/local\/.*?\)/g, '[图片]')
           this.addLog('in', `[${nickname}]: ${logText}`)
@@ -697,9 +721,20 @@ export class WechatBotManager {
             let replyText = ''
             let isError = false
             try {
-              replyText = await this.generateAiReply(fromUserId, text, onToolEvent)
+              // 1.5 分钟 (90 秒) 强制超时保护机制
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('TIMEOUT')), 90000)
+              )
+              replyText = await Promise.race([
+                this.generateAiReply(fromUserId, text, onToolEvent),
+                timeoutPromise
+              ])
             } catch (err: any) {
-              replyText = `⚠️ 自动回复生成失败: ${err.message || err}`
+              if (err.message === 'TIMEOUT') {
+                replyText = '⚠️ 请求超时，请重新发送'
+              } else {
+                replyText = `⚠️ 自动回复生成失败: ${err.message || err}`
+              }
               isError = true
             }
 
@@ -733,30 +768,55 @@ export class WechatBotManager {
                   isThinking: false,
                   isError: true
                 })
+                // 超时或错误时，强制将提示信息也回发给微信好友
+                await this.client.sendMessageItems(fromUserId, token, [
+                  { type: 1, text_item: { text: replyText } }
+                ])
               } else {
-                const items: any[] = []
+                const mediaItems: any[] = []
                 const mediaRegex = /(!?)\[(.*?)\]\((.*?)\)/g
-                let lastIdx = 0
                 let match: RegExpExecArray | null
 
+                // 1. 扫描并上传所有的媒体附件
+                mediaRegex.lastIndex = 0
                 while ((match = mediaRegex.exec(replyText)) !== null) {
-                  if (match.index > lastIdx) {
-                    const textPart = replyText.substring(lastIdx, match.index)
-                    if (textPart.trim()) items.push({ type: 1, text_item: { text: textPart } })
-                  }
                   const isImage = match[1] === '!'
                   const label = match[2]
                   const url = match[3]
 
                   try {
                     let buffer: Buffer | null = null
-                    if (url.startsWith('local-file://') || url.startsWith('wechat-file://local/')) {
-                      let localPath = url.replace('local-file://', '').replace('wechat-file://local/', '')
-                      if (localPath.startsWith('/C:/') || /^\\?[A-Za-z]:[\\/]/.test(localPath)) localPath = localPath.replace(/^\\?/, '')
+                    let localPath = url
+                    if (localPath.startsWith('local-file:///')) {
+                      localPath = localPath.replace('local-file:///', '')
+                      if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
                       localPath = decodeURIComponent(localPath)
-                      if (fs.existsSync(localPath)) buffer = fs.readFileSync(localPath)
-                      else if (fs.existsSync(join(this.options.getStorageDir(), 'wechat_files', localPath))) {
-                        buffer = fs.readFileSync(join(this.options.getStorageDir(), 'wechat_files', localPath))
+                    } else if (localPath.startsWith('local-file://')) {
+                      localPath = localPath.replace('local-file://', '')
+                      if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
+                      localPath = decodeURIComponent(localPath)
+                    } else if (localPath.startsWith('wechat-file://')) {
+                      const wechatFilesDir = join(this.options.getStorageDir(), 'wechat_files')
+                      let fileName = decodeURIComponent(localPath.replace('wechat-file://', '').replace(/^\/+/, ''))
+                      if (fileName.startsWith('local/')) {
+                        fileName = fileName.substring(6)
+                      }
+                      localPath = join(wechatFilesDir, fileName)
+                    }
+
+                    const isLocalFile = url.startsWith('local-file://') || 
+                                       url.startsWith('wechat-file://') || 
+                                       fs.existsSync(localPath) || 
+                                       fs.existsSync(join(this.options.getStorageDir(), 'wechat_files', localPath))
+
+                    if (isLocalFile) {
+                      if (fs.existsSync(localPath)) {
+                        buffer = fs.readFileSync(localPath)
+                      } else {
+                        const fallbackPath = join(this.options.getStorageDir(), 'wechat_files', localPath)
+                        if (fs.existsSync(fallbackPath)) {
+                          buffer = fs.readFileSync(fallbackPath)
+                        }
                       }
                     } else if (url.startsWith('data:')) {
                       const b64 = url.split(',')[1]
@@ -767,12 +827,14 @@ export class WechatBotManager {
                     }
 
                     if (buffer) {
-                      const mediaType = isImage ? 1 : 4 // 1=IMAGE, 4=FILE
+                      const mediaType = isImage ? 1 : 3 // 1=IMAGE, 3=FILE
                       this.addLog('info', `正在上传${isImage ? '图片' : '文件'}到微信 CDN: ${label || '未命名'}`)
                       const uploadRes = await this.client!.uploadMedia(buffer, mediaType, fromUserId)
 
+                      const aesKeyBase64 = Buffer.from(uploadRes.aeskey, 'utf8').toString('base64')
+
                       if (isImage) {
-                        const imageItem = {
+                        mediaItems.push({
                           type: 2,
                           image_item: {
                             aeskey: uploadRes.aeskey,
@@ -781,50 +843,73 @@ export class WechatBotManager {
                             rawfilemd5: uploadRes.rawfilemd5,
                             rawsize: uploadRes.rawsize,
                             size: uploadRes.rawsize,
-                            media: { encrypt_query_param: uploadRes.encrypt_param },
+                            mid_size: uploadRes.filesize,
+                            media: {
+                              encrypt_query_param: uploadRes.encrypt_param,
+                              aes_key: aesKeyBase64,
+                              encrypt_type: 1
+                            },
                             cdn_url: uploadRes.url,
                             url: uploadRes.url
                           }
-                        }
-                        console.log('[sendImage] 发送图片 item:', JSON.stringify(imageItem, null, 2))
-                        items.push(imageItem)
+                        })
                       } else {
-                        items.push({
+                        const ext = (label || 'file.dat').split('.').pop() || 'dat'
+                        mediaItems.push({
                           type: 4,
                           file_item: {
                             name: label || 'file.dat',
+                            title: label || 'file.dat',
+                            file_name: label || 'file.dat',
+                            filename: label || 'file.dat',
+                            ext: ext,
+                            file_ext: ext,
                             size: uploadRes.rawsize,
                             rawsize: uploadRes.rawsize,
                             aeskey: uploadRes.aeskey,
+                            encrypt_param: uploadRes.encrypt_param,
                             filekey: uploadRes.filekey,
                             rawfilemd5: uploadRes.rawfilemd5,
-                            media: { encrypt_query_param: uploadRes.encrypt_param },
-                            cdn_url: uploadRes.url,
+                            media: {
+                              encrypt_query_param: uploadRes.encrypt_param,
+                              aes_key: aesKeyBase64,
+                              encrypt_type: 1
+                            },
+                            len: String(uploadRes.rawsize),
+                            cdn_url: uploadRes.cdn_url || uploadRes.url,
                             url: uploadRes.url
                           }
                         })
                       }
                       this.addLog('info', `${isImage ? '图片' : '文件'}已上传成功并加入发送队列`)
-                    } else {
-                      items.push({ type: 1, text_item: { text: match[0] } })
                     }
                   } catch (err: any) {
-                    this.addLog('info', `发送媒体失败: ${err.message}`)
-                    items.push({ type: 1, text_item: { text: match[0] } })
+                    this.addLog('info', `上传发送媒体失败: ${err.message}`)
                   }
-                  lastIdx = mediaRegex.lastIndex
                 }
 
-                if (lastIdx < replyText.length) {
-                  const textPart = replyText.substring(lastIdx)
-                  if (textPart.trim()) items.push({ type: 1, text_item: { text: textPart } })
+                // 2. 清洗回复文本：去除 Markdown 超链接格式，只保留显示名称，保证发送的文字清爽好读
+                let cleanText = replyText
+                  .replace(/!\[(.*?)\]\(.*?\)/g, '[图片]')
+                  .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+
+                // 3. 构建发送队列并依次发送
+                const sendQueue: any[] = []
+                if (cleanText.trim()) {
+                  sendQueue.push({ type: 1, text_item: { text: cleanText } })
+                }
+                sendQueue.push(...mediaItems)
+
+                if (sendQueue.length === 0) {
+                  sendQueue.push({ type: 1, text_item: { text: replyText || ' ' } })
                 }
 
-                if (items.length === 0) {
-                  items.push({ type: 1, text_item: { text: replyText || ' ' } })
+                // 逐条依次发送，避免在一包消息里混合文本与文件/图片导致微信官方接口报 ret: -2 错误
+                for (const item of sendQueue) {
+                  await this.client.sendMessageItems(fromUserId, token, [item])
+                  // 稍微延时 800ms 防止发送过快触发官方限制
+                  await new Promise(resolve => setTimeout(resolve, 800))
                 }
-
-                await this.client.sendMessageItems(fromUserId, token, items)
 
                 this.state.messagesSent++
                 this.addLog('out', `[回复 ${nickname}]: ${replyText}`)
@@ -897,10 +982,14 @@ export class WechatBotManager {
         ? `\n你可以使用以下外部工具来帮助回答问题：${mcpToolNames.join('、')}。当用户的问题需要实时信息（如搜索、天气、地图等）时，请主动调用这些工具获取最新数据。`
         : ''
       const skillsContext = '你无法直接操作本地电脑的文件系统或运行命令，但可以通过外部工具获取实时信息。'
+      const filePrompt = `\n【核心要求】当且仅当你调用工具成功修改或生成了本地文件后，你必须在回复中提供该文件的 Markdown 超链接链接，以便微信助手把该物理文件发送给好友：
+- 格式：[展示的文件名](文件的真实绝对物理路径)
+- 示例：我已经帮您把文件修改好了：[会议记录_修改版.docx](D:/Electron/AgentPet/chat/wechat_xxx/generated_files/会议记录_修改版.docx)
+注意：绝对物理路径必须完全使用工具返回的实际路径（如 file_path），不得自行伪造或忽略 Markdown 括号！`
       const systemPrompt = `你是一只名为 Mao 的微信个人助理。
 你需要使用非常温柔、自然、友好的语气与主人的好友对话。
 你绝对不能泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，要坚持自己是主人专属助理 Mao 的分身。
-${skillsContext}${mcpContext}
+${skillsContext}${mcpContext}${filePrompt}
 回答要尽量简短，适合微信聊天的快节奏。`
 
       const messagesForLlm = [
@@ -916,7 +1005,7 @@ ${skillsContext}${mcpContext}
         })
       ]
 
-      const response = await this.options.callLlm(llm, messagesForLlm, onToolEvent)
+      const response = await this.options.callLlm(llm, messagesForLlm, `wechat:${fromUserId}`, onToolEvent)
       
       if (response && response !== '智能代理执行工具链已达到最大轮数上限。') {
         history.push({ role: 'assistant', content: response })
@@ -1093,9 +1182,10 @@ ${skillsContext}${mcpContext}
         // 文件项 (ITEM_TYPE_FILE)
         const fileItem = item.file_item
         if (fileItem) {
+          console.log('[processMessage] file_item 完整结构:', JSON.stringify(fileItem, null, 2))
           const aesKey = fileItem.aeskey || fileItem.media?.aes_key || ''
           const cdnUrl = fileItem.url || fileItem.cdn_url || fileItem.media?.full_url || ''
-          const fileName = fileItem.name || 'file.dat'
+          const fileName = fileItem.name || fileItem.file_name || fileItem.filename || fileItem.title || 'file.dat'
           const ext = fileName.split('.').pop() || 'dat'
           if (cdnUrl && aesKey) {
             this.addLog('info', `检测到微信文件消息 [${fileName}]，开始下载解密...`)

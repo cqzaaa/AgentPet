@@ -700,7 +700,10 @@ app.whenReady().then(() => {
     try {
       const url = new URL(request.url)
       const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-      const fileName = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      let fileName = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      if (fileName.startsWith('local/')) {
+        fileName = fileName.substring(6)
+      }
       const filePath = join(wechatFilesDir, fileName)
       
       // 安全检查：防止目录遍历漏洞
@@ -796,6 +799,28 @@ app.whenReady().then(() => {
       }
     }
     return app.getPath('userData')
+  }
+
+  const resolveLocalPath = (filePath: string): string => {
+    if (!filePath || typeof filePath !== 'string') return filePath
+    let resolved = filePath
+    if (resolved.startsWith('local-file:///')) {
+      resolved = resolved.replace('local-file:///', '')
+      if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
+      resolved = decodeURIComponent(resolved)
+    } else if (resolved.startsWith('local-file://')) {
+      resolved = resolved.replace('local-file://', '')
+      if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
+      resolved = decodeURIComponent(resolved)
+    } else if (resolved.startsWith('wechat-file://')) {
+      const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
+      let fileName = decodeURIComponent(resolved.replace('wechat-file://', '').replace(/^\/+/, ''))
+      if (fileName.startsWith('local/')) {
+        fileName = fileName.substring(6)
+      }
+      resolved = join(wechatFilesDir, fileName)
+    }
+    return resolved
   }
 
   const getActiveSkillsDir = (): string => {
@@ -1075,7 +1100,10 @@ app.whenReady().then(() => {
         img = nativeImage.createFromPath(filePath)
       } else if (imageUrl.startsWith('wechat-file://')) {
         const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-        const fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+        let fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+        if (fileName.startsWith('local/')) {
+          fileName = fileName.substring(6)
+        }
         const filePath = join(wechatFilesDir, fileName)
         img = nativeImage.createFromPath(filePath)
       } else if (imageUrl.startsWith('data:image/')) {
@@ -1099,6 +1127,28 @@ app.whenReady().then(() => {
     } catch (err: any) {
       console.error('复制图片到剪贴板失败:', err)
       return { success: false, error: err.message || String(err) }
+    }
+  })
+
+  ipcMain.handle('api:open-local-file', async (_, url: string) => {
+    try {
+      const filePath = resolveLocalPath(url)
+      if (filePath === url) {
+        return { success: false, error: '不支持的文件协议' }
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: `文件不存在：${filePath}` }
+      }
+
+      const err = await shell.openPath(filePath)
+      if (err) {
+        return { success: false, error: `打开文件失败：${err}` }
+      }
+      return { success: true }
+    } catch (e: any) {
+      console.error('打开本地文件失败:', e)
+      return { success: false, error: e.message || String(e) }
     }
   })
 
@@ -1159,7 +1209,10 @@ app.whenReady().then(() => {
               img = nativeImage.createFromPath(filePath)
             } else if (imageUrl.startsWith('wechat-file://')) {
               const wechatFilesDir = join(getActiveStorageDir(), 'wechat_files')
-              const fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+              let fileName = decodeURIComponent(imageUrl.replace('wechat-file://', '').replace(/^\/+/, ''))
+              if (fileName.startsWith('local/')) {
+                fileName = fileName.substring(6)
+              }
               img = nativeImage.createFromPath(join(wechatFilesDir, fileName))
             } else if (imageUrl.startsWith('data:image/')) {
               img = nativeImage.createFromDataURL(imageUrl)
@@ -2402,7 +2455,15 @@ app.whenReady().then(() => {
       // 本地内置工具不进行简化，保持原样，以避免对常规工具（如终端命令、文件读取）增加额外的 API 填充开销
       list.push(...toolDefinitions)
     } else {
-      // 后端（如微信机器人）不注入本地工具，仅使用 MCP 工具
+      // 后端（如微信机器人）：开放安全的文件读取/修改工具，排除终端命令、定时任务、定位等需要前端或有安全风险的工具
+      const wechatSafeTools = new Set([
+        'read_file',
+        'generate_file',
+        'modify_xlsx_file',
+        'modify_docx_file',
+        'get_system_status'
+      ])
+      list.push(...toolDefinitions.filter(t => wechatSafeTools.has(t.function.name)))
     }
 
     const mcpTools = mcpManager.getTools()
@@ -3035,7 +3096,8 @@ if (-not $task.Wait(15000)) {
     // 修改 docx 文件（保留原始排版）
     if (name === 'modify_docx_file') {
       try {
-        const { source_path, output_name, modifications, images } = args
+        let { source_path, output_name, modifications, images } = args
+        source_path = resolveLocalPath(source_path)
         if (!source_path || !output_name) {
           return '错误：缺少必要参数 source_path 或 output_name'
         }
@@ -3307,6 +3369,7 @@ if (-not $task.Wait(15000)) {
 
           for (const img of images) {
             if (!img.search_text || !img.image_path) continue
+            img.image_path = resolveLocalPath(img.image_path)
             if (!fs.existsSync(img.image_path)) continue
 
             const imgBuffer = await fs.promises.readFile(img.image_path)
@@ -3399,7 +3462,8 @@ if (-not $task.Wait(15000)) {
     // 解决方案：用 worker_threads 将 exceljs 操作完全隔离到子线程，子线程崩溃不影响主进程。
     if (name === 'modify_xlsx_file') {
       try {
-        const { source_path, output_name, modifications, append_rows, merge_cells, add_sheet, column_widths, data_validations } = args
+        let { source_path, output_name, modifications, append_rows, merge_cells, add_sheet, column_widths, data_validations } = args
+        source_path = resolveLocalPath(source_path)
         console.log('[modify_xlsx_file] 开始执行 Excel 修改, 路径:', source_path, '输出文件名:', output_name)
         if (!source_path || !output_name) {
           console.warn('[modify_xlsx_file] 缺少必要参数 source_path 或 output_name')
@@ -3508,8 +3572,9 @@ if (-not $task.Wait(15000)) {
     // 通用读取文件工具（支持 xlsx/xls/docx/pdf/csv 及文本文件）
     if (name === 'read_file') {
       try {
-        const { file_path } = args
+        let { file_path } = args
         if (!file_path) return '错误：缺少必要参数 file_path'
+        file_path = resolveLocalPath(file_path)
         if (!fs.existsSync(file_path)) return `错误：文件不存在：${file_path}`
         const ext = file_path.split('.').pop()?.toLowerCase() || ''
         let content = ''
@@ -4116,7 +4181,7 @@ if (-not $task.Wait(15000)) {
   // 初始化微信 Bot 服务
   wechatBotManager = new WechatBotManager({
     getDB,
-    callLlm: async (config, messages, onToolEvent) => {
+    callLlm: async (config, messages, sessionId, onToolEvent) => {
       const effectiveConfig = config.useSystemConfig
         ? {
             ...systemLlmConfig,
@@ -4132,7 +4197,7 @@ if (-not $task.Wait(15000)) {
         throw new Error('微信 Bot 未配置大模型密钥 (API Key)')
       }
 
-      return callLlmInternal(effectiveConfig, messages, getActiveStorageDir(), undefined, onToolEvent)
+      return callLlmInternal({ ...effectiveConfig, sessionId }, messages, getActiveStorageDir(), undefined, onToolEvent)
     },
     getMcpToolNames: () => {
       return mcpManager.getTools().map((t: any) => t.name)
