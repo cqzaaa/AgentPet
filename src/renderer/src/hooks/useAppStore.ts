@@ -307,6 +307,12 @@ export function useAppStore() {
   const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
   const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
   const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
+  const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
+
+  // ── TTS Settings ─────────────────────────────────────────────
+  const [ttsEnabled, setTtsEnabled] = useState(() => {
+    return localStorage.getItem('agentpet_tts_enabled') === 'true'
+  })
 
   // ── Memory Settings ──────────────────────────────────────────
   const [autoSaveHistory, setAutoSaveHistory] = useState(() => {
@@ -1211,6 +1217,18 @@ ${mcpContext}`
         return latestSessions
       })
 
+      // TTS 语音合成：LLM 回复后自动朗读
+      if (ttsEnabled && response && currentAvatarVoice) {
+        try {
+          const audioBuffer = await window.api.synthesizeTts(response, currentAvatarVoice)
+          if (audioBuffer) {
+            window.api.playTtsAudio(audioBuffer)
+          }
+        } catch (ttsErr) {
+          console.error('TTS 播放失败', ttsErr)
+        }
+      }
+
       // 异步检测并触发记忆总结
       setTimeout(() => {
         if (latestSessions.length > 0) {
@@ -1742,6 +1760,8 @@ ${skillsContext}
     avatarList,
     currentAvatarName,
     refreshAvatarsList,
+    // tts
+    ttsEnabled, setTtsEnabled,
     // memory
     autoSaveHistory, setAutoSaveHistory,
     contextRounds, setContextRounds,

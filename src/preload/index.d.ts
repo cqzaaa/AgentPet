@@ -5,7 +5,7 @@ declare global {
     electron: ElectronAPI
     api: {
       moveWindow: (dx: number, dy: number) => void
-      setWindowSize: (width: number, height: number) => void
+      setWindowSize: (width: number, height: number, anchor?: 'bottom' | 'top') => void
       endDrag: () => void
       startDrag: () => void
       hoverEnter: () => void
@@ -13,6 +13,9 @@ declare global {
       setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void
       openAgentWindow: () => void
       hideWindow: () => void
+      openInputWindow: () => void
+      closeInputWindow: () => void
+      sendChatToPet: (text: string, isNewSession?: boolean) => void
       getSystemInfo: () => Promise<any>
       getSkillsPath: () => Promise<string>
       openSkillsFolder: () => Promise<void>
@@ -52,7 +55,10 @@ declare global {
       strengthenExperiences: (ids: string[]) => Promise<boolean>
       getActiveMcpServers: () => Promise<any[]>
       getAvatarsList: () => Promise<any[]>
-      saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }) => Promise<boolean>
+      saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string }) => Promise<boolean>
+      synthesizeTts: (text: string, voice: string) => Promise<ArrayBuffer | null>
+      playTtsAudio: (audioBuffer: ArrayBuffer) => Promise<boolean>
+      onPlayTtsAudio: (callback: (audioBuffer: ArrayBuffer) => void) => () => void
       switchAvatar: (params: { dir: string; configFile: string }) => Promise<any>
       deleteAvatar: (dirPath: string) => Promise<boolean>
       getSandboxMode: () => Promise<boolean>
@@ -85,6 +91,9 @@ declare global {
       copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
+      showPetContextMenu: () => void
+      sendPetReplyToInput: (responseText: string) => void
+      onPetReplyResponse: (callback: (responseText: string) => void) => () => void
       openLocalFile: (url: string) => Promise<{ success: boolean; error?: string }>
     }
   }

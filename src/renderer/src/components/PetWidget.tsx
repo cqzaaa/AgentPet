@@ -8,6 +8,31 @@ const SIZE_CONFIG = {
   defaultWidth: 250    // 默认兜底宽度 (px)
 }
 
+// 过滤 Markdown 等标记以便 TTS 自然朗读的净化函数
+function cleanTextForTts(text: string): string {
+  if (!text) return ''
+  return text
+    // 移除 markdown 标题 (e.g. ### 标题 -> 标题)
+    .replace(/^(#+)\s+/gm, '')
+    // 移除加粗与斜体标记 (e.g. **加粗** -> 加粗)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // 移除列表标记 (e.g. - 列表 -> 列表, 1. 列表 -> 列表)
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    // 移除链接 (e.g. [链接](url) -> 链接)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // 移除行内代码 (e.g. `code` -> code)
+    .replace(/`([^`]+)`/g, '$1')
+    // 移除代码块
+    .replace(/```[\s\S]*?```/g, '')
+    // 移除 HTML 标签
+    .replace(/<[^>]*>/g, '')
+    .trim()
+}
+
 // Cubism Core 加载状态检测
 function isCubismReady(): boolean {
   return typeof (window as unknown as { Live2DCubismCore?: unknown }).Live2DCubismCore !== 'undefined'
@@ -18,13 +43,87 @@ export function PetWidget(): React.JSX.Element {
   const [modelReady, setModelReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean }>({ x: 0, y: 0, visible: false })
+
 
   const isDraggingRef = useRef(false)
   const lastXRef = useRef(0)
   const lastYRef = useRef(0)
   const modelRef = useRef<InstanceType<typeof Live2DModel> | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
+
+  // ── 快捷聊天与大模型/TTS 相关状态 ──────────────────────────
+  const [isLlmThinking, setIsLlmThinking] = useState(false)
+  const [avatarList, setAvatarList] = useState<any[]>([])
+  const [customModelDir, setCustomModelDir] = useState('')
+  const [customModelFile, setCustomModelFile] = useState('')
+
+  const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
+  const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
+  const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
+  const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
+
+  const isLlmThinkingRef = useRef(false)
+  isLlmThinkingRef.current = isLlmThinking
+
+  // 记录挂件窗口的自适应宽高 Ref，用于动态气泡拉伸高度使用
+  const computedWidthRef = useRef(SIZE_CONFIG.defaultWidth)
+  const targetHeightRef = useRef(SIZE_CONFIG.targetHeight)
+
+  const formatDateTime = (): string => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  }
+
+  // 气泡文本格式化渲染器 (将大段原始的 Markdown 天气预报渲染成高级精致、紧凑自适应的排版)
+  const renderBubbleContent = (text: string | null) => {
+    if (!text) return null
+    const lines = text.split('\n')
+    return lines.map((line, idx) => {
+      let cleanLine = line
+      const boldRegexStrict = /\*\*(.*?)\*\*/g
+      const parts = []
+      let lastIndex = 0
+      let match
+      
+      while ((match = boldRegexStrict.exec(cleanLine)) !== null) {
+        if (match.index > lastIndex) {
+          parts.push(cleanLine.substring(lastIndex, match.index))
+        }
+        parts.push(<strong key={match.index} style={{ color: '#ffb638', fontWeight: 'bold' }}>{match[1]}</strong>)
+        lastIndex = boldRegexStrict.lastIndex
+      }
+      
+      if (lastIndex < cleanLine.length) {
+        parts.push(cleanLine.substring(lastIndex))
+      }
+
+      return (
+        <div key={idx} style={{ margin: '4px 0', minHeight: '1.2em', wordBreak: 'break-word', fontSize: '11px', letterSpacing: '0.2px' }}>
+          {parts.length > 0 ? parts : line}
+        </div>
+      )
+    })
+  }
+
+  // 加载 avatar 配置
+  const refreshAvatarsInfo = async () => {
+    try {
+      const info = await window.api.getCustomModel()
+      if (info) {
+        setCustomModelDir(info.customModelDir || '')
+        setCustomModelFile(info.customModelFile || '')
+      }
+      const list = await window.api.getAvatarsList()
+      setAvatarList(list)
+    } catch (e) {
+      console.error('[PetWidget] 加载模型配置失败:', e)
+    }
+  }
+
+  useEffect(() => {
+    refreshAvatarsInfo()
+  }, [reloadKey])
 
   // Listen for model-updated IPC event
   useEffect(() => {
@@ -50,7 +149,6 @@ export function PetWidget(): React.JSX.Element {
         modelRef.current.motion('TapBody').catch((err) => console.log('Live2D motion failed', err))
       }
       if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
-      // 如果有 details，延长显示时间到 10 秒
       const duration = details ? 10000 : 5000
       bubbleTimerRef.current = setTimeout(() => {
         setBubbleText(null)
@@ -65,18 +163,306 @@ export function PetWidget(): React.JSX.Element {
     }
   }, [])
 
+  // 动态根据气泡是否显示调整 Electron 窗口尺寸，给气泡腾空间以防遮挡 Live2D 模型
+  useEffect(() => {
+    if (!modelReady) return
+    const currentW = computedWidthRef.current
+    const targetH = targetHeightRef.current
+    if (bubbleText) {
+      // 弹出气泡时，调高 140px 以免挡住 Live2D
+      window.api.setWindowSize(currentW, targetH + 140)
+    } else {
+      // 气泡消失，还原原高
+      window.api.setWindowSize(currentW, targetH)
+    }
+  }, [bubbleText, modelReady])
+
+  // TTS 音频播放 + Lip-Sync
+  useEffect(() => {
+    if (!window.api.onPlayTtsAudio) return
+    const unsubscribe = window.api.onPlayTtsAudio((audioBuffer: ArrayBuffer) => {
+      try {
+        const blob = new Blob([audioBuffer], { type: 'audio/mp3' })
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+
+        const audioCtx = new AudioContext()
+        const source = audioCtx.createMediaElementSource(audio)
+        const analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 256
+        source.connect(analyser)
+        analyser.connect(audioCtx.destination)
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        let lipSyncRaf = 0
+
+        const updateLipSync = (): void => {
+          analyser.getByteFrequencyData(dataArray)
+          const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length / 255
+          if (modelRef.current) {
+            try {
+              const coreModel = (modelRef.current as any).internalModel?.coreModel
+              if (coreModel && coreModel.setParameterValueById) {
+                coreModel.setParameterValueById('ParamMouthOpenY', avg * 1.5)
+              }
+            } catch { /* ignore */ }
+          }
+          lipSyncRaf = requestAnimationFrame(updateLipSync)
+        }
+
+        audio.onplay = () => { updateLipSync() }
+        audio.onended = () => {
+          cancelAnimationFrame(lipSyncRaf)
+          // 闭嘴
+          if (modelRef.current) {
+            try {
+              const coreModel = (modelRef.current as any).internalModel?.coreModel
+              if (coreModel && coreModel.setParameterValueById) {
+                coreModel.setParameterValueById('ParamMouthOpenY', 0)
+              }
+            } catch { /* ignore */ }
+          }
+          audioCtx.close().catch(() => {})
+          URL.revokeObjectURL(url)
+        }
+
+        audio.play().catch(err => console.error('TTS 音频播放失败', err))
+      } catch (err) {
+        console.error('TTS 播放初始化失败', err)
+      }
+    })
+    return () => { unsubscribe() }
+  }, [])
+
+  // ── 快捷聊天核心响应大模型逻辑 ─────────────────────────────
+  const handleChatToPet = async (text: string, isNewSession?: boolean) => {
+    if (isLlmThinkingRef.current) return
+    setIsLlmThinking(true)
+
+    if (modelRef.current) {
+      modelRef.current.motion('TapBody').catch(() => {})
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1200))
+
+    try {
+      const savedLlmConfig = localStorage.getItem('agentpet_llm_config') || localStorage.getItem('agentself_llm_config')
+      let llmConfig = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
+      if (savedLlmConfig) {
+        try { llmConfig = JSON.parse(savedLlmConfig) } catch (e) {}
+      }
+
+      const isOllama = llmConfig.provider === 'ollama'
+      const hasKey = isOllama || !!llmConfig.apiKey
+
+      if (!hasKey) {
+        const replies = [
+          '主人，今天天气真好，但我还没配大模型 Key 哦，快去设置里配置吧！',
+          '配置了模型 Key 后，我就可以和你无限畅聊啦！',
+          '哎呀，没有 Key 的我只是个精美的花瓶，快快给我配个 API Key 吧！'
+        ]
+        const reply = replies[Math.floor(Math.random() * replies.length)]
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        setIsLlmThinking(false)
+
+        // 将兜底答复同步传回给快捷输入框显示
+        if (window.api.sendPetReplyToInput) {
+          window.api.sendPetReplyToInput(reply)
+        }
+
+        // 默认开启 TTS 朗读发声（除非用户明确关闭）
+        const ttsEnabled = localStorage.getItem('agentpet_tts_enabled') !== 'false'
+        if (ttsEnabled && currentAvatarVoice) {
+          const cleanReply = cleanTextForTts(reply)
+          const audioBuffer = await window.api.synthesizeTts(cleanReply, currentAvatarVoice)
+          if (audioBuffer) window.api.playTtsAudio(audioBuffer)
+        }
+        return
+      }
+
+      let activeSessionId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default'
+      
+      if (isNewSession) {
+        activeSessionId = 'agent:session:' + Date.now()
+        localStorage.setItem('agentself_active_session_id', activeSessionId)
+        localStorage.setItem('agentpet_active_session_id', activeSessionId)
+        // 广播通知主界面等更新当前的会话选中状态
+        if (window.electron && window.electron.ipcRenderer) {
+          window.electron.ipcRenderer.send('api:wechat-session-updated', activeSessionId)
+        }
+      }
+
+      const savedSessions = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
+      let sessions: any[] = []
+      if (savedSessions) {
+        try { sessions = JSON.parse(savedSessions) } catch (e) {}
+      }
+
+      let activeSession = sessions.find(s => s.id === activeSessionId)
+      if (!activeSession) {
+        activeSession = {
+          id: activeSessionId,
+          name: '(未命名)',
+          time: formatDateTime(),
+          messages: []
+        }
+        sessions.push(activeSession)
+      }
+
+      const contextRoundsStr = localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'
+      const contextRounds = Number(contextRoundsStr)
+      const currentMessages = activeSession.messages || []
+      const filtered = currentMessages.filter((m: any) => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError)
+      
+      const chatMessages = filtered.slice(-contextRounds * 2).map((m: any) => {
+        return { role: m.sender === 'user' ? 'user' : 'assistant', content: m.text || '' }
+      })
+
+      chatMessages.push({ role: 'user', content: text })
+
+      let profileContent = ''
+      try {
+        profileContent = await window.api.getMemoryProfile()
+      } catch (err) {}
+
+      let relevantExperiences: any[] = []
+      try {
+        const recallRes = await window.api.recallExperiences(text)
+        if (recallRes) {
+          relevantExperiences = Array.isArray(recallRes) ? recallRes : (recallRes.results || [])
+        }
+      } catch (err) {}
+
+      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` + 
+        (relevantExperiences.length > 0 
+          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}`).join('\n')}`
+          : '')
+
+      const stylePrompt = currentAvatarStyle === 'cute'
+        ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
+        : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
+
+      const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
+${stylePrompt}
+当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
+${memoryContext}
+⚠️ 极重要约束：普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。由于这是桌面悬浮聊天，绝对不要返回包含代码、文件写入等本地系统工具的指令，以文本交流为主。`
+
+      chatMessages.unshift({ role: 'system', content: systemPrompt })
+
+      const timeStr = formatDateTime()
+      const userMsg = {
+        id: Date.now(),
+        sender: 'user',
+        text: text,
+        time: timeStr
+      }
+      const replyId = Date.now() + 1
+      const agentPlaceholderMsg = {
+        id: replyId,
+        sender: 'agent',
+        text: '',
+        isThinking: true,
+        toolSteps: [],
+        time: timeStr
+      }
+
+      const updatedMessages = [...(activeSession.messages || []), userMsg, agentPlaceholderMsg]
+      
+      let name = activeSession.name
+      const isFirstUserMsg = (activeSession.messages || []).filter((m: any) => m.sender === 'user').length === 0
+      if (isFirstUserMsg || activeSession.name === '(未命名)' || activeSession.name === '新会话') {
+        name = text.length > 15 ? text.substring(0, 15) + '...' : text
+      }
+
+      const updatedSessions = sessions.map(s => {
+        if (s.id === activeSessionId) {
+          return { ...s, name, messages: updatedMessages }
+        }
+        return s
+      })
+
+      localStorage.setItem('agentpet_sessions', JSON.stringify(updatedSessions))
+      await window.api.saveLocalSessions(updatedSessions)
+
+      const workspacePath = localStorage.getItem('agentpet_workspace_path') || ''
+      const response = await window.api.callLLM(
+        {
+          ...llmConfig,
+          sessionId: activeSessionId,
+          messageId: replyId
+        },
+        chatMessages,
+        workspacePath
+      )
+
+      const finalSessions = updatedSessions.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map(m => m.id === replyId ? { ...m, text: response, isThinking: false } : m)
+          }
+        }
+        return s
+      })
+
+      localStorage.setItem('agentpet_sessions', JSON.stringify(finalSessions))
+      await window.api.saveLocalSessions(finalSessions)
+
+
+
+      // 将大模型答复同步传回给快捷输入框显示
+      if (window.api.sendPetReplyToInput) {
+        window.api.sendPetReplyToInput(response)
+      }
+
+      // 默认开启 TTS 朗读发音（除非用户明确关闭）
+      const ttsEnabled = localStorage.getItem('agentpet_tts_enabled') !== 'false'
+      if (ttsEnabled && response && currentAvatarVoice) {
+        try {
+          const cleanResponse = cleanTextForTts(response)
+          const audioBuffer = await window.api.synthesizeTts(cleanResponse, currentAvatarVoice)
+          if (audioBuffer) {
+            window.api.playTtsAudio(audioBuffer)
+          }
+        } catch (ttsErr) {
+          console.error('TTS 播放失败', ttsErr)
+        }
+      }
+
+    } catch (e: any) {
+      console.error('[PetWidget] 对话生成失败:', e)
+      const errMsg = `⚠️ 哎呀，出错了（${e.message || e}）。请检查你的模型 API Key 是否正确配置。`
+      if (window.api.sendPetReplyToInput) {
+        window.api.sendPetReplyToInput(errMsg)
+      }
+    } finally {
+      setIsLlmThinking(false)
+    }
+  }
+
+  // 监听广播消息
+  useEffect(() => {
+    if (!window.electron || !window.electron.ipcRenderer) return
+    const handleChat = (_event: any, text: string, isNewSession?: boolean) => {
+      handleChatToPet(text, isNewSession)
+    }
+    window.electron.ipcRenderer.on('chat-to-pet', handleChat)
+    return () => {
+      window.electron.ipcRenderer.removeListener('chat-to-pet', handleChat)
+    }
+  }, [currentAvatarVoice, currentAvatarStyle, currentAvatarName, reloadKey])
+
   const handleViewDetails = (e: React.MouseEvent): void => {
     e.stopPropagation()
     const tId = bubbleTaskId
     const lId = bubbleLogId
-    // 清除气泡
     setBubbleText(null)
     setBubbleDetails(null)
     setBubbleTaskId(null)
     setBubbleLogId(null)
     if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current)
 
-    // 唤醒主配置中心窗口并定位详情
     if (tId && lId) {
       window.api.openCronLogDetails(tId, lId)
     } else {
@@ -176,25 +562,22 @@ export function PetWidget(): React.JSX.Element {
       const origH = model.height || 2048
       console.log('[Live2D] 原始尺寸:', origW, 'x', origH)
 
-      // 计算自适应尺寸并调整 Electron 窗口与 Canvas 尺寸
       const targetHeight = SIZE_CONFIG.targetHeight
       const aspectRatio = origW / origH
-      // 限制宽度在合理范围 150px ~ 450px 之间
       const computedWidth = Math.max(150, Math.min(450, Math.round(targetHeight * aspectRatio)))
 
       console.log(`[Live2D] 窗口自适应尺寸设置: 宽=${computedWidth}, 高=${targetHeight}`)
 
-      // 调整 Electron 窗口尺寸
-      window.api.setWindowSize(computedWidth, targetHeight)
+      // 记录最新长宽状态
+      computedWidthRef.current = computedWidth
+      targetHeightRef.current = targetHeight
 
-      // 重新调整 Pixi 渲染器分辨率
+      window.api.setWindowSize(computedWidth, targetHeight)
       app.renderer.resize(computedWidth, targetHeight)
 
-      // 缩放模型，留出微小边缘防切边
       const scale = (targetHeight / origH) * 0.96
       model.scale.set(scale)
 
-      // 居中对齐模型
       model.x = (computedWidth - model.width) / 2
       model.y = (targetHeight - model.height) / 2
 
@@ -215,31 +598,23 @@ export function PetWidget(): React.JSX.Element {
     }
   }, [reloadKey])
 
-  // 检测鼠标是否悬停在模型上（支持 Live2D hitTest 与模型矩形 Bounds 兜底）
   const checkHoveringModel = (clientX: number, clientY: number): boolean => {
     if (!modelRef.current || !containerRef.current) return false
     const rect = containerRef.current.getBoundingClientRect()
     const x = clientX - rect.left
     const y = clientY - rect.top
 
-    // 1. 优先使用模型内置碰撞区检测
     const hitAreas = modelRef.current.hitTest(x, y)
     if (hitAreas && hitAreas.length > 0) {
       return true
     }
 
-    // 2. 备用方案：检测是否在模型的外包围盒内
     const modelX = modelRef.current.x
     const modelY = modelRef.current.y
     const modelW = modelRef.current.width
     const modelH = modelRef.current.height
 
-    if (
-      x >= modelX &&
-      x <= modelX + modelW &&
-      y >= modelY &&
-      y <= modelY + modelH
-    ) {
+    if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) {
       return true
     }
 
@@ -257,7 +632,7 @@ export function PetWidget(): React.JSX.Element {
   const handleMouseEnter = (e: React.MouseEvent): void => {
     if (!modelRef.current) return
     const isHovering = checkHoveringModel(e.clientX, e.clientY)
-    if (isHovering || contextMenu.visible) {
+    if (isHovering) {
       window.api.setIgnoreMouseEvents(false)
     } else {
       window.api.setIgnoreMouseEvents(true, { forward: true })
@@ -266,7 +641,6 @@ export function PetWidget(): React.JSX.Element {
 
   const handleMouseLeave = (): void => {
     window.api.setIgnoreMouseEvents(true, { forward: true })
-    setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
   }
 
   const handleMouseMove = (e: React.MouseEvent): void => {
@@ -276,9 +650,8 @@ export function PetWidget(): React.JSX.Element {
     const y = e.clientY - rect.top
     modelRef.current.focus(x, y)
 
-    // 动态控制鼠标穿透
     const isHovering = checkHoveringModel(e.clientX, e.clientY)
-    if (isHovering || contextMenu.visible) {
+    if (isHovering) {
       window.api.setIgnoreMouseEvents(false)
     } else {
       window.api.setIgnoreMouseEvents(true, { forward: true })
@@ -301,32 +674,12 @@ export function PetWidget(): React.JSX.Element {
 
   const handleContextMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
-    if (!containerRef.current) return
-    const rect = containerRef.current.getBoundingClientRect()
-    const clickX = e.clientX - rect.left
-    const clickY = e.clientY - rect.top
-    const menuWidth = 110
-    const menuHeight = 82
-    let x = clickX
-    let y = clickY
-    if (x + menuWidth > rect.width) x = rect.width - menuWidth - 8
-    if (y + menuHeight > rect.height) y = rect.height - menuHeight - 8
-    if (x < 8) x = 8
-    if (y < 8) y = 8
-    setContextMenu({ x, y, visible: true })
-    window.api.setIgnoreMouseEvents(false)
+    window.api.showPetContextMenu()
   }
 
-  const handleOpenAgent = (e: React.MouseEvent): void => {
+  const handleOpenInput = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    setContextMenu({ x: 0, y: 0, visible: false })
-    window.api.openAgentWindow()
-  }
-
-  const handleHideWidget = (e: React.MouseEvent): void => {
-    e.stopPropagation()
-    setContextMenu({ x: 0, y: 0, visible: false })
-    window.api.hideWindow()
+    window.api.openInputWindow()
   }
 
   return (
@@ -336,13 +689,113 @@ export function PetWidget(): React.JSX.Element {
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
       onContextMenu={handleContextMenu}
-      style={{ width: '100%', height: '100%', paddingBottom: 0 }}
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        position: 'relative', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        justifyContent: 'flex-end', 
+        overflow: 'visible' 
+      }}
     >
+      <style>{`
+        .pet-chat-icon-btn {
+          position: absolute;
+          bottom: 12px;
+          right: 12px;
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          border: 1px solid rgba(0, 0, 0, 0.1);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #4f8cff;
+          cursor: pointer;
+          z-index: 999;
+          opacity: 0;
+          transform: scale(0.9);
+          transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .widget-container:hover .pet-chat-icon-btn {
+          opacity: 1;
+          transform: scale(1);
+        }
+
+        .pet-chat-icon-btn:hover {
+          background: #4f8cff;
+          color: #ffffff;
+          transform: scale(1.08) !important;
+          box-shadow: 0 4px 12px rgba(79, 140, 255, 0.35);
+        }
+
+        .pet-chat-icon-btn:active {
+          transform: scale(0.95) !important;
+        }
+
+        /* 气泡样式重构：亮丽半透明黑胶玻璃效果，加宽排版，支持滚动 */
+        .pet-toast-bubble {
+          position: absolute;
+          top: 10px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(20, 20, 22, 0.88);
+          backdrop-filter: blur(14px) saturate(180%);
+          -webkit-backdrop-filter: blur(14px) saturate(180%);
+          border: 1.2px solid rgba(255, 255, 255, 0.08);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+          border-radius: 16px;
+          padding: 10px 14px;
+          width: 250px;
+          max-width: 280px;
+          max-height: 120px;
+          overflow-y: auto;
+          box-sizing: border-box;
+          z-index: 1000;
+          animation: bubbleFadeIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .pet-toast-bubble::-webkit-scrollbar {
+          width: 3px;
+        }
+        .pet-toast-bubble::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.15);
+          border-radius: 2px;
+        }
+
+        .pet-toast-bubble-content {
+          font-size: 11px;
+          color: #f1f5f9;
+          line-height: 1.45;
+          text-align: left;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-weight: normal;
+        }
+
+        .pet-toast-bubble-arrow {
+          position: absolute;
+          bottom: -5px;
+          left: 50%;
+          transform: translateX(-50%) rotate(45deg);
+          width: 10px;
+          height: 10px;
+          background: rgba(20, 20, 22, 0.88);
+          border-right: 1.2px solid rgba(255, 255, 255, 0.08);
+          border-bottom: 1.2px solid rgba(255, 255, 255, 0.08);
+        }
+      `}</style>
+
       {/* 定时提醒气泡 */}
       {bubbleText && (
         <div className="pet-toast-bubble">
           <div className="pet-toast-bubble-content">
-            <div>{bubbleText}</div>
+            <div>{renderBubbleContent(bubbleText)}</div>
             {bubbleDetails && (
               <div className="pet-bubble-link" onClick={handleViewDetails}>
                 查看详情
@@ -353,9 +806,7 @@ export function PetWidget(): React.JSX.Element {
         </div>
       )}
 
-
-
-      {/* Live2D 渲染容器 */}
+      {/* Live2D 渲染容器，高度固定并绝对定位靠底 */}
       <div
         ref={containerRef}
         className="pet-avatar-wrapper"
@@ -364,24 +815,31 @@ export function PetWidget(): React.JSX.Element {
         onDoubleClick={handleDoubleClick}
         style={{
           width: '100%',
-          height: '100%',
+          height: `${SIZE_CONFIG.targetHeight}px`,
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
           borderRadius: 0,
           opacity: modelReady ? 1 : 0,
-          transition: 'opacity 0.5s ease'
+          transition: 'opacity 0.5s ease',
+          zIndex: 5
         }}
       />
 
-      {/* 自定义右键菜单 */}
-      {contextMenu.visible && (
-        <div
-          className="custom-context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={e => e.stopPropagation()}
+      {/* 快捷输入聊天悬浮按钮 */}
+      {modelReady && (
+        <div 
+          className="pet-chat-icon-btn" 
+          onClick={handleOpenInput} 
+          title="快捷聊天"
         >
-          <div className="menu-item" onClick={handleOpenAgent}>打开窗口</div>
-          <div className="menu-item" onClick={handleHideWidget}>隐藏</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
         </div>
       )}
+
+
 
       {/* 调试错误提示 */}
       {loadError && (

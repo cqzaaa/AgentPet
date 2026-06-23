@@ -8,6 +8,7 @@ import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import Database from 'better-sqlite3'
+import { EdgeTTS } from 'node-edge-tts'
 
 // 本地环境变量 .env 极简解析加载器
 try {
@@ -453,6 +454,7 @@ const winHeight = 300
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
+let inputWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let customModelDir = ''
 let customModelFile = ''
@@ -523,6 +525,57 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   agentWindow.on('closed', () => {
     agentWindow = null
+  })
+}
+
+function createInputWindow(): void {
+  if (inputWindow) {
+    if (inputWindow.isMinimized()) inputWindow.restore()
+    inputWindow.focus()
+    return
+  }
+
+  let x: number | undefined = undefined
+  let y: number | undefined = undefined
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: scrWidth, height: scrHeight } = primaryDisplay.workArea
+  x = Math.round(scrWidth / 2 - 400 / 2)
+  y = Math.round(scrHeight * 0.22)
+
+  inputWindow = new BrowserWindow({
+    width: 400,
+    height: 90,
+    x,
+    y,
+    show: false,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  inputWindow.setMenu(null)
+
+  const inputUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
+    ? `${process.env['ELECTRON_RENDERER_URL']}/#/chat-input`
+    : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/chat-input`
+
+  inputWindow.loadURL(inputUrl)
+
+  inputWindow.on('ready-to-show', () => {
+    inputWindow?.show()
+    inputWindow?.focus()
+  })
+
+  inputWindow.on('closed', () => {
+    inputWindow = null
   })
 }
 
@@ -617,20 +670,22 @@ function createWindow(): void {
     // 拖拽开始，无需特殊处理
   })
 
-  ipcMain.on('move-window', (_, dx: number, dy: number) => {
-    const [x, y] = win.getPosition()
-    win.setPosition(x + dx, y + dy)
+  ipcMain.on('move-window', (event, dx: number, dy: number) => {
+    const targetWin = BrowserWindow.fromWebContents(event.sender)
+    if (targetWin) {
+      const [x, y] = targetWin.getPosition()
+      targetWin.setPosition(x + dx, y + dy)
+    }
   })
 
   ipcMain.on('end-drag', () => {
     // 拖拽结束，无需边缘贴合半隐藏逻辑
   })
-
   ipcMain.on('set-ignore-mouse-events', (_, ignore: boolean, options?: { forward: boolean }) => {
     win.setIgnoreMouseEvents(ignore, options)
   })
 
-  ipcMain.on('set-window-size', (event, width: number, height: number) => {
+  ipcMain.on('set-window-size', (event, width: number, height: number, anchor?: 'bottom' | 'top') => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
       const [oldW, oldH] = win.getSize()
@@ -638,9 +693,18 @@ function createWindow(): void {
       const newW = Math.round(width)
       const newH = Math.round(height)
 
-      // 保持窗口底部中心点不变
-      const newX = Math.round((oldX + oldW / 2) - newW / 2)
-      const newY = Math.round((oldY + oldH) - newH)
+      let newX = oldX
+      let newY = oldY
+
+      if (anchor === 'top') {
+        // 保持顶部中心点不变
+        newX = Math.round((oldX + oldW / 2) - newW / 2)
+        newY = oldY
+      } else {
+        // 默认保持底部中心点不变 (适合桌宠)
+        newX = Math.round((oldX + oldW / 2) - newW / 2)
+        newY = Math.round((oldY + oldH) - newH)
+      }
 
       win.setBounds({
         x: newX,
@@ -658,6 +722,32 @@ function createWindow(): void {
   ipcMain.on('hide-window', () => {
     if (mainWindow) {
       mainWindow.hide()
+    }
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.close()
+    }
+  })
+
+  ipcMain.on('open-input-window', () => {
+    createInputWindow()
+  })
+
+  ipcMain.on('close-input-window', () => {
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.close()
+    }
+  })
+
+  ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat-to-pet', text, isNewSession)
+    }
+  })
+
+  // 转发桌宠生成的 LLM 回复到快捷输入框
+  ipcMain.on('api:send-pet-reply-to-input', (_, responseText: string) => {
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.webContents.send('pet-reply-response', responseText)
     }
   })
 }
@@ -1326,6 +1416,39 @@ app.whenReady().then(() => {
     menu.popup()
   })
 
+  // 显示原生右键菜单（桌宠右键菜单）
+  ipcMain.on('api:show-pet-context-menu', () => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '💬 快捷聊天',
+        click: () => {
+          createInputWindow()
+        }
+      },
+      {
+        label: '💻 打开窗口',
+        click: () => {
+          createAgentWindow()
+        }
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: '👁️ 隐藏桌宠',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.hide()
+          }
+          if (inputWindow && !inputWindow.isDestroyed()) {
+            inputWindow.close()
+          }
+        }
+      }
+    ])
+    menu.popup()
+  })
+
   ipcMain.handle('api:abort-llm', () => {
     if (currentLlmAbortController) {
       currentLlmAbortController.abort()
@@ -1489,6 +1612,7 @@ app.whenReady().then(() => {
         dir: '',
         configFile: '',
         languageStyle: defaultConfig.languageStyle || 'normal',
+        voice: defaultConfig.voice || 'zh-CN-XiaoxiaoNeural',
         isDefault: true
       })
 
@@ -1505,6 +1629,7 @@ app.whenReady().then(() => {
               dir: subDirPath,
               configFile: modelFile,
               languageStyle: cfg.languageStyle || 'normal',
+              voice: cfg.voice || 'zh-CN-XiaoxiaoNeural',
               isDefault: false
             })
           }
@@ -1518,17 +1643,50 @@ app.whenReady().then(() => {
   })
 
   // 保存虚拟体参数
-  ipcMain.handle('api:save-avatar-config', async (_, { id, name, languageStyle }) => {
+  ipcMain.handle('api:save-avatar-config', async (_, { id, name, languageStyle, voice }) => {
     try {
       if (!avatarConfigs[id]) {
         avatarConfigs[id] = {}
       }
       avatarConfigs[id].name = name
       avatarConfigs[id].languageStyle = languageStyle
+      if (voice) avatarConfigs[id].voice = voice
       writeConfig({ avatarConfigs })
       return true
     } catch (e) {
       console.error('保存虚拟体配置失败', e)
+      return false
+    }
+  })
+
+  // TTS 语音合成
+  ipcMain.handle('api:synthesize-tts', async (_, { text, voice }: { text: string; voice: string }) => {
+    try {
+      const tmpFile = join(app.getPath('temp'), `agentpet_tts_${Date.now()}.mp3`)
+      const ttsEngine = new EdgeTTS({
+        voice: voice || 'zh-CN-XiaoxiaoNeural',
+        lang: 'zh-CN',
+        rate: 'default',
+        pitch: 'default',
+        volume: 'default'
+      })
+      await ttsEngine.ttsPromise(text, tmpFile)
+      const buffer = fs.readFileSync(tmpFile)
+      fs.unlinkSync(tmpFile)
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    } catch (e) {
+      console.error('TTS 合成失败', e)
+      return null
+    }
+  })
+
+  // 将 TTS 音频发送到挂件窗口播放
+  ipcMain.handle('api:play-tts-audio', async (_, audioBuffer: ArrayBuffer) => {
+    try {
+      mainWindow?.webContents.send('play-tts-audio', audioBuffer)
+      return true
+    } catch (e) {
+      console.error('发送 TTS 音频失败', e)
       return false
     }
   })

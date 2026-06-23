@@ -7,4 +7,4 @@ out
 .agents*
 .vscode*
 skills-lock.json
-
+.gemini*

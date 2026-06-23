@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react'
 import * as PIXI from 'pixi.js'
 import { AgentWindow } from './components/AgentWindow'
 import { PetWidget } from './components/PetWidget'
+import { ChatInputWindow } from './components/ChatInputWindow'
 
 // pixi-live2d-display@0.4 + pixi.js@6 需要全局暴露 PIXI 以驱动 Ticker
 // 必须在模块作用域最外层执行（不是在函数/useEffect 里）
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
 function App(): React.JSX.Element {
-  const [isAgent, setIsAgent] = useState(window.location.hash === '#/agent')
+  const [currentHash, setCurrentHash] = useState(window.location.hash)
 
   useEffect(() => {
     const handleHashChange = (): void => {
-      setIsAgent(window.location.hash === '#/agent')
+      setCurrentHash(window.location.hash)
     }
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
@@ -40,7 +41,13 @@ function App(): React.JSX.Element {
     return undefined
   }, [])
 
-  return isAgent ? <AgentWindow /> : <PetWidget />
+  if (currentHash === '#/agent') {
+    return <AgentWindow />
+  } else if (currentHash === '#/chat-input') {
+    return <ChatInputWindow />
+  } else {
+    return <PetWidget />
+  }
 }
 
 export default App

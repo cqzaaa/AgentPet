@@ -128,59 +128,7 @@ body {
   transform: translateY(0) scale(0.97);
 }
 
-/* 自定义右键上下文菜单 */
-.custom-context-menu {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-  border-radius: 12px;
-  padding: 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: 1000;
-  width: 105px;
-  animation: menuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  transform-origin: top left;
-}
 
-@keyframes menuFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(-4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.custom-context-menu .menu-item {
-  font-size: 11px;
-  font-weight: 600;
-  color: #2c3e50;
-  padding: 7px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-  font-family: 'Outfit', 'Inter', sans-serif;
-  text-align: center;
-}
-
-.custom-context-menu .menu-item:hover {
-  background: rgba(108, 92, 231, 0.12);
-  color: #6c5ce7;
-  transform: scale(1.02);
-}
-
-.custom-context-menu .menu-item:active {
-  transform: scale(0.97);
-}
 
 
 /* ── Agent 交互窗口页面 (OpenClaw-style Layout) ────────────────────── */

@@ -26,6 +26,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     customModelFile, setCustomModelFile,
     avatarList, refreshAvatarsList,
     showToast,
+    // tts
+    ttsEnabled, setTtsEnabled,
     // sandbox
     sandboxMode,
     handleToggleSandboxMode
@@ -36,6 +38,16 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editingAvatar, setEditingAvatar] = React.useState<any>(null)
   const [editAvatarName, setEditAvatarName] = React.useState('')
   const [editAvatarStyle, setEditAvatarStyle] = React.useState('normal')
+  const [editAvatarVoice, setEditAvatarVoice] = React.useState('zh-CN-XiaoxiaoNeural')
+  const [openAvatarDropdownId, setOpenAvatarDropdownId] = React.useState<string | null>(null)
+
+  // 点击外部关闭下拉菜单
+  React.useEffect(() => {
+    if (!openAvatarDropdownId) return
+    const handleClickOutside = () => setOpenAvatarDropdownId(null)
+    window.addEventListener('click', handleClickOutside)
+    return () => window.removeEventListener('click', handleClickOutside)
+  }, [openAvatarDropdownId])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
@@ -311,6 +323,40 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
               在这里更换挂件的 Live2D 形象。您可以点击"🎭 导入虚拟体"将外部模型拷贝归档到统一存储包中，系统会自动在此页面生成卡片列表供您一键切换。
             </div>
 
+            {/* TTS 语音开关 */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '12px',
+              padding: '12px 16px', marginBottom: '20px',
+              background: 'var(--bg-secondary, #f8f9fa)',
+              borderRadius: '8px', border: '1px solid var(--border-color, #e9ecef)'
+            }}>
+              <span style={{ fontSize: '14px' }}>🔊</span>
+              <span style={{ fontSize: '13px', fontWeight: 500 }}>语音朗读</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', flex: 1 }}>
+                开启后 LLM 回复将自动朗读，声音在下方虚拟体卡片中设置
+              </span>
+              <div
+                onClick={() => {
+                  const next = !ttsEnabled
+                  setTtsEnabled(next)
+                  localStorage.setItem('agentpet_tts_enabled', String(next))
+                }}
+                style={{
+                  width: '44px', height: '24px', borderRadius: '12px',
+                  background: ttsEnabled ? 'var(--accent-color, #4f8cff)' : '#ccc',
+                  cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{
+                  width: '20px', height: '20px', borderRadius: '50%',
+                  background: '#fff', position: 'absolute', top: '2px',
+                  left: ttsEnabled ? '22px' : '2px',
+                  transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                }} />
+              </div>
+            </div>
+
             <div className="action-row" style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
               <button
                 type="button"
@@ -358,8 +404,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     <th>形象标识 (图标)</th>
                     <th>虚拟体名称</th>
                     <th>语言风格</th>
+                    <th>语音声音</th>
                     <th style={{ width: '100px', textAlign: 'center' }}>启用状态</th>
-                    <th style={{ width: '230px', textAlign: 'center' }}>操作</th>
+                    <th style={{ width: '140px', textAlign: 'right' }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -386,70 +433,124 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                         <td>
                           {avatar.languageStyle === 'cute' ? '🎀 可爱风格' : '📝 常规风格'}
                         </td>
+                        <td style={{ fontSize: '12px' }}>
+                          {(() => {
+                            const voiceMap: Record<string, string> = {
+                              'zh-CN-XiaoxiaoNeural': '🎀 萝莉甜妹',
+                              'zh-CN-XiaoyiNeural': '🌸 活泼少女',
+                              'zh-CN-XiaoxuanNeural': '💖 可爱萌妹',
+                              'zh-CN-XiaomoNeural': '👑 温柔御姐',
+                              'zh-CN-XiaohanNeural': '🌺 知性御姐',
+                              'zh-CN-XiaoruiNeural': '🎭 成熟女王',
+                              'zh-CN-XiaozhenNeural': '💼 专业女声',
+                              'zh-CN-YunxiNeural': '🧢 活力少年',
+                              'zh-CN-YunjianNeural': '🎤 磁性男声',
+                              'zh-CN-YunyangNeural': '📺 新闻播音'
+                            }
+                            return voiceMap[avatar.voice] || avatar.voice || '🎀 萝莉甜妹'
+                          })()}
+                        </td>
                         <td style={{ textAlign: 'center' }}>
                           <span className={`mcp-badge ${isActive ? 'configured' : 'none'}`}>
                             {isActive ? '使用中' : '未启用'}
                           </span>
                         </td>
-                        <td>
-                          <div className="mcp-btn-action-group">
-                            {!isActive && (
-                              <button
-                                type="button"
-                                className="mcp-btn-action test"
-                                onClick={async () => {
-                                  try {
-                                    if (avatar.isDefault) {
-                                      await window.api.clearCustomModel()
-                                      setCustomModelDir('')
-                                      setCustomModelFile('')
-                                    } else {
-                                      const res = await window.api.switchAvatar({ dir: avatar.dir, configFile: avatar.configFile })
-                                      setCustomModelDir(res.customModelDir)
-                                      setCustomModelFile(res.customModelFile)
-                                    }
-                                    showToast('已启用此虚拟形象！', 'success')
-                                  } catch (err: any) {
-                                    showToast(err.message || '切换形象失败', 'error')
-                                  }
-                                }}
-                              >
-                                ✅ 启用
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="mcp-btn-action edit"
-                              onClick={() => {
-                                setEditingAvatar(avatar)
-                                setEditAvatarName(avatar.name)
-                                setEditAvatarStyle(avatar.languageStyle || 'normal')
-                                setShowEditAvatarModal(true)
+                        <td style={{ textAlign: 'right', position: 'relative' }}>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOpenAvatarDropdownId(openAvatarDropdownId === avatar.id ? null : avatar.id)
+                            }}
+                          >
+                            ⚙️ 设置 ▾
+                          </button>
+
+                          {openAvatarDropdownId === avatar.id && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '100%',
+                                right: '0',
+                                marginTop: '4px',
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border-card)',
+                                borderRadius: '6px',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                zIndex: 10,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                minWidth: '120px',
+                                overflow: 'hidden'
                               }}
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              ✏️ 编辑
-                            </button>
-                            {!avatar.isDefault && (
-                              <button
-                                type="button"
-                                className="mcp-btn-action delete"
-                                title="删除该归档形象"
-                                onClick={async () => {
-                                  if (confirm(`确认要彻底删除形象 [${avatar.name}] 吗？这会物理清空对应的本地模型文件夹。`)) {
+                              {!isActive && (
+                                <div
+                                  style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
+                                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                  onClick={async () => {
                                     try {
-                                      await window.api.deleteAvatar(avatar.dir)
-                                      await refreshAvatarsList()
-                                      showToast('形象已成功删除。', 'success')
+                                      if (avatar.isDefault) {
+                                        await window.api.clearCustomModel()
+                                        setCustomModelDir('')
+                                        setCustomModelFile('')
+                                      } else {
+                                        const res = await window.api.switchAvatar({ dir: avatar.dir, configFile: avatar.configFile })
+                                        setCustomModelDir(res.customModelDir)
+                                        setCustomModelFile(res.customModelFile)
+                                      }
+                                      showToast('已启用此虚拟形象！', 'success')
                                     } catch (err: any) {
-                                      showToast(err.message || err, 'error')
+                                      showToast(err.message || '切换形象失败', 'error')
                                     }
-                                  }
+                                    setOpenAvatarDropdownId(null)
+                                  }}
+                                >
+                                  ✅ 启用
+                                </div>
+                              )}
+                              <div
+                                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                onClick={() => {
+                                  setEditingAvatar(avatar)
+                                  setEditAvatarName(avatar.name)
+                                  setEditAvatarStyle(avatar.languageStyle || 'normal')
+                                  setEditAvatarVoice(avatar.voice || 'zh-CN-XiaoxiaoNeural')
+                                  setShowEditAvatarModal(true)
+                                  setOpenAvatarDropdownId(null)
                                 }}
                               >
-                                🗑️ 删除
-                              </button>
-                            )}
-                          </div>
+                                ✏️ 编辑
+                              </div>
+                              {!avatar.isDefault && (
+                                <div
+                                  style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', color: '#ef4444', borderTop: '1px solid var(--border-card)', display: 'flex', gap: '8px', alignItems: 'center' }}
+                                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
+                                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                  onClick={async () => {
+                                    if (confirm(`确认要彻底删除形象 [${avatar.name}] 吗？这会物理清空对应的本地模型文件夹。`)) {
+                                      try {
+                                        await window.api.deleteAvatar(avatar.dir)
+                                        await refreshAvatarsList()
+                                        showToast('形象已成功删除。', 'success')
+                                      } catch (err: any) {
+                                        showToast(err.message || err, 'error')
+                                      }
+                                    }
+                                    setOpenAvatarDropdownId(null)
+                                  }}
+                                >
+                                  🗑️ 删除
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )
@@ -499,6 +600,53 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   提示：切换后将影响大模型智能体的语言表达风格。常规为专业友好，可爱为萌系调皮。
                 </div>
               </div>
+
+              <div>
+                <label className="mcp-form-label">语音声音</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select
+                    className="mcp-input-fancy"
+                    value={editAvatarVoice}
+                    onChange={e => setEditAvatarVoice(e.target.value)}
+                    style={{ cursor: 'pointer', flex: 1 }}
+                  >
+                    <option value="zh-CN-XiaoxiaoNeural">🎀 萝莉甜妹 (Xiaoxiao)</option>
+                    <option value="zh-CN-XiaoyiNeural">🌸 活泼少女 (Xiaoyi)</option>
+                    <option value="zh-CN-XiaoxuanNeural">💖 可爱萌妹 (Xiaoxuan)</option>
+                    <option value="zh-CN-XiaomoNeural">👑 温柔御姐 (Xiaomo)</option>
+                    <option value="zh-CN-XiaohanNeural">🌺 知性御姐 (Xiaohan)</option>
+                    <option value="zh-CN-XiaoruiNeural">🎭 成熟女王 (Xiaorui)</option>
+                    <option value="zh-CN-XiaozhenNeural">💼 专业女声 (Xiaozhen)</option>
+                    <option value="zh-CN-YunxiNeural">🧢 活力少年 (Yunxi)</option>
+                    <option value="zh-CN-YunjianNeural">🎤 磁性男声 (Yunjian)</option>
+                    <option value="zh-CN-YunyangNeural">📺 新闻播音 (Yunyang)</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={async () => {
+                      try {
+                        const buf = await window.api.synthesizeTts('你好呀，我是你的桌面助手！', editAvatarVoice)
+                        if (buf) {
+                          const blob = new Blob([buf], { type: 'audio/mp3' })
+                          const url = URL.createObjectURL(blob)
+                          const audio = new Audio(url)
+                          audio.onended = () => URL.revokeObjectURL(url)
+                          audio.play()
+                        }
+                      } catch (e) {
+                        console.error('试听失败', e)
+                      }
+                    }}
+                    style={{ fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    🔊 试听
+                  </button>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  提示：选择 TTS 语音声音，开启语音后 LLM 回复将自动朗读。
+                </div>
+              </div>
             </div>
             <div className="mcp-modal-footer">
               <button
@@ -521,7 +669,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     await window.api.saveAvatarConfig({
                       id: editingAvatar.id,
                       name: editAvatarName.trim(),
-                      languageStyle: editAvatarStyle
+                      languageStyle: editAvatarStyle,
+                      voice: editAvatarVoice
                     })
                     await refreshAvatarsList()
                     setShowEditAvatarModal(false)

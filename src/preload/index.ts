@@ -6,8 +6,8 @@ const api = {
   moveWindow: (dx: number, dy: number): void => {
     ipcRenderer.send('move-window', dx, dy)
   },
-  setWindowSize: (width: number, height: number): void => {
-    ipcRenderer.send('set-window-size', width, height)
+  setWindowSize: (width: number, height: number, anchor?: 'bottom' | 'top'): void => {
+    ipcRenderer.send('set-window-size', width, height, anchor)
   },
   endDrag: (): void => {
     ipcRenderer.send('end-drag')
@@ -29,6 +29,15 @@ const api = {
   },
   hideWindow: (): void => {
     ipcRenderer.send('hide-window')
+  },
+  openInputWindow: (): void => {
+    ipcRenderer.send('open-input-window')
+  },
+  closeInputWindow: (): void => {
+    ipcRenderer.send('close-input-window')
+  },
+  sendChatToPet: (text: string, isNewSession?: boolean): void => {
+    ipcRenderer.send('send-chat-to-pet', text, isNewSession)
   },
   getSystemInfo: (): Promise<any> => ipcRenderer.invoke('api:get-system-info'),
   getSkillsPath: (): Promise<string> => ipcRenderer.invoke('api:get-skills-path'),
@@ -113,8 +122,19 @@ const api = {
     ipcRenderer.invoke('api:get-active-mcp-servers'),
   getAvatarsList: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-avatars-list'),
-  saveAvatarConfig: (params: { id: string; name: string; languageStyle: string }): Promise<boolean> =>
+  saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string }): Promise<boolean> =>
     ipcRenderer.invoke('api:save-avatar-config', params),
+  synthesizeTts: (text: string, voice: string): Promise<ArrayBuffer | null> =>
+    ipcRenderer.invoke('api:synthesize-tts', { text, voice }),
+  playTtsAudio: (audioBuffer: ArrayBuffer): Promise<boolean> =>
+    ipcRenderer.invoke('api:play-tts-audio', audioBuffer),
+  onPlayTtsAudio: (callback: (audioBuffer: ArrayBuffer) => void): (() => void) => {
+    const subscription = (_event: any, audioBuffer: ArrayBuffer) => callback(audioBuffer)
+    ipcRenderer.on('play-tts-audio', subscription)
+    return () => {
+      ipcRenderer.removeListener('play-tts-audio', subscription)
+    }
+  },
   switchAvatar: (params: { dir: string; configFile: string }): Promise<any> =>
     ipcRenderer.invoke('api:switch-avatar', params),
   deleteAvatar: (dirPath: string): Promise<boolean> =>
@@ -211,6 +231,19 @@ const api = {
   },
   showTextContextMenu: (selectedText: string): void => {
     ipcRenderer.send('api:show-text-context-menu', selectedText)
+  },
+  showPetContextMenu: (): void => {
+    ipcRenderer.send('api:show-pet-context-menu')
+  },
+  sendPetReplyToInput: (responseText: string): void => {
+    ipcRenderer.send('api:send-pet-reply-to-input', responseText)
+  },
+  onPetReplyResponse: (callback: (responseText: string) => void): (() => void) => {
+    const handler = (_event: any, text: string) => callback(text)
+    ipcRenderer.on('pet-reply-response', handler)
+    return () => {
+      ipcRenderer.removeListener('pet-reply-response', handler)
+    }
   },
   getToolsDefinition: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-tools-definition'),

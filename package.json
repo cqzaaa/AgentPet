@@ -33,6 +33,7 @@
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
+    "node-edge-tts": "^1.2.10",
     "papaparse": "^5.5.3",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
