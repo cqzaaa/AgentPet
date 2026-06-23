@@ -85,7 +85,7 @@ export function ChatInputWindow(): React.JSX.Element {
       const month = String(now.getMonth() + 1).padStart(2, '0')
       const day = String(now.getDate()).padStart(2, '0')
       const todayStr = `${year}-${month}-${day}`
-      
+
       if (timeStr.startsWith(todayStr)) {
         const parts = timeStr.split(' ')
         if (parts[1]) {
@@ -99,7 +99,7 @@ export function ChatInputWindow(): React.JSX.Element {
         }
         return datePart
       }
-    } catch (e) {}
+    } catch (e) { }
     return timeStr.substring(0, 10)
   }
 
@@ -115,7 +115,7 @@ export function ChatInputWindow(): React.JSX.Element {
       }
     }
     const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
-    
+
     setSessions([...parsed].reverse())
     setCurrentSessionId(activeId)
 
@@ -164,7 +164,7 @@ export function ChatInputWindow(): React.JSX.Element {
           try {
             const parsed = JSON.parse(saved)
             setSessions([...parsed].reverse())
-          } catch (e) {}
+          } catch (e) { }
         }
       }, 150)
     })
@@ -218,14 +218,14 @@ export function ChatInputWindow(): React.JSX.Element {
     const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
     let parsed: any[] = []
     if (saved) {
-      try { parsed = JSON.parse(saved) } catch (e) {}
+      try { parsed = JSON.parse(saved) } catch (e) { }
     }
 
     const selected = parsed.find(s => s.id === sessionId)
     if (selected) {
       setCurrentSessionId(sessionId)
       setShowDropdown(false)
-      
+
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
 
       if (selected.messages && selected.messages.length > 0) {
@@ -255,6 +255,17 @@ export function ChatInputWindow(): React.JSX.Element {
       window.electron.ipcRenderer.send('api:wechat-session-updated', newId)
     }
 
+    // 同步写入数据库，确保 Agent 窗口打开时能加载到新会话
+    try {
+      const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
+      let parsed: any[] = []
+      if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
+      const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
+      const updated = [...parsed, newSession]
+      localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+      window.api.saveLocalSessions(updated).catch(() => {})
+    } catch (e) { }
+
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
     setMessages([])
     setIsLoadingHistory(false)
@@ -262,7 +273,7 @@ export function ChatInputWindow(): React.JSX.Element {
     setShowChat(false)
     window.api.setWindowSize(400, 90, 'top')
     setShowDropdown(false)
-    
+
     setTimeout(() => {
       if (inputRef.current) inputRef.current.focus()
     }, 50)
@@ -272,29 +283,53 @@ export function ChatInputWindow(): React.JSX.Element {
     if (!text.trim()) return
     const userText = text.trim()
     const isFirst = messages.length === 0
+
     window.api.sendChatToPet(userText, isFirst)
-    
-    // 扩展窗口尺寸以容纳对话记录 (保持顶部对齐，向下延伸)
+    setText('')
+
+    // 纯文字消息：在迷你面板内展示
     window.api.setWindowSize(400, 260, 'top')
-    
     shouldScrollRef.current = 'smooth'
     setMessages(prev => [...prev, { sender: 'user', text: userText }])
     setIsThinking(true)
     setShowChat(true)
-    setText('')
 
-    // 每次发送后同步刷新一次历史会话名称（有些新会话可能被重命名了）
+    // 立即将用户消息同步写入数据库，确保 Agent 窗口打开时能加载到
+    try {
+      const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
+      let parsed: any[] = []
+      if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
+      const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
+      const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+      let found = false
+      const updated = parsed.map(s => {
+        if (s.id === activeId) {
+          found = true
+          const userMsg = { id: Date.now(), sender: 'user', text: userText, time: timeStr }
+          return { ...s, messages: [...(s.messages || []), userMsg] }
+        }
+        return s
+      })
+      if (!found) {
+        const newSess = { id: activeId, name: userText.substring(0, 15), time: timeStr, messages: [{ id: Date.now(), sender: 'user', text: userText, time: timeStr }] }
+        updated.push(newSess)
+      }
+      localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+      window.api.saveLocalSessions(updated).catch(() => {})
+    } catch (e) { }
+
+    // 每次发送后同步刷新一次历史会话名称
     setTimeout(() => {
       const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
       if (saved) {
         try {
           const parsed = JSON.parse(saved)
           setSessions([...parsed].reverse())
-        } catch (e) {}
+        } catch (e) { }
       }
     }, 150)
 
-    // 发送后重新聚焦输入框，让用户可以连续打字聊天
+    // 发送后重新聚焦输入框
     setTimeout(() => {
       if (inputRef.current) inputRef.current.focus()
     }, 50)
@@ -307,7 +342,18 @@ export function ChatInputWindow(): React.JSX.Element {
     if (window.electron && window.electron.ipcRenderer) {
       window.electron.ipcRenderer.send('api:wechat-session-updated', newId)
     }
-    
+
+    // 同步写入数据库
+    try {
+      const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
+      let parsed: any[] = []
+      if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
+      const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
+      const updated = [...parsed, newSession]
+      localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
+      window.api.saveLocalSessions(updated).catch(() => {})
+    } catch (e) { }
+
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
     setMessages([])
     setIsLoadingHistory(false)
@@ -315,7 +361,7 @@ export function ChatInputWindow(): React.JSX.Element {
     setIsThinking(false)
     window.api.setWindowSize(400, 90, 'top')
     setCurrentSessionId(newId)
-    
+
     setTimeout(() => {
       loadSessions()
     }, 100)
@@ -332,66 +378,154 @@ export function ChatInputWindow(): React.JSX.Element {
     }
   }
 
-  // 粘贴文件时提取文本内容追加至输入框
+  // 粘贴文件/图片时处理，完成后自动跳转到完整对话窗口
+  // 图片 → 保存为临时文件并作为附件传递；文档 → 提取文本传递
   const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    // ── 优先检测剪贴板中的原始图片（截图、复制的图片等）──
+    const items = Array.from(e.clipboardData.items)
+    const imageItem = items.find(item => item.type.startsWith('image/'))
+    if (imageItem) {
+      e.preventDefault()
+      const blob = imageItem.getAsFile()
+      if (blob) {
+        try {
+          const reader = new FileReader()
+          reader.onload = async () => {
+            const dataUrl = reader.result as string
+            // 保存剪贴板图片为临时文件，返回文件路径
+            const result = await window.api.saveClipboardImage(dataUrl)
+            if (result) {
+              // 传文件路径给 Agent 窗口，由其作为附件加载
+              window.api.sendPendingInput(JSON.stringify({ type: 'file', path: result.path, name: result.name }))
+            }
+            window.api.openAgentWindow()
+            window.api.closeInputWindow()
+          }
+          reader.readAsDataURL(blob)
+        } catch (err) {
+          console.error('读取剪贴板图片失败:', err)
+        }
+      }
+      return
+    }
+
+    // ── 处理文件粘贴（Electron 文件拖拽/复制）──
     const files = e.clipboardData.files
     if (files && files.length > 0) {
       e.preventDefault()
+      const filePaths: { path: string; name: string }[] = []
+      let docText = ''
+
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         try {
           const filePath = (file as any).path
           const ext = file.name.split('.').pop()?.toLowerCase() || ''
+          const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
           const docExts = ['pdf', 'docx', 'xlsx', 'xls', 'csv']
           const textExts = ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'sh', 'bat', 'yml', 'yaml', 'ini', 'xml']
-          
-          let fileText = ''
-          if (docExts.includes(ext) && filePath) {
-            fileText = await window.api.parseFileContent(filePath)
-          } else if (textExts.includes(ext)) {
-            fileText = await file.text()
-          } else {
-            fileText = `[暂不支持该格式的文件直接提取文本：${file.name}]`
-          }
 
-          const appendedText = `\n📄【已粘贴文件：${file.name}】\n${fileText}\n`
-          setText(prev => prev + appendedText)
+          if (imageExts.includes(ext) && filePath) {
+            // 图片文件 → 传路径给 Agent 窗口作为附件
+            filePaths.push({ path: filePath, name: file.name })
+          } else if (docExts.includes(ext) && filePath) {
+            const parsed = await window.api.parseFileContent(filePath)
+            docText += `\n📄【已粘贴文件：${file.name}】\n${parsed}\n`
+          } else if (textExts.includes(ext)) {
+            const parsed = await file.text()
+            docText += `\n📄【已粘贴文件：${file.name}】\n${parsed}\n`
+          } else if (filePath) {
+            filePaths.push({ path: filePath, name: file.name })
+          }
         } catch (err: any) {
           console.error('粘贴文件提取失败:', err)
-          setText(prev => prev + `\n⚠️【粘贴文件读取失败: ${file.name}】\n`)
+          docText += `\n⚠️【粘贴文件读取失败: ${file.name}】\n`
         }
+      }
+
+      // 组装传递给 Agent 窗口的数据
+      const payload: any = {}
+      if (filePaths.length > 0) payload.files = filePaths
+      if (docText) payload.text = docText
+
+      if (payload.files || payload.text) {
+        window.api.sendPendingInput(JSON.stringify(payload))
+        window.api.openAgentWindow()
+        window.api.closeInputWindow()
       }
     }
   }
 
-  // 渲染 Markdown 加粗语法
+  // 渲染 Markdown 加粗 + 图片语法 (与主 Chat 页面保持一致)
   const renderMessageText = (txt: string) => {
     const lines = txt.split('\n')
+    const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
+
     return lines.map((line, idx) => {
-      let cleanLine = line
-      const boldRegex = /\*\*(.*?)\*\*/g
-      const parts = []
+      // 先检测该行是否包含图片语法，分割为图片和文字段落
+      const segments: React.ReactNode[] = []
       let lastIndex = 0
-      let match
-      
-      while ((match = boldRegex.exec(cleanLine)) !== null) {
-        if (match.index > lastIndex) {
-          parts.push(cleanLine.substring(lastIndex, match.index))
+      let imgMatch
+      imageRegex.lastIndex = 0
+
+      while ((imgMatch = imageRegex.exec(line)) !== null) {
+        // 图片前的文字部分
+        if (imgMatch.index > lastIndex) {
+          segments.push(renderBoldText(line.substring(lastIndex, imgMatch.index), `text-${idx}-${lastIndex}`))
         }
-        parts.push(<strong key={match.index} style={{ color: '#d97706', fontWeight: 'bold' }}>{match[1]}</strong>)
-        lastIndex = boldRegex.lastIndex
+        // 图片本体 (迷你窗口内不支持缩放预览，使用普通 img)
+        segments.push(
+          <div key={`img-${idx}-${imgMatch.index}`} style={{ margin: '6px 0' }}>
+            <img
+              src={imgMatch[2]}
+              alt={imgMatch[1]}
+              style={{ maxWidth: '100%', maxHeight: '160px', borderRadius: '6px', display: 'block', objectFit: 'contain' }}
+            />
+          </div>
+        )
+        lastIndex = imageRegex.lastIndex
       }
-      
-      if (lastIndex < cleanLine.length) {
-        parts.push(cleanLine.substring(lastIndex))
+
+      // 图片后的剩余文字
+      if (lastIndex < line.length) {
+        segments.push(renderBoldText(line.substring(lastIndex), `text-${idx}-tail`))
+      }
+
+      if (segments.length === 0) {
+        // 空行保留最小高度
+        return <div key={idx} style={{ minHeight: '1.2em' }} />
       }
 
       return (
-        <div key={idx} style={{ margin: '3px 0', minHeight: '1.2em', wordBreak: 'break-word' }}>
-          {parts.length > 0 ? parts : line}
+        <div key={idx} style={{ margin: '3px 0', wordBreak: 'break-word' }}>
+          {segments}
         </div>
       )
     })
+  }
+
+  // 辅助：对一段纯文本渲染加粗语法
+  const renderBoldText = (text: string, keyPrefix: string): React.ReactNode => {
+    const boldRegex = /\*\*(.*?)\*\*/g
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match
+
+    while ((match = boldRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index))
+      }
+      parts.push(
+        <strong key={`${keyPrefix}-b${match.index}`} style={{ color: '#d97706', fontWeight: 'bold' }}>
+          {match[1]}
+        </strong>
+      )
+      lastIndex = boldRegex.lastIndex
+    }
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex))
+    }
+    return parts.length > 0 ? <>{parts}</> : text
   }
 
   // 根据当前会话名称动态显示 placeholder 提示
@@ -399,7 +533,7 @@ export function ChatInputWindow(): React.JSX.Element {
   const sessionName = currentSession ? currentSession.name : ''
   const placeholderText = sessionName && sessionName !== '(未命名)' && sessionName !== '新会话'
     ? `在会话「${sessionName.length > 12 ? sessionName.substring(0, 12) + '...' : sessionName}」中继续提问...`
-    : '给桌面助手说点什么... (Enter 发送, Esc 退出, 支持文件粘贴)'
+    : '给桌面助手说点什么... (Enter 发送, Esc 退出, 支持粘贴文件/图片)'
 
   // 动态计算 wrapper 的高度，以提供平滑过渡的动效
   let wrapperHeight = '66px'
@@ -410,8 +544,8 @@ export function ChatInputWindow(): React.JSX.Element {
   }
 
   return (
-    <div 
-      className="chat-input-window-wrapper" 
+    <div
+      className="chat-input-window-wrapper"
       style={{ height: wrapperHeight }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
@@ -950,8 +1084,8 @@ export function ChatInputWindow(): React.JSX.Element {
 
       <div className="chat-input-container">
         {/* 拖动把手，带有点阵图标 */}
-        <div 
-          className="drag-handle" 
+        <div
+          className="drag-handle"
           title="按住拖拽窗口"
           onMouseDown={handleMouseDown}
         >
@@ -973,7 +1107,7 @@ export function ChatInputWindow(): React.JSX.Element {
         </div>
 
         {/* 历史下拉菜单触发按钮 */}
-        <button 
+        <button
           className={`history-dropdown-trigger ${showDropdown ? 'active' : ''}`}
           onClick={(e) => {
             e.stopPropagation()
@@ -1029,8 +1163,8 @@ export function ChatInputWindow(): React.JSX.Element {
             </div>
           ) : (
             sessions.map(session => (
-              <div 
-                key={session.id} 
+              <div
+                key={session.id}
                 className={`dropdown-item ${session.id === currentSessionId ? 'active' : ''}`}
                 onClick={() => handleSwitchSession(session.id)}
               >
@@ -1050,13 +1184,18 @@ export function ChatInputWindow(): React.JSX.Element {
           <div className="mini-panel-header">
             <span className="mini-panel-title">💡 快捷会话</span>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button 
-                className="action-btn chat-link-btn" 
+              <button
+                className="action-btn chat-link-btn"
                 onClick={() => {
+                  // 广播会话更新，确保 Agent 窗口加载最新数据
+                  const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
+                  if (window.electron && window.electron.ipcRenderer) {
+                    window.electron.ipcRenderer.send('api:wechat-session-updated', activeId)
+                  }
                   window.api.openAgentWindow()
                   window.api.closeInputWindow()
-                }} 
-                title="在大窗口中打开该对话"
+                }}
+                title="在主窗口中打开该对话"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -1065,13 +1204,13 @@ export function ChatInputWindow(): React.JSX.Element {
                 </svg>
                 完整对话
               </button>
-              
+
               <button className="clear-chat-btn" onClick={handleClearAll} title="清空当前对话并收起">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
-                清空并收起
+                收起
               </button>
             </div>
           </div>

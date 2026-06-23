@@ -455,6 +455,7 @@ const winHeight = 300
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
 let inputWindow: BrowserWindow | null = null
+let pendingAgentInput: string = '' // 缓存快捷输入框传递过来的待发送文本
 let tray: Tray | null = null
 let customModelDir = ''
 let customModelFile = ''
@@ -521,6 +522,11 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   agentWindow.on('ready-to-show', () => {
     agentWindow?.show()
+    // 窗口就绪后，如果有待投递的通知则发送（数据在 localStorage 中）
+    if (pendingAgentInput && agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('pending-input')
+      pendingAgentInput = ''
+    }
   })
 
   agentWindow.on('closed', () => {
@@ -744,11 +750,32 @@ function createWindow(): void {
     }
   })
 
-  // 转发桌宠生成的 LLM 回复到快捷输入框
+  // 转发桌宠生成的 LLM 回复到快捷输入框，并通知 Agent 窗口刷新会话
   ipcMain.on('api:send-pet-reply-to-input', (_, responseText: string) => {
     if (inputWindow && !inputWindow.isDestroyed()) {
       inputWindow.webContents.send('pet-reply-response', responseText)
     }
+    // 同步通知 Agent 窗口刷新会话（回复已写入数据库）
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('api:wechat-session-updated')
+    }
+  })
+
+  // 从快捷输入框向完整对话窗口传递待发送文本的通知（数据在 localStorage 中）
+  ipcMain.on('api:send-pending-input', () => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('pending-input')
+    } else {
+      // 窗口尚未创建，标记有待投递通知
+      pendingAgentInput = '__pending__'
+    }
+  })
+
+  // Agent 窗口初始化时检查是否有待投递的通知
+  ipcMain.handle('api:get-pending-input', () => {
+    const hasPending = !!pendingAgentInput
+    pendingAgentInput = ''
+    return hasPending ? '__pending__' : ''
   })
 }
 
@@ -1190,6 +1217,40 @@ app.whenReady().then(() => {
     } catch (e: any) {
       console.error('保存聊天附件失败', e)
       throw new Error(`保存聊天附件失败: ${e.message}`)
+    }
+  })
+
+  // 从文件路径读取文件并保存为会话附件（用于剪贴板图片等场景）
+  ipcMain.handle('api:attach-file-from-path', async (_, filePath: string, sessionId: string) => {
+    try {
+      const buffer = await fs.promises.readFile(filePath)
+      const fileName = filePath.split(/[\\/]/).pop() || 'file'
+      const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+      const chatDir = getActiveChatDir()
+      const sessionDir = join(chatDir, safeSessionId)
+      if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true })
+      }
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')
+      const uniqueFileName = `${Date.now()}_${safeFileName}`
+      const targetPath = join(sessionDir, uniqueFileName)
+      await fs.promises.writeFile(targetPath, buffer)
+
+      const ext = fileName.split('.').pop()?.toLowerCase() || ''
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+      const isImage = imageExts.includes(ext)
+
+      // 图片不设 content —— 发送给 LLM 时走 image_url 通道（真正的视觉理解）
+      // 非图片文件也不设 content（由前端解析文档内容）
+      return {
+        name: fileName,
+        path: targetPath,
+        safeName: uniqueFileName,
+        isImage
+      }
+    } catch (e: any) {
+      console.error('从路径附加文件失败:', e)
+      return null
     }
   })
 
@@ -3110,6 +3171,28 @@ app.whenReady().then(() => {
       const buffer = await fs.promises.readFile(filePath)
       return buffer.toString('base64')
     } catch (e: any) {
+      return null
+    }
+  })
+
+  // 将剪贴板图片（base64 data URL）保存为临时文件，返回文件路径
+  ipcMain.handle('api:save-clipboard-image', async (_, dataUrl: string) => {
+    try {
+      const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+      if (!matches) return null
+      const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1]
+      const base64Data = matches[2]
+      const buffer = Buffer.from(base64Data, 'base64')
+      const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true })
+      }
+      const fileName = `clipboard_${Date.now()}.${ext}`
+      const filePath = join(tempDir, fileName)
+      await fs.promises.writeFile(filePath, buffer)
+      return { path: filePath, name: fileName }
+    } catch (e: any) {
+      console.error('保存剪贴板图片失败:', e)
       return null
     }
   })

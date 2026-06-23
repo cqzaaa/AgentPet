@@ -28,12 +28,14 @@ declare global {
       parseFileContent: (filePath: string) => Promise<string>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
+      saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
       copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
+      attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
       onToolEvent: (callback: (data: any) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
@@ -94,6 +96,9 @@ declare global {
       showPetContextMenu: () => void
       sendPetReplyToInput: (responseText: string) => void
       onPetReplyResponse: (callback: (responseText: string) => void) => () => void
+      sendPendingInput: (text: string) => void
+      onPendingInput: (callback: (text: string) => void) => () => void
+      getPendingInput: () => Promise<string>
       openLocalFile: (url: string) => Promise<{ success: boolean; error?: string }>
     }
   }

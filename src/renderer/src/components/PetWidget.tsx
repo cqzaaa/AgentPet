@@ -238,6 +238,7 @@ export function PetWidget(): React.JSX.Element {
   const handleChatToPet = async (text: string, isNewSession?: boolean) => {
     if (isLlmThinkingRef.current) return
     setIsLlmThinking(true)
+    localStorage.setItem('agentpet_llm_thinking_at', String(Date.now()))
 
     if (modelRef.current) {
       modelRef.current.motion('TapBody').catch(() => {})
@@ -438,6 +439,7 @@ ${memoryContext}
       }
     } finally {
       setIsLlmThinking(false)
+      localStorage.removeItem('agentpet_llm_thinking_at')
     }
   }
 

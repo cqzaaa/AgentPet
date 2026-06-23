@@ -556,12 +556,17 @@ export function useAppStore() {
       const localSess = await window.api.getLocalSessions()
       if (localSess && localSess.length > 0) {
         if (clearThinking) {
-          // 清除残留的 is_thinking 状态（应用异常退出时可能遗留在数据库中）
+          // 检查 PetWidget 的 LLM 是否正在工作（30 秒内有活动则不清除）
+          const llmThinkingAt = localStorage.getItem('agentpet_llm_thinking_at')
+          const isLlmActive = llmThinkingAt && (Date.now() - Number(llmThinkingAt) < 30000)
+
           const cleaned = localSess.map((s: any) => ({
             ...s,
             messages: (s.messages || []).map((m: any) =>
               m.isThinking
-                ? { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
+                ? (isLlmActive
+                    ? m  // LLM 正在工作，保留 isThinking 状态
+                    : { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' })
                 : m
             )
           }))
@@ -595,6 +600,82 @@ export function useAppStore() {
     })
     return () => unsubscribe()
   }, [])
+
+  // 处理从快捷输入框传递过来的待发送内容（文件路径或文本）
+  const handlePendingInput = useCallback(async (raw: string) => {
+    if (!raw) return
+    setActiveTab('chat')
+
+    // 尝试解析 JSON 格式（带文件附件）
+    try {
+      const payload = JSON.parse(raw)
+      // 单个文件（剪贴板图片）
+      if (payload.type === 'file' && payload.path && payload.name) {
+        if (window.api.attachFileFromPath) {
+          const result = await window.api.attachFileFromPath(payload.path, activeSessionId)
+          if (result) {
+            const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+            const ext = result.name.split('.').pop()?.toLowerCase() || ''
+            const objectUrl = imageExts.includes(ext) ? `local-file:///${result.path.replace(/\\/g, '/')}` : undefined
+            setAttachedFiles(prev => [...prev, {
+              name: result.name,
+              path: result.path,
+              safeName: result.safeName,
+              objectUrl,
+              content: result.content
+            }])
+          }
+        }
+        return
+      }
+      // 多个文件 + 文本
+      if (payload.files || payload.text) {
+        if (payload.files && Array.isArray(payload.files) && window.api.attachFileFromPath) {
+          for (const f of payload.files) {
+            const result = await window.api.attachFileFromPath(f.path, activeSessionId)
+            if (result) {
+              const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+              const ext = result.name.split('.').pop()?.toLowerCase() || ''
+              const objectUrl = imageExts.includes(ext) ? `local-file:///${result.path.replace(/\\/g, '/')}` : undefined
+              setAttachedFiles(prev => [...prev, {
+                name: result.name,
+                path: result.path,
+                safeName: result.safeName,
+                objectUrl,
+                content: result.content
+              }])
+            }
+          }
+        }
+        if (payload.text) {
+          setInputValue(prev => prev ? prev + payload.text : payload.text)
+        }
+        return
+      }
+    } catch {
+      // 非 JSON，按纯文本处理
+    }
+
+    // 纯文本
+    setInputValue(raw)
+  }, [activeSessionId])
+
+  // 监听快捷输入框粘贴文件后传递过来的待发送内容
+  useEffect(() => {
+    if (!window.api.onPendingInput) return
+    const unsubscribe = window.api.onPendingInput((text: string) => {
+      handlePendingInput(text)
+    })
+    return () => unsubscribe()
+  }, [handlePendingInput])
+
+  // 初始化时主动拉取一次缓存的待发送内容（处理窗口刚创建、IPC 监听尚未就绪的时序问题）
+  useEffect(() => {
+    if (!window.api.getPendingInput) return
+    window.api.getPendingInput().then((text: string) => {
+      if (text) handlePendingInput(text)
+    }).catch(() => {})
+  }, [handlePendingInput])
 
   // 微信 Bot 链接成功时，把当前会话置顶，方便在最近会话列表顶部快速找到
   useEffect(() => {

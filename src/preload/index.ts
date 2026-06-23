@@ -55,6 +55,8 @@ const api = {
     ipcRenderer.invoke('api:parse-file-html', filePath),
   readFileBase64: (filePath: string): Promise<string | null> =>
     ipcRenderer.invoke('api:read-file-base64', filePath),
+  saveClipboardImage: (dataUrl: string): Promise<{ path: string; name: string } | null> =>
+    ipcRenderer.invoke('api:save-clipboard-image', dataUrl),
   getGeneratedFiles: (sessionId?: string): Promise<{ name: string; path: string; size: number; time: string }[]> =>
     ipcRenderer.invoke('api:get-generated-files', sessionId),
   saveGeneratedFileAs: (filePath: string): Promise<boolean> =>
@@ -72,6 +74,8 @@ const api = {
     ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
   copyToChatFile: (sessionId: string, sourcePath: string): Promise<{ path: string; exists: boolean }> =>
     ipcRenderer.invoke('api:copy-to-chat-file', sessionId, sourcePath),
+  attachFileFromPath: (filePath: string, sessionId: string): Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null> =>
+    ipcRenderer.invoke('api:attach-file-from-path', filePath, sessionId),
   onToolEvent: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:llm-tool-event', subscription)
@@ -244,6 +248,36 @@ const api = {
     return () => {
       ipcRenderer.removeListener('pet-reply-response', handler)
     }
+  },
+  // 从快捷输入框向完整对话窗口传递待发送的文本（如粘贴文件后跳转）
+  // 使用 localStorage 传递大数据（base64 图片可达数 MB），IPC 仅做轻量通知
+  sendPendingInput: (text: string): void => {
+    localStorage.setItem('agentpet_pending_input', text)
+    ipcRenderer.send('api:send-pending-input')
+  },
+  onPendingInput: (callback: (text: string) => void): (() => void) => {
+    const handler = () => {
+      const text = localStorage.getItem('agentpet_pending_input') || ''
+      if (text) {
+        localStorage.removeItem('agentpet_pending_input')
+        callback(text)
+      }
+    }
+    ipcRenderer.on('pending-input', handler)
+    return () => {
+      ipcRenderer.removeListener('pending-input', handler)
+    }
+  },
+  getPendingInput: (): Promise<string> => {
+    return new Promise((resolve) => {
+      const text = localStorage.getItem('agentpet_pending_input') || ''
+      if (text) {
+        localStorage.removeItem('agentpet_pending_input')
+        resolve(text)
+      } else {
+        resolve('')
+      }
+    })
   },
   getToolsDefinition: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-tools-definition'),
