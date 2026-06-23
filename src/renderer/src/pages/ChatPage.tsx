@@ -6,15 +6,12 @@ import { ChatMessageItem } from '../components/ChatMessageItem'
 
 interface ChatPageProps {
   store: AppStore
-  generatedFiles?: { name: string; path: string; size: number; time: string }[]
-  onDeleteFile?: (f: { path: string }) => void
 }
 
-export function ChatPage({ store, generatedFiles = [] }: ChatPageProps): React.JSX.Element {
+export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   const {
     llmConfig,
     activeSessMessages,
-    activeSession,
     activeSessionId,
     currentAvatarName,
     isSending,

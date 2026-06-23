@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useAppStore } from '../hooks/useAppStore'
 import { ChatPage } from '../pages/ChatPage'
 import { ControlPage } from '../pages/ControlPage'
@@ -71,7 +71,6 @@ export function AgentWindow(): React.JSX.Element {
   const [openTabs, setOpenTabs] = useState<{ name: string; path: string; size: number; time: string }[]>([])
   const [previewFile, setPreviewFile] = useState<{ name: string; path: string; size: number } | null>(null)
   const [previewContent, setPreviewContent] = useState<string>('')
-  const [previewHtml, setPreviewHtml] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const docxContainerRef = useRef<HTMLDivElement>(null)
   const sheetContainerRef = useRef<HTMLDivElement>(null)
@@ -116,7 +115,6 @@ export function AgentWindow(): React.JSX.Element {
     setOpenTabs([])
     setPreviewFile(null)
     setPreviewContent('')
-    setPreviewHtml('')
     if (window.api?.onGeneratedFileUpdated) {
       const unsub = window.api.onGeneratedFileUpdated(() => {
         loadGeneratedFiles()
@@ -124,6 +122,7 @@ export function AgentWindow(): React.JSX.Element {
       })
       return unsub
     }
+    return undefined
   }, [activeSessionId])
 
   // 点击文件 → 加载预览内容
@@ -137,7 +136,6 @@ export function AgentWindow(): React.JSX.Element {
     })
     if (filePanelWidth < 380) setFilePanelWidth(420)
     setPreviewContent('')
-    setPreviewHtml('')
     setPreviewLoading(true)
     sheetDataRef.current = null
 
@@ -259,7 +257,6 @@ export function AgentWindow(): React.JSX.Element {
       if (remaining.length === 0) {
         setPreviewFile(null)
         setPreviewContent('')
-        setPreviewHtml('')
       } else {
         const next = remaining[remaining.length - 1]
         handlePreviewFile(next)
@@ -283,7 +280,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const renderPage = (): React.JSX.Element => {
     switch (activeTab) {
-      case 'chat': return <ChatPage store={store} generatedFiles={generatedFiles} onDeleteFile={handleDeleteFile} />
+      case 'chat': return <ChatPage store={store} />
       case 'control': return <ControlPage store={store} />
       case 'agent': return <AgentPage store={store} />
       case 'logs': return <LogsPage store={store} />
@@ -425,7 +422,7 @@ export function AgentWindow(): React.JSX.Element {
                 {generatedFiles.length > 0 && (
                   <button
                     className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setPreviewContent(''); setPreviewHtml(''); setOpenTabs([]) } }}
+                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setPreviewContent(''); setOpenTabs([]) } }}
                     title="查看已生成的文件"
                   >
                     📁 {generatedFiles.length}
@@ -510,7 +507,7 @@ export function AgentWindow(): React.JSX.Element {
               <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                 <span style={{ fontSize: '13px', fontWeight: 600 }}>📁 已生成的文件 ({generatedFiles.length})</span>
                 <button
-                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setPreviewContent(''); setPreviewHtml(''); setOpenTabs([]) }}
+                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setPreviewContent(''); setOpenTabs([]) }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
                 >✕</button>
               </div>
@@ -530,7 +527,7 @@ export function AgentWindow(): React.JSX.Element {
                       borderBottom: '1px solid var(--border-color)',
                       background: 'var(--bg-menu-hover, rgba(128,128,128,0.03))'
                     }}>
-                      {openTabs.map((f, i) => {
+                      {openTabs.map((f) => {
                         const isActive = previewFile?.path === f.path
                         const ext = f.name.split('.').pop()?.toLowerCase() || ''
                         const extColors: Record<string, string> = {
@@ -591,7 +588,6 @@ export function AgentWindow(): React.JSX.Element {
                                   // 最后一个 Tab 关闭 → 回到文件列表视图
                                   setPreviewFile(null)
                                   setPreviewContent('')
-                                  setPreviewHtml('')
                                 } else if (previewFile?.path === f.path) {
                                   // 关闭的是当前激活的 Tab → 切换到最后一个 Tab
                                   const next = remaining[remaining.length - 1]
@@ -620,15 +616,15 @@ export function AgentWindow(): React.JSX.Element {
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                       {/* 预览头部 */}
                       <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-                        <span title={previewFile.name} style={{ fontSize: '11px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{previewFile.name}</span>
+                        <span title={previewFile!.name} style={{ fontSize: '11px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{previewFile!.name}</span>
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '8px' }}>
-                          <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
-                          <button onClick={() => handleDeleteFile(previewFile)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
+                          <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
+                          <button onClick={() => handleDeleteFile(previewFile!)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
                           <button onClick={() => {
-                            const remaining = openTabs.filter(t => t.path !== previewFile.path)
+                            const remaining = openTabs.filter(t => t.path !== previewFile!.path)
                             setOpenTabs(remaining)
                             if (remaining.length === 0) {
-                              setPreviewFile(null); setPreviewContent(''); setPreviewHtml('')
+                              setPreviewFile(null); setPreviewContent('');
                             } else {
                               const next = remaining[remaining.length - 1]
                               handlePreviewFile(next)
@@ -672,10 +668,10 @@ export function AgentWindow(): React.JSX.Element {
                           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
                         )}
                         {(() => {
-                          const ext = previewFile.name.split('.').pop()?.toLowerCase() || ''
+                          const ext = previewFile!.name.split('.').pop()?.toLowerCase() || ''
                           const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
                           if (imageExts.includes(ext)) {
-                            return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
+                            return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile!.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
                           }
                           if (ext === 'docx') {
                             return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff', transformOrigin: 'top left' }} />

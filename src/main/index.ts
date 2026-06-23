@@ -6,10 +6,31 @@ import icon from '../../resources/icon.png?asset'
 import * as fs from 'fs'
 import * as os from 'os'
 import { exec } from 'child_process'
-import * as https from 'https'
-import * as http from 'http'
 import { promisify } from 'util'
 import Database from 'better-sqlite3'
+
+// 本地环境变量 .env 极简解析加载器
+try {
+  const envFile = join(process.cwd(), '.env')
+  if (fs.existsSync(envFile)) {
+    const content = fs.readFileSync(envFile, 'utf8')
+    content.split(/\r?\n/).forEach(line => {
+      // 过滤注释和空白
+      if (line.trim().startsWith('#')) return
+      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
+      if (match) {
+        const key = match[1]
+        let value = match[2] || ''
+        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1)
+        if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1)
+        process.env[key] = value.trim()
+      }
+    })
+    console.log('[Env] 本地环境变量 .env 加载成功')
+  }
+} catch (e) {
+  console.error('[Env] 读取本地 .env 失败', e)
+}
 import { WechatBotManager } from './wechatBot'
 
 let wechatBotManager: WechatBotManager | null = null
@@ -27,6 +48,7 @@ interface McpServerConfig {
   apiKey: string
   type?: 'sse' | 'stream' | 'auto'
   enabled: boolean
+  description?: string
 }
 
 class McpManager {
@@ -91,7 +113,7 @@ class McpManager {
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
         } else if (mcpType === 'sse') {
-          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功`)
         } else {
@@ -107,7 +129,7 @@ class McpManager {
               { name: 'AgentPet-Client', version: '1.0.0' },
               { capabilities: {} }
             )
-            transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+            transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
             await Promise.race([client.connect(transport), connectTimeout(5000)])
             console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
           }
@@ -158,7 +180,7 @@ class McpManager {
         await Promise.race([client.connect(transport), connectTimeout(5000)])
         console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
       } else if (mcpType === 'sse') {
-        transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+        transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
         console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
       } else {
@@ -173,7 +195,7 @@ class McpManager {
             { name: 'AgentPet-Client', version: '1.0.0' },
             { capabilities: {} }
           )
-          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
         }
@@ -191,7 +213,7 @@ class McpManager {
   }
 
   public async disconnectAll() {
-    for (const [id, conn] of this.connections.entries()) {
+    for (const conn of this.connections.values()) {
       try {
         await conn.client.close()
       } catch {}
@@ -544,7 +566,7 @@ function createWindow(): void {
   const defaultY = scrHeight - winHeight - 20
 
   // Create the browser window.
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: winWidth,
     height: winHeight,
     x: defaultX,
@@ -564,18 +586,20 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  mainWindow = win
+
+  win.on('ready-to-show', () => {
+    win.show()
     // 初始开启穿透，直到鼠标移动到宠物元素上
-    mainWindow.setIgnoreMouseEvents(true, { forward: true })
-    createTray(mainWindow)
+    win.setIgnoreMouseEvents(true, { forward: true })
+    createTray(win)
   })
 
-  mainWindow.on('blur', () => {
-    mainWindow?.webContents.send('window-blur')
+  win.on('blur', () => {
+    win.webContents.send('window-blur')
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
@@ -583,9 +607,9 @@ function createWindow(): void {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
   // 注册窗口拖动 IPC 监听
@@ -594,8 +618,8 @@ function createWindow(): void {
   })
 
   ipcMain.on('move-window', (_, dx: number, dy: number) => {
-    const [x, y] = mainWindow.getPosition()
-    mainWindow.setPosition(x + dx, y + dy)
+    const [x, y] = win.getPosition()
+    win.setPosition(x + dx, y + dy)
   })
 
   ipcMain.on('end-drag', () => {
@@ -603,7 +627,7 @@ function createWindow(): void {
   })
 
   ipcMain.on('set-ignore-mouse-events', (_, ignore: boolean, options?: { forward: boolean }) => {
-    mainWindow.setIgnoreMouseEvents(ignore, options)
+    win.setIgnoreMouseEvents(ignore, options)
   })
 
   ipcMain.on('set-window-size', (event, width: number, height: number) => {
@@ -632,7 +656,9 @@ function createWindow(): void {
   })
 
   ipcMain.on('hide-window', () => {
-    mainWindow.hide()
+    if (mainWindow) {
+      mainWindow.hide()
+    }
   })
 }
 
@@ -1307,7 +1333,7 @@ app.whenReady().then(() => {
     }
     // 同时清理任何正在等待授权的 promise 避免 loading 挂载不消失
     if (pendingPermissions.size > 0) {
-      for (const [reqId, resolve] of pendingPermissions.entries()) {
+      for (const [, resolve] of pendingPermissions.entries()) {
         resolve(false)
       }
       pendingPermissions.clear()
@@ -1680,6 +1706,13 @@ app.whenReady().then(() => {
           keywords TEXT,
           embedding TEXT
         );
+        CREATE TABLE IF NOT EXISTS memory_entity_links (
+          memory_id TEXT,
+          entity_name TEXT NOT NULL,
+          created_at INTEGER,
+          PRIMARY KEY (memory_id, entity_name),
+          FOREIGN KEY (memory_id) REFERENCES persona_memories(id) ON DELETE CASCADE
+        );
       `)
 
       // 动态升级旧数据库表结构，为已创建的表添加 user_id 字段
@@ -2025,6 +2058,40 @@ app.whenReady().then(() => {
     }, 
     text: string
   ): Promise<number[] | null> {
+    // 优先尝试 SiliconFlow 的免费高精度向量嵌入
+    const sfApiKey = process.env.SILICONFLOW_API_KEY
+    if (sfApiKey) {
+      try {
+        console.log('[Embedding] 正在通过 SiliconFlow (BAAI/bge-m3) 获取向量...')
+        const sfResponse = await net.fetch("https://api.siliconflow.cn/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${sfApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            input: text,
+            model: "BAAI/bge-m3"
+          }),
+          signal: AbortSignal.timeout(8000)
+        })
+
+        if (sfResponse.ok) {
+          const sfData: any = await sfResponse.json()
+          if (sfData && sfData.data && sfData.data[0] && sfData.data[0].embedding) {
+            console.log('[Embedding] SiliconFlow 向量获取成功')
+            return sfData.data[0].embedding
+          }
+        } else {
+          const sfErr = await sfResponse.text().catch(() => '')
+          console.warn(`[Embedding] SiliconFlow 响应错误 (HTTP ${sfResponse.status}): ${sfErr}，将尝试回退。`)
+        }
+      } catch (err) {
+        console.warn('[Embedding] SiliconFlow 请求异常，将尝试回退至系统配置大模型向量:', err)
+      }
+    }
+
+    // 回退逻辑：使用既有大模型提供商的向量接口
     try {
       const { provider, apiKey, baseUrl } = config
       if (!apiKey && provider !== 'ollama') {
@@ -2049,7 +2116,6 @@ app.whenReady().then(() => {
         headers['Authorization'] = `Bearer ${apiKey}`
         body.model = 'text-embedding-3-small'
       } else if (provider === 'deepseek') {
-        // Deepseek 目前官方不提供 embedding API
         return null
       } else if (provider === 'ollama') {
         const effectiveBaseUrl = baseUrl || 'http://localhost:11434/v1'
@@ -2080,7 +2146,7 @@ app.whenReady().then(() => {
       }
       return null
     } catch (err) {
-      console.warn('[Embedding] 无法获取向量，降级为纯文本模糊搜索', err)
+      console.warn('[Embedding] 回退向量接口异常，降级为纯文本模糊搜索', err)
       return null
     }
   }
@@ -2141,8 +2207,88 @@ app.whenReady().then(() => {
         }
       }
 
+      // 辅助函数：自动扫描库内向量维度不符的老数据，重新生成向量嵌入并更新，同时一键补建老数据的实体关联图谱
+      async function autoMigrateOldEmbeddings(db: any) {
+        try {
+          const rows = db.prepare("SELECT id, fact, keywords, embedding FROM persona_memories WHERE category = 'experience'").all() as any[]
+          if (rows.length === 0) return
+
+          // 1. 增量自动扫描并补建实体多对多关联图谱 (避免新数据库表中实体关系全空的问题)
+          let linkRebuiltCount = 0
+          for (const row of rows) {
+            let keywordsList: string[] = []
+            try {
+              if (row.keywords) {
+                const parsedKw = JSON.parse(row.keywords)
+                keywordsList = Array.isArray(parsedKw) ? parsedKw : []
+              }
+            } catch {}
+
+            if (keywordsList.length > 0) {
+              const linkCount = db.prepare("SELECT COUNT(*) as cnt FROM memory_entity_links WHERE memory_id = ?").get(row.id) as { cnt: number }
+              if (linkCount && linkCount.cnt === 0) {
+                const insertLink = db.prepare("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)")
+                const now = Date.now()
+                for (const kw of keywordsList) {
+                  if (kw && typeof kw === 'string' && kw.trim()) {
+                    insertLink.run(row.id, kw.trim(), now)
+                  }
+                }
+                linkRebuiltCount++
+              }
+            }
+          }
+          if (linkRebuiltCount > 0) {
+            console.log(`[Migration] 成功为 ${linkRebuiltCount} 条历史经验自动完成了实体多对多关联图谱的重建补建`)
+          }
+
+          // 2. 检测期望的向量维度并做向量重嵌入
+          let expectedLen = 1024 
+          const sampleEmb = await getEmbeddingInternal(systemLlmConfig, "test")
+          if (sampleEmb && sampleEmb.length > 0) {
+            expectedLen = sampleEmb.length
+          } else {
+            console.log('[Migration] 未获取到当前活动的向量生成模型，跳过向量增量更新。')
+            return
+          }
+
+          const rowsToMigrate = rows.filter(row => {
+            if (!row.embedding) return true
+            try {
+              const parsed = JSON.parse(row.embedding)
+              return !Array.isArray(parsed) || parsed.length !== expectedLen
+            } catch {
+              return true
+            }
+          })
+
+          if (rowsToMigrate.length === 0) {
+            return
+          }
+
+          console.log(`[Migration] 检测到有 ${rowsToMigrate.length} 条历史避坑数据没有向量或向量维度不匹配，正在重算并迁移更新...`)
+
+          let updateCount = 0
+          for (const row of rowsToMigrate) {
+            try {
+              const newEmb = await getEmbeddingInternal(systemLlmConfig, row.fact)
+              if (newEmb && newEmb.length === expectedLen) {
+                db.prepare("UPDATE persona_memories SET embedding = ? WHERE id = ?").run(JSON.stringify(newEmb), row.id)
+                updateCount++
+              }
+            } catch (err) {
+              console.error(`[Migration] 更新历史数据向量失败 (ID: ${row.id}):`, err)
+            }
+          }
+          console.log(`[Migration] 历史向量库增量更新迁移完毕，成功更新了 ${updateCount} 条数据。当前使用维度为 ${expectedLen}`)
+        } catch (migrationErr) {
+          console.error('[Migration] 执行历史老数据向量增量更新抛出异常:', migrationErr)
+        }
+      }
+
       if (!allSummariesCombined.trim()) {
         console.log('[Purify] 无摘要历史，跳过大模型合并，只执行数据库状态清理。')
+        await autoMigrateOldEmbeddings(database)
         return { success: true, count: 0, insertCount: 0 }
       }
 
@@ -2252,17 +2398,18 @@ app.whenReady().then(() => {
           }
 
           const now = Date.now()
+          const targetId = matchedId || `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
+
           if (matchedId) {
             database.prepare("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ? WHERE id = ?")
               .run(now, matchedId)
             console.log(`[Purify] 强化已有避坑经验 (ID: ${matchedId})`)
           } else {
-            const newId = `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
             database.prepare(`
               INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding)
               VALUES (?, ?, 1.0, ?, ?, 'experience', ?, ?)
             `).run(
-              newId,
+              targetId,
               item.fact,
               now,
               now,
@@ -2270,7 +2417,25 @@ app.whenReady().then(() => {
               emb ? JSON.stringify(emb) : null
             )
             insertCount++
-            console.log(`[Purify] 写入新避坑经验 (ID: ${newId}): ${item.fact}`)
+            console.log(`[Purify] 写入新避坑经验 (ID: ${targetId}): ${item.fact}`)
+          }
+
+          // 仿 SAG 机制：写入实体多对多关联关系图谱
+          try {
+            // 先清理旧有的实体绑定，以防大模型更新时实体关键词发生变更
+            database.prepare("DELETE FROM memory_entity_links WHERE memory_id = ?").run(targetId)
+
+            const keywordsList = Array.isArray(item.keywords) ? item.keywords : []
+            if (keywordsList.length > 0) {
+              const insertLink = database.prepare("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)")
+              for (const kw of keywordsList) {
+                if (kw && typeof kw === 'string' && kw.trim()) {
+                  insertLink.run(targetId, kw.trim(), now)
+                }
+              }
+            }
+          } catch (linkErr) {
+            console.error(`[Purify] 写入实体关联图谱失败 (ID: ${targetId})`, linkErr)
           }
         }
       }
@@ -2285,6 +2450,7 @@ app.whenReady().then(() => {
         }
       }
 
+      await autoMigrateOldEmbeddings(database)
       return { success: true, count: processedFiles.length, insertCount }
     } catch (e: any) {
       console.error('画像整理 pipeline 失败', e)
@@ -2292,50 +2458,121 @@ app.whenReady().then(() => {
     }
   })
 
-  // 第四层：多路混合检索召回相关避坑经验
+  // 第四层：多路混合检索召回相关避坑经验 (仿 SAG 本地 SQL 动态图关联 RAG 架构)
   ipcMain.handle('api:recall-experiences', async (_, queryText: string) => {
     try {
       if (!queryText || !queryText.trim()) return []
       const database = getDB()
-      const rows = database.prepare("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding FROM persona_memories WHERE category = 'experience'").all() as any[]
       
+      // 1. 获取库中所有避坑经验记录及实体映射
+      const rows = database.prepare("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding FROM persona_memories WHERE category = 'experience'").all() as any[]
       if (rows.length === 0) return []
 
-      const now = Date.now()
+      const linkRows = database.prepare("SELECT memory_id, entity_name FROM memory_entity_links").all() as { memory_id: string, entity_name: string }[]
       
+      // 构建每个记忆与其包含的实体的映射 Map<memoryId, Set<entityName>>
+      const memoryToEntities = new Map<string, Set<string>>()
+      linkRows.forEach(link => {
+        const memId = link.memory_id
+        if (!memoryToEntities.has(memId)) {
+          memoryToEntities.set(memId, new Set())
+        }
+        memoryToEntities.get(memId)!.add(link.entity_name.toLowerCase().trim())
+      })
+
+      // 2. 一阶激活实体提取：寻找出现在用户提问中的实体词
+      const uniqueEntities = new Set(linkRows.map(r => r.entity_name.toLowerCase().trim()))
+      const lowerQuery = queryText.toLowerCase()
+      const firstOrderActive = new Set<string>()
+      uniqueEntities.forEach(ent => {
+        if (lowerQuery.includes(ent)) {
+          firstOrderActive.add(ent)
+        }
+      })
+
+      // 3. 动态二阶实体联想 (多跳联想)
+      const secondOrderActive = new Set<string>()
+      if (firstOrderActive.size > 0) {
+        // A. 找出包含任意一阶实体词的所有直接相关记忆 (一阶记忆)
+        const firstOrderMemories = new Set<string>()
+        memoryToEntities.forEach((entitiesSet, memId) => {
+          for (const ent of firstOrderActive) {
+            if (entitiesSet.has(ent)) {
+              firstOrderMemories.add(memId)
+              break
+            }
+          }
+        })
+
+        // B. 找出这些一阶记忆关联的、不属于一阶激活实体的其它实体作为二阶实体
+        firstOrderMemories.forEach(memId => {
+          const entitiesSet = memoryToEntities.get(memId)
+          if (entitiesSet) {
+            entitiesSet.forEach(ent => {
+              if (!firstOrderActive.has(ent)) {
+                secondOrderActive.add(ent)
+              }
+            })
+          }
+        })
+      }
+
+      // 4. 尝试生成提问的 Embedding 向量 (优先 SiliconFlow)
       let queryEmb: number[] | null = null
       try {
         queryEmb = await getEmbeddingInternal(systemLlmConfig, queryText)
       } catch (e) {
-        console.error('召回计算向量失败', e)
+        console.error('召回计算提问向量失败', e)
       }
 
+      // 5. 本地轻量级 Jaccard 相似度辅助算法
+      const jaccardSimilarity = (strA: string, strB: string): number => {
+        const cleanTokens = (str: string) => {
+          return new Set(str.toLowerCase().match(/[\w\-]+|[\u4e00-\u9fa5]/g) || [])
+        }
+        const setA = cleanTokens(strA)
+        const setB = cleanTokens(strB)
+        if (setA.size === 0 || setB.size === 0) return 0
+        const intersection = new Set([...setA].filter(x => setB.has(x)))
+        const union = new Set([...setA, ...setB])
+        return intersection.size / union.size
+      }
+
+      const now = Date.now()
+      
       const scoredResults = rows.map(row => {
-        // A. 指数衰退后的实际强度
+        // A. 指数时间衰退实际强度 (S_now)
         const lastAccess = row.last_accessed_at || row.created_at || now
         const deltaDays = (now - lastAccess) / (1000 * 60 * 60 * 24)
         const sNow = Math.max(0, row.strength * Math.exp(-0.1 * deltaDays))
 
+        // 过滤深度遗忘的知识 (强度小于 0.2)
         if (sNow < 0.2) {
           return { ...row, sNow, score: 0 }
         }
 
-        // B. 关键词匹配得分 (Keyword Score)
-        let keywordScore = 0
-        let keywords: string[] = []
-        try {
-          keywords = JSON.parse(row.keywords || '[]')
-        } catch {}
-
-        if (keywords.length > 0) {
-          let matchedCount = 0
-          const lowerQuery = queryText.toLowerCase()
-          for (const kw of keywords) {
-            if (lowerQuery.includes(kw.toLowerCase())) {
-              matchedCount++
+        // B. 动态实体图谱匹配得分 (Graph Score，仿 SAG 核心逻辑)
+        let graphScore = 0
+        const rowEntities = memoryToEntities.get(row.id)
+        if (rowEntities && firstOrderActive.size > 0) {
+          let hasFirstOrder = false
+          let hasSecondOrder = false
+          
+          for (const ent of rowEntities) {
+            if (firstOrderActive.has(ent)) {
+              hasFirstOrder = true
+              break
+            }
+            if (secondOrderActive.has(ent)) {
+              hasSecondOrder = true
             }
           }
-          keywordScore = matchedCount / keywords.length
+
+          if (hasFirstOrder) {
+            graphScore = 1.0 // 直接一阶相关
+          } else if (hasSecondOrder) {
+            graphScore = 0.5 // 间接二阶关联相关 (实现多跳召回)
+          }
         }
 
         // C. 向量相似度得分 (Vector Score)
@@ -2345,33 +2582,61 @@ app.whenReady().then(() => {
             const dbEmb = JSON.parse(row.embedding)
             if (Array.isArray(dbEmb)) {
               vectorScore = cosineSimilarity(queryEmb, dbEmb)
+              // 归一化 [-1, 1] 到 [0, 1]
               vectorScore = (vectorScore + 1) / 2
             }
           } catch {}
         }
 
-        // D. 综合得分
+        // D. 纯本地文本 Jaccard 相似度匹配分 (Jaccard Score)
+        const jaccardScore = jaccardSimilarity(queryText, row.fact)
+
+        // E. 融合计算综合打分
         let score = 0
         if (queryEmb && row.embedding) {
-          score = 0.5 * vectorScore + 0.3 * keywordScore + 0.2 * sNow
+          // 有向量支持：加权图谱、向量相似度、本地文本分及时间衰减
+          score = 0.4 * vectorScore + 0.3 * graphScore + 0.2 * jaccardScore + 0.1 * sNow
         } else {
-          score = 0.7 * keywordScore + 0.3 * sNow
+          // 无向量支持（降级模式）：完全依赖图谱分、本地文本匹配和时间衰减
+          score = 0.5 * graphScore + 0.3 * jaccardScore + 0.2 * sNow
         }
 
         return {
           id: row.id,
           fact: row.fact,
           sNow,
+          vectorScore,
+          graphScore,
+          jaccardScore,
           score
         }
       })
 
+      // 过滤低相关分，并按得分从高到低排序
       const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.05)
       activeResults.sort((a, b) => b.score - a.score)
       const top3 = activeResults.slice(0, 3)
 
-      console.log(`[Recall] 成功召回了 ${top3.length} 条相关经验`)
-      return top3
+      console.log(`[Recall] 仿 SAG 多跳召回了 ${top3.length} 条相关经验:`, top3.map(t => `${t.fact.substring(0, 30)}... (score: ${t.score.toFixed(3)})`))
+      return {
+        results: top3,
+        debug: {
+          firstOrderActive: Array.from(firstOrderActive),
+          secondOrderActive: Array.from(secondOrderActive),
+          allScored: scoredResults
+            .filter(r => r.score > 0.01)
+            .sort((a, b) => b.score - a.score)
+            .map(r => ({
+              id: r.id,
+              fact: r.fact,
+              score: r.score,
+              vectorScore: r.vectorScore || 0,
+              graphScore: r.graphScore || 0,
+              jaccardScore: r.jaccardScore || 0,
+              sNow: r.sNow || 0
+            }))
+        }
+      }
     } catch (err) {
       console.error('召回经验失败', err)
       return []
@@ -3878,7 +4143,7 @@ if (-not $task.Wait(15000)) {
                 newXml += xml.slice(lastPEnd, paraStart)
                 if (paraStyle === pStyleVal || paraStyle.toLowerCase() === pStyleVal.toLowerCase()) {
                   // 在这个段落内执行替换
-                  newXml += replaceInXml(paraBlock, mod.search, replacement, rPr)
+                  newXml += replaceInXml(paraBlock, mod.search, replacement, mod.style)
                 } else {
                   newXml += paraBlock
                 }
@@ -3989,7 +4254,7 @@ if (-not $task.Wait(15000)) {
           activeWin.webContents.send('api:generated-file-updated')
         }
 
-        const parts = []
+        const parts: string[] = []
         if (replaceCount > 0) parts.push(`${replaceCount} 处文本`)
         if (imageCount > 0) parts.push(`${imageCount} 张图片`)
         return JSON.stringify({
@@ -4098,7 +4363,7 @@ if (-not $task.Wait(15000)) {
           activeWin.webContents.send('api:generated-file-updated')
         }
 
-        const parts = []
+        const parts: string[] = []
         if (modCount > 0) parts.push(`修改了 ${modCount} 个单元格`)
         if (appendCount > 0) parts.push(`追加了 ${appendCount} 行数据`)
         const messageStr = parts.length > 0 ? parts.join('，') : '无数据改动'
@@ -4677,7 +4942,7 @@ if (-not $task.Wait(15000)) {
         await client.connect(transport)
         usedProtocol = 'Streamable HTTP'
       } else if (mcpType === 'sse') {
-        const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+        const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
         await client.connect(transport)
         usedProtocol = 'SSE'
       } else {
@@ -4693,7 +4958,7 @@ if (-not $task.Wait(15000)) {
             { capabilities: {} }
           )
           usedProtocol = 'SSE'
-          const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } })
+          const transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
           await client.connect(transport)
         }
       }

@@ -552,6 +552,170 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
 }
 
 // ── 统一排版与折叠日志状态的消息项组件 ──────────────────────────────
+// 绘制召回的 SVG 拓扑图
+function renderSvgGraph(debug: any) {
+  if (!debug) {
+    return (
+      <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--color-text-muted, #999)', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '8px', border: '1px dashed rgba(0,0,0,0.1)' }}>
+        <div style={{ fontSize: '24px', marginBottom: '8px' }}>🌌</div>
+        <div style={{ fontSize: '12px' }}>未触发避坑经验库的检索召回（如闲聊、问候等）</div>
+      </div>
+    )
+  }
+
+  const firstOrder = debug.firstOrderActive || []
+  const secondOrder = debug.secondOrderActive || []
+  const recalledFacts = (debug.allScored || []).filter((c: any, idx: number) => idx < 2 && c.score > 0.05)
+
+  if (firstOrder.length === 0 && secondOrder.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--color-text-muted, #999)', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '8px', border: '1px dashed rgba(0,0,0,0.1)' }}>
+        <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔍</div>
+        <div style={{ fontSize: '12px' }}>当前输入未提取到匹配的图谱实体词，未触发实体联想。</div>
+      </div>
+    )
+  }
+
+  // 限制绘制数量防重叠
+  const drawFirst = firstOrder.slice(0, 3)
+  const drawSecond = secondOrder.slice(0, 3)
+
+  const w = 700
+  const h = 180
+
+  // 计算坐标
+  const centerNode = { x: 55, y: h / 2 }
+  
+  const firstNodes = drawFirst.map((name: string, i: number) => ({
+    name,
+    x: 180,
+    y: drawFirst.length === 1 ? h / 2 : 30 + (i * (h - 60)) / (drawFirst.length - 1)
+  }))
+
+  const secondNodes = drawSecond.map((name: string, i: number) => ({
+    name,
+    x: 340,
+    y: drawSecond.length === 1 ? h / 2 : 30 + (i * (h - 60)) / (drawSecond.length - 1)
+  }))
+
+  const factNodes = recalledFacts.map((c: any, i: number) => ({
+    fact: c.fact.length > 25 ? c.fact.substring(0, 25) + '...' : c.fact,
+    fullFact: c.fact,
+    x: 480,
+    y: recalledFacts.length === 1 ? h / 2 : 40 + (i * (h - 80)) / (recalledFacts.length - 1)
+  }))
+
+  return (
+    <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: '#1e1b29', borderRadius: '10px', padding: '12px 10px', boxShadow: 'inset 0 0 20px rgba(0,0,0,0.5)', marginBottom: '16px' }}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes dash {
+          to {
+            stroke-dashoffset: -20;
+          }
+        }
+        .flowing-line {
+          stroke-dasharray: 6, 4;
+          animation: dash 1.2s linear infinite;
+        }
+        .node-glow-purple { filter: drop-shadow(0 0 6px #8b5cf6); }
+        .node-glow-green { filter: drop-shadow(0 0 6px #10b981); }
+        .node-glow-blue { filter: drop-shadow(0 0 6px #3b82f6); }
+      `}} />
+      <svg width={w} height={h} style={{ display: 'block', margin: '0 auto' }}>
+        {/* 绘制连线 */}
+        {/* 中心 -> 一阶 */}
+        {firstNodes.map((fn, idx) => (
+          <line
+            key={`line-c-f-${idx}`}
+            x1={centerNode.x}
+            y1={centerNode.y}
+            x2={fn.x}
+            y2={fn.y}
+            stroke="#8b5cf6"
+            strokeWidth="1.5"
+            className="flowing-line"
+            opacity="0.7"
+          />
+        ))}
+
+        {/* 一阶 -> 二阶 (全连或者配对连) */}
+        {firstNodes.flatMap((fn, fidx) =>
+          secondNodes.map((sn, sidx) => (
+            <line
+              key={`line-f-s-${fidx}-${sidx}`}
+              x1={fn.x}
+              y1={fn.y}
+              x2={sn.x}
+              y2={sn.y}
+              stroke="#10b981"
+              strokeWidth="1.2"
+              strokeDasharray="4,4"
+              opacity="0.5"
+            />
+          ))
+        )}
+
+        {/* 二阶 -> 事实 */}
+        {secondNodes.flatMap((sn, sidx) =>
+          factNodes.map((fact, fidx) => (
+            <line
+              key={`line-s-fact-${sidx}-${fidx}`}
+              x1={sn.x}
+              y1={sn.y}
+              x2={fact.x}
+              y2={fact.y}
+              stroke="#3b82f6"
+              strokeWidth="1.2"
+              className="flowing-line"
+              opacity="0.6"
+            />
+          ))
+        )}
+
+        {/* 绘制节点 */}
+        {/* 中心节点 */}
+        <circle cx={centerNode.x} cy={centerNode.y} r="18" fill="#8b5cf6" className="node-glow-purple" />
+        <text x={centerNode.x} y={centerNode.y + 4} fill="#fff" fontSize="10" textAnchor="middle" fontWeight="bold">提问</text>
+
+        {/* 一阶节点 */}
+        {firstNodes.map((fn, idx) => (
+          <g key={`gn-first-${idx}`}>
+            <circle cx={fn.x} cy={fn.y} r="14" fill="#10b981" className="node-glow-green" />
+            <text x={fn.x} y={fn.y + 4} fill="#fff" fontSize="9" textAnchor="middle" fontWeight="bold">一阶</text>
+            <rect x={fn.x - 45} y={fn.y - 30} width="90" height="14" rx="3" fill="rgba(16,185,129,0.95)" />
+            <text x={fn.x} y={fn.y - 20} fill="#fff" fontSize="9" textAnchor="middle" title={fn.name}>
+              {fn.name.length > 8 ? fn.name.substring(0, 7) + '..' : fn.name}
+            </text>
+          </g>
+        ))}
+
+        {/* 二阶节点 */}
+        {secondNodes.map((sn, idx) => (
+          <g key={`gn-second-${idx}`}>
+            <circle cx={sn.x} cy={sn.y} r="14" fill="#3b82f6" className="node-glow-blue" />
+            <text x={sn.x} y={sn.y + 4} fill="#fff" fontSize="9" textAnchor="middle" fontWeight="bold">二阶</text>
+            <rect x={sn.x - 45} y={sn.y - 30} width="90" height="14" rx="3" fill="rgba(59,130,246,0.95)" />
+            <text x={sn.x} y={sn.y - 20} fill="#fff" fontSize="9" textAnchor="middle" title={sn.name}>
+              {sn.name.length > 8 ? sn.name.substring(0, 7) + '..' : sn.name}
+            </text>
+          </g>
+        ))}
+
+        {/* 事实卡片 */}
+        {factNodes.map((fn, idx) => (
+          <g key={`gn-fact-${idx}`}>
+            <rect x={fn.x} y={fn.y - 18} width="200" height="36" rx="6" fill="#2d2a45" stroke="#8b5cf6" strokeWidth="1" className="node-glow-purple" />
+            <text x={fn.x + 8} y={fn.y - 4} fill="#10b981" fontSize="9" fontWeight="bold">[已召回避坑事实]</text>
+            <text x={fn.x + 8} y={fn.y + 10} fill="#ddd" fontSize="9" title={fn.fullFact}>
+              {fn.fact}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
 interface MessageItemProps {
   msg: any
   currentAvatarName: string
@@ -575,6 +739,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const [copied, setCopied] = useState(false)
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showPromptModal, setShowPromptModal] = useState(false)
+  const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
 
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const renderedText = useMemo(() => {
@@ -618,7 +783,11 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
       if (window.api && typeof window.api.copyFiles === 'function') {
         await window.api.copyFiles(filePaths, textToCopy)
       } else {
-        window.api?.copyText?.(textToCopy) || navigator.clipboard.writeText(textToCopy)
+        if (window.api && typeof window.api.copyText === 'function') {
+          window.api.copyText(textToCopy)
+        } else {
+          navigator.clipboard.writeText(textToCopy)
+        }
       }
     } else {
       // 无文件，纯文本复制
@@ -816,8 +985,8 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         >
           <div
             style={{
-              width: '80vw',
-              maxWidth: '900px',
+              width: '85vw',
+              maxWidth: '960px',
               height: '80vh',
               backgroundColor: 'var(--color-bg-primary, #fff)',
               borderRadius: '12px',
@@ -840,8 +1009,8 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                 backgroundColor: 'var(--color-bg-secondary, #f5f5f5)'
               }}
             >
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
-                🔍 本次提问传给 Agent 的完整内容
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🔍 Agent 提问参数与调试分析面板
               </h3>
               <button
                 onClick={() => setShowPromptModal(false)}
@@ -859,6 +1028,44 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
               </button>
             </div>
 
+            {/* Tab 导航 */}
+            <div
+              style={{
+                display: 'flex',
+                borderBottom: '1px solid var(--color-border, #e0e0e0)',
+                backgroundColor: 'var(--color-bg-secondary, #fafafa)',
+                padding: '0 16px'
+              }}
+            >
+              {[
+                { id: 'recall', label: '🧠 知识召回与图谱可视化' },
+                { id: 'context', label: '💬 系统提示词 (System Prompt)' },
+                { id: 'tools', label: '🛠️ 模型参数与工具集' }
+              ].map(tab => {
+                const isActive = activePromptTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActivePromptTab(tab.id as any)}
+                    style={{
+                      padding: '12px 16px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: isActive ? '3px solid #8b5cf6' : '3px solid transparent',
+                      color: isActive ? '#8b5cf6' : 'var(--color-text-secondary, #666)',
+                      fontWeight: isActive ? 600 : 500,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      marginBottom: '-1px'
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                )
+              })}
+            </div>
+
             {/* 弹框内容 */}
             <div
               style={{
@@ -867,133 +1074,251 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                 padding: '20px'
               }}
             >
-              {/* 说明信息 */}
-              <div
-                style={{
-                  marginBottom: '16px',
-                  padding: '12px 16px',
-                  backgroundColor: 'rgba(96, 165, 250, 0.08)',
-                  border: '1px solid rgba(96, 165, 250, 0.2)',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  color: '#3b82f6'
-                }}
-              >
-                💡 以下是本次提问调用 <code>callLLM()</code> 时传入的完整参数，包括系统提示词、历史对话上下文、工具定义和模型配置。
-              </div>
-
-              {/* 模型配置信息 */}
-              <div
-                style={{
-                  marginBottom: '20px',
-                  padding: '12px 16px',
-                  backgroundColor: 'var(--color-bg-tertiary, #f0f0f0)',
-                  borderRadius: '8px',
-                  fontSize: '13px'
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: '8px' }}>📊 模型配置</div>
-                <div>模型: {msg.promptInfo.model || '未知'}</div>
-                <div>提供商: {msg.promptInfo.provider || '未知'}</div>
-                <div>温度: {msg.promptInfo.temperature ?? '默认'}</div>
-                <div>最大 Token: {msg.promptInfo.maxTokens ?? '默认'}</div>
-              </div>
-
-              {/* Token 估算统计 */}
-              <div
-                style={{
-                  marginBottom: '20px',
-                  padding: '12px 16px',
-                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                  border: '1px solid rgba(16, 185, 129, 0.2)',
-                  borderRadius: '8px',
-                  fontSize: '13px'
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#10b981' }}>📏 Token 估算统计</div>
-                <div>系统提示词: ~{formatTokens(estimateTokens(msg.promptInfo.systemPrompt || ''))}</div>
-                <div>历史对话 ({msg.promptInfo.chatMessages.length - 1} 条): ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))))}</div>
-                <div>工具定义 ({msg.promptInfo.toolsDefinition?.length || 0} 个): ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || [])))}</div>
-                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(16, 185, 129, 0.2)', fontWeight: 600 }}>
-                  总计估算: ~{formatTokens(
-                    estimateTokens(msg.promptInfo.systemPrompt || '') +
-                    estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))) +
-                    estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || []))
-                  )}
-                </div>
-                <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                  💡 估算方式：字符数 × 0.5（与日志中 Prompt 输入的降级估算策略一致）
-                </div>
-              </div>
-
-              {/* 完整 chatMessages 数组 */}
-              <div>
-                <div
-                  style={{
-                    fontWeight: 600,
-                    marginBottom: '8px',
-                    fontSize: '14px',
-                    color: 'var(--color-text-primary, #333)'
-                  }}
-                >
-                  📦 完整 chatMessages 数组 (共 {msg.promptInfo.chatMessages.length} 条消息)
-                </div>
-                <div
-                  style={{
-                    border: '1px solid var(--color-border, #e0e0e0)',
-                    borderRadius: '8px',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {msg.promptInfo.chatMessages.map((m: any, idx: number) => (
+              {/* Tab 1: 知识召回与图谱可视化 */}
+              {activePromptTab === 'recall' && (() => {
+                const debug = msg.promptInfo.recallDebug
+                const candidates = debug?.allScored || []
+                return (
+                  <div>
                     <div
-                      key={idx}
                       style={{
-                        padding: '12px 16px',
-                        borderBottom: idx < msg.promptInfo.chatMessages.length - 1 ? '1px solid var(--color-border, #e0e0e0)' : 'none',
-                        backgroundColor: m.role === 'system'
-                          ? 'var(--color-bg-system, #fff3cd)'
-                          : m.role === 'user'
-                            ? 'var(--color-bg-user, #e3f2fd)'
-                            : 'var(--color-bg-assistant, #f3e5f5)'
+                        marginBottom: '16px',
+                        padding: '10px 14px',
+                        backgroundColor: 'rgba(139, 92, 246, 0.05)',
+                        border: '1px solid rgba(139, 92, 246, 0.15)',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#8b5cf6'
                       }}
                     >
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: '12px',
-                          marginBottom: '4px',
-                          color: 'var(--color-text-secondary, #666)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px'
-                        }}
-                      >
-                        {m.role === 'system' ? '⚙️ 系统' : m.role === 'user' ? '👤 用户' : '🤖 助手'}
-                        <span style={{ fontSize: '11px', color: '#999' }}>
-                          (#{idx + 1} · ~{formatTokens(estimateTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))})
-                        </span>
-                      </div>
-                      <pre
-                        style={{
-                          margin: 0,
-                          fontSize: '12px',
-                          lineHeight: '1.6',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          fontFamily: 'inherit',
-                          maxHeight: '200px',
-                          overflow: 'auto'
-                        }}
-                      >
-                        {typeof m.content === 'string'
-                          ? m.content
-                          : JSON.stringify(m.content, null, 2)}
-                      </pre>
+                      💡 本面板展示基于仿 SAG 机制的本地关系图谱与多路混合检索打分结果。最终排名前三且总分大于 0.05 的经验事实将被召回并注入系统提示词尾部。
                     </div>
-                  ))}
+
+                    {/* SVG 拓扑网络图 */}
+                    <div style={{ marginBottom: '20px' }}>
+                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: 'var(--color-text-primary, #333)' }}>🕸️ 动态图谱实体联想路径：</div>
+                      {renderSvgGraph(debug)}
+                    </div>
+
+                    {/* 评分进度条候选列表 */}
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--color-text-primary, #333)' }}>📝 候选避坑经验打分细节：</div>
+                      {candidates.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {candidates.slice(0, 5).map((c: any, idx: number) => {
+                            const isRecalled = idx < 3 && c.score > 0.05
+                            return (
+                              <div
+                                key={c.id || idx}
+                                style={{
+                                  border: isRecalled ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--color-border, #e0e0e0)',
+                                  borderRadius: '8px',
+                                  padding: '12px',
+                                  backgroundColor: isRecalled ? 'rgba(16, 185, 129, 0.02)' : 'var(--color-bg-secondary, #fafafa)',
+                                  transition: 'all 0.2s ease'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                  <div style={{ fontWeight: 500, fontSize: '13px', color: isRecalled ? 'var(--color-text-primary, #111)' : 'var(--color-text-muted, #777)', flex: 1, paddingRight: '12px', wordBreak: 'break-all' }}>
+                                    {isRecalled && (
+                                      <span style={{
+                                        marginRight: '6px',
+                                        backgroundColor: '#10b981',
+                                        color: '#fff',
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10px',
+                                        fontWeight: 'bold',
+                                        verticalAlign: 'middle'
+                                      }}>
+                                        ✓ 召回注入
+                                      </span>
+                                    )}
+                                    {c.fact}
+                                  </div>
+                                  <div style={{ textAlign: 'right', minWidth: '50px' }}>
+                                    <div style={{ fontSize: '10px', color: 'var(--color-text-secondary, #888)' }}>最终总分</div>
+                                    <div style={{ fontSize: '15px', fontWeight: 'bold', color: isRecalled ? '#8b5cf6' : '#999' }}>
+                                      {c.score.toFixed(3)}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '11px', color: 'var(--color-text-secondary, #666)' }}>
+                                  <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                      <span>🧬 向量分 (40%):</span>
+                                      <span style={{ fontWeight: 600 }}>{c.vectorScore.toFixed(3)}</span>
+                                    </div>
+                                    <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${c.vectorScore * 100}%`, background: 'linear-gradient(90deg, #06b6d4, #3b82f6)', borderRadius: '3px' }} />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                      <span>🕸️ 图谱分 (30%):</span>
+                                      <span style={{ fontWeight: 600 }}>{c.graphScore.toFixed(2)}</span>
+                                    </div>
+                                    <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${Math.min(1, c.graphScore) * 100}%`, background: 'linear-gradient(90deg, #8b5cf6, #d946ef)', borderRadius: '3px' }} />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                      <span>📝 文本分 (20%):</span>
+                                      <span style={{ fontWeight: 600 }}>{c.jaccardScore.toFixed(3)}</span>
+                                    </div>
+                                    <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${c.jaccardScore * 100}%`, background: 'linear-gradient(90deg, #ec4899, #f43f5e)', borderRadius: '3px' }} />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                                      <span>⏳ 遗忘强度 (10%):</span>
+                                      <span style={{ fontWeight: 600 }}>{c.sNow.toFixed(2)}</span>
+                                    </div>
+                                    <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${Math.min(1, c.sNow) * 100}%`, background: 'linear-gradient(90deg, #f59e0b, #ef4444)', borderRadius: '3px' }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #999)', fontStyle: 'italic', padding: '12px 0', textAlign: 'center', border: '1px dashed var(--color-border)', borderRadius: '6px' }}>
+                          避坑经验库为空，或者本次提问未触发任何候选匹配。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Tab 2: 系统提示词 (System Prompt) */}
+              {activePromptTab === 'context' && (
+                <div>
+                  <div
+                    style={{
+                      marginBottom: '16px',
+                      padding: '10px 14px',
+                      backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                      border: '1px solid rgba(59, 130, 246, 0.15)',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: '#3b82f6'
+                    }}
+                  >
+                    💡 本面板展示大模型系统提示词（System Prompt）。避坑经验与全局画像已被拼装在系统人设最末尾，以实现首尾增强引用效果。
+                  </div>
+
+                  <div style={{ border: '1px solid var(--color-border, #e0e0e0)', borderRadius: '8px', overflow: 'hidden' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border, #e0e0e0)', backgroundColor: 'var(--color-bg-secondary, #f5f5f5)', fontWeight: 600, fontSize: '12px' }}>
+                      🖥️ System Prompt 拼接详情
+                    </div>
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: '16px',
+                        fontSize: '12.5px',
+                        whiteSpace: 'pre-wrap',
+                        maxHeight: '45vh',
+                        overflow: 'auto',
+                        backgroundColor: 'var(--color-bg-tertiary, #fafafa)',
+                        lineHeight: '1.6',
+                        fontFamily: 'Courier New, Courier, monospace',
+                        color: 'var(--color-text-primary, #333)'
+                      }}
+                    >
+                      {msg.promptInfo.systemPrompt}
+                    </pre>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Tab 3: 模型参数与工具集 */}
+              {activePromptTab === 'tools' && (
+                <div>
+                  {/* 网格卡片 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                    {/* 模型配置卡 */}
+                    <div
+                      style={{
+                        padding: '16px',
+                        backgroundColor: 'var(--color-bg-secondary, #fafafa)',
+                        border: '1px solid var(--color-border, #e0e0e0)',
+                        borderRadius: '8px',
+                        fontSize: '13px'
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>📊 模型配置参数</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div><strong>模型:</strong> {msg.promptInfo.model || '未知'}</div>
+                        <div><strong>服务商:</strong> {msg.promptInfo.provider || '未知'}</div>
+                        <div><strong>采样温度:</strong> {msg.promptInfo.temperature ?? '默认 (1.0)'}</div>
+                        <div><strong>最大生成 Token:</strong> {msg.promptInfo.maxTokens ?? '默认 (不限)'}</div>
+                      </div>
+                    </div>
+
+                    {/* Token 估算卡 */}
+                    <div
+                      style={{
+                        padding: '16px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.02)',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        borderRadius: '8px',
+                        fontSize: '13px'
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', color: '#10b981', borderBottom: '1px solid rgba(16,185,129,0.15)', paddingBottom: '6px' }}>📏 Token 估算与占比</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div><strong>系统预设:</strong> ~{formatTokens(estimateTokens(msg.promptInfo.systemPrompt || ''))}</div>
+                        <div><strong>历史上下文:</strong> ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))))}</div>
+                        <div><strong>工具定义:</strong> ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || [])))}</div>
+                        <div style={{ borderTop: '1px dashed rgba(16,185,129,0.2)', paddingTop: '4px', marginTop: '4px', fontWeight: 'bold' }}>
+                          总计输入估算: ~{formatTokens(
+                            estimateTokens(msg.promptInfo.systemPrompt || '') +
+                            estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))) +
+                            estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || []))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 携带的工具定义 */}
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px', color: 'var(--color-text-primary, #333)' }}>🛠️ 注入模型工具库 (Tools Schema)</div>
+                    {msg.promptInfo.toolsDefinition && msg.promptInfo.toolsDefinition.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {msg.promptInfo.toolsDefinition.map((tool: any, idx: number) => {
+                          const func = tool.function || tool
+                          return (
+                            <div key={idx} style={{ padding: '12px', border: '1px solid var(--color-border, #e0e0e0)', borderRadius: '8px', backgroundColor: 'var(--color-bg-secondary, #fafafa)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <span style={{ fontWeight: 'bold', color: '#8b5cf6', fontFamily: 'monospace', fontSize: '12px' }}>
+                                  {func.name}
+                                </span>
+                                <span style={{ fontSize: '10px', color: '#999', backgroundColor: 'rgba(0,0,0,0.05)', padding: '1px 6px', borderRadius: '4px' }}>
+                                  {tool.type || 'function'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-secondary, #666)', lineHeight: '1.4' }}>
+                                {func.description}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ fontStyle: 'italic', fontSize: '11px', color: '#999', padding: '12px 0', textAlign: 'right', border: '1px dashed var(--color-border)', borderRadius: '6px' }}>
+                        本次调用未携带任何工具定义。
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

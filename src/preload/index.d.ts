@@ -18,6 +18,8 @@ declare global {
       openSkillsFolder: () => Promise<void>
       uploadSkillPack: () => Promise<any[]>
       getSkillsList: () => Promise<any[]>
+      deleteSkill: (name: string) => Promise<any[]>
+      getToolsDefinition: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
       parseFileContent: (filePath: string) => Promise<string>

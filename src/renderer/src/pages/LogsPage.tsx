@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { type AppStore, type TokenLog } from '../hooks/useAppStore'
+import { type AppStore } from '../hooks/useAppStore'
 
 interface LogsPageProps {
   store: AppStore

@@ -36,7 +36,7 @@ interface WechatBotManagerOptions {
   ) => Promise<string>
   getMcpToolNames: () => string[]
   onStatusUpdated: () => void
-  notifyRenderSessionUpdate: () => void
+  notifyRenderSessionUpdate: (sessionId?: string) => void
   getStorageDir: () => string
 }
 
@@ -542,7 +542,7 @@ export class WechatBotManager {
       let scannedNotified = false
       let pollBaseUrl = this.client.baseUrl
 
-      while (Date.now() <= deadline && this.state.status !== 'disconnected') {
+      while (Date.now() <= deadline && (this.state.status as string) !== 'disconnected') {
         if (!this.client) break
 
         let statusResp: any
@@ -720,7 +720,7 @@ export class WechatBotManager {
           }
 
           const nickname = message.from_user_nickname || `微信好友 (${fromUserId})`
-          const { text, mediaUrls } = await this.processMessageContent(message, fromUserId)
+          const { text } = await this.processMessageContent(message, fromUserId)
           if (!text) continue
 
           // 构建唯一去重 Key，防止微信服务器重试或长轮询引发的重复处理

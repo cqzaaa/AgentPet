@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
 
 // ── 类型定义 ─────────────────────────────────────────────────
@@ -651,6 +651,7 @@ export function useAppStore() {
         return () => clearTimeout(timer)
       }
     }
+    return undefined
   }, [activeSessionId, activeTab, triggerChatSkeleton])
 
   // 2. 处理从其他 tab 切换到 chat 页面时的骨架屏
@@ -661,6 +662,7 @@ export function useAppStore() {
       return () => clearTimeout(timer)
     }
     prevActiveTabRef.current = activeTab
+    return undefined
   }, [activeTab, triggerChatSkeleton])
 
   // 3. 处理正常收到或发送新消息时的平滑滚动
@@ -672,6 +674,7 @@ export function useAppStore() {
       }, 100)
       return () => clearTimeout(timer)
     }
+    return undefined
   }, [sessions, activeTab])
 
   // Auto-save sessions
@@ -1087,8 +1090,15 @@ export function useAppStore() {
       }
 
       let relevantExperiences: any[] = []
+      let recallDebug: any = null
       try {
-        relevantExperiences = await window.api.recallExperiences(inputText)
+        const recallRes = await window.api.recallExperiences(text)
+        if (recallRes && !Array.isArray(recallRes)) {
+          relevantExperiences = recallRes.results || []
+          recallDebug = recallRes.debug || null
+        } else {
+          relevantExperiences = Array.isArray(recallRes) ? recallRes : []
+        }
       } catch (err) {
         console.error('获取避坑经验失败:', err)
       }
@@ -1160,7 +1170,8 @@ ${mcpContext}`
         model: llmConfig.model,
         provider: llmConfig.provider,
         temperature: llmConfig.temperature,
-        maxTokens: llmConfig.maxTokens
+        maxTokens: llmConfig.maxTokens,
+        recallDebug
       }
 
       // 更新用户消息，添加 promptInfo 字段
