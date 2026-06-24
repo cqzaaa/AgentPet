@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { setInternalClipboard } from '../hooks/useAppStore'
+import iconSvg from '../assets/icon_from_image.svg'
 
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
@@ -816,12 +817,15 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const msgsCount = toolSteps.length
 
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
-  const avatarText = msg.sender === 'user' ? '👤' : '🐱'
 
   return (
     <div id={`msg-${msg.id}`} className={`message-row ${msg.sender} ${highlightedMessageId === msg.id ? 'highlight-pulse' : ''}`}>
       <div className="message-header-row">
-        {msg.sender !== 'user' && <span className="msg-sender-avatar">{avatarText}</span>}
+        {msg.sender !== 'user' && (
+          <span className="msg-sender-avatar">
+            <img src={iconSvg} alt="avatar" className="msg-sender-avatar-img" />
+          </span>
+        )}
         <span className="msg-sender-name">{senderName}</span>
         <span className="msg-send-time">{msg.time}</span>
       </div>
