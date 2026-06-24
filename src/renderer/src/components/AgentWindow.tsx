@@ -407,8 +407,8 @@ export function AgentWindow(): React.JSX.Element {
           </div>
           {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
-              <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="控制">
-                <div className="menu-item-left"><OverviewIcon /><span>控制</span></div>
+              <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="订阅频道">
+                <div className="menu-item-left"><OverviewIcon /><span>订阅频道</span></div>
                 <span className="menu-item-arrow">&gt;</span>
               </div>
               <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
@@ -536,14 +536,14 @@ export function AgentWindow(): React.JSX.Element {
           <div>
             <div className="content-title">
               {activeTab === 'chat' && (sessions.find(s => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
-              {activeTab === 'control' && '集成第三方服务'}
+              {activeTab === 'control' && '订阅频道'}
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
             </div>
             <div className="content-subtitle">
               {activeTab === 'chat' && `当前使用模型：${llmConfig.model || '未定义'}`}
-              {activeTab === 'control' && '配置三方Bot'}
+              {activeTab === 'control' && '配置和管理您的订阅渠道'}
               {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
               {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
               {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}

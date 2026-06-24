@@ -1,5 +1,24 @@
 @import './base.css';
 
+/* 全局滚动条美化：与 Chat 页面保持一致 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.3);
+}
+
 /* 覆写 base.css 中的 body，实现全透明窗口背景 */
 body {
   background: transparent !important;

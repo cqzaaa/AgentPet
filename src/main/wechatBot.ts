@@ -304,6 +304,34 @@ class WechatIlinkClient {
     }
     return resp
   }
+
+  // 获取输入中的 typing_ticket
+  public async getTypingTicket(fromUserId: string, contextToken: string): Promise<string> {
+    try {
+      const resp = await this.doPost('ilink/bot/getconfig', {
+        ilink_user_id: fromUserId,
+        context_token: contextToken,
+        base_info: { channel_version: '2.1.6' }
+      })
+      return resp.typing_ticket || ''
+    } catch (e) {
+      console.error('获取 typing_ticket 失败', e)
+      return ''
+    }
+  }
+
+  // 发送输入状态 (status 1=输入中, 2=取消)
+  public async sendTyping(toUserId: string, typingTicket: string, isTyping: boolean): Promise<any> {
+    try {
+      return await this.doPost('ilink/bot/sendtyping', {
+        to_user_id: toUserId,
+        typing_ticket: typingTicket,
+        status: isTyping ? 1 : 2
+      })
+    } catch (e) {
+      console.error('发送 typing 状态失败', e)
+    }
+  }
 }
 
 // ── 微信消息文字提取器 ──────────────────────────────────────────────────
@@ -492,6 +520,7 @@ export class WechatBotManager {
 
   // 保存局部配置到物理文件
   public saveSettings(settings: { llmConfig: WechatLlmConfig; autoReplyText: string; enableAutoReply: boolean }) {
+    const prevEnable = this.state.enableAutoReply
     this.state.llmConfig = settings.llmConfig
     this.state.autoReplyText = settings.autoReplyText
     this.state.enableAutoReply = settings.enableAutoReply
@@ -503,6 +532,11 @@ export class WechatBotManager {
         enableAutoReply: this.state.enableAutoReply
       }, null, 2), 'utf8')
       this.addLog('info', '微信 Bot 独立大模型及自动回复配置已成功保存！')
+
+      // 联动重连：如果 enableAutoReply 变为了 true，并且当前连接断开，自动在后台重连
+      if (this.state.enableAutoReply && !prevEnable && this.state.status === 'disconnected') {
+        this.autoReconnect()
+      }
     } catch (e) {
       this.addLog('info', `保存配置文件 wechat_config.json 失败: ${e}`)
     }
@@ -712,8 +746,14 @@ export class WechatBotManager {
         }
 
         // 循环处理消息
+        if (!this.isMonitoring) {
+          break
+        }
         const msgs = resp.msgs || []
         for (const message of msgs) {
+          if (!this.isMonitoring) {
+            break
+          }
           const fromUserId = String(message.from_user_id)
           if (message.context_token) {
             contextTokens.set(fromUserId, message.context_token)
@@ -799,6 +839,26 @@ export class WechatBotManager {
 
             let replyText = ''
             let isError = false
+            let typingInterval: any = null
+            const token = contextTokens.get(fromUserId)
+
+            if (token) {
+              try {
+                this.client.getTypingTicket(fromUserId, token).then((ticket) => {
+                  if (ticket && this.isMonitoring && this.client) {
+                    this.client.sendTyping(fromUserId, ticket, true).catch(() => {})
+                    typingInterval = setInterval(() => {
+                      if (this.client && this.isMonitoring) {
+                        this.client.sendTyping(fromUserId, ticket, true).catch(() => {})
+                      }
+                    }, 5000)
+                  }
+                }).catch(() => {})
+              } catch (err) {
+                console.error('[wechatBot] 开启打字状态失败:', err)
+              }
+            }
+
             try {
               // 1.5 分钟 (90 秒) 强制超时保护机制
               const timeoutPromise = new Promise<never>((_, reject) =>
@@ -815,9 +875,20 @@ export class WechatBotManager {
                 replyText = `⚠️ 自动回复生成失败: ${err.message || err}`
               }
               isError = true
+            } finally {
+              if (typingInterval) {
+                clearInterval(typingInterval)
+              }
+              if (token) {
+                try {
+                  this.client.getTypingTicket(fromUserId, token).then((ticket) => {
+                    if (ticket && this.client) {
+                      this.client.sendTyping(fromUserId, ticket, false).catch(() => {})
+                    }
+                  }).catch(() => {})
+                } catch {}
+              }
             }
-
-            const token = contextTokens.get(fromUserId)
             
             if (!token) {
               this.addLog('info', `回复失败：未找到好友 [${nickname}] 的会话 context_token`)
