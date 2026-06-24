@@ -40,13 +40,20 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editAvatarStyle, setEditAvatarStyle] = React.useState('normal')
   const [editAvatarVoice, setEditAvatarVoice] = React.useState('zh-CN-XiaoxiaoNeural')
   const [openAvatarDropdownId, setOpenAvatarDropdownId] = React.useState<string | null>(null)
+  const [dropdownPos, setDropdownPos] = React.useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 })
 
-  // 点击外部关闭下拉菜单
+  // 点击外部/滚动/缩放时关闭下拉菜单
   React.useEffect(() => {
     if (!openAvatarDropdownId) return
-    const handleClickOutside = () => setOpenAvatarDropdownId(null)
-    window.addEventListener('click', handleClickOutside)
-    return () => window.removeEventListener('click', handleClickOutside)
+    const handleClose = () => setOpenAvatarDropdownId(null)
+    window.addEventListener('click', handleClose)
+    window.addEventListener('scroll', handleClose, { capture: true })
+    window.addEventListener('resize', handleClose)
+    return () => {
+      window.removeEventListener('click', handleClose)
+      window.removeEventListener('scroll', handleClose, { capture: true })
+      window.removeEventListener('resize', handleClose)
+    }
   }, [openAvatarDropdownId])
 
   return (
@@ -455,14 +462,27 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                             {isActive ? '使用中' : '未启用'}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right', position: 'relative' }}>
+                        <td style={{ textAlign: 'right' }}>
                           <button
                             type="button"
                             className="btn-secondary"
                             style={{ padding: '4px 8px', fontSize: '11px' }}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpenAvatarDropdownId(openAvatarDropdownId === avatar.id ? null : avatar.id)
+                              if (openAvatarDropdownId === avatar.id) {
+                                setOpenAvatarDropdownId(null)
+                              } else {
+                                const rect = e.currentTarget.getBoundingClientRect()
+                                const spaceBelow = window.innerHeight - rect.bottom
+                                if (spaceBelow < 160) {
+                                  // 空间不足，向上展开
+                                  setDropdownPos({ bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right })
+                                } else {
+                                  // 空间充足，向下展开
+                                  setDropdownPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                                }
+                                setOpenAvatarDropdownId(avatar.id)
+                              }
                             }}
                           >
                             ⚙️ 设置 ▾
@@ -471,15 +491,15 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                           {openAvatarDropdownId === avatar.id && (
                             <div
                               style={{
-                                position: 'absolute',
-                                top: '100%',
-                                right: '0',
-                                marginTop: '4px',
+                                position: 'fixed',
+                                top: dropdownPos.top !== undefined ? `${dropdownPos.top}px` : 'auto',
+                                bottom: dropdownPos.bottom !== undefined ? `${dropdownPos.bottom}px` : 'auto',
+                                right: `${dropdownPos.right}px`,
                                 background: 'var(--bg-card)',
                                 border: '1px solid var(--border-card)',
                                 borderRadius: '6px',
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                zIndex: 10,
+                                zIndex: 9999,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 minWidth: '120px',
