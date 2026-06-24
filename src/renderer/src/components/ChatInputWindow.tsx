@@ -123,7 +123,7 @@ export function ChatInputWindow(): React.JSX.Element {
     if (activeSession) {
       if (activeSession.messages && activeSession.messages.length > 0) {
         setShowChat(true)
-        window.api.setWindowSize(400, 260, 'top')
+        window.api.setWindowSize(400, 400, 'top')
         setIsLoadingHistory(true)
         if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
         loadingTimerRef.current = setTimeout(() => {
@@ -183,7 +183,7 @@ export function ChatInputWindow(): React.JSX.Element {
       if (!showChat) {
         window.api.setWindowSize(400, 90, 'top')
       } else {
-        window.api.setWindowSize(400, 260, 'top')
+        window.api.setWindowSize(400, 400, 'top')
       }
     }
   }, [showDropdown, showChat])
@@ -230,7 +230,7 @@ export function ChatInputWindow(): React.JSX.Element {
 
       if (selected.messages && selected.messages.length > 0) {
         setShowChat(true)
-        window.api.setWindowSize(400, 260, 'top')
+        window.api.setWindowSize(400, 400, 'top')
         setIsLoadingHistory(true)
         loadingTimerRef.current = setTimeout(() => {
           shouldScrollRef.current = 'auto'
@@ -288,7 +288,7 @@ export function ChatInputWindow(): React.JSX.Element {
     setText('')
 
     // 纯文字消息：在迷你面板内展示
-    window.api.setWindowSize(400, 260, 'top')
+    window.api.setWindowSize(400, 400, 'top')
     shouldScrollRef.current = 'smooth'
     setMessages(prev => [...prev, { sender: 'user', text: userText }])
     setIsThinking(true)
@@ -538,7 +538,7 @@ export function ChatInputWindow(): React.JSX.Element {
   // 动态计算 wrapper 的高度，以提供平滑过渡的动效
   let wrapperHeight = '66px'
   if (showChat) {
-    wrapperHeight = '246px'
+    wrapperHeight = '378px'
   } else if (showDropdown) {
     wrapperHeight = '220px'
   }
@@ -584,7 +584,8 @@ export function ChatInputWindow(): React.JSX.Element {
           border: 1px solid rgba(255, 255, 255, 0.6);
           border-radius: 999px;
           box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.85), 
-                      inset 0 -1px 2px rgba(0, 0, 0, 0.04);
+                      inset 0 -1px 2px rgba(0, 0, 0, 0.04),
+                      0 4px 16px rgba(0, 0, 0, 0.08);
           display: flex;
           align-items: center;
           padding: 0 10px 0 6px;
@@ -855,12 +856,13 @@ export function ChatInputWindow(): React.JSX.Element {
           border: 1px solid rgba(255, 255, 255, 0.6);
           border-radius: 16px;
           box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.85),
-                      0 8px 24px rgba(0, 0, 0, 0.08);
+                      0 10px 30px rgba(0, 0, 0, 0.12),
+                      0 2px 8px rgba(0, 0, 0, 0.04);
           padding: 10px 12px 12px 12px;
           box-sizing: border-box;
           display: flex;
           flex-direction: column;
-          height: 168px;
+          height: 300px;
           -webkit-app-region: no-drag;
           opacity: 0;
           animation: miniChatFadeIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) 0.1s forwards;

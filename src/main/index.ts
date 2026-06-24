@@ -608,7 +608,7 @@ function createTray(mainWindow: BrowserWindow): void {
       }
     }
   ])
-  tray.setToolTip('agentself')
+  tray.setToolTip('agentpet')
   tray.setContextMenu(contextMenu)
 
   tray.on('double-click', () => {
