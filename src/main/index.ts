@@ -1674,6 +1674,9 @@ app.whenReady().then(() => {
         configFile: '',
         languageStyle: defaultConfig.languageStyle || 'normal',
         voice: defaultConfig.voice || 'zh-CN-XiaoxiaoNeural',
+        scale: defaultConfig.scale ?? 1.0,
+        xOffset: defaultConfig.xOffset ?? 0,
+        yOffset: defaultConfig.yOffset ?? 0,
         isDefault: true
       })
 
@@ -1691,6 +1694,9 @@ app.whenReady().then(() => {
               configFile: modelFile,
               languageStyle: cfg.languageStyle || 'normal',
               voice: cfg.voice || 'zh-CN-XiaoxiaoNeural',
+              scale: cfg.scale ?? 1.0,
+              xOffset: cfg.xOffset ?? 0,
+              yOffset: cfg.yOffset ?? 0,
               isDefault: false
             })
           }
@@ -1704,7 +1710,7 @@ app.whenReady().then(() => {
   })
 
   // 保存虚拟体参数
-  ipcMain.handle('api:save-avatar-config', async (_, { id, name, languageStyle, voice }) => {
+  ipcMain.handle('api:save-avatar-config', async (_, { id, name, languageStyle, voice, scale, xOffset, yOffset }) => {
     try {
       if (!avatarConfigs[id]) {
         avatarConfigs[id] = {}
@@ -1712,7 +1718,17 @@ app.whenReady().then(() => {
       avatarConfigs[id].name = name
       avatarConfigs[id].languageStyle = languageStyle
       if (voice) avatarConfigs[id].voice = voice
+      avatarConfigs[id].scale = scale ?? 1.0
+      avatarConfigs[id].xOffset = xOffset ?? 0
+      avatarConfigs[id].yOffset = yOffset ?? 0
       writeConfig({ avatarConfigs })
+
+      // 如果当前修改的是正在使用的虚拟体，立即通知挂件重新渲染
+      const isCurrentActive = (id === 'default' && !customModelDir) || (id === customModelDir)
+      if (isCurrentActive) {
+        mainWindow?.webContents.send('model-updated')
+      }
+
       return true
     } catch (e) {
       console.error('保存虚拟体配置失败', e)

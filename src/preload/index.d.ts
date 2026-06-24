@@ -57,7 +57,7 @@ declare global {
       strengthenExperiences: (ids: string[]) => Promise<boolean>
       getActiveMcpServers: () => Promise<any[]>
       getAvatarsList: () => Promise<any[]>
-      saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string }) => Promise<boolean>
+      saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string; scale?: number; xOffset?: number; yOffset?: number }) => Promise<boolean>
       synthesizeTts: (text: string, voice: string) => Promise<ArrayBuffer | null>
       playTtsAudio: (audioBuffer: ArrayBuffer) => Promise<boolean>
       onPlayTtsAudio: (callback: (audioBuffer: ArrayBuffer) => void) => () => void

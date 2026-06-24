@@ -41,6 +41,8 @@ function isCubismReady(): boolean {
 export function PetWidget(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const [modelReady, setModelReady] = useState(false)
+  const [isHoveringBody, setIsHoveringBody] = useState(false)
+  const [widgetHeight, setWidgetHeight] = useState(SIZE_CONFIG.targetHeight)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -531,13 +533,32 @@ ${memoryContext}
       await waitForCubism()
       if (destroyed) return
 
+      // 直接从主进程获取最新的配置信息，避免 React 状态更新延迟
+      let customScale = 1.0
+      let customXOffset = 0
+      let customYOffset = 0
+      try {
+        const info = await window.api.getCustomModel()
+        const customDir = info?.customModelDir || ''
+        const list = await window.api.getAvatarsList()
+        const active = list.find(a => (customDir ? a.dir === customDir : a.isDefault))
+        if (active) {
+          customScale = active.scale ?? 1.0
+          customXOffset = active.xOffset ?? 0
+          customYOffset = active.yOffset ?? 0
+        }
+      } catch (err) {
+        console.error('[Live2D] 获取模型微调配置失败:', err)
+      }
+
       const app = new PIXI.Application({
         width: SIZE_CONFIG.defaultWidth,
         height: SIZE_CONFIG.targetHeight,
         backgroundAlpha: 0,
         antialias: true,
         resolution: window.devicePixelRatio || 1,
-        autoDensity: true
+        autoDensity: true,
+        preserveDrawingBuffer: true // 开启绘图缓冲保留，用于 readPixels 检测不规则碰撞
       })
       appRef.current = app
 
@@ -560,28 +581,44 @@ ${memoryContext}
       modelRef.current = model
       app.stage.addChild(model as unknown as PIXI.DisplayObject)
 
-      const origW = model.width || 2048
-      const origH = model.height || 2048
-      console.log('[Live2D] 原始尺寸:', origW, 'x', origH)
+      // 先把缩放设为 1，然后高精度获取可见物体的物理包围盒，摆脱巨大的透明外框限制
+      model.scale.set(1)
+      const localBounds = model.getLocalBounds()
+      const boundsW = localBounds.width || model.width || 2048
+      const boundsH = localBounds.height || model.height || 2048
+      const boundsX = localBounds.x || 0
+      const boundsY = localBounds.y || 0
 
-      const targetHeight = SIZE_CONFIG.targetHeight
-      const aspectRatio = origW / origH
-      const computedWidth = Math.max(150, Math.min(450, Math.round(targetHeight * aspectRatio)))
+      console.log('[Live2D] 物理可见包围盒:', boundsW, 'x', boundsH, 'offset:', boundsX, ',', boundsY)
 
-      console.log(`[Live2D] 窗口自适应尺寸设置: 宽=${computedWidth}, 高=${targetHeight}`)
+      // 目标人物身体显示高度设为 250px 
+      const desiredBodyHeight = 250
+      const autoScale = desiredBodyHeight / boundsH
+      const finalScale = autoScale * customScale
+
+      const bodyW = boundsW * finalScale
+      const bodyH = boundsH * finalScale
+
+      // 动态推导最包裹身体的窗口宽度和高度（给动作摆动留出空间）
+      const computedWidth = Math.max(160, Math.min(480, Math.round(bodyW + 50)))
+      const targetHeight = Math.max(220, Math.min(500, Math.round(bodyH + 60)))
+
+      console.log(`[Live2D] 窗口自适应尺寸设置: 宽=${computedWidth}, 高=${targetHeight}, 缩放=${finalScale}`)
 
       // 记录最新长宽状态
       computedWidthRef.current = computedWidth
       targetHeightRef.current = targetHeight
+      setWidgetHeight(targetHeight)
 
       window.api.setWindowSize(computedWidth, targetHeight)
       app.renderer.resize(computedWidth, targetHeight)
 
-      const scale = (targetHeight / origH) * 0.96
-      model.scale.set(scale)
+      // 应用最终缩放
+      model.scale.set(finalScale)
 
-      model.x = (computedWidth - model.width) / 2
-      model.y = (targetHeight - model.height) / 2
+      // 完美的坐标定位算法：水平居中对齐，垂直底部对齐（向上留 10px 缝隙）
+      model.x = (computedWidth - bodyW) / 2 - boundsX * finalScale + (customXOffset * finalScale)
+      model.y = targetHeight - 10 - (boundsY + boundsH) * finalScale + (customYOffset * finalScale)
 
       await model.motion('Idle')
       setModelReady(true)
@@ -601,24 +638,53 @@ ${memoryContext}
   }, [reloadKey])
 
   const checkHoveringModel = (clientX: number, clientY: number): boolean => {
-    if (!modelRef.current || !containerRef.current) return false
+    if (!modelRef.current || !containerRef.current || !appRef.current) return false
     const rect = containerRef.current.getBoundingClientRect()
     const x = clientX - rect.left
     const y = clientY - rect.top
 
+    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+      return false
+    }
+
+    // 1. 高精度的 WebGL 像素级碰撞检测 (Alpha 过滤)
+    try {
+      const renderer = appRef.current.renderer
+      const resolution = renderer.resolution || 1
+      const canvasX = Math.round(x * resolution)
+      const canvasY = Math.round((rect.height - y) * resolution)
+      const gl = (renderer as any).gl
+      if (gl) {
+        const pixels = new Uint8Array(4)
+        renderer.framebuffer.bind()
+        gl.readPixels(canvasX, canvasY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+        const alpha = pixels[3]
+        return alpha > 10 // 大于 10 则判定鼠标触及有颜色的身体部分
+      }
+    } catch (err) {
+      console.warn('[Live2D] WebGL readPixels 失败，降级至包围盒检测:', err)
+    }
+
+    // 2. 降级方案 A: 角色内置 hitTest
     const hitAreas = modelRef.current.hitTest(x, y)
     if (hitAreas && hitAreas.length > 0) {
       return true
     }
 
-    const modelX = modelRef.current.x
-    const modelY = modelRef.current.y
-    const modelW = modelRef.current.width
-    const modelH = modelRef.current.height
+    // 3. 降级方案 B: 精确的物理可见部分 AABB 盒子检测
+    try {
+      const localBounds = modelRef.current.getLocalBounds()
+      const finalScale = modelRef.current.scale.x
+      
+      const modelX = modelRef.current.x + localBounds.x * finalScale
+      const modelY = modelRef.current.y + localBounds.y * finalScale
+      const modelW = localBounds.width * finalScale
+      const modelH = localBounds.height * finalScale
 
-    if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) {
-      return true
-    }
+      if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) {
+        return true
+      }
+    } catch (e) {}
 
     return false
   }
@@ -633,7 +699,13 @@ ${memoryContext}
 
   const handleMouseEnter = (e: React.MouseEvent): void => {
     if (!modelRef.current) return
-    const isHovering = checkHoveringModel(e.clientX, e.clientY)
+    
+    // 检查鼠标下方是不是交互式 HTML 元素（气泡或快捷聊天按钮）
+    const element = document.elementFromPoint(e.clientX, e.clientY)
+    const isInteractive = element && (element.closest('.pet-chat-icon-btn') || element.closest('.pet-toast-bubble'))
+    
+    const isHovering = isInteractive ? true : checkHoveringModel(e.clientX, e.clientY)
+    setIsHoveringBody(isHovering)
     if (isHovering) {
       window.api.setIgnoreMouseEvents(false)
     } else {
@@ -642,6 +714,7 @@ ${memoryContext}
   }
 
   const handleMouseLeave = (): void => {
+    setIsHoveringBody(false)
     window.api.setIgnoreMouseEvents(true, { forward: true })
   }
 
@@ -652,7 +725,12 @@ ${memoryContext}
     const y = e.clientY - rect.top
     modelRef.current.focus(x, y)
 
-    const isHovering = checkHoveringModel(e.clientX, e.clientY)
+    // 检查鼠标下方是不是交互式 HTML 元素（气泡或快捷聊天按钮）
+    const element = document.elementFromPoint(e.clientX, e.clientY)
+    const isInteractive = element && (element.closest('.pet-chat-icon-btn') || element.closest('.pet-toast-bubble'))
+
+    const isHovering = isInteractive ? true : checkHoveringModel(e.clientX, e.clientY)
+    setIsHoveringBody(isHovering)
     if (isHovering) {
       window.api.setIgnoreMouseEvents(false)
     } else {
@@ -817,7 +895,7 @@ ${memoryContext}
         onDoubleClick={handleDoubleClick}
         style={{
           width: '100%',
-          height: `${SIZE_CONFIG.targetHeight}px`,
+          height: `${widgetHeight}px`,
           position: 'absolute',
           bottom: 0,
           left: 0,

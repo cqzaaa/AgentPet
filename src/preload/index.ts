@@ -126,7 +126,7 @@ const api = {
     ipcRenderer.invoke('api:get-active-mcp-servers'),
   getAvatarsList: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-avatars-list'),
-  saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string }): Promise<boolean> =>
+  saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string; scale?: number; xOffset?: number; yOffset?: number }): Promise<boolean> =>
     ipcRenderer.invoke('api:save-avatar-config', params),
   synthesizeTts: (text: string, voice: string): Promise<ArrayBuffer | null> =>
     ipcRenderer.invoke('api:synthesize-tts', { text, voice }),

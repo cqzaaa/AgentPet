@@ -39,6 +39,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editAvatarName, setEditAvatarName] = React.useState('')
   const [editAvatarStyle, setEditAvatarStyle] = React.useState('normal')
   const [editAvatarVoice, setEditAvatarVoice] = React.useState('zh-CN-XiaoxiaoNeural')
+  const [editAvatarScale, setEditAvatarScale] = React.useState(1.0)
+  const [editAvatarXOffset, setEditAvatarXOffset] = React.useState(0)
+  const [editAvatarYOffset, setEditAvatarYOffset] = React.useState(0)
   const [openAvatarDropdownId, setOpenAvatarDropdownId] = React.useState<string | null>(null)
   const [dropdownPos, setDropdownPos] = React.useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 })
 
@@ -542,6 +545,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                   setEditAvatarName(avatar.name)
                                   setEditAvatarStyle(avatar.languageStyle || 'normal')
                                   setEditAvatarVoice(avatar.voice || 'zh-CN-XiaoxiaoNeural')
+                                  setEditAvatarScale(avatar.scale ?? 1.0)
+                                  setEditAvatarXOffset(avatar.xOffset ?? 0)
+                                  setEditAvatarYOffset(avatar.yOffset ?? 0)
                                   setShowEditAvatarModal(true)
                                   setOpenAvatarDropdownId(null)
                                 }}
@@ -667,6 +673,96 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   提示：选择 TTS 语音声音，开启语音后 LLM 回复将自动朗读。
                 </div>
               </div>
+
+              <div>
+                <label className="mcp-form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>微调缩放比例</span>
+                  <span style={{ color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}>{editAvatarScale.toFixed(2)}x</span>
+                </label>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.05"
+                    value={editAvatarScale}
+                    onChange={e => setEditAvatarScale(parseFloat(e.target.value))}
+                    style={{ flex: 1, accentColor: 'var(--accent-color, #4f8cff)' }}
+                  />
+                  <input
+                    type="number"
+                    min="0.5"
+                    max="2.0"
+                    step="0.05"
+                    value={editAvatarScale}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value)
+                      if (!isNaN(val)) setEditAvatarScale(val)
+                    }}
+                    style={{ width: '65px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color, rgba(128,128,128,0.2))', background: 'var(--bg-card-sub, rgba(128,128,128,0.05))', color: 'var(--text-color)' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mcp-form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>水平位置微调 (X 轴)</span>
+                  <span style={{ color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}>{editAvatarXOffset} px</span>
+                </label>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    value={editAvatarXOffset}
+                    onChange={e => setEditAvatarXOffset(parseInt(e.target.value, 10))}
+                    style={{ flex: 1, accentColor: 'var(--accent-color, #4f8cff)' }}
+                  />
+                  <input
+                    type="number"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    value={editAvatarXOffset}
+                    onChange={e => {
+                      const val = parseInt(e.target.value, 10)
+                      if (!isNaN(val)) setEditAvatarXOffset(val)
+                    }}
+                    style={{ width: '65px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color, rgba(128,128,128,0.2))', background: 'var(--bg-card-sub, rgba(128,128,128,0.05))', color: 'var(--text-color)' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mcp-form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>垂直位置微调 (Y 轴)</span>
+                  <span style={{ color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}>{editAvatarYOffset} px</span>
+                </label>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    value={editAvatarYOffset}
+                    onChange={e => setEditAvatarYOffset(parseInt(e.target.value, 10))}
+                    style={{ flex: 1, accentColor: 'var(--accent-color, #4f8cff)' }}
+                  />
+                  <input
+                    type="number"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    value={editAvatarYOffset}
+                    onChange={e => {
+                      const val = parseInt(e.target.value, 10)
+                      if (!isNaN(val)) setEditAvatarYOffset(val)
+                    }}
+                    style={{ width: '65px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color, rgba(128,128,128,0.2))', background: 'var(--bg-card-sub, rgba(128,128,128,0.05))', color: 'var(--text-color)' }}
+                  />
+                </div>
+              </div>
             </div>
             <div className="mcp-modal-footer">
               <button
@@ -690,7 +786,10 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                       id: editingAvatar.id,
                       name: editAvatarName.trim(),
                       languageStyle: editAvatarStyle,
-                      voice: editAvatarVoice
+                      voice: editAvatarVoice,
+                      scale: editAvatarScale,
+                      xOffset: editAvatarXOffset,
+                      yOffset: editAvatarYOffset
                     })
                     await refreshAvatarsList()
                     setShowEditAvatarModal(false)
