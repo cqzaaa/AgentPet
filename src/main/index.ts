@@ -2220,6 +2220,19 @@ app.whenReady().then(() => {
 
       const sessionIds = sessions.map(s => s.id)
 
+      // 在事务开始前找出将被删除的会话
+      let deletedSessions: { id: string }[] = []
+      try {
+        if (sessionIds.length > 0) {
+          const placeholders = sessionIds.map(() => '?').join(',')
+          deletedSessions = database.prepare(`SELECT id FROM sessions WHERE id NOT IN (${placeholders})`).all(...sessionIds) as { id: string }[]
+        } else {
+          deletedSessions = database.prepare('SELECT id FROM sessions').all() as { id: string }[]
+        }
+      } catch (err) {
+        console.error('获取即将删除的会话失败', err)
+      }
+
       const transaction = database.transaction((sessList: any[]) => {
         // 1. 删除已被删除 of sessions
         if (sessionIds.length > 0) {
@@ -2232,7 +2245,7 @@ app.whenReady().then(() => {
         for (const s of sessList) {
           insertSession.run(s.id, s.name, s.time, s.pinned ? 1 : 0, s.userId || 'system')
 
-          // 收集当前 session 里的所有 message ID，用于删除已经不存在的 message
+          // 收集当前 session 里的所有 message ID，用于删除已经不存在 the message
           const msgList = s.messages || []
           const msgIds = msgList.map((m: any) => String(m.id))
 
@@ -2265,6 +2278,33 @@ app.whenReady().then(() => {
       })
 
       transaction(sessions)
+
+      // 事务执行成功后，物理清理关联的本地物理文件目录
+      if (deletedSessions.length > 0) {
+        const chatDir = getActiveChatDir()
+        for (const ds of deletedSessions) {
+          // 兼容并清理两种安全命名替换方式的目录
+          const safe1 = ds.id.replace(/[^a-zA-Z0-9_-]/g, '_')
+          const safe2 = ds.id.replace(/[<>:"/\\|?*]/g, '_')
+          
+          const path1 = join(chatDir, safe1)
+          const path2 = join(chatDir, safe2)
+          
+          try {
+            if (fs.existsSync(path1)) {
+              await fs.promises.rm(path1, { recursive: true, force: true })
+              console.log(`[SaveLocalSessions] 成功物理清理会话目录: ${path1}`)
+            }
+            if (safe2 !== safe1 && fs.existsSync(path2)) {
+              await fs.promises.rm(path2, { recursive: true, force: true })
+              console.log(`[SaveLocalSessions] 成功物理清理会话目录: ${path2}`)
+            }
+          } catch (err) {
+            console.error(`[SaveLocalSessions] 清理被删除会话目录失败 (${ds.id}):`, err)
+          }
+        }
+      }
+
       return true
     } catch (e) {
       console.error('保存聊天记录到 SQLite 失败', e)

@@ -57,6 +57,7 @@ export function AgentWindow(): React.JSX.Element {
 
   // ── 标签页与窗口控制状态及逻辑 ──
   const [openSessionIds, setOpenSessionIds] = useState<string[]>([])
+  const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
 
   const checkMaximized = async () => {
@@ -390,7 +391,7 @@ export function AgentWindow(): React.JSX.Element {
               sessions={sessions}
               activeSessionId={activeSessionId}
               onSelect={(id) => { setActiveSessionId(id); setActiveTab('chat') }}
-              onDelete={handleDeleteSession}
+              onDelete={setSessionToDeleteId}
               onTogglePin={handleTogglePinSession}
               onRename={handleRenameSession}
             />
@@ -895,6 +896,67 @@ export function AgentWindow(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* 删除会话二次确认弹框 */}
+      {sessionToDeleteId && (
+        <div className="mcp-modal-overlay">
+          <div className="mcp-modal-card" style={{ maxWidth: '380px', width: '90%' }}>
+            <div className="mcp-modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))' }}>
+              <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                删除
+              </div>
+              <button className="mcp-modal-close-btn" style={{ fontSize: '20px' }} onClick={() => setSessionToDeleteId(null)}>×</button>
+            </div>
+            <div className="mcp-modal-body" style={{ padding: '24px 20px', fontSize: '13px', color: 'var(--text-secondary, #666)', lineHeight: '1.6' }}>
+              您即将删除此话题，此操作无法撤销。
+            </div>
+            <div className="mcp-modal-footer" style={{ padding: '12px 20px 16px', display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: 'none' }}>
+              <button
+                onClick={() => setSessionToDeleteId(null)}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color, rgba(128, 128, 128, 0.2))',
+                  background: 'var(--bg-card, #ffffff)',
+                  color: 'var(--text-primary, #333)',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card, #ffffff)'}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (sessionToDeleteId) {
+                    handleDeleteSession(sessionToDeleteId)
+                    setSessionToDeleteId(null)
+                  }
+                }}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#e0533c', // 珊瑚红/橙红色
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 'bold',
+                  boxShadow: '0 2px 6px rgba(224, 83, 60, 0.15)',
+                  transition: 'filter 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.05)'}
+                onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Global Toast */}
       {toast && (
