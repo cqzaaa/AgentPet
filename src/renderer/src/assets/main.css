@@ -747,6 +747,23 @@ body {
   padding: 10px 8px 4px;
   white-space: nowrap;
   user-select: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s ease;
+}
+
+.recent-group-header:hover {
+  color: var(--text-primary);
+}
+
+.recent-group-arrow {
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  font-size: 9px;
+  flex-shrink: 0;
 }
 
 /* 空状态 */

@@ -51,7 +51,7 @@ function getPreview(s: Session): string {
 
 // 扁平化的渲染单元
 type RenderRow =
-  | { type: 'header'; key: string; label: string }
+  | { type: 'header'; key: string; groupKey: GroupKey; label: string }
   | { type: 'item'; key: string; session: Session }
 
 interface Props {
@@ -67,6 +67,21 @@ export function RecentSessionList(props: Props): React.JSX.Element {
   const { sessions, activeSessionId, onSelect, onDelete, onTogglePin, onRename } = props
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<GroupKey, boolean>>({
+    pinned: false,
+    today: false,
+    yesterday: false,
+    thisWeek: true,
+    earlier: true
+  })
+
+  const toggleGroup = (g: GroupKey) => {
+    setCollapsedGroups(prev => ({
+      ...prev,
+      [g]: !prev[g]
+    }))
+  }
+
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sessionId: string } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renamingValue, setRenamingValue] = useState('')
@@ -96,13 +111,15 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     const out: RenderRow[] = []
     for (const g of GROUP_ORDER) {
       if (buckets[g].length === 0) continue
-      out.push({ type: 'header', key: `header-${g}`, label: GROUP_LABELS[g] })
-      for (const s of buckets[g]) {
-        out.push({ type: 'item', key: `item-${s.id}`, session: s })
+      out.push({ type: 'header', key: `header-${g}`, groupKey: g, label: GROUP_LABELS[g] })
+      if (!collapsedGroups[g]) {
+        for (const s of buckets[g]) {
+          out.push({ type: 'item', key: `item-${s.id}`, session: s })
+        }
       }
     }
     return out
-  }, [filteredSessions, searchQuery])
+  }, [filteredSessions, searchQuery, collapsedGroups])
 
   // 点击外部关闭右键菜单
   useEffect(() => {
@@ -152,7 +169,16 @@ export function RecentSessionList(props: Props): React.JSX.Element {
   const renderRow = (index: number): React.ReactNode => {
     const row = rows[index]
     if (row.type === 'header') {
-      return <div className="recent-group-header">{row.label}</div>
+      const isCollapsed = collapsedGroups[row.groupKey]
+      return (
+        <div
+          className="recent-group-header"
+          onClick={() => toggleGroup(row.groupKey)}
+        >
+          <span className="recent-group-arrow">{isCollapsed ? '▸' : '▾'}</span>
+          <span>{row.label}</span>
+        </div>
+      )
     }
     const s = row.session
     const isActive = s.id === activeSessionId
