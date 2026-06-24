@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
 import { join, basename, dirname } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -459,6 +459,124 @@ let pendingAgentInput: string = '' // 缓存快捷输入框传递过来的待发
 let tray: Tray | null = null
 let customModelDir = ''
 let customModelFile = ''
+
+let screenshotWindows: BrowserWindow[] = []
+const screenshotMap = new Map<string, string>()
+
+async function startScreenshot(): Promise<void> {
+  closeScreenshotWindows()
+
+  // 立即显示快捷输入窗口（如果未创建则创建之）
+  if (!inputWindow || inputWindow.isDestroyed()) {
+    createInputWindow()
+  } else {
+    if (inputWindow.isMinimized()) inputWindow.restore()
+    inputWindow.show()
+  }
+
+  // 临时隐藏快捷输入窗口，避免其遮挡截图画面
+  if (inputWindow && !inputWindow.isDestroyed()) {
+    inputWindow.hide()
+  }
+
+  const displays = screen.getAllDisplays()
+  
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: Math.max(...displays.map(d => d.bounds.width * d.scaleFactor)),
+        height: Math.max(...displays.map(d => d.bounds.height * d.scaleFactor))
+      }
+    })
+
+    screenshotMap.clear()
+
+    for (const display of displays) {
+      let source = sources.find(s => s.display_id === display.id.toString())
+      if (!source) {
+        const index = displays.indexOf(display)
+        if (index < sources.length) {
+          source = sources[index]
+        }
+      }
+
+      if (source) {
+        screenshotMap.set(display.id.toString(), source.thumbnail.toDataURL())
+      }
+    }
+
+    for (const display of displays) {
+      const win = new BrowserWindow({
+        x: display.bounds.x,
+        y: display.bounds.y,
+        width: display.bounds.width,
+        height: display.bounds.height,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        fullscreen: process.platform !== 'darwin',
+        enableLargerThanScreen: true,
+        resizable: false,
+        movable: false,
+        skipTaskbar: true,
+        hasShadow: false,
+        show: false,
+        webPreferences: {
+          preload: join(__dirname, '../preload/index.js'),
+          sandbox: false
+        }
+      })
+
+      win.setMenu(null)
+      
+      const screenshotUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
+        ? `${process.env['ELECTRON_RENDERER_URL']}/#/screenshot?displayId=${display.id}&scaleFactor=${display.scaleFactor}&width=${display.bounds.width}&height=${display.bounds.height}`
+        : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/screenshot?displayId=${display.id}&scaleFactor=${display.scaleFactor}&width=${display.bounds.width}&height=${display.bounds.height}`
+
+      win.loadURL(screenshotUrl)
+      
+      win.on('ready-to-show', () => {
+        win.show()
+        win.focus()
+      })
+
+      screenshotWindows.push(win)
+    }
+  } catch (err) {
+    console.error('Failed to capture screen:', err)
+  }
+}
+
+function closeScreenshotWindows(): void {
+  for (const win of screenshotWindows) {
+    if (!win.isDestroyed()) {
+      win.destroy()
+    }
+  }
+  screenshotWindows = []
+}
+
+async function saveBase64ImageInternal(dataUrl: string): Promise<{ path: string; name: string } | null> {
+  try {
+    const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+    if (!matches) return null
+    const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1]
+    const base64Data = matches[2]
+    const buffer = Buffer.from(base64Data, 'base64')
+    const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true })
+    }
+    const fileName = `clipboard_${Date.now()}.${ext}`
+    const filePath = join(tempDir, fileName)
+    await fs.promises.writeFile(filePath, buffer)
+    return { path: filePath, name: fileName }
+  } catch (e: any) {
+    console.error('保存图片失败:', e)
+    return null
+  }
+}
 let currentLlmAbortController: AbortController | null = null
 // 跟踪每个会话最近上传的 xlsx 文件，用于 generate_file 时自动复制数据验证
 const sessionLastXlsxMap: Map<string, string> = new Map()
@@ -565,26 +683,34 @@ ipcMain.handle('api:is-agent-window-maximized', () => {
 })
 
 
-function createInputWindow(): void {
+function createInputWindow(x?: number, y?: number, initialImage?: { path: string; base64: string; width: number; height: number }): void {
   if (inputWindow) {
     if (inputWindow.isMinimized()) inputWindow.restore()
+    if (x !== undefined && y !== undefined) {
+      inputWindow.setBounds({ x, y, width: 400, height: 90 })
+    }
     inputWindow.focus()
+    if (initialImage) {
+      inputWindow.webContents.send('api:set-screenshot-image', initialImage)
+    }
     return
   }
 
-  let x: number | undefined = undefined
-  let y: number | undefined = undefined
+  let targetX = x
+  let targetY = y
 
-  const primaryDisplay = screen.getPrimaryDisplay()
-  const { width: scrWidth, height: scrHeight } = primaryDisplay.workArea
-  x = Math.round(scrWidth / 2 - 400 / 2)
-  y = Math.round(scrHeight * 0.22)
+  if (targetX === undefined || targetY === undefined) {
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width: scrWidth, height: scrHeight } = primaryDisplay.workArea
+    targetX = Math.round(scrWidth / 2 - 400 / 2)
+    targetY = Math.round(scrHeight * 0.22)
+  }
 
   inputWindow = new BrowserWindow({
     width: 400,
     height: 90,
-    x,
-    y,
+    x: targetX,
+    y: targetY,
     show: false,
     frame: false,
     transparent: true,
@@ -609,6 +735,13 @@ function createInputWindow(): void {
   inputWindow.on('ready-to-show', () => {
     inputWindow?.show()
     inputWindow?.focus()
+    if (initialImage) {
+      setTimeout(() => {
+        if (inputWindow && !inputWindow.isDestroyed()) {
+          inputWindow.webContents.send('api:set-screenshot-image', initialImage)
+        }
+      }, 150)
+    }
   })
 
   inputWindow.on('closed', () => {
@@ -623,6 +756,12 @@ function createTray(mainWindow: BrowserWindow): void {
       label: '显示虚拟体',
       click: () => {
         mainWindow.show()
+      }
+    },
+    {
+      label: '快捷聊天',
+      click: () => {
+        createInputWindow()
       }
     },
     {
@@ -775,9 +914,87 @@ function createWindow(): void {
     }
   })
 
-  ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean) => {
+  ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean, imagePath?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('chat-to-pet', text, isNewSession)
+      mainWindow.webContents.send('chat-to-pet', text, isNewSession, imagePath)
+    }
+  })
+
+  // 截图相关 IPC 通信注册
+  ipcMain.on('api:start-screenshot', () => {
+    startScreenshot()
+  })
+
+  ipcMain.handle('api:get-screenshot-by-display-id', (_, displayId: string) => {
+    return screenshotMap.get(displayId) || ''
+  })
+
+  ipcMain.on('api:cancel-screenshot', () => {
+    closeScreenshotWindows()
+    // 取消截图时重新显示快捷输入窗口
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.show()
+      inputWindow.focus()
+    }
+  })
+
+  ipcMain.on('api:complete-screenshot', async (_, croppedBase64: string, bounds: { x: number; y: number; width: number; height: number }) => {
+    closeScreenshotWindows()
+
+    let imagePath = ''
+    try {
+      const result = await saveBase64ImageInternal(croppedBase64)
+      if (result) {
+        imagePath = result.path
+      }
+    } catch (err) {
+      console.error('Failed to save screenshot image:', err)
+    }
+
+    if (!imagePath) return
+
+    // 计算快捷窗口的最佳显示坐标 (400x90 规格，贴合屏幕安全距离)
+    const inputWidth = 400
+    const inputHeight = 90
+    let targetX = bounds.x + (bounds.width - inputWidth) / 2
+    let targetY = bounds.y + bounds.height + 10
+
+    const activeDisplay = screen.getDisplayMatching(bounds)
+    const workArea = activeDisplay.workArea
+
+    if (targetX < workArea.x) {
+      targetX = workArea.x + 10
+    } else if (targetX + inputWidth > workArea.x + workArea.width) {
+      targetX = workArea.x + workArea.width - inputWidth - 10
+    }
+
+    if (targetY + inputHeight > workArea.y + workArea.height) {
+      // 空间不足以放在下方，则放在上方
+      targetY = bounds.y - inputHeight - 10
+    }
+    if (targetY < workArea.y) {
+      targetY = workArea.y + 10
+    }
+
+    const payload = {
+      path: imagePath,
+      base64: croppedBase64,
+      width: bounds.width,
+      height: bounds.height
+    }
+
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.setBounds({
+        x: Math.round(targetX),
+        y: Math.round(targetY),
+        width: inputWidth,
+        height: inputHeight
+      })
+      inputWindow.show()
+      inputWindow.focus()
+      inputWindow.webContents.send('api:set-screenshot-image', payload)
+    } else {
+      createInputWindow(Math.round(targetX), Math.round(targetY), payload)
     }
   })
 
@@ -1323,6 +1540,43 @@ app.whenReady().then(() => {
     if (resolve) {
       resolve(!!approved)
       pendingPermissions.delete(requestId)
+    }
+  })
+
+  // 从剪贴板读取文件路径（Windows CF_HDROP）或图片
+  ipcMain.handle('api:read-clipboard-files', async () => {
+    try {
+      // 1. 尝试读取 Windows 文件拖拽/复制格式 (FileNameW)
+      const fileNameWBuf = clipboard.readBuffer('FileNameW')
+      if (fileNameWBuf && fileNameWBuf.length > 0) {
+        let pathStr = fileNameWBuf.toString('utf16le')
+        pathStr = pathStr.replace(/\0/g, '') // 移除 null terminator
+        if (pathStr) {
+          try {
+            if (fs.existsSync(pathStr)) {
+              return { type: 'files', paths: [pathStr] }
+            }
+          } catch (e) {
+            console.error('检查剪贴板文件路径失败:', e)
+          }
+        }
+      }
+
+      // 2. 尝试读取剪贴板图片
+      const img = clipboard.readImage()
+      if (img && !img.isEmpty()) {
+        const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
+        const fileName = `clipboard_${Date.now()}.png`
+        const filePath = join(tempDir, fileName)
+        fs.writeFileSync(filePath, img.toPNG())
+        return { type: 'image', path: filePath, name: fileName }
+      }
+
+      return null
+    } catch (err) {
+      console.error('读取剪贴板文件失败:', err)
+      return null
     }
   })
 
@@ -3264,24 +3518,7 @@ app.whenReady().then(() => {
 
   // 将剪贴板图片（base64 data URL）保存为临时文件，返回文件路径
   ipcMain.handle('api:save-clipboard-image', async (_, dataUrl: string) => {
-    try {
-      const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
-      if (!matches) return null
-      const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1]
-      const base64Data = matches[2]
-      const buffer = Buffer.from(base64Data, 'base64')
-      const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true })
-      }
-      const fileName = `clipboard_${Date.now()}.${ext}`
-      const filePath = join(tempDir, fileName)
-      await fs.promises.writeFile(filePath, buffer)
-      return { path: filePath, name: fileName }
-    } catch (e: any) {
-      console.error('保存剪贴板图片失败:', e)
-      return null
-    }
+    return saveBase64ImageInternal(dataUrl)
   })
 
   // 获取已生成的文件列表（支持按会话过滤）

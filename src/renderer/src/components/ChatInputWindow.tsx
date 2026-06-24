@@ -2,10 +2,24 @@ import React, { useEffect, useState, useRef } from 'react'
 
 export function ChatInputWindow(): React.JSX.Element {
   const [text, setText] = useState('')
+  const [screenshotImages, setScreenshotImages] = useState<{ path: string; base64: string; width: number; height: number }[]>([]);
+  const [pastedFiles, setPastedFiles] = useState<{ path: string; name: string; isImage: boolean; base64?: string }[]>([]);
   const [messages, setMessages] = useState<{ sender: 'user' | 'agent'; text: string }[]>([])
   const [isThinking, setIsThinking] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // 监听截图提问发送的截图图片并追加到数组中
+  useEffect(() => {
+    if (!window.api.onSetScreenshotImage) return
+    const unsubscribe = window.api.onSetScreenshotImage((imgInfo) => {
+      setScreenshotImages(prev => [...prev, imgInfo])
+      setShowDropdown(false)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [])
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const isDraggingRef = useRef(false)
@@ -175,18 +189,20 @@ export function ChatInputWindow(): React.JSX.Element {
 
   // 监听下拉菜单和聊天框的展开状态，自适应调节 Electron 窗口大小以防止裁剪
   useEffect(() => {
+    const hasAttachments = screenshotImages.length > 0 || pastedFiles.length > 0
+    const extraH = hasAttachments ? 60 : 0
     if (showDropdown) {
       if (!showChat) {
-        window.api.setWindowSize(400, 240, 'top')
+        window.api.setWindowSize(400, 240 + extraH, 'top')
       }
     } else {
       if (!showChat) {
-        window.api.setWindowSize(400, 90, 'top')
+        window.api.setWindowSize(400, 90 + extraH, 'top')
       } else {
-        window.api.setWindowSize(400, 400, 'top')
+        window.api.setWindowSize(400, 400 + extraH, 'top')
       }
     }
-  }, [showDropdown, showChat])
+  }, [showDropdown, showChat, screenshotImages.length, pastedFiles.length])
 
   // 自动滚动到底部 (新消息平滑滚动，历史会话瞬间直达底部无滚动动画)
   useEffect(() => {
@@ -263,7 +279,7 @@ export function ChatInputWindow(): React.JSX.Element {
       const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-      window.api.saveLocalSessions(updated).catch(() => {})
+      window.api.saveLocalSessions(updated).catch(() => { })
     } catch (e) { }
 
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
@@ -280,59 +296,36 @@ export function ChatInputWindow(): React.JSX.Element {
   }
 
   const handleSend = () => {
-    if (!text.trim()) return
+    if (!text.trim() && screenshotImages.length === 0 && pastedFiles.length === 0) return
     const userText = text.trim()
-    const isFirst = messages.length === 0
 
-    window.api.sendChatToPet(userText, isFirst)
-    setText('')
-
-    // 纯文字消息：在迷你面板内展示
-    window.api.setWindowSize(400, 400, 'top')
-    shouldScrollRef.current = 'smooth'
-    setMessages(prev => [...prev, { sender: 'user', text: userText }])
-    setIsThinking(true)
-    setShowChat(true)
-
-    // 立即将用户消息同步写入数据库，确保 Agent 窗口打开时能加载到
-    try {
-      const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-      let parsed: any[] = []
-      if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
-      const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
-      const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
-      let found = false
-      const updated = parsed.map(s => {
-        if (s.id === activeId) {
-          found = true
-          const userMsg = { id: Date.now(), sender: 'user', text: userText, time: timeStr }
-          return { ...s, messages: [...(s.messages || []), userMsg] }
-        }
-        return s
+    // 组装并发送待处理的输入到 Agent 窗口（实现弹框跳转到主 chat 页面）
+    const payload: any = {}
+    const allFiles: { path: string; name: string }[] = []
+    if (screenshotImages.length > 0) {
+      screenshotImages.forEach(img => {
+        allFiles.push({ path: img.path, name: `screenshot_${Date.now()}.png` })
       })
-      if (!found) {
-        const newSess = { id: activeId, name: userText.substring(0, 15), time: timeStr, messages: [{ id: Date.now(), sender: 'user', text: userText, time: timeStr }] }
-        updated.push(newSess)
-      }
-      localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-      window.api.saveLocalSessions(updated).catch(() => {})
-    } catch (e) { }
+    }
+    if (pastedFiles.length > 0) {
+      pastedFiles.forEach(f => {
+        allFiles.push({ path: f.path, name: f.name })
+      })
+    }
+    if (allFiles.length > 0) {
+      payload.files = allFiles
+    }
+    if (userText) {
+      payload.text = userText
+    }
 
-    // 每次发送后同步刷新一次历史会话名称
-    setTimeout(() => {
-      const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved)
-          setSessions([...parsed].reverse())
-        } catch (e) { }
-      }
-    }, 150)
+    window.api.sendPendingInput(JSON.stringify(payload))
+    window.api.openAgentWindow()
+    window.api.closeInputWindow()
 
-    // 发送后重新聚焦输入框
-    setTimeout(() => {
-      if (inputRef.current) inputRef.current.focus()
-    }, 50)
+    setText('')
+    setScreenshotImages([])
+    setPastedFiles([])
   }
 
   const handleClearAll = () => {
@@ -351,7 +344,7 @@ export function ChatInputWindow(): React.JSX.Element {
       const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-      window.api.saveLocalSessions(updated).catch(() => {})
+      window.api.saveLocalSessions(updated).catch(() => { })
     } catch (e) { }
 
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
@@ -378,81 +371,148 @@ export function ChatInputWindow(): React.JSX.Element {
     }
   }
 
-  // 粘贴文件/图片时处理，完成后自动跳转到完整对话窗口
-  // 图片 → 保存为临时文件并作为附件传递；文档 → 提取文本传递
+  // 辅助：根据文件扩展名返回分类图标
+  const getFileIcon = (name: string): string => {
+    const ext = name.split('.').pop()?.toLowerCase() || ''
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+    if (imageExts.includes(ext)) return '🖼️'
+    if (['pdf'].includes(ext)) return '📕'
+    if (['doc', 'docx'].includes(ext)) return '📘'
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📗'
+    if (['ppt', 'pptx'].includes(ext)) return '📙'
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '📦'
+    if (['mp3', 'wav', 'flac', 'ogg'].includes(ext)) return '🎵'
+    if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return '🎬'
+    if (['txt', 'md', 'log'].includes(ext)) return '📝'
+    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs'].includes(ext)) return '💻'
+    if (['json', 'xml', 'yaml', 'yml', 'ini', 'toml'].includes(ext)) return '⚙️'
+    if (['html', 'css', 'scss'].includes(ext)) return '🌐'
+    return '📄'
+  }
+
+  // 辅助：将文件添加到粘贴文件预览列表（图片自动加载缩略图）
+  const addPastedFile = async (filePath: string, fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || ''
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
+    const isImage = imageExts.includes(ext)
+    let base64: string | undefined
+
+    if (isImage) {
+      try {
+        const b64 = await window.api.readFileBase64(filePath)
+        if (b64) base64 = `data:image/${ext === 'svg' ? 'svg+xml' : ext};base64,${b64}`
+      } catch { /* 缩略图加载失败不影响 */ }
+    }
+
+    setPastedFiles(prev => [...prev, { path: filePath, name: fileName, isImage, base64 }])
+  }
+
+  // 粘贴文件/图片时处理：添加到预览列表，发送时再跳转
   const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
-    // ── 优先检测剪贴板中的原始图片（截图、复制的图片等）──
+    // 阻止默认行为，我们将接管所有的粘贴逻辑，以确保在不同环境下都能正确提取系统剪贴板文件
+    e.preventDefault()
+
+    const plainText = e.clipboardData.getData('text/plain')
     const items = Array.from(e.clipboardData.items)
     const imageItem = items.find(item => item.type.startsWith('image/'))
+
+    // 优先同步提取 HTML5 剪贴板中的纯图片（如浏览器中复制的图片），防止异步后数据丢失
+    let fallbackDataUrl: string | null = null
     if (imageItem) {
-      e.preventDefault()
       const blob = imageItem.getAsFile()
       if (blob) {
-        try {
+        fallbackDataUrl = await new Promise<string | null>(resolve => {
           const reader = new FileReader()
-          reader.onload = async () => {
-            const dataUrl = reader.result as string
-            // 保存剪贴板图片为临时文件，返回文件路径
-            const result = await window.api.saveClipboardImage(dataUrl)
-            if (result) {
-              // 传文件路径给 Agent 窗口，由其作为附件加载
-              window.api.sendPendingInput(JSON.stringify({ type: 'file', path: result.path, name: result.name }))
-            }
-            window.api.openAgentWindow()
-            window.api.closeInputWindow()
-          }
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = () => resolve(null)
           reader.readAsDataURL(blob)
-        } catch (err) {
-          console.error('读取剪贴板图片失败:', err)
+        })
+      }
+    }
+
+    let handledAsFile = false
+
+    // 1. 优先尝试通过主进程读取真实文件（解决资源管理器复制文件的原名和绝对路径获取问题，兼顾所有文件类型）
+    if (window.api.readClipboardFiles) {
+      try {
+        const result = await window.api.readClipboardFiles()
+        if (result) {
+          if (result.type === 'files' && result.paths.length > 0) {
+            for (const fp of result.paths) {
+              const name = fp.split(/[\\/]/).pop() || 'file'
+              await addPastedFile(fp, name)
+            }
+            handledAsFile = true
+          } else if (result.type === 'image') {
+            // 主进程成功提取了系统剪贴板图片
+            let base64: string | undefined
+            try {
+              const b64 = await window.api.readFileBase64(result.path)
+              if (b64) base64 = `data:image/png;base64,${b64}`
+            } catch { /* ignore */ }
+            setPastedFiles(prev => [...prev, {
+              path: result.path,
+              name: result.name,
+              isImage: true,
+              base64
+            }])
+            handledAsFile = true
+          }
         }
+      } catch (err) {
+        console.error('主进程读取剪贴板文件失败:', err)
+      }
+    }
+
+    if (handledAsFile) return
+
+    // 2. 如果主进程没能读取到真实文件，使用刚刚同步截获的纯图片 DataURL
+    if (fallbackDataUrl) {
+      try {
+        const result = await window.api.saveClipboardImage(fallbackDataUrl)
+        if (result) {
+          setPastedFiles(prev => [...prev, {
+            path: result.path,
+            name: result.name,
+            isImage: true,
+            base64: fallbackDataUrl
+          }])
+        }
+      } catch (err) {
+        console.error('读取 fallback 图片失败:', err)
       }
       return
     }
 
-    // ── 处理文件粘贴（Electron 文件拖拽/复制）──
+    // 3. Fallback: 处理 HTML5 File API 提供的文件拖拽遗留逻辑
     const files = e.clipboardData.files
     if (files && files.length > 0) {
-      e.preventDefault()
-      const filePaths: { path: string; name: string }[] = []
-      let docText = ''
-
+      let html5Handled = false
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-        try {
-          const filePath = (file as any).path
-          const ext = file.name.split('.').pop()?.toLowerCase() || ''
-          const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
-          const docExts = ['pdf', 'docx', 'xlsx', 'xls', 'csv']
-          const textExts = ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'sh', 'bat', 'yml', 'yaml', 'ini', 'xml']
-
-          if (imageExts.includes(ext) && filePath) {
-            // 图片文件 → 传路径给 Agent 窗口作为附件
-            filePaths.push({ path: filePath, name: file.name })
-          } else if (docExts.includes(ext) && filePath) {
-            const parsed = await window.api.parseFileContent(filePath)
-            docText += `\n📄【已粘贴文件：${file.name}】\n${parsed}\n`
-          } else if (textExts.includes(ext)) {
-            const parsed = await file.text()
-            docText += `\n📄【已粘贴文件：${file.name}】\n${parsed}\n`
-          } else if (filePath) {
-            filePaths.push({ path: filePath, name: file.name })
-          }
-        } catch (err: any) {
-          console.error('粘贴文件提取失败:', err)
-          docText += `\n⚠️【粘贴文件读取失败: ${file.name}】\n`
+        const filePath = (file as any).path
+        if (filePath) {
+          await addPastedFile(filePath, file.name)
+          html5Handled = true
         }
       }
+      if (html5Handled) return
+    }
 
-      // 组装传递给 Agent 窗口的数据
-      const payload: any = {}
-      if (filePaths.length > 0) payload.files = filePaths
-      if (docText) payload.text = docText
-
-      if (payload.files || payload.text) {
-        window.api.sendPendingInput(JSON.stringify(payload))
-        window.api.openAgentWindow()
-        window.api.closeInputWindow()
-      }
+    // 4. 如果以上都不是，说明纯粹是普通文本，我们手动将其插回输入框
+    if (plainText) {
+      const input = e.target as HTMLInputElement
+      const start = input.selectionStart || 0
+      const end = input.selectionEnd || 0
+      
+      setText(prev => {
+        const newText = prev.substring(0, start) + plainText + prev.substring(end)
+        // 使用 setTimeout 等待 React 更新 DOM 后再调整光标位置
+        setTimeout(() => {
+          input.setSelectionRange(start + plainText.length, start + plainText.length)
+        }, 0)
+        return newText
+      })
     }
   }
 
@@ -537,10 +597,15 @@ export function ChatInputWindow(): React.JSX.Element {
 
   // 动态计算 wrapper 的高度，以提供平滑过渡的动效
   let wrapperHeight = '66px'
+  const hasAttachments = screenshotImages.length > 0 || pastedFiles.length > 0
+  const attachmentsHeaderHeight = 60 // 54px header + 6px gap
+
   if (showChat) {
-    wrapperHeight = '378px'
+    wrapperHeight = hasAttachments ? `${378 + attachmentsHeaderHeight}px` : '378px'
   } else if (showDropdown) {
-    wrapperHeight = '220px'
+    wrapperHeight = hasAttachments ? `${220 + attachmentsHeaderHeight}px` : '220px'
+  } else {
+    wrapperHeight = hasAttachments ? `${66 + attachmentsHeaderHeight}px` : '66px'
   }
 
   return (
@@ -553,6 +618,59 @@ export function ChatInputWindow(): React.JSX.Element {
         }
       }}
     >
+      {(screenshotImages.length > 0 || pastedFiles.length > 0) && (
+        <div className="screenshot-previews-container">
+          {/* 截图预览 */}
+          {screenshotImages.map((img, index) => (
+            <div key={`ss-${index}`} className="screenshot-preview-item">
+              <img src={img.base64} className="screenshot-preview-thumb" />
+              <span className="screenshot-preview-meta">{img.width} × {img.height}</span>
+              <button
+                className="screenshot-preview-remove"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setScreenshotImages(prev => prev.filter((_, i) => i !== index))
+                }}
+                title="移除图片"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {/* 粘贴文件预览 */}
+          {pastedFiles.map((file, index) => (
+            <div key={`pf-${index}`} className="screenshot-preview-item pasted-file-item">
+              {file.isImage && file.base64 ? (
+                <img src={file.base64} className="screenshot-preview-thumb" />
+              ) : (
+                <span className="pasted-file-icon">{getFileIcon(file.name)}</span>
+              )}
+              <span className="screenshot-preview-meta pasted-file-name" title={file.name}>
+                {file.name.length > 12 ? file.name.substring(0, 10) + '…' + file.name.split('.').pop() : file.name}
+              </span>
+              <button
+                className="screenshot-preview-remove"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setPastedFiles(prev => prev.filter((_, i) => i !== index))
+                }}
+                title="移除文件"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {(screenshotImages.length > 0 || pastedFiles.length > 0) && (
+            <button
+              className="screenshot-preview-add-more"
+              onClick={() => window.api.startScreenshot()}
+              title="继续截图"
+            >
+              ＋ 继续截图
+            </button>
+          )}
+        </div>
+      )}
       <style>{`
         .chat-input-window-wrapper {
           width: 100%;
@@ -565,6 +683,134 @@ export function ChatInputWindow(): React.JSX.Element {
           overflow: visible; /* 必须是 visible，否则绝对定位的下拉列表在缩短高度时会被截断 */
           background: transparent;
           transition: height 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .screenshot-previews-container {
+          width: calc(100% - 4px);
+          height: 54px;
+          background: rgba(255, 255, 255, 0.85);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.6);
+          border-radius: 12px;
+          margin-bottom: 8px;
+          display: flex;
+          align-items: center;
+          padding: 0 10px;
+          box-sizing: border-box;
+          box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.85),
+                      0 4px 12px rgba(0,0,0,0.04);
+          -webkit-app-region: no-drag;
+          align-self: stretch;
+          gap: 8px;
+          overflow-x: auto;
+          animation: slideDown 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .screenshot-previews-container::-webkit-scrollbar {
+          height: 3px;
+        }
+        .screenshot-previews-container::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.1);
+          border-radius: 2px;
+        }
+
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .screenshot-preview-item {
+          display: flex;
+          align-items: center;
+          background: rgba(0, 0, 0, 0.03);
+          border: 1.2px solid rgba(0, 0, 0, 0.06);
+          padding: 3px 6px 3px 4px;
+          border-radius: 8px;
+          gap: 6px;
+          height: 36px;
+          box-sizing: border-box;
+          flex-shrink: 0;
+          position: relative;
+        }
+
+        .screenshot-preview-thumb {
+          width: 28px;
+          height: 28px;
+          border-radius: 4px;
+          object-fit: cover;
+          border: 1px solid rgba(0,0,0,0.08);
+        }
+
+        .screenshot-preview-meta {
+          font-size: 9.5px;
+          color: #64748b;
+          font-weight: 500;
+        }
+
+        .screenshot-preview-remove {
+          background: rgba(0, 0, 0, 0.06);
+          border: none;
+          color: #64748b;
+          font-size: 11px;
+          cursor: pointer;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s;
+          padding: 0;
+          line-height: 1;
+        }
+
+        .screenshot-preview-remove:hover {
+          background: #ef4444;
+          color: #ffffff;
+        }
+
+        .screenshot-preview-add-more {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 36px;
+          padding: 0 10px;
+          border-radius: 8px;
+          border: 1px dashed rgba(59, 130, 246, 0.5);
+          background: rgba(59, 130, 246, 0.03);
+          color: #2563eb;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+          flex-shrink: 0;
+        }
+
+        .screenshot-preview-add-more:hover {
+          background: rgba(59, 130, 246, 0.08);
+          border-color: #2563eb;
+        }
+
+        .pasted-file-icon {
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          flex-shrink: 0;
+          background: rgba(0, 0, 0, 0.02);
+          border-radius: 4px;
+        }
+
+        .pasted-file-name {
+          max-width: 90px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 9px !important;
+          letter-spacing: -0.2px;
         }
 
         @keyframes gradientMove {
@@ -734,6 +980,28 @@ export function ChatInputWindow(): React.JSX.Element {
         .dropdown-item.active {
           background: rgba(59, 130, 246, 0.08);
           color: #2563eb;
+        }
+
+        .screenshot-btn {
+          width: 30px;
+          height: 30px;
+          border-radius: 50%;
+          border: none;
+          background: transparent;
+          color: #64748b;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.2s;
+          margin-right: 2px;
+          flex-shrink: 0;
+          -webkit-app-region: no-drag;
+        }
+
+        .screenshot-btn:hover {
+          color: #3b82f6;
+          background: rgba(59, 130, 246, 0.08);
         }
 
         .new-session-item {
@@ -1136,8 +1404,24 @@ export function ChatInputWindow(): React.JSX.Element {
           onPaste={handlePaste}
         />
 
+        {/* 截图按钮 */}
+        <button
+          className="screenshot-btn"
+          onClick={() => window.api.startScreenshot()}
+          title="屏幕截图区域提问"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+        </button>
+
         {/* 发送按钮 */}
-        <button className={`send-btn ${text.trim() ? 'active' : ''}`} onClick={handleSend} disabled={!text.trim()}>
+        <button
+          className={`send-btn ${(text.trim() || screenshotImages.length > 0 || pastedFiles.length > 0) ? 'active' : ''}`}
+          onClick={handleSend}
+          disabled={!text.trim() && screenshotImages.length === 0 && pastedFiles.length === 0}
+        >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"></line>
             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>

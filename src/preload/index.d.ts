@@ -15,7 +15,7 @@ declare global {
       hideWindow: () => void
       openInputWindow: () => void
       closeInputWindow: () => void
-      sendChatToPet: (text: string, isNewSession?: boolean) => void
+      sendChatToPet: (text: string, isNewSession?: boolean, imagePath?: string) => void
       getSystemInfo: () => Promise<any>
       getSkillsPath: () => Promise<string>
       openSkillsFolder: () => Promise<void>
@@ -91,6 +91,7 @@ declare global {
       copyText: (text: string) => void
       copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
       copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
+      readClipboardFiles: () => Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null>
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
       showPetContextMenu: () => void
@@ -99,6 +100,11 @@ declare global {
       sendPendingInput: (text: string) => void
       onPendingInput: (callback: (text: string) => void) => () => void
       getPendingInput: () => Promise<string>
+      startScreenshot: () => void
+      getScreenshotByDisplayId: (displayId: string) => Promise<string>
+      cancelScreenshot: () => void
+      completeScreenshot: (croppedBase64: string, bounds: { x: number; y: number; width: number; height: number }) => void
+      onSetScreenshotImage: (callback: (data: { path: string; base64: string; width: number; height: number }) => void) => () => void
       openLocalFile: (url: string) => Promise<{ success: boolean; error?: string }>
       minimizeAgentWindow: () => void
       maximizeAgentWindow: () => void

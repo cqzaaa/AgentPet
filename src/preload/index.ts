@@ -36,8 +36,8 @@ const api = {
   closeInputWindow: (): void => {
     ipcRenderer.send('close-input-window')
   },
-  sendChatToPet: (text: string, isNewSession?: boolean): void => {
-    ipcRenderer.send('send-chat-to-pet', text, isNewSession)
+  sendChatToPet: (text: string, isNewSession?: boolean, imagePath?: string): void => {
+    ipcRenderer.send('send-chat-to-pet', text, isNewSession, imagePath)
   },
   getSystemInfo: (): Promise<any> => ipcRenderer.invoke('api:get-system-info'),
   getSkillsPath: (): Promise<string> => ipcRenderer.invoke('api:get-skills-path'),
@@ -230,6 +230,8 @@ const api = {
     ipcRenderer.invoke('api:copy-image', imageUrl),
   copyFiles: (filePaths: string[], text?: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('api:copy-files', { filePaths, text }),
+  readClipboardFiles: (): Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null> =>
+    ipcRenderer.invoke('api:read-clipboard-files'),
   showImageContextMenu: (imageUrl: string): void => {
     ipcRenderer.send('api:show-image-context-menu', imageUrl)
   },
@@ -278,6 +280,24 @@ const api = {
         resolve('')
       }
     })
+  },
+  startScreenshot: (): void => {
+    ipcRenderer.send('api:start-screenshot')
+  },
+  getScreenshotByDisplayId: (displayId: string): Promise<string> =>
+    ipcRenderer.invoke('api:get-screenshot-by-display-id', displayId),
+  cancelScreenshot: (): void => {
+    ipcRenderer.send('api:cancel-screenshot')
+  },
+  completeScreenshot: (croppedBase64: string, bounds: { x: number; y: number; width: number; height: number }): void => {
+    ipcRenderer.send('api:complete-screenshot', croppedBase64, bounds)
+  },
+  onSetScreenshotImage: (callback: (data: { path: string; base64: string; width: number; height: number }) => void): (() => void) => {
+    const handler = (_event: any, data: { path: string; base64: string; width: number; height: number }) => callback(data)
+    ipcRenderer.on('api:set-screenshot-image', handler)
+    return () => {
+      ipcRenderer.removeListener('api:set-screenshot-image', handler)
+    }
   },
   getToolsDefinition: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-tools-definition'),

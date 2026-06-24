@@ -3,6 +3,7 @@ import * as PIXI from 'pixi.js'
 import { AgentWindow } from './components/AgentWindow'
 import { PetWidget } from './components/PetWidget'
 import { ChatInputWindow } from './components/ChatInputWindow'
+import { ScreenshotWindow } from './components/ScreenshotWindow'
 
 // pixi-live2d-display@0.4 + pixi.js@6 需要全局暴露 PIXI 以驱动 Ticker
 // 必须在模块作用域最外层执行（不是在函数/useEffect 里）
@@ -45,6 +46,8 @@ function App(): React.JSX.Element {
     return <AgentWindow />
   } else if (currentHash === '#/chat-input') {
     return <ChatInputWindow />
+  } else if (currentHash.startsWith('#/screenshot')) {
+    return <ScreenshotWindow />
   } else {
     return <PetWidget />
   }

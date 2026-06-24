@@ -237,7 +237,7 @@ export function PetWidget(): React.JSX.Element {
   }, [])
 
   // ── 快捷聊天核心响应大模型逻辑 ─────────────────────────────
-  const handleChatToPet = async (text: string, isNewSession?: boolean) => {
+  const handleChatToPet = async (text: string, isNewSession?: boolean, imagePath?: string) => {
     if (isLlmThinkingRef.current) return
     setIsLlmThinking(true)
     localStorage.setItem('agentpet_llm_thinking_at', String(Date.now()))
@@ -317,11 +317,39 @@ export function PetWidget(): React.JSX.Element {
       const currentMessages = activeSession.messages || []
       const filtered = currentMessages.filter((m: any) => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError)
       
+      const parseMessageToBlocks = (msgText: string) => {
+        const imageRegex = /!\[([^\]]*)\]\((local-file:\/\/[^)]+)\)/g
+        imageRegex.lastIndex = 0
+        const match = imageRegex.exec(msgText)
+        if (match) {
+          const textPart = msgText.replace(imageRegex, '').trim()
+          const imageUrl = match[2]
+          return [
+            { type: 'text', text: textPart || '分析这张图片' },
+            { type: 'image_url', image_url: { url: imageUrl } }
+          ]
+        }
+        return msgText
+      }
+
       const chatMessages = filtered.slice(-contextRounds * 2).map((m: any) => {
-        return { role: m.sender === 'user' ? 'user' : 'assistant', content: m.text || '' }
+        return { 
+          role: m.sender === 'user' ? 'user' : 'assistant', 
+          content: parseMessageToBlocks(m.text || '') 
+        }
       })
 
-      chatMessages.push({ role: 'user', content: text })
+      if (imagePath) {
+        chatMessages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: text || '分析这张图片' },
+            { type: 'image_url', image_url: { url: `local-file://${imagePath}` } }
+          ]
+        })
+      } else {
+        chatMessages.push({ role: 'user', content: text })
+      }
 
       let profileContent = ''
       try {
@@ -354,10 +382,14 @@ ${memoryContext}
       chatMessages.unshift({ role: 'system', content: systemPrompt })
 
       const timeStr = formatDateTime()
+      const displayFormatText = imagePath
+        ? `${text}\n\n![Screenshot](local-file://${imagePath})`
+        : text
+
       const userMsg = {
         id: Date.now(),
         sender: 'user',
-        text: text,
+        text: displayFormatText,
         time: timeStr
       }
       const replyId = Date.now() + 1
@@ -448,8 +480,8 @@ ${memoryContext}
   // 监听广播消息
   useEffect(() => {
     if (!window.electron || !window.electron.ipcRenderer) return
-    const handleChat = (_event: any, text: string, isNewSession?: boolean) => {
-      handleChatToPet(text, isNewSession)
+    const handleChat = (_event: any, text: string, isNewSession?: boolean, imagePath?: string) => {
+      handleChatToPet(text, isNewSession, imagePath)
     }
     window.electron.ipcRenderer.on('chat-to-pet', handleChat)
     return () => {
