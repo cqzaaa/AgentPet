@@ -100,6 +100,10 @@ declare global {
       onPendingInput: (callback: (text: string) => void) => () => void
       getPendingInput: () => Promise<string>
       openLocalFile: (url: string) => Promise<{ success: boolean; error?: string }>
+      minimizeAgentWindow: () => void
+      maximizeAgentWindow: () => void
+      closeAgentWindow: () => void
+      isAgentWindowMaximized: () => Promise<boolean>
     }
   }
 }

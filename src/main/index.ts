@@ -492,7 +492,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     width: 1100,
     height: 700,
     show: false,
-    frame: true,
+    frame: false,
     resizable: true,
     icon,
     webPreferences: {
@@ -533,6 +533,37 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     agentWindow = null
   })
 }
+
+// 注册 Agent 窗口控制 IPC 监听
+ipcMain.on('minimize-agent-window', () => {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.minimize()
+  }
+})
+
+ipcMain.on('maximize-agent-window', () => {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    if (agentWindow.isMaximized()) {
+      agentWindow.unmaximize()
+    } else {
+      agentWindow.maximize()
+    }
+  }
+})
+
+ipcMain.on('close-agent-window', () => {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.close()
+  }
+})
+
+ipcMain.handle('api:is-agent-window-maximized', () => {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    return agentWindow.isMaximized()
+  }
+  return false
+})
+
 
 function createInputWindow(): void {
   if (inputWindow) {

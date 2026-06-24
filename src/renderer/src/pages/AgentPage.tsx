@@ -1,7 +1,7 @@
 import React from 'react'
 import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
-import { ChatMessageItem } from '../components/ChatMessageItem'
+import { ChatMessageItem, MarkdownText } from '../components/ChatMessageItem'
 
 interface AgentPageProps {
   store: AppStore
@@ -26,6 +26,24 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     // mcp
     mcpConfig, saveMcpConfig, showToast
   } = store
+
+  const [profileText, setProfileText] = React.useState('')
+  const [tempProfileText, setTempProfileText] = React.useState('')
+  const [isEditingProfile, setIsEditingProfile] = React.useState(false)
+  const [showProfileModal, setShowProfileModal] = React.useState(false)
+
+  React.useEffect(() => {
+    if (agentSubTab === 'memory') {
+      window.api.getMemoryProfile()
+        .then(text => {
+          setProfileText(text || '')
+          setTempProfileText(text || '')
+        })
+        .catch(err => {
+          console.error('加载人物画像失败:', err)
+        })
+    }
+  }, [agentSubTab])
 
   const [mcpNewName, setMcpNewName] = React.useState('')
   const [mcpNewUrl, setMcpNewUrl] = React.useState('')
@@ -248,6 +266,24 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 🚨 清空所有
               </button>
             </div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <span className="settings-row-title">长期人物画像 (profile.md)</span>
+                <span className="settings-row-desc">这是基于您日常聊天，由定时任务自动提纯总结的个人画像（避坑重点、背景等）。大模型会将其作为长期人设背景载入。</span>
+              </div>
+              <button
+                className="btn-secondary"
+                style={{ border: '1px solid var(--border-card)', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer' }}
+                onClick={() => {
+                  setTempProfileText(profileText)
+                  setIsEditingProfile(false) // 默认以查看/预览模式打开
+                  setShowProfileModal(true)
+                }}
+              >
+                🔍 查看并编辑
+              </button>
+            </div>
           </div>
         )}
 
@@ -323,7 +359,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         >
                           ⚙️ 操作 ▾
                         </button>
-                        
+
                         {openDropdownId === task.id && (
                           <div
                             style={{
@@ -343,7 +379,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             }}
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <div 
+                            <div
                               style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
                               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
                               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -360,7 +396,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             >
                               ✏️ 编辑
                             </div>
-                            <div 
+                            <div
                               style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
                               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
                               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -372,7 +408,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               {task.isActive ? '⏸ 暂停' : '▶ 启动'}
                             </div>
                             {task.name !== '系统画像提纯与经验沉淀' && (
-                              <div 
+                              <div
                                 style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', color: '#ef4444', borderTop: '1px solid var(--border-card)', display: 'flex', gap: '8px', alignItems: 'center' }}
                                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
                                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -676,7 +712,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           showToast('执行频率不能少于 5 秒', 'error')
                           return
                         }
-                        
+
                         if (editingCron) {
                           await handleEditCronTask(editingCron.id, {
                             name: cronName.trim(),
@@ -1284,6 +1320,123 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   {JSON.stringify(testResultData, null, 2)}
                 </pre>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 长期人物画像 (profile.md) 查看与编辑 Modal */}
+      {showProfileModal && (
+        <div className="cron-modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1005
+        }}
+          onClick={() => setShowProfileModal(false)}
+        >
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()} style={{ width: '850px', maxWidth: '90%', maxHeight: '90%', display: 'flex', flexDirection: 'column' }}>
+            <div className="mcp-modal-header" style={{ flexShrink: 0 }}>
+              <div className="mcp-modal-title">
+                <span>🧠 长期人物画像 (profile.md)</span>
+              </div>
+              <button className="mcp-modal-close-btn" onClick={() => setShowProfileModal(false)}>×</button>
+            </div>
+
+            <div className="mcp-modal-body" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '450px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  此画像是大模型分析您的日常聊天自动生成的长期人设。您可手动进行精修。
+                </span>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: '11.5px', height: '26px' }}
+                  onClick={() => setIsEditingProfile(!isEditingProfile)}
+                >
+                  {isEditingProfile ? '👁️ 切换预览' : '📝 切换编辑'}
+                </button>
+              </div>
+
+              {isEditingProfile ? (
+                <textarea
+                  className="mcp-input-fancy"
+                  style={{
+                    flex: 1,
+                    width: '100%',
+                    minHeight: '400px',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                    lineHeight: '1.6',
+                    resize: 'none',
+                    background: 'var(--bg-app)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-card)',
+                    borderRadius: '6px',
+                    padding: '12px'
+                  }}
+                  placeholder="在此处输入您的人物画像 markdown，例如：&#10;# 工作背景&#10;- 岗位：开发工程师&#10;&#10;# 避坑重点与习惯&#10;- 喜欢直接切入正题的简明回答。"
+                  value={tempProfileText}
+                  onChange={e => setTempProfileText(e.target.value)}
+                />
+              ) : (
+                <div style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  background: 'var(--bg-app)',
+                  padding: '12px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-card)',
+                  minHeight: '400px'
+                }}>
+                  {tempProfileText.trim() ? (
+                    <MarkdownText rawText={tempProfileText} />
+                  ) : (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
+                      👻 当前画像为空。可在此处输入 Markdown 格式进行编辑保存。
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mcp-modal-footer" style={{ flexShrink: 0 }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowProfileModal(false)}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  try {
+                    const success = await window.api.writeMemoryProfile(tempProfileText)
+                    if (success) {
+                      setProfileText(tempProfileText)
+                      setShowProfileModal(false)
+                      showToast('长期人物画像已成功更新并保存！', 'success')
+                    } else {
+                      showToast('保存失败，请稍后重试', 'error')
+                    }
+                  } catch (err) {
+                    showToast('保存失败: ' + String(err), 'error')
+                  }
+                }}
+                style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                💾 保存修改
+              </button>
             </div>
           </div>
         </div>

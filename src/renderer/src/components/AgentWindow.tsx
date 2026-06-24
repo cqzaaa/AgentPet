@@ -55,6 +55,58 @@ export function AgentWindow(): React.JSX.Element {
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
 
+  // ── 标签页与窗口控制状态及逻辑 ──
+  const [openSessionIds, setOpenSessionIds] = useState<string[]>([])
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  const checkMaximized = async () => {
+    if (window.api?.isAgentWindowMaximized) {
+      const max = await window.api.isAgentWindowMaximized()
+      setIsMaximized(max)
+    }
+  }
+
+  useEffect(() => {
+    checkMaximized()
+    window.addEventListener('resize', checkMaximized)
+    return () => window.removeEventListener('resize', checkMaximized)
+  }, [])
+
+  useEffect(() => {
+    if (activeSessionId && !openSessionIds.includes(activeSessionId)) {
+      setOpenSessionIds(prev => [...prev, activeSessionId])
+    }
+  }, [activeSessionId])
+
+  useEffect(() => {
+    const validIds = sessions.map(s => s.id)
+    setOpenSessionIds(prev => prev.filter(id => validIds.includes(id)))
+  }, [sessions])
+
+  const handleCloseTab = (idToClose: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const nextTabs = openSessionIds.filter(id => id !== idToClose)
+    setOpenSessionIds(nextTabs)
+
+    if (activeSessionId === idToClose) {
+      if (nextTabs.length > 0) {
+        const currentIndex = openSessionIds.indexOf(idToClose)
+        const nextIndex = Math.max(0, currentIndex - 1)
+        const nextActiveId = nextTabs[nextIndex] || nextTabs[0]
+        setActiveSessionId(nextActiveId)
+        setActiveTab('chat')
+      } else {
+        const remainingSessions = sessions.filter(s => s.id !== idToClose)
+        if (remainingSessions.length > 0) {
+          setActiveSessionId(remainingSessions[0].id)
+          setActiveTab('chat')
+        } else {
+          handleCreateNewSession()
+        }
+      }
+    }
+  }
+
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -294,6 +346,8 @@ export function AgentWindow(): React.JSX.Element {
       {/* ── 1. Left Sidebar ── */}
       <div className={`agent-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
         <div>
+          {/* 顶部无边框拖拽区 */}
+          <div style={{ height: '16px', flexShrink: 0, WebkitAppRegion: 'drag' } as any} />
           {/* Brand/Avatar Info */}
           <div className="sidebar-brand">
             <div className="brand-left">
@@ -397,6 +451,87 @@ export function AgentWindow(): React.JSX.Element {
 
       {/* ── 2. Right Content Area ── */}
       <div className="agent-content-area">
+        {/* ── 自定义标题栏 (Custom Titlebar) ── */}
+        <div className="window-titlebar">
+          {/* 会话标签页 */}
+          <div className="titlebar-tabs" onDoubleClick={() => handleCreateNewSession()}>
+            {openSessionIds.map(id => {
+              const session = sessions.find(s => s.id === id)
+              if (!session) return null
+              const isActive = activeSessionId === id && activeTab === 'chat'
+              return (
+                <div
+                  key={id}
+                  className={`titlebar-tab ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveSessionId(id)
+                    setActiveTab('chat')
+                  }}
+                >
+                  <span className="titlebar-tab-name" title={session.name}>{session.name}</span>
+                  <span
+                    className="titlebar-tab-close"
+                    onClick={(e) => handleCloseTab(id, e)}
+                    title="关闭标签页"
+                  >
+                    ✕
+                  </span>
+                </div>
+              )
+            })}
+
+            <button
+              className="titlebar-new-tab-btn"
+              onClick={() => handleCreateNewSession()}
+              title="新建会话"
+            >
+              +
+            </button>
+          </div>
+
+          {/* 窗口控制按钮 */}
+          <div className="titlebar-controls">
+            <button
+              className="titlebar-control-btn"
+              onClick={() => window.api?.minimizeAgentWindow()}
+              title="最小化"
+            >
+              <svg width="10" height="1" viewBox="0 0 10 1" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <line x1="0" y1="0.5" x2="10" y2="0.5" />
+              </svg>
+            </button>
+            <button
+              className="titlebar-control-btn"
+              onClick={() => {
+                window.api?.maximizeAgentWindow()
+                setTimeout(checkMaximized, 100)
+              }}
+              title={isMaximized ? '向下还原' : '最大化'}
+            >
+              {isMaximized ? (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
+                  <rect x="1.5" y="3.5" width="5" height="5" />
+                  <path d="M3.5 1.5H8.5V6.5" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
+                  <rect x="1.5" y="1.5" width="7" height="7" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="titlebar-control-btn close"
+              onClick={() => window.api?.closeAgentWindow()}
+              title="关闭"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M1.5 1.5L8.5 8.5" />
+                <path d="M8.5 1.5L1.5 8.5" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
         <div className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div className="content-title">
@@ -404,14 +539,14 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'control' && '集成第三方服务'}
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
-              {activeTab === 'settings' && '系统设置与外部集成'}
+              {activeTab === 'settings' && '系统设置'}
             </div>
             <div className="content-subtitle">
               {activeTab === 'chat' && `当前使用模型：${llmConfig.model || '未定义'}`}
               {activeTab === 'control' && '配置三方Bot'}
               {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
               {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
-              {activeTab === 'settings' && '大模型与微信消息集成模拟配置项'}
+              {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
             </div>
           </div>
 

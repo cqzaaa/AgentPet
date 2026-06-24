@@ -164,6 +164,13 @@ body {
   --bg-recent-active: rgba(96, 165, 250, 0.08);
   --border-recent-active: rgba(96, 165, 250, 0.25);
   --text-recent-active: #bfdbfe;
+
+  --bg-titlebar: transparent;
+  --bg-titlebar-tab-active: rgba(255, 255, 255, 0.06);
+  --bg-titlebar-tab-hover: rgba(255, 255, 255, 0.02);
+  --text-titlebar-tab-active: #bfdbfe;
+  --bg-titlebar-btn-hover: rgba(255, 255, 255, 0.06);
+  --bg-titlebar-close-hover: #ef4444;
 }
 
 .agent-window-container.light {
@@ -198,6 +205,13 @@ body {
   --bg-recent-active: rgba(96, 165, 250, 0.04);
   --border-recent-active: rgba(96, 165, 250, 0.2);
   --text-recent-active: #3b82f6;
+
+  --bg-titlebar: transparent;
+  --bg-titlebar-tab-active: #ffffff;
+  --bg-titlebar-tab-hover: rgba(0, 0, 0, 0.02);
+  --text-titlebar-tab-active: #3b82f6;
+  --bg-titlebar-btn-hover: rgba(0, 0, 0, 0.05);
+  --bg-titlebar-close-hover: #ef4444;
 }
 
 .agent-window-container {
@@ -211,6 +225,156 @@ body {
   color: var(--text-primary);
   overflow: hidden;
   box-sizing: border-box;
+}
+
+/* ── 自定义标题栏 (Custom Titlebar) ────────────────────── */
+.window-titlebar {
+  height: 40px;
+  background: var(--bg-titlebar);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  -webkit-app-region: drag; /* 允许窗口拖拽 */
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 1000;
+}
+
+/* 会话标签页容器 */
+.titlebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  margin-right: 20px;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-app-region: no-drag; /* 允许标签点击 */
+}
+
+/* 隐藏标签栏滚动条 */
+.titlebar-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* 每一个 Tab */
+.titlebar-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  max-width: 150px;
+  min-width: 70px;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.titlebar-tab:hover {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-primary);
+}
+
+.titlebar-tab.active {
+  background: var(--bg-titlebar-tab-active);
+  color: var(--text-titlebar-tab-active);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--border-color);
+}
+
+.titlebar-tab-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+/* 关闭标签按钮 */
+.titlebar-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: all 0.15s ease;
+  line-height: 1;
+  margin-right: -4px;
+}
+
+.titlebar-tab-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  opacity: 1;
+}
+
+/* 新建会话按钮 '+' */
+.titlebar-new-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-new-tab-btn:hover {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-primary);
+}
+
+/* 右侧控制按钮区域 */
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 12px;
+  outline: none;
+  border-radius: 4px;
+}
+
+.titlebar-control-btn:hover {
+  background: var(--bg-titlebar-btn-hover);
+  color: var(--text-primary);
+}
+
+.titlebar-control-btn.close:hover {
+  background: var(--bg-titlebar-close-hover);
+  color: #ffffff;
 }
 
 /* 左侧侧边栏 */

@@ -1198,7 +1198,7 @@ export function useAppStore() {
       // 动态拼装系统人设与技能感知上下文
       const skillsContext = skillsList.length > 0
         ? `你当前已配备并激活的专属技能扩展模块有：[${skillsList.map(s => s.name).join(', ')}]。`
-        : '你当前尚未安装配备任何第三方扩展技能。'
+        : '你当前尚未安装配备任何第三方扩展skill技能。'
       const stylePrompt = currentAvatarStyle === 'cute'
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
         : '你需要使用专业、友好、自然的语气与主人（用户）对话。'

@@ -282,7 +282,18 @@ const api = {
   getToolsDefinition: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-tools-definition'),
   openLocalFile: (url: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('api:open-local-file', url)
+    ipcRenderer.invoke('api:open-local-file', url),
+  minimizeAgentWindow: (): void => {
+    ipcRenderer.send('minimize-agent-window')
+  },
+  maximizeAgentWindow: (): void => {
+    ipcRenderer.send('maximize-agent-window')
+  },
+  closeAgentWindow: (): void => {
+    ipcRenderer.send('close-agent-window')
+  },
+  isAgentWindowMaximized: (): Promise<boolean> =>
+    ipcRenderer.invoke('api:is-agent-window-maximized')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
