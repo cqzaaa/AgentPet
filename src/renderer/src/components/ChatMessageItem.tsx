@@ -750,6 +750,175 @@ function renderSvgGraph(debug: any) {
   )
 }
 
+function translateToolName(name: string): string {
+  const map: Record<string, string> = {
+    'run_terminal_command': '运行了命令',
+    'get_system_status': '获取了系统状态',
+    'manage_cron_task': '管理了定时任务',
+    'get_location': '获取了地理位置',
+    'generate_file': '生成了文件',
+    'modify_docx_file': '修改了 Word 文档',
+    'modify_xlsx_file': '修改了 Excel 表格',
+    'read_file': '读取了文件内容',
+    'search_web': '搜索了网络',
+    'read_url_content': '获取了网页',
+    'ask_question': '提问了用户',
+    'get-current-date': '获取了当前日期',
+    'get-station-code-of-citys': '获取了车站代码',
+    'get-tickets': '查询了车票',
+    'list_dir': '列出了目录',
+    'view_file': '查看了文件',
+    'write_to_file': '写入了新文件',
+    'replace_file_content': '修改了文件',
+    'multi_replace_file_content': '批量修改了文件',
+  }
+
+  if (map[name]) return map[name]
+
+  const cleanName = name.replace(/[_-]/g, ' ')
+  if (name.startsWith('get_') || name.startsWith('get-')) {
+    return `获取了${cleanName.substring(4)}`
+  }
+  if (name.startsWith('list_') || name.startsWith('list-')) {
+    return `列出了${cleanName.substring(5)}`
+  }
+  if (name.startsWith('run_') || name.startsWith('run-')) {
+    return `运行了${cleanName.substring(4)}`
+  }
+  if (name.startsWith('search_') || name.startsWith('search-')) {
+    return `搜索了${cleanName.substring(7)}`
+  }
+
+  return `启用了工具 ${name}`
+}
+
+function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
+  const combined: any[] = []
+
+  toolSteps.forEach((step: any) => {
+    if (step.type === 'think') {
+      combined.push({
+        id: step.id,
+        type: 'think',
+        name: step.name,
+        detail: step.detail
+      })
+    } else if (step.type === 'call') {
+      combined.push({
+        id: step.id,
+        type: 'tool',
+        name: step.name,
+        callDetail: step.detail,
+        isWaiting: false
+      })
+    } else if (step.type === 'result') {
+      let matched = false
+      for (let i = combined.length - 1; i >= 0; i--) {
+        const item = combined[i]
+        if (item.type === 'tool' && item.name === step.name && !item.resultDetail) {
+          item.resultDetail = step.detail
+          matched = true
+          break
+        }
+      }
+      if (!matched) {
+        combined.push({
+          id: step.id,
+          type: 'tool',
+          name: step.name,
+          resultDetail: step.detail,
+          isWaiting: false
+        })
+      }
+    }
+  })
+
+  combined.forEach((item) => {
+    if (item.type === 'tool' && !item.resultDetail && isThinking) {
+      item.isWaiting = true
+    }
+  })
+
+  return combined
+}
+
+export function ToolStepItem({ step, isThinking }: { step: any; isThinking: boolean }) {
+  const [isItemCollapsed, setIsItemCollapsed] = useState(true)
+  const [isReqCollapsed, setIsReqCollapsed] = useState(true)
+
+  useEffect(() => {
+    if (!isThinking) {
+      setIsItemCollapsed(true)
+      setIsReqCollapsed(true)
+    }
+  }, [isThinking])
+
+  const toolDisplayName = translateToolName(step.name || '')
+
+  const displayCmd = typeof step.callDetail === 'object' && step.callDetail !== null
+    ? (step.callDetail.command || JSON.stringify(step.callDetail, null, 2))
+    : String(step.callDetail)
+
+  const displayResult = typeof step.resultDetail === 'string'
+    ? step.resultDetail
+    : JSON.stringify(step.resultDetail, null, 2)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
+        title="点击展开/收起详情"
+      >
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: step.isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
+          {step.isWaiting ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '12px', height: '12px', animation: 'tool-spin-item 1s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+              <style>{`@keyframes tool-spin-item { 100% { transform: rotate(360deg); } }`}</style>
+            </svg>
+          ) : '✓'}
+        </span>
+        <span>调用 {toolDisplayName} 工具</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+      </div>
+      {!isItemCollapsed && (
+        <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {step.callDetail && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600, userSelect: 'none' }}
+                onClick={() => setIsReqCollapsed(!isReqCollapsed)}
+                title="点击展开/折叠参数"
+              >
+                <span>📥 请求参数 / 命令:</span>
+                <span style={{ fontSize: '9px', opacity: 0.7 }}>{isReqCollapsed ? '▶' : '▼'}</span>
+              </div>
+              {!isReqCollapsed && (
+                <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
+                  {displayCmd}
+                </div>
+              )}
+            </div>
+          )}
+          {step.resultDetail && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600 }}>📤 返回结果:</div>
+              <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
+                {displayResult}
+              </div>
+            </div>
+          )}
+          {step.isWaiting && (
+            <div style={{ fontSize: '11px', color: '#60a5fa', fontStyle: 'italic', paddingLeft: '4px' }}>
+              ⏳ 正在等待工具返回结果...
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface MessageItemProps {
   msg: any
   currentAvatarName: string
@@ -851,21 +1020,35 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || (s.type === 'think' && s.detail?.trim()))
   const msgsCount = toolSteps.length
 
-  let headerText = ''
-  let collapseText = ''
-  if (hasThink && callsCount > 0) {
-    headerText = `深度思考与工具调用 ${callsCount} 次`
-    collapseText = '收起深度思考与工具调用过程'
-  } else if (hasThink && callsCount === 0) {
-    headerText = `已深度思考`
-    collapseText = '收起深度思考过程'
-  } else if (!hasThink && callsCount > 0) {
-    headerText = `工具调用 ${callsCount} 次`
-    collapseText = '收起工具调用过程'
+  const callSteps = toolSteps.filter((s: any) => s.type === 'call')
+  let summaryText = ''
+  if (callSteps.length > 0) {
+    const names = Array.from(new Set(callSteps.map((s: any) => translateToolName(s.name))))
+    summaryText = names.join(', ')
+  } else if (hasThink) {
+    summaryText = '已深度思考'
   } else {
-    headerText = `运行过程`
-    collapseText = '收起运行过程'
+    summaryText = '运行过程'
   }
+
+  let timeSuffix = ''
+  if (!msg.isThinking) {
+    const timestamps = toolSteps
+      .map((s: any) => {
+        const match = String(s.id || '').match(/step-(\d+)-/)
+        return match ? parseInt(match[1], 10) : null
+      })
+      .filter((t: any) => t !== null) as number[]
+    const lastTime = timestamps.length > 0 ? Math.max(...timestamps) : msg.id
+    const durationMs = lastTime - msg.id
+    const durationSec = Math.max(1, Math.round(durationMs / 1000))
+    if (durationSec > 0 && durationSec < 3600) {
+      timeSuffix = ` ${durationSec}s`
+    }
+  }
+
+  const headerText = `${summaryText}${timeSuffix}`
+  const collapseText = `${summaryText}`
 
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
 
@@ -953,41 +1136,76 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
             {currentCollapsed ? (
               <div
-                style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  fontSize: '12.5px',
+                  userSelect: 'none',
+                  backgroundColor: 'rgba(128, 128, 128, 0.05)',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
                 onClick={() => setUserCollapsed(false)}
               >
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
-                <span>{headerText}</span>
+                <span style={{ flex: 1 }}>{headerText}</span>
                 <span style={{ fontSize: '10px', opacity: 0.7 }}>▶</span>
               </div>
             ) : (
               <>
                 {!msg.isThinking && (
                   <div
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none', paddingBottom: '4px' }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      fontSize: '12.5px',
+                      userSelect: 'none',
+                      backgroundColor: 'rgba(128, 128, 128, 0.05)',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      marginBottom: '4px'
+                    }}
                     onClick={() => setUserCollapsed(true)}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
-                    <span>{collapseText}</span>
+                    <span style={{ flex: 1 }}>{collapseText}</span>
                     <span style={{ fontSize: '10px', opacity: 0.7 }}>▼</span>
                   </div>
                 )}
-                {toolSteps.map((step: any, index: number, arr: any[]) => {
-                  if (step.type === 'call') {
-                    const isWaiting = msg.isThinking && !arr.some((s, i) => i > index && s.type === 'result' && s.name === step.name)
-                    return (
-                      <ToolCallItem key={step.id} step={step} isThinking={msg.isThinking} isWaiting={isWaiting} />
-                    )
-                  } else if (step.type === 'think') {
-                    return (
-                      <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
-                    )
-                  } else {
-                    return (
-                      <ToolResultItem key={step.id} step={step} isThinking={msg.isThinking} />
-                    )
-                  }
-                })}
+                <div
+                  className="tool-steps-scroll-area"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    paddingLeft: '12px',
+                    paddingRight: '6px'
+                  }}
+                >
+                  {combineToolSteps(toolSteps, msg.isThinking).map((step: any) => {
+                    if (step.type === 'tool') {
+                      return (
+                        <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />
+                      )
+                    } else {
+                      return (
+                        <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
+                      )
+                    }
+                  })}
+                </div>
               </>
             )}
           </div>

@@ -245,7 +245,7 @@ class WechatIlinkClient {
       base_info: { channel_version: '2.1.6' }
     })
 
-    console.log('[uploadMedia] getuploadurl 完整响应:', JSON.stringify(getUrlResp, null, 2))
+    // console.log('[uploadMedia] getuploadurl 完整响应:', JSON.stringify(getUrlResp, null, 2))
 
     if (!getUrlResp || (!getUrlResp.upload_full_url && !getUrlResp.upload_url && !getUrlResp.url)) {
       throw new Error(`获取上传链接失败: ${JSON.stringify(getUrlResp)}`)
@@ -298,7 +298,7 @@ class WechatIlinkClient {
       filesize,
       rawfilemd5
     }
-    console.log('[uploadMedia] 上传结果:', JSON.stringify(result, null, 2))
+    // console.log('[uploadMedia] 上传结果:', JSON.stringify(result, null, 2))
     return result
   }
 

@@ -34,6 +34,15 @@ function HistoryListIcon(): React.JSX.Element {
   )
 }
 
+const checkIsThinking = (s: any): boolean => {
+  if (!s || !s.messages) return false
+  for (let i = s.messages.length - 1; i >= 0; i--) {
+    const m = s.messages[i]
+    if (m.sender === 'agent') return !!m.isThinking
+  }
+  return false
+}
+
 export function AgentWindow(): React.JSX.Element {
   const store = useAppStore()
 
@@ -430,22 +439,8 @@ export function AgentWindow(): React.JSX.Element {
 
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
-          {!isCollapsed && (
-            <div className="footer-widget-status">
-              <div className="footer-stat-row">
-                <span>状态</span>
-                <span className="footer-stat-val" style={{ color: '#10b981' }}>● 激活</span>
-              </div>
-              <div className="footer-stat-row">
-                <span>模式</span>
-                <span className="footer-stat-val">
-                  {llmConfig.provider === 'ollama' ? 'Ollama' : (llmConfig.apiKey ? '大模型云服务' : '模拟对话模式')}
-                </span>
-              </div>
-            </div>
-          )}
-          <button className="theme-toggle-btn" onClick={handleThemeToggle} style={{ width: '100%' }} title="切换主题">
-            {theme === 'dark' ? '☀️ 切换为浅色主题' : '🌙 切换为深色主题'}
+          <button className="theme-toggle-icon-btn" onClick={handleThemeToggle} title="切换主题">
+            {theme === 'dark' ? '☀️' : '🌙'}
           </button>
         </div>
       </div>
@@ -460,15 +455,17 @@ export function AgentWindow(): React.JSX.Element {
               const session = sessions.find(s => s.id === id)
               if (!session) return null
               const isActive = activeSessionId === id && activeTab === 'chat'
+              const isThinking = checkIsThinking(session)
               return (
                 <div
                   key={id}
-                  className={`titlebar-tab ${isActive ? 'active' : ''}`}
+                  className={`titlebar-tab ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
                   onClick={() => {
                     setActiveSessionId(id)
                     setActiveTab('chat')
                   }}
                 >
+                  {isThinking && <span className="tab-status-dot-pulse"></span>}
                   <span className="titlebar-tab-name" title={session.name}>{session.name}</span>
                   <span
                     className="titlebar-tab-close"
@@ -542,13 +539,14 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
             </div>
-            <div className="content-subtitle">
-              {activeTab === 'chat' && `当前使用模型：${llmConfig.model || '未定义'}`}
-              {activeTab === 'control' && '配置和管理您的订阅渠道'}
-              {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
-              {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
-              {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
-            </div>
+            {activeTab !== 'chat' && (
+              <div className="content-subtitle">
+                {activeTab === 'control' && '配置和管理您的订阅渠道'}
+                {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
+                {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
+                {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
+              </div>
+            )}
           </div>
 
           {/* 右侧工具栏 */}
