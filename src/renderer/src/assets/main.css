@@ -3117,17 +3117,29 @@ body {
 
 /* Tooltip 气泡 */
 .chart-tooltip-bubble {
-  background: rgba(17, 18, 25, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
   padding: 8px 12px;
   border-radius: 8px;
   min-width: 110px;
   z-index: 100;
   pointer-events: none;
   animation: tooltipFade 0.15s ease-out;
+}
+
+.agent-window-container.dark .chart-tooltip-bubble {
+  background: rgba(30, 41, 59, 0.85); /* 适配暗色模式：高级深蓝灰透明质感 */
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+}
+
+.agent-window-container.light .chart-tooltip-bubble {
+  background: rgba(255, 255, 255, 0.9); /* 适配亮色模式：白色半透明 */
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
 }
 
 @keyframes tooltipFade {
@@ -3145,7 +3157,7 @@ body {
 .tooltip-title {
   font-size: 10.5px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary);
   margin-bottom: 5px;
   white-space: nowrap;
   overflow: hidden;
@@ -3176,12 +3188,12 @@ body {
 }
 
 .tooltip-total {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-color);
   margin-top: 4px;
   padding-top: 4px;
   font-size: 10.5px;
   font-weight: 700;
-  color: #bfdbfe;
+  color: var(--text-menu-active);
 }
 
 /* 环形图占比双栏排版 */

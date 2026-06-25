@@ -34,7 +34,7 @@ interface WechatBotManagerOptions {
     sessionId?: string,
     onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string }) => void
   ) => Promise<string>
-  getMcpToolNames: () => string[]
+  getMcpToolNames: () => string[] | Promise<string[]>
   onStatusUpdated: () => void
   notifyRenderSessionUpdate: (sessionId?: string) => void
   getStorageDir: () => string
@@ -1099,7 +1099,7 @@ export class WechatBotManager {
     history.push({ role: 'user', content: userText })
 
     try {
-      const mcpToolNames = this.options.getMcpToolNames()
+      const mcpToolNames = await this.options.getMcpToolNames()
       const mcpContext = mcpToolNames.length > 0
         ? `\n你可以使用以下外部工具来帮助回答问题：${mcpToolNames.join('、')}。当用户的问题需要实时信息（如搜索、天气、地图等）时，请主动调用这些工具获取最新数据。`
         : ''

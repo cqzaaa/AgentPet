@@ -54,6 +54,46 @@ interface McpServerConfig {
 
 class McpManager {
   private connections: Map<string, { client: Client; transport: SSEClientTransport | StreamableHTTPClientTransport; tools: any[]; config: McpServerConfig }> = new Map()
+  // 懒连接：保存待连接的配置，仅在实际需要工具时才真正建立连接
+  private pendingConfigs: McpServerConfig[] = []
+
+  // 设置配置但不立即连接（懒加载模式）
+  public setConfigs(configs: McpServerConfig[]) {
+    this.pendingConfigs = configs.filter(c => c.enabled && c.url)
+    console.log(`[MCP] 已加载 ${this.pendingConfigs.length} 个 MCP 服务配置（懒加载模式，将在首次使用时连接）`)
+
+    // 同时断开已不再启用的旧连接
+    const enabledIds = this.pendingConfigs.map(c => c.id)
+    for (const [id, conn] of this.connections.entries()) {
+      if (!enabledIds.includes(id)) {
+        console.log(`[MCP] 断开已禁用的服务: ${conn.config.name} (${id})`)
+        conn.client.close().catch(() => {})
+        this.connections.delete(id)
+      }
+    }
+  }
+
+  // 确保所有配置的服务都已连接（懒连接核心方法）
+  public async ensureConnected(): Promise<void> {
+    if (this.pendingConfigs.length === 0) return
+
+    const configsToConnect = [...this.pendingConfigs]
+    this.pendingConfigs = []
+
+    // 过滤掉已经连接且配置未变化的服务
+    const configsNeedingConnection = configsToConnect.filter(config => {
+      const existing = this.connections.get(config.id)
+      if (existing && existing.config.url === config.url && existing.config.apiKey === config.apiKey && existing.config.type === config.type) {
+        return false
+      }
+      return true
+    })
+
+    if (configsNeedingConnection.length === 0) return
+
+    console.log(`[MCP] 按需连接 ${configsNeedingConnection.length} 个 MCP 服务...`)
+    await this.connectAll(configsNeedingConnection)
+  }
 
   public async connectAll(configs: McpServerConfig[]) {
     const configsToConnect = configs.filter(c => c.enabled && c.url)
@@ -254,6 +294,9 @@ class McpManager {
   }
 
   public async executeTool(name: string, args: any, isRetry = false): Promise<string> {
+    // 懒连接：首次调用工具时才真正建立 MCP 连接
+    await this.ensureConnected()
+
     let targetConnId: string | null = null
     let targetConn: any = null
     for (const [id, conn] of this.connections.entries()) {
@@ -372,7 +415,8 @@ function loadSystemMcpConfig() {
       saveSystemMcpConfig(systemMcpConfig)
     }
 
-    mcpManager.connectAll(systemMcpConfig.servers).catch(console.error)
+    // 懒加载模式：只注册配置，不在启动时立即连接，等实际需要工具时再按需连接
+    mcpManager.setConfigs(systemMcpConfig.servers)
   } catch (e) {
     console.error('加载全局 MCP 配置文件失败:', e)
   }
@@ -5437,6 +5481,8 @@ if (-not $task.Wait(15000)) {
   // 获取当前可用的工具定义（用于明盒化展示）
   ipcMain.handle('api:get-tools-definition', async () => {
     try {
+      // 触发懒连接，确保 MCP 工具定义已加载
+      await mcpManager.ensureConnected()
       const tools = getFormattedTools(true)
       return tools
     } catch (err) {
@@ -5486,7 +5532,8 @@ if (-not $task.Wait(15000)) {
   ipcMain.handle('api:sync-mcp-config', (_, config) => {
     systemMcpConfig = config
     saveSystemMcpConfig(config)
-    mcpManager.connectAll(config.servers).catch(console.error)
+    // 懒加载模式：只注册配置，不立即连接，等实际需要工具时再按需连接
+    mcpManager.setConfigs(config.servers)
     return true
   })
 
@@ -5556,7 +5603,9 @@ if (-not $task.Wait(15000)) {
     return systemMcpConfig
   })
 
-  ipcMain.handle('api:get-active-mcp-servers', () => {
+  ipcMain.handle('api:get-active-mcp-servers', async () => {
+    // 首次查询时触发懒连接，确保大模型能获取到 MCP 工具列表
+    await mcpManager.ensureConnected()
     return mcpManager.getActiveServers()
   })
 
@@ -5581,7 +5630,8 @@ if (-not $task.Wait(15000)) {
 
       return callLlmInternal({ ...effectiveConfig, sessionId }, messages, getActiveStorageDir(), undefined, onToolEvent)
     },
-    getMcpToolNames: () => {
+    getMcpToolNames: async () => {
+      await mcpManager.ensureConnected()
       return mcpManager.getTools().map((t: any) => t.name)
     },
     onStatusUpdated: () => {
