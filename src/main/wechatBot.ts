@@ -3,6 +3,8 @@ import { join } from 'path'
 import * as fs from 'fs'
 import { randomBytes } from 'node:crypto'
 import * as crypto from 'crypto'
+import * as https from 'https'
+import * as http from 'http'
 
 export interface WechatLlmConfig {
   provider: string
@@ -72,33 +74,51 @@ class WechatIlinkClient {
     return headers
   }
 
-  // POST 请求通用方法
+  // POST 请求通用方法（使用 Node.js 原生 https 模块，避免 Chromium fetch 的 ERR_INVALID_ARGUMENT）
   private async doPost(path: string, payload: any, timeoutMs = 15000): Promise<any> {
-    const url = `${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
+    const fullUrl = `${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
     const bodyStr = JSON.stringify(payload)
     const headers = this.buildHeaders(Buffer.byteLength(bodyStr))
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(fullUrl)
+      const transport = parsedUrl.protocol === 'https:' ? https : http
 
-    try {
-      const resp = await fetch(url, {
+      const req = transport.request({
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
         method: 'POST',
         headers,
-        body: bodyStr,
-        signal: controller.signal
+        timeout: timeoutMs
+      }, (res) => {
+        let data = ''
+        res.on('data', (chunk) => { data += chunk })
+        res.on('end', () => {
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`HTTP ${res.statusCode}: ${data}`))
+            return
+          }
+          try {
+            resolve(JSON.parse(data))
+          } catch (e) {
+            reject(new Error(`JSON 解析失败: ${data.substring(0, 200)}`))
+          }
+        })
       })
-      clearTimeout(timer)
 
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}: ${await resp.text()}`)
-      }
+      req.on('timeout', () => {
+        req.destroy()
+        reject(new Error('Request timeout'))
+      })
 
-      return await resp.json()
-    } catch (err: any) {
-      clearTimeout(timer)
-      throw err
-    }
+      req.on('error', (err) => {
+        reject(err)
+      })
+
+      req.write(bodyStr)
+      req.end()
+    })
   }
 
   // GET 请求通用方法
@@ -549,8 +569,11 @@ export class WechatBotManager {
 
   // 微信登录：扫码授权
   public async startLogin() {
-    if (this.state.status === 'connected' || this.state.status === 'scanned' || this.state.status === 'qrcode_ready') {
-      this.addLog('info', '当前正在连接或已连接，请先断开连接。')
+    if (this.state.status === 'connected') {
+      this.addLog('info', '正在断开当前连接以重新绑定...')
+      await this.logout()
+    } else if (this.state.status === 'scanned' || this.state.status === 'qrcode_ready') {
+      this.addLog('info', '当前正在等待扫码，请勿重复点击。')
       return
     }
 
@@ -611,6 +634,9 @@ export class WechatBotManager {
           this.client.token = statusResp.bot_token || ''
           if (statusResp.baseurl) {
             this.client.baseUrl = statusResp.baseurl
+          } else if (pollBaseUrl !== this.client.baseUrl) {
+            // 如果服务器发生了重定向但 confirmed 响应没有返回 baseurl，使用重定向后的地址
+            this.client.baseUrl = pollBaseUrl
           }
 
           this.state.status = 'connected'
@@ -618,6 +644,11 @@ export class WechatBotManager {
           this.state.qrcodeUrl = ''
           this.addLog('info', `微信登录成功！Bot ID: ${this.state.botId}`)
           this.options.onStatusUpdated()
+
+          // 清除旧的同步缓冲区，确保新会话从最新位置开始轮询
+          if (fs.existsSync(this.syncBufPath)) {
+            try { fs.unlinkSync(this.syncBufPath) } catch {}
+          }
 
           // 保存 Token，用于重启自动连线
           this.saveToken(this.client.token, this.client.baseUrl)
@@ -683,6 +714,11 @@ export class WechatBotManager {
         this.state.botId = '已恢复的会话'
         this.options.onStatusUpdated()
 
+        // 清除旧的同步缓冲区，避免使用过期的游标导致服务器返回错误
+        if (fs.existsSync(this.syncBufPath)) {
+          try { fs.unlinkSync(this.syncBufPath) } catch {}
+        }
+
         this.startMessageLoop()
       }
     } catch (e) {
@@ -718,24 +754,43 @@ export class WechatBotManager {
     // 微信好友在内存中维护 context_token
     const contextTokens = new Map<string, string>()
 
+    // 连续错误计数器，用于检测是否需要重新认证
+    let consecutiveErrors = 0
+    // 连续超时计数器
+    let consecutiveTimeouts = 0
+
     while (this.isMonitoring && this.client) {
       try {
         const resp = await this.client.getUpdates(savedBuf, 35000)
-        
+
         // 处理服务器状态码
         const ret = Number(resp.ret || 0)
         const errCode = Number(resp.errcode || 0)
-        
+
         if (ret !== 0 || errCode !== 0) {
+          consecutiveErrors++
+
           if (ret === -14 || errCode === -14) {
             this.addLog('info', '检测到微信登录会话已过期 (errcode: -14)，需重新进行扫码登录！')
             this.logout()
             break
           }
+
+          // 连续错误超过 5 次，可能是 token 失效，强制断开并提示用户
+          if (consecutiveErrors >= 5) {
+            this.addLog('info', `消息接口连续返回错误 ${consecutiveErrors} 次 (ret: ${ret}, errcode: ${errCode})，可能登录已失效，正在断开连接...`)
+            this.logout()
+            break
+          }
+
           this.addLog('info', `获取消息接口返回错误 ret: ${ret}, errcode: ${errCode}，2 秒后重试...`)
           await new Promise(resolve => setTimeout(resolve, 2000))
           continue
         }
+
+        // 成功响应，重置错误计数和超时计数
+        consecutiveErrors = 0
+        consecutiveTimeouts = 0
 
         // 保存下一次请求的游标位置
         if (resp.get_updates_buf) {
@@ -769,7 +824,6 @@ export class WechatBotManager {
                          `${fromUserId}_${message.create_time || message.time || ''}_${textContent}`
           
           if (this.processedMsgKeys.has(msgKey)) {
-            console.log(`[wechatBot] 检测到重复消息，已自动忽略。Key: ${msgKey}`)
             continue
           }
 
@@ -1068,8 +1122,15 @@ export class WechatBotManager {
         if (!this.isMonitoring) break
         
         if (err.name === 'AbortError') {
+          consecutiveTimeouts++
+          if (consecutiveTimeouts % 3 === 0) {
+            this.addLog('info', `消息轮询已连续超时 ${consecutiveTimeouts} 次，服务器可能未正常响应...`)
+          }
           continue
         }
+
+        // 非超时错误，重置超时计数
+        consecutiveTimeouts = 0
         
         this.addLog('info', `消息长轮询监听异常: ${err.message || err}，正在等待 5 秒后重试...`)
         await new Promise((resolve) => setTimeout(resolve, 5000))
