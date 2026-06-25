@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
+import * as path from 'path'
 import { join, basename, dirname } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -9,6 +10,12 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import Database from 'better-sqlite3'
 import { EdgeTTS } from 'node-edge-tts'
+import { toolLoader } from './tools/tool-loader'
+
+// 强制使用 Electron 的 net.fetch 代理 Node 的全局 fetch，以继承系统/代理工具（如 Clash/V2ray）的代理设置
+// 解决 MCP SDK 或内部请求抛出 fetch failed: ECONNRESET 的问题
+globalThis.fetch = net.fetch as any;
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // 本地环境变量 .env 极简解析加载器
 try {
@@ -312,9 +319,9 @@ class McpManager {
     }
 
     try {
-      // 增加超时控制 (10秒限制)
+      // 增加超时控制 (22秒限制)
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('MCP 工具调用超时 (10秒限制)')), 20000)
+        setTimeout(() => reject(new Error('MCP 工具调用超时 (22秒限制)')), 22000)
       )
 
       const callPromise = targetConn.client.callTool({ name, arguments: args })
@@ -453,6 +460,375 @@ function saveSystemLlmConfig(config: any) {
 }
 
 const execAsync = promisify(exec)
+const spawn = require('child_process').spawn
+
+// Shell 会话管理
+interface ShellSession {
+  id: string
+  process: any
+  output: string
+  isRunning: boolean
+  startTime: number
+  command: string
+}
+
+const shellSessions: Map<string, ShellSession> = new Map()
+let nextShellId = 1
+
+// 获取 bash 路径（优先使用 Git Bash）
+function getBashPath(): string | null {
+  // 1. 先检查环境变量
+  if (process.env.GIT_BASH && fs.existsSync(process.env.GIT_BASH)) {
+    return process.env.GIT_BASH
+  }
+
+  // 2. 从 git 命令推断 bash 路径
+  try {
+    const { execSync } = require('child_process')
+    const gitPath = execSync('where git', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    if (gitPath) {
+      // git.exe 通常在 Git/cmd/ 目录，bash.exe 在 Git/bin/ 或 Git/usr/bin/ 目录
+      const gitDir = path.dirname(path.dirname(gitPath)) // 向上两级到 Git/ 目录
+
+      // 尝试常见的 bash.exe 相对路径
+      const bashCandidates = [
+        path.join(gitDir, 'bin', 'bash.exe'),
+        path.join(gitDir, 'usr', 'bin', 'bash.exe'),
+        path.join(gitDir, 'Git', 'bin', 'bash.exe'),
+        path.join(gitDir, 'Git', 'usr', 'bin', 'bash.exe'),
+      ]
+
+      for (const bashPath of bashCandidates) {
+        if (fs.existsSync(bashPath)) {
+          console.log(`[getBashPath] 从 git 路径推断 bash: ${bashPath}`)
+          return bashPath
+        }
+      }
+    }
+  } catch (e) {
+    // where git 失败，继续尝试其他方法
+  }
+
+  // 3. 常见安装路径（兜底）
+  const commonPaths = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'D:\\Program Files\\Git\\bin\\bash.exe',
+    'D:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    process.env.ProgramFiles + '\\Git\\bin\\bash.exe',
+    process.env['ProgramFiles(x86)'] + '\\Git\\bin\\bash.exe',
+  ].filter(Boolean)
+
+  for (const bashPath of commonPaths) {
+    if (fs.existsSync(bashPath)) {
+      console.log(`[getBashPath] 找到 bash: ${bashPath}`)
+      return bashPath
+    }
+  }
+
+  console.warn('[getBashPath] 未找到 Git Bash')
+  return null
+}
+
+// 检测命令类型
+function detectCommandType(command: string): 'powershell' | 'cmd' | 'bash' {
+  const cmd = command.trim().toLowerCase()
+
+  // PowerShell 命令特征
+  const powershellPatterns = [
+    /^powershell\b/i,
+    /^pwsh\b/i,
+    /\bget-childitem\b/i,
+    /\bget-process\b/i,
+    /\bget-service\b/i,
+    /\bget-item\b/i,
+    /\bset-item\b/i,
+    /\bnew-item\b/i,
+    /\bremove-item\b/i,
+    /\binvoke-/i,
+    /\bwrite-output\b/i,
+    /\bwrite-host\b/i,
+    /\bformat-table\b/i,
+    /\bselect-object\b/i,
+    /\bwhere-object\b/i,
+    /\bforeach-object\b/i,
+    /\b-sort-object\b/i,
+    /\bmeasure-object\b/i,
+    /\bconvertto-/i,
+    /\bconvertfrom-/i,
+    /\bimport-module\b/i,
+    /\bexport-module\b/i,
+    /\badd-type\b/i,
+    /\[math\]::/i,
+    /\bpsobject\b/i,
+  ]
+
+  // Windows cmd 命令特征
+  const cmdPatterns = [
+    /^wmic\b/i,
+    /^systeminfo\b/i,
+    /^ipconfig\b/i,
+    /^ping\b/i,
+    /^tracert\b/i,
+    /^netstat\b/i,
+    /^tasklist\b/i,
+    /^taskkill\b/i,
+    /^schtasks\b/i,
+    /^reg\b/i,
+    /^sc\b/i,
+    /^net\b/i,
+    /^dir\b/i,
+    /^type\b/i,
+    /^copy\b/i,
+    /^move\b/i,
+    /^del\b/i,
+    /^rd\b/i,
+    /^md\b/i,
+    /^mkdir\b/i,
+    /^rmdir\b/i,
+    /^echo\b/i,
+    /^set\b/i,
+    /^cls\b/i,
+    /^color\b/i,
+    /^title\b/i,
+    /^timeout\b/i,
+    /^start\b/i,
+    /^assoc\b/i,
+    /^ftype\b/i,
+    /^for\b/i,
+    /^if\b/i,
+  ]
+
+  // Bash 命令特征
+  const bashPatterns = [
+    /^ls\b/i,
+    /^du\b/i,
+    /^df\b/i,
+    /^grep\b/i,
+    /^find\b/i,
+    /^awk\b/i,
+    /^sed\b/i,
+    /^cat\b/i,
+    /^head\b/i,
+    /^tail\b/i,
+    /^sort\b/i,
+    /^uniq\b/i,
+    /^wc\b/i,
+    /^chmod\b/i,
+    /^chown\b/i,
+    /^mkdir\b/i,
+    /^rm\b/i,
+    /^cp\b/i,
+    /^mv\b/i,
+    /^tar\b/i,
+    /^gzip\b/i,
+    /^gunzip\b/i,
+    /^ssh\b/i,
+    /^scp\b/i,
+    /^rsync\b/i,
+    /^git\b/i,
+    /^npm\b/i,
+    /^node\b/i,
+    /^python\b/i,
+    /^pip\b/i,
+    /^curl\b/i,
+    /^wget\b/i,
+    /^docker\b/i,
+    /^kubectl\b/i,
+  ]
+
+  // 明确的 PowerShell 前缀
+  if (powershellPatterns.some(p => p.test(cmd))) {
+    return 'powershell'
+  }
+
+  // 明确的 cmd 命令
+  if (cmdPatterns.some(p => p.test(cmd))) {
+    return 'cmd'
+  }
+
+  // 明确的 bash 命令
+  if (bashPatterns.some(p => p.test(cmd))) {
+    return 'bash'
+  }
+
+  // 包含 bash 特有的语法
+  if (cmd.includes(' 2>/dev/null') || cmd.includes(' | ') && cmd.includes('grep') ||
+      cmd.includes('$( ') || cmd.includes('`') || cmd.includes('&&') && !cmd.includes('&')) {
+    return 'bash'
+  }
+
+  // 包含 PowerShell 特有的语法
+  if (cmd.includes('$(') && !cmd.includes('$()') || cmd.includes('| %') || cmd.includes('|?') ||
+      cmd.includes('$_') || cmd.includes('$PSVersionTable')) {
+    return 'powershell'
+  }
+
+  // 默认使用 cmd（Windows 默认）
+  return 'cmd'
+}
+
+// 使用 bash 执行命令（同步）
+async function execWithBash(command: string, options: { cwd?: string; timeout?: number } = {}) {
+  const bashPath = getBashPath()
+  const cmd = command.trim()
+
+  // 检测命令是否已经是完整的 shell 命令（包含 powershell -Command, bash -c 等）
+  const isAlreadyWrapped =
+    /^powershell\s+-Command\s+/i.test(cmd) ||
+    /^pwsh\s+-Command\s+/i.test(cmd) ||
+    /^bash\s+-c\s+/i.test(cmd) ||
+    /^sh\s+-c\s+/i.test(cmd) ||
+    /^cmd\s+\/c\s+/i.test(cmd)
+
+  if (isAlreadyWrapped) {
+    // 已经是完整命令，直接执行
+    console.log(`[execWithBash] 命令已包含 shell 前缀，直接执行`)
+    return execAsync(cmd, options)
+  }
+
+  // 检测命令类型
+  const commandType = detectCommandType(cmd)
+  console.log(`[execWithBash] 命令类型: ${commandType}, 命令: ${cmd.substring(0, 50)}...`)
+
+  switch (commandType) {
+    case 'powershell':
+      // 使用 PowerShell 执行
+      return execAsync(`powershell -Command "${cmd.replace(/"/g, '\\"')}"`, {
+        ...options,
+        shell: 'powershell.exe',
+      })
+
+    case 'bash':
+      if (bashPath) {
+        // 使用 Git Bash 执行
+        return execAsync(`"${bashPath}" -c "${cmd.replace(/"/g, '\\"')}"`, {
+          ...options,
+          shell: bashPath,
+        })
+      } else {
+        // 没有 Git Bash，尝试用 sh（可能在 WSL 或其他环境）
+        console.warn('[execWithBash] Git Bash not found, trying sh')
+        return execAsync(`sh -c "${cmd.replace(/"/g, '\\"')}"`, options)
+      }
+
+    case 'cmd':
+    default:
+      // 使用 cmd.exe 执行
+      return execAsync(cmd, { ...options, shell: 'cmd.exe' })
+  }
+}
+
+// 启动异步 shell 会话
+function startShellSession(command: string, cwd?: string): ShellSession {
+  const shellId = `shell_${nextShellId++}`
+  const bashPath = getBashPath()
+
+  let proc: any
+  if (bashPath) {
+    proc = spawn(bashPath, ['-c', command], {
+      cwd: cwd || process.cwd(),
+      shell: bashPath,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  } else {
+    proc = spawn(command, [], {
+      cwd: cwd || process.cwd(),
+      shell: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  }
+
+  const session: ShellSession = {
+    id: shellId,
+    process: proc,
+    output: '',
+    isRunning: true,
+    startTime: Date.now(),
+    command,
+  }
+
+  // 收集输出
+  proc.stdout.on('data', (data: Buffer) => {
+    session.output += data.toString()
+  })
+
+  proc.stderr.on('data', (data: Buffer) => {
+    session.output += data.toString()
+  })
+
+  proc.on('close', (code: number) => {
+    session.isRunning = false
+    session.output += `\n[进程退出，退出码: ${code}]`
+  })
+
+  proc.on('error', (err: Error) => {
+    session.isRunning = false
+    session.output += `\n[错误: ${err.message}]`
+  })
+
+  shellSessions.set(shellId, session)
+  return session
+}
+
+// 获取 shell 会话的新输出
+function getShellOutput(shellId: string, filter?: string): { output: string; isRunning: boolean } {
+  const session = shellSessions.get(shellId)
+  if (!session) {
+    return { output: `错误: 未找到会话 ${shellId}`, isRunning: false }
+  }
+
+  let output = session.output
+  if (filter) {
+    try {
+      const regex = new RegExp(filter, 'gm')
+      const matches = output.match(regex)
+      output = matches ? matches.join('\n') : ''
+    } catch (e) {
+      // 忽略无效的正则
+    }
+  }
+
+  return { output, isRunning: session.isRunning }
+}
+
+// 终止 shell 会话
+function killShellSession(shellId: string): boolean {
+  const session = shellSessions.get(shellId)
+  if (!session) {
+    return false
+  }
+
+  if (session.isRunning) {
+    session.process.kill('SIGTERM')
+    // 等待一下，如果还没退出就强制杀掉
+    setTimeout(() => {
+      if (session.isRunning) {
+        session.process.kill('SIGKILL')
+      }
+    }, 2000)
+  }
+
+  shellSessions.delete(shellId)
+  return true
+}
+
+// 清理过期的 shell 会话（超过1小时）
+function cleanupOldShellSessions() {
+  const now = Date.now()
+  for (const [id, session] of shellSessions.entries()) {
+    if (now - session.startTime > 3600000) { // 1小时
+      if (session.isRunning) {
+        session.process.kill('SIGKILL')
+      }
+      shellSessions.delete(id)
+    }
+  }
+}
+
+// 定期清理
+setInterval(cleanupOldShellSessions, 300000) // 每5分钟清理一次
 
 // 消除 GPU Shader Disk Cache 权限警告（不影响渲染性能）
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
@@ -1877,6 +2253,51 @@ app.whenReady().then(() => {
 
   ipcMain.on('api:request-open-cron-log-details', (_, taskId: string, logId: string) => {
     createAgentWindow({ taskId, logId })
+  })
+
+  // 获取工具摘要（用于大模型了解可用工具）
+  ipcMain.handle('api:get-tools-summary', async () => {
+    try {
+      return toolLoader.getToolsSummary()
+    } catch (error) {
+      console.error('获取工具摘要失败:', error)
+      return '获取工具摘要失败'
+    }
+  })
+
+  // 获取工具详细文档
+  ipcMain.handle('api:get-tool-documentation', async (_, toolName: string) => {
+    try {
+      return toolLoader.getToolDocumentation(toolName)
+    } catch (error) {
+      console.error('获取工具文档失败:', error)
+      return `获取工具 ${toolName} 的文档失败`
+    }
+  })
+
+  // 获取所有工具信息
+  ipcMain.handle('api:get-all-tools-info', async () => {
+    try {
+      return {
+        tools: toolLoader.getAllToolsInfo(),
+        categories: toolLoader.getCategories(),
+        count: toolLoader.getToolCount()
+      }
+    } catch (error) {
+      console.error('获取工具信息失败:', error)
+      return null
+    }
+  })
+
+  // 重新加载工具定义（支持热更新）
+  ipcMain.handle('api:reload-tools', async () => {
+    try {
+      toolLoader.reload()
+      return { success: true, count: toolLoader.getToolCount() }
+    } catch (error) {
+      console.error('重新加载工具失败:', error)
+      return { success: false, error: (error as Error).message }
+    }
   })
 
   ipcMain.handle('api:get-cron-tasks', async () => {
@@ -3867,17 +4288,124 @@ app.whenReady().then(() => {
           required: ['file_path']
         }
       }
+    },
+    // ========== 新增细粒度工具 ==========
+    {
+      type: 'function',
+      function: {
+        name: 'run_command',
+        description: '异步执行终端命令，返回 shell_id。适用于长时间运行的命令（如服务器启动、编译等）。使用 get_command_output 获取后续输出，使用 kill_command 终止命令。',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: '要执行的终端命令' },
+            description: { type: 'string', description: '命令的简短描述（5-10字）' },
+            cwd: { type: 'string', description: '工作目录（可选）' }
+          },
+          required: ['command']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_command_output',
+        description: '获取正在运行的命令的最新输出。每次调用会等待最多30秒收集新输出。',
+        parameters: {
+          type: 'object',
+          properties: {
+            shell_id: { type: 'string', description: '由 run_command 返回的终端会话ID' },
+            filter: { type: 'string', description: '输出过滤的正则表达式（可选）' }
+          },
+          required: ['shell_id']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'kill_command',
+        description: '终止正在运行的终端命令。',
+        parameters: {
+          type: 'object',
+          properties: {
+            shell_id: { type: 'string', description: '由 run_command 返回的终端会话ID' }
+          },
+          required: ['shell_id']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_files',
+        description: '按关键词搜索文件名。关键词用空格分隔，所有词都必须出现在文件名中。',
+        parameters: {
+          type: 'object',
+          properties: {
+            keywords: { type: 'string', description: '搜索关键词（空格分隔）' },
+            scope: { type: 'string', description: '搜索范围目录（可选）' },
+            file_types: { type: 'array', items: { type: 'string' }, description: '文件类型过滤（可选）' },
+            limit: { type: 'number', description: '返回结果数量限制（可选）' }
+          },
+          required: ['keywords']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'grep_content',
+        description: '在文件内容中搜索正则表达式。支持多种输出模式和过滤选项。',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: '正则表达式模式' },
+            scope: { type: 'string', description: '搜索范围目录（可选）' },
+            glob: { type: 'string', description: '文件过滤的 glob 模式（可选，如 "*.js"）' },
+            output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'], description: '输出模式（可选，默认为 files_with_matches）' },
+            case_insensitive: { type: 'boolean', description: '是否忽略大小写（可选）' }
+          },
+          required: ['pattern']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'glob_files',
+        description: '按 glob 模式查找文件。支持通配符 * 和 **。返回按修改时间排序的文件列表。',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'glob 模式（如 "**/*.js", "src/**/*.ts"）' },
+            scope: { type: 'string', description: '搜索范围目录（可选）' }
+          },
+          required: ['pattern']
+        }
+      }
     }
   ]
 
+  // 动态工具加载：优先使用 toolLoader，回退到静态定义
   function getFormattedTools(isFrontend: boolean, simplify = false): any[] {
     const list: any[] = []
-    
+
+    // 从 toolLoader 动态加载工具定义
+    const dynamicTools = toolLoader.getToolDefinitions()
+
     if (isFrontend) {
-      // 本地内置工具不进行简化，保持原样，以避免对常规工具（如终端命令、文件读取）增加额外的 API 填充开销
-      list.push(...toolDefinitions)
+      // 本地内置工具不进行简化，保持原样
+      if (dynamicTools.length > 0) {
+        list.push(...dynamicTools)
+        console.log(`[ToolLoader] 使用动态加载的 ${dynamicTools.length} 个工具`)
+      } else {
+        // 回退到静态定义
+        list.push(...toolDefinitions)
+        console.log('[ToolLoader] 动态加载失败，回退到静态工具定义')
+      }
     } else {
-      // 后端（如微信机器人）：开放安全的文件读取/修改工具，排除终端命令、定时任务、定位等需要前端或有安全风险的工具
+      // 后端（如微信机器人）：开放安全的文件读取/修改工具
       const wechatSafeTools = new Set([
         'read_file',
         'generate_file',
@@ -3885,9 +4413,15 @@ app.whenReady().then(() => {
         'modify_docx_file',
         'get_system_status'
       ])
-      list.push(...toolDefinitions.filter(t => wechatSafeTools.has(t.function.name)))
+
+      if (dynamicTools.length > 0) {
+        list.push(...dynamicTools.filter(t => wechatSafeTools.has(t.function.name)))
+      } else {
+        list.push(...toolDefinitions.filter(t => wechatSafeTools.has(t.function.name)))
+      }
     }
 
+    // 添加 MCP 工具
     const mcpTools = mcpManager.getTools()
     for (const tool of mcpTools) {
       list.push({
@@ -4240,10 +4774,187 @@ if (-not $task.Wait(15000)) {
           }
         }
 
-        const { stdout, stderr } = await execAsync(command, { cwd: execCwd, timeout: 30000 })
+        // 本地工具不限制超时，由系统自行管理
+        const { stdout, stderr } = await execWithBash(command, { cwd: execCwd })
         return `[命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`
       } catch (err: any) {
         return `终端命令执行失败：${err.message || err}`
+      }
+    }
+
+    // ========== 新增细粒度工具执行逻辑 ==========
+
+    // 异步执行命令
+    if (name === 'run_command') {
+      try {
+        const { command, description, cwd } = args
+        // 确定工作目录
+        let execCwd = cwd || os.homedir()
+        if (!cwd && sessionId) {
+          const sessionDir = join(getActiveStorageDir(), 'chat', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'))
+          if (fs.existsSync(sessionDir)) {
+            execCwd = sessionDir
+          }
+        }
+        if (!cwd && execCwd === os.homedir() && workspacePath && fs.existsSync(workspacePath)) {
+          execCwd = workspacePath
+        }
+
+        // 权限检查
+        if (sandboxMode) {
+          if (!isReadOnlyCommand(command)) {
+            const safety = checkCommandSafety(command)
+            const activeWin = agentWindow || mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+            if (activeWin) {
+              const reqId = nextPermissionRequestId++
+              activeWin.webContents.send('api:request-permission', {
+                requestId: reqId,
+                command,
+                execCwd,
+                warning: safety.warning
+              })
+              const approved = await new Promise<boolean>((resolve) => {
+                pendingPermissions.set(reqId, resolve)
+                setTimeout(() => {
+                  if (pendingPermissions.has(reqId)) {
+                    resolve(false)
+                    pendingPermissions.delete(reqId)
+                  }
+                }, 300000)
+              })
+              if (!approved) {
+                return `[安全提示] 用户拒绝了此终端命令的执行。指令内容: "${command}"`
+              }
+            } else {
+              return '[安全拦截] 找不到活动窗口以发送授权确认，拒绝执行命令。'
+            }
+          }
+        }
+
+        const session = startShellSession(command, execCwd)
+        return `[命令已启动]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`
+      } catch (err: any) {
+        return `启动命令失败：${err.message || err}`
+      }
+    }
+
+    // 获取命令输出
+    if (name === 'get_command_output') {
+      try {
+        const { shell_id, filter } = args
+        if (!shell_id) return '错误：缺少必要参数 shell_id'
+
+        const { output, isRunning } = getShellOutput(shell_id, filter)
+        const status = isRunning ? '运行中' : '已结束'
+        return `[命令状态: ${status}]\n${output || '(无输出)'}`
+      } catch (err: any) {
+        return `获取输出失败：${err.message || err}`
+      }
+    }
+
+    // 终止命令
+    if (name === 'kill_command') {
+      try {
+        const { shell_id } = args
+        if (!shell_id) return '错误：缺少必要参数 shell_id'
+
+        const success = killShellSession(shell_id)
+        if (success) {
+          return `[命令已终止] shell_id: ${shell_id}`
+        } else {
+          return `错误：未找到会话 ${shell_id}`
+        }
+      } catch (err: any) {
+        return `终止命令失败：${err.message || err}`
+      }
+    }
+
+    // 搜索文件
+    if (name === 'search_files') {
+      try {
+        const { keywords, scope, file_types, limit } = args
+        if (!keywords) return '错误：缺少必要参数 keywords'
+
+        const searchDir = scope || os.homedir()
+        const keywordList = keywords.split(/\s+/).filter(Boolean)
+
+        // 使用 find 命令搜索文件名
+        let cmd = `find "${searchDir}" -type f`
+        if (file_types && file_types.length > 0) {
+          const extFilter = file_types.map((t: string) => `-name "*.${t}"`).join(' -o ')
+          cmd += ` \\( ${extFilter} \\)`
+        }
+
+        const { stdout } = await execWithBash(cmd, { timeout: 30000 })
+        let files = stdout.split('\n').filter(Boolean)
+
+        // 过滤包含所有关键词的文件
+        files = files.filter(file => {
+          const fileName = basename(file).toLowerCase()
+          return keywordList.every((kw: string) => fileName.includes(kw.toLowerCase()))
+        })
+
+        if (limit && limit > 0) {
+          files = files.slice(0, limit)
+        }
+
+        return `[搜索结果] 找到 ${files.length} 个文件\n${files.join('\n')}`
+      } catch (err: any) {
+        return `搜索文件失败：${err.message || err}`
+      }
+    }
+
+    // 内容搜索
+    if (name === 'grep_content') {
+      try {
+        const { pattern, scope, glob, output_mode, case_insensitive } = args
+        if (!pattern) return '错误：缺少必要参数 pattern'
+
+        const searchDir = scope || os.homedir()
+        let cmd = `grep -r`
+
+        if (case_insensitive) cmd += 'i'
+        if (output_mode === 'content') cmd += 'n'
+
+        cmd += ` "${pattern}"`
+
+        if (glob) {
+          cmd += ` --include="${glob}"`
+        }
+
+        cmd += ` "${searchDir}"`
+
+        const { stdout } = await execWithBash(cmd, { timeout: 30000 })
+
+        if (output_mode === 'count') {
+          const count = stdout.split('\n').filter(Boolean).length
+          return `[搜索结果] 找到 ${count} 处匹配`
+        } else if (output_mode === 'files_with_matches') {
+          const files = [...new Set(stdout.split('\n').filter(Boolean).map(line => line.split(':')[0]))]
+          return `[搜索结果] 在 ${files.length} 个文件中找到匹配\n${files.join('\n')}`
+        } else {
+          return `[搜索结果]\n${stdout || '(无匹配)'}`
+        }
+      } catch (err: any) {
+        return `内容搜索失败：${err.message || err}`
+      }
+    }
+
+    // glob 模式查找
+    if (name === 'glob_files') {
+      try {
+        const { pattern, scope } = args
+        if (!pattern) return '错误：缺少必要参数 pattern'
+
+        const searchDir = scope || os.homedir()
+        const cmd = `find "${searchDir}" -name "${pattern}" -type f | head -100`
+
+        const { stdout } = await execWithBash(cmd, { timeout: 30000 })
+        const files = stdout.split('\n').filter(Boolean)
+
+        return `[搜索结果] 找到 ${files.length} 个文件\n${files.join('\n')}`
+      } catch (err: any) {
+        return `glob 搜索失败：${err.message || err}`
       }
     }
 
@@ -5322,6 +6033,28 @@ if (-not $task.Wait(15000)) {
           throw new Error('未获取到有效的模型答复结构')
         }
 
+        let thinkContent = message.reasoning_content || ''
+        if (!thinkContent && message.content) {
+          const thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/i)
+          if (thinkMatch) {
+            thinkContent = thinkMatch[1].trim()
+          }
+        }
+
+        if (thinkContent) {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'think',
+              name: '深度思考过程',
+              detail: thinkContent,
+              sessionId
+            })
+          }
+          if (onToolEvent) {
+            onToolEvent({ type: 'think', name: '深度思考过程', detail: thinkContent })
+          }
+        }
+
         const toolCalls = message.tool_calls
         if (toolCalls && toolCalls.length > 0) {
           // 第二阶段参数填充逻辑：对于每个被调用的工具，若其包含非空 properties 参数定义，则按需填充
@@ -5397,6 +6130,12 @@ if (-not $task.Wait(15000)) {
           chatHistory.push(message)
 
           for (const toolCall of toolCalls) {
+            // 检查是否已中止，如果是则立即停止工具执行
+            if (thisController.signal.aborted) {
+              currentLlmAbortController = null
+              throw new Error('UserAborted')
+            }
+
             const toolName = toolCall.function.name
             let toolArgs: any = {}
             try {
@@ -5424,6 +6163,12 @@ if (-not $task.Wait(15000)) {
               toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event, sessionId)
             }
 
+            // 工具执行完成后再次检查是否已中止
+            if (thisController.signal.aborted) {
+              currentLlmAbortController = null
+              throw new Error('UserAborted')
+            }
+
             if (event) {
               event.sender.send('api:llm-tool-event', {
                 type: 'tool_result',
@@ -5448,6 +6193,7 @@ if (-not $task.Wait(15000)) {
           sendTokenEvent()
           currentLlmAbortController = null
           let finalResponse = message.content || ''
+          finalResponse = finalResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
           if (!finalResponse.trim() && loopCount > 1) {
             finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'
           }

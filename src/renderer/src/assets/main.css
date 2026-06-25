@@ -835,6 +835,18 @@ body {
   box-shadow: 0 0 6px #60a5fa;
 }
 
+.recent-item.thinking .recent-dot {
+  background: #f97316;
+  box-shadow: 0 0 6px #f97316;
+  animation: sessionPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes sessionPulse {
+  0% { opacity: 1; box-shadow: 0 0 6px #f97316; }
+  50% { opacity: 0.4; box-shadow: 0 0 2px #f97316; transform: scale(0.9); }
+  100% { opacity: 1; box-shadow: 0 0 6px #f97316; }
+}
+
 .recent-pin-icon {
   font-size: 11px;
   flex-shrink: 0;

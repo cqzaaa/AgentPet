@@ -313,7 +313,17 @@ const api = {
     ipcRenderer.send('close-agent-window')
   },
   isAgentWindowMaximized: (): Promise<boolean> =>
-    ipcRenderer.invoke('api:is-agent-window-maximized')
+    ipcRenderer.invoke('api:is-agent-window-maximized'),
+
+  // 工具管理 API
+  getToolsSummary: (): Promise<string> =>
+    ipcRenderer.invoke('api:get-tools-summary'),
+  getToolDocumentation: (toolName: string): Promise<string> =>
+    ipcRenderer.invoke('api:get-tool-documentation', toolName),
+  getAllToolsInfo: (): Promise<any> =>
+    ipcRenderer.invoke('api:get-all-tools-info'),
+  reloadTools: (): Promise<{ success: boolean; count?: number; error?: string }> =>
+    ipcRenderer.invoke('api:reload-tools')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

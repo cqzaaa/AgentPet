@@ -49,6 +49,15 @@ function getPreview(s: Session): string {
   return ''
 }
 
+function checkIsThinking(s: Session): boolean {
+  const msgs = s.messages || []
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.sender === 'agent') return !!m.isThinking
+  }
+  return false
+}
+
 // 扁平化的渲染单元
 type RenderRow =
   | { type: 'header'; key: string; groupKey: GroupKey; label: string }
@@ -184,9 +193,10 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     const isActive = s.id === activeSessionId
     const isRenaming = renamingId === s.id
     const preview = getPreview(s)
+    const isThinking = checkIsThinking(s)
     return (
       <div
-        className={`recent-item ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''}`}
+        className={`recent-item ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${isThinking ? 'thinking' : ''}`}
         onClick={() => { if (!isRenaming) onSelect(s.id) }}
         onContextMenu={(e) => handleContextMenu(e, s.id)}
         onDoubleClick={() => startRename(s)}

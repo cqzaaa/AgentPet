@@ -1,0 +1,445 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-06-25",
+  "categories": {
+    "terminal": {
+      "name": "终端命令",
+      "description": "执行和管理终端命令",
+      "tools": ["run_command", "get_command_output", "kill_command", "run_terminal_command"]
+    },
+    "file": {
+      "name": "文件操作",
+      "description": "读取、写入、编辑文件",
+      "tools": ["read_file", "write_file", "edit_file", "generate_file", "move_file", "delete_file"]
+    },
+    "search": {
+      "name": "搜索查找",
+      "description": "搜索文件和内容",
+      "tools": ["search_files", "grep_content", "glob_files"]
+    },
+    "office": {
+      "name": "Office 文档",
+      "description": "处理 Excel、Word、PDF 等文档",
+      "tools": ["modify_xlsx_file", "modify_docx_file"]
+    },
+    "system": {
+      "name": "系统工具",
+      "description": "系统状态和任务管理",
+      "tools": ["get_system_status", "manage_cron_task", "get_location"]
+    }
+  },
+  "tools": {
+    "run_command": {
+      "name": "run_command",
+      "category": "terminal",
+      "description": "异步执行终端命令，返回 shell_id。适用于长时间运行的命令。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "要执行的终端命令"
+          },
+          "description": {
+            "type": "string",
+            "description": "命令的简短描述（5-10字）"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "工作目录（可选）"
+          }
+        },
+        "required": ["command"]
+      },
+      "returns": {
+        "shell_id": "string - 终端会话ID，用于后续获取输出或终止",
+        "initial_output": "string - 初始输出（前30秒）"
+      },
+      "usage": "用于执行需要长时间运行的命令，如服务器启动、编译等。使用 get_command_output 获取后续输出。"
+    },
+    "get_command_output": {
+      "name": "get_command_output",
+      "category": "terminal",
+      "description": "获取正在运行的命令的最新输出",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "shell_id": {
+            "type": "string",
+            "description": "由 run_command 返回的终端会话ID"
+          },
+          "filter": {
+            "type": "string",
+            "description": "输出过滤的正则表达式（可选）"
+          }
+        },
+        "required": ["shell_id"]
+      },
+      "returns": {
+        "output": "string - 新的输出内容",
+        "is_running": "boolean - 命令是否仍在运行"
+      },
+      "usage": "配合 run_command 使用，获取命令的实时输出。每次调用会等待最多30秒收集新输出。"
+    },
+    "kill_command": {
+      "name": "kill_command",
+      "category": "terminal",
+      "description": "终止正在运行的终端命令",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "shell_id": {
+            "type": "string",
+            "description": "由 run_command 返回的终端会话ID"
+          }
+        },
+        "required": ["shell_id"]
+      },
+      "returns": {
+        "success": "boolean - 是否成功终止"
+      },
+      "usage": "终止由 run_command 启动的长时间运行的命令。"
+    },
+    "run_terminal_command": {
+      "name": "run_terminal_command",
+      "category": "terminal",
+      "description": "同步执行终端命令并返回结果。适用于快速命令（<30秒）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "要执行的终端命令"
+          }
+        },
+        "required": ["command"]
+      },
+      "returns": {
+        "stdout": "string - 标准输出",
+        "stderr": "string - 错误输出",
+        "exit_code": "number - 退出码"
+      },
+      "usage": "用于执行快速命令，如查看文件、列出目录等。对于长时间运行的命令，请使用 run_command。"
+    },
+    "read_file": {
+      "name": "read_file",
+      "category": "file",
+      "description": "读取文件内容。支持 Excel、Word、PDF、CSV 及文本文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "文件的绝对路径"
+          },
+          "start_line": {
+            "type": "number",
+            "description": "起始行号（可选，默认从头开始）"
+          },
+          "end_line": {
+            "type": "number",
+            "description": "结束行号（可选，默认读到末尾）"
+          }
+        },
+        "required": ["file_path"]
+      },
+      "returns": {
+        "content": "string - 文件内容",
+        "total_lines": "number - 总行数",
+        "file_type": "string - 文件类型"
+      },
+      "usage": "读取文件内容。对于大文件，可以使用 start_line 和 end_line 分段读取。"
+    },
+    "write_file": {
+      "name": "write_file",
+      "category": "file",
+      "description": "写入文件内容。支持创建新文件或覆盖现有文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "文件的绝对路径"
+          },
+          "content": {
+            "type": "string",
+            "description": "要写入的内容"
+          },
+          "append": {
+            "type": "boolean",
+            "description": "是否追加模式（可选，默认为覆盖）"
+          }
+        },
+        "required": ["file_path", "content"]
+      },
+      "returns": {
+        "success": "boolean - 是否成功",
+        "bytes_written": "number - 写入的字节数"
+      },
+      "usage": "创建新文件或覆盖现有文件。设置 append=true 可以追加内容。"
+    },
+    "edit_file": {
+      "name": "edit_file",
+      "category": "file",
+      "description": "精确替换文件中的字符串。必须先读取文件再编辑。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "文件的绝对路径"
+          },
+          "old_string": {
+            "type": "string",
+            "description": "要替换的原始文本"
+          },
+          "new_string": {
+            "type": "string",
+            "description": "替换后的新文本"
+          },
+          "replace_all": {
+            "type": "boolean",
+            "description": "是否替换所有匹配项（可选，默认为 false）"
+          }
+        },
+        "required": ["file_path", "old_string", "new_string"]
+      },
+      "returns": {
+        "success": "boolean - 是否成功",
+        "replacements": "number - 替换的数量"
+      },
+      "usage": "局部修改文件，无需覆盖整个文件。old_string 必须与文件中的内容完全匹配。"
+    },
+    "generate_file": {
+      "name": "generate_file",
+      "category": "file",
+      "description": "生成新文件。支持 txt、md、js、xlsx、docx、pdf、pptx 等格式。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "文件名（含扩展名）"
+          },
+          "content": {
+            "type": "string",
+            "description": "文件内容（文本文件）或 JSON 数据（Office 文件）"
+          },
+          "file_type": {
+            "type": "string",
+            "description": "文件类型：text、excel、word、pdf、powerpoint"
+          }
+        },
+        "required": ["file_name", "content"]
+      },
+      "returns": {
+        "file_path": "string - 生成的文件路径",
+        "file_name": "string - 文件名"
+      },
+      "usage": "从零创建新文件。对于 Office 文件，content 应为 JSON 格式的数据。"
+    },
+    "move_file": {
+      "name": "move_file",
+      "category": "file",
+      "description": "移动或重命名文件/目录",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "description": "源路径"
+          },
+          "destination_path": {
+            "type": "string",
+            "description": "目标路径"
+          }
+        },
+        "required": ["source_path", "destination_path"]
+      },
+      "returns": {
+        "success": "boolean - 是否成功"
+      },
+      "usage": "移动文件到新位置，或重命名文件。"
+    },
+    "delete_file": {
+      "name": "delete_file",
+      "category": "file",
+      "description": "删除文件或目录",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "要删除的文件/目录路径"
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "是否递归删除目录（可选，默认为 false）"
+          }
+        },
+        "required": ["file_path"]
+      },
+      "returns": {
+        "success": "boolean - 是否成功"
+      },
+      "usage": "删除文件或目录。删除目录时需设置 recursive=true。"
+    },
+    "search_files": {
+      "name": "search_files",
+      "category": "search",
+      "description": "按关键词搜索文件名",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "string",
+            "description": "搜索关键词（空格分隔，所有词都必须出现）"
+          },
+          "scope": {
+            "type": "string",
+            "description": "搜索范围目录（可选，默认为工作目录）"
+          },
+          "file_types": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "文件类型过滤（可选）"
+          },
+          "limit": {
+            "type": "number",
+            "description": "返回结果数量限制（可选）"
+          }
+        },
+        "required": ["keywords"]
+      },
+      "returns": {
+        "files": "array - 匹配的文件路径列表",
+        "count": "number - 结果数量"
+      },
+      "usage": "搜索文件名中包含指定关键词的文件。关键词用空格分隔，所有词都必须出现。"
+    },
+    "grep_content": {
+      "name": "grep_content",
+      "category": "search",
+      "description": "在文件内容中搜索正则表达式",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "正则表达式模式"
+          },
+          "scope": {
+            "type": "string",
+            "description": "搜索范围目录（可选）"
+          },
+          "glob": {
+            "type": "string",
+            "description": "文件过滤的 glob 模式（可选，如 '*.js'）"
+          },
+          "output_mode": {
+            "type": "string",
+            "enum": ["content", "files_with_matches", "count"],
+            "description": "输出模式（可选，默认为 files_with_matches）"
+          },
+          "case_insensitive": {
+            "type": "boolean",
+            "description": "是否忽略大小写（可选）"
+          }
+        },
+        "required": ["pattern"]
+      },
+      "returns": {
+        "matches": "array/object - 匹配结果（取决于 output_mode）",
+        "count": "number - 匹配数量"
+      },
+      "usage": "在文件内容中搜索正则表达式。可以指定搜索范围和文件类型过滤。"
+    },
+    "glob_files": {
+      "name": "glob_files",
+      "category": "search",
+      "description": "按 glob 模式查找文件",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "glob 模式（如 '**/*.js', 'src/**/*.ts'）"
+          },
+          "scope": {
+            "type": "string",
+            "description": "搜索范围目录（可选）"
+          }
+        },
+        "required": ["pattern"]
+      },
+      "returns": {
+        "files": "array - 匹配的文件路径列表（按修改时间排序）",
+        "count": "number - 结果数量"
+      },
+      "usage": "使用 glob 模式查找文件。支持通配符 * 和 **。"
+    },
+    "modify_xlsx_file": {
+      "name": "modify_xlsx_file",
+      "category": "office",
+      "description": "修改 Excel 文件，保留原有格式和数据验证。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "description": "原始 xlsx 文件路径"
+          },
+          "output_name": {
+            "type": "string",
+            "description": "输出文件名"
+          },
+          "modifications": {
+            "type": "object",
+            "description": "修改内容（JSON 格式）"
+          }
+        },
+        "required": ["source_path", "output_name", "modifications"]
+      },
+      "usage": "修改已有的 Excel文件，保留原有格式、公式、数据验证等。"
+    },
+    "modify_docx_file": {
+      "name": "modify_docx_file",
+      "category": "office",
+      "description": "修改 Word 文档，保留原有排版格式。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "description": "原始 docx 文件路径"
+          },
+          "output_name": {
+            "type": "string",
+            "description": "输出文件名"
+          },
+          "modifications": {
+            "type": "object",
+            "description": "修改内容（JSON 格式）"
+          }
+        },
+        "required": ["source_path", "output_name", "modifications"]
+      },
+      "usage": "修改已有的 Word 文档，保留原有排版格式。"
+    },
+    "get_system_status": {
+      "name": "get_system_status",
+      "category": "system",
+      "description": "获取系统状态信息（CPU、内存、磁盘等）",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "returns": {
+        "cpu": "object - CPU 使用情况",
+        "memory": "object - 内存使用情况",
+        "disk": "object - 磁盘使用情况"
+      },
+      "usage": "获取当前系统的资源使用情况。"
+    }
+  }
+}

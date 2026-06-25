@@ -478,13 +478,11 @@ export function renderAdvancedMessage(text: string): React.ReactNode {
 }
 
 // ── 可独立折叠的工具调用子组件 ─────────────────────────────────
-export function ToolCallItem({ step, isThinking }: { step: any; isThinking: boolean }) {
-  const [isItemCollapsed, setIsItemCollapsed] = useState(true) // 默认是折叠的
+export function ToolCallItem({ step, isThinking, isWaiting }: { step: any; isThinking: boolean; isWaiting?: boolean }) {
+  const [isItemCollapsed, setIsItemCollapsed] = useState(true)
 
   useEffect(() => {
-    if (!isThinking) {
-      setIsItemCollapsed(true)
-    }
+    if (!isThinking) setIsItemCollapsed(true)
   }, [isThinking])
 
   const displayCmd = typeof step.detail === 'object' && step.detail !== null
@@ -492,24 +490,60 @@ export function ToolCallItem({ step, isThinking }: { step: any; isThinking: bool
     : String(step.detail)
 
   return (
-    <div className="tool-step-item call">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <div
-        className="step-call-header"
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起调用详情"
+        title="点击展开/收起详情"
       >
-        <div className="step-call-title-area">
-          <span className="step-title">深度思考</span>
-          <span className="step-call-info">
-            正在调用系统工具: <span className="highlight-tool">{step.name}</span>
-          </span>
-        </div>
-        <span className="step-call-arrow">{isItemCollapsed ? ' ∨' : ' ∧'}</span>
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
+          {isWaiting ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '12px', height: '12px', animation: 'tool-spin 1s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+              <style>{`@keyframes tool-spin { 100% { transform: rotate(360deg); } }`}</style>
+            </svg>
+          ) : '✓'}
+        </span>
+        <span>调用系统工具: {step.name}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
       </div>
-
       {!isItemCollapsed && (
-        <div className="step-call-cmd">
-          <code>&gt;_ {displayCmd}</code>
+        <div style={{ paddingLeft: '28px' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
+            {displayCmd}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 深度思考过程展示子组件 ─────────────────────────────────
+export function ToolThinkItem({ step, isThinking }: { step: any; isThinking: boolean }) {
+  const [isItemCollapsed, setIsItemCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (!isThinking) setIsItemCollapsed(true)
+  }, [isThinking])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
+        title="点击展开/收起思考详情"
+      >
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: 'var(--text-muted)', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" /></svg>
+        </span>
+        <span>已深度思考</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+      </div>
+      {!isItemCollapsed && (
+        <div style={{ paddingLeft: '28px' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.04)', borderLeft: '3px solid rgba(128,128,128,0.3)', fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+            {step.detail}
+          </div>
         </div>
       )}
     </div>
@@ -518,12 +552,10 @@ export function ToolCallItem({ step, isThinking }: { step: any; isThinking: bool
 
 // ── 可独立折叠的工具具体执行结果子组件 ─────────────────────────────────
 export function ToolResultItem({ step, isThinking }: { step: any; isThinking: boolean }) {
-  const [isItemCollapsed, setIsItemCollapsed] = useState(true) // 默认是折叠的
+  const [isItemCollapsed, setIsItemCollapsed] = useState(true)
 
   useEffect(() => {
-    if (!isThinking) {
-      setIsItemCollapsed(true)
-    }
+    if (!isThinking) setIsItemCollapsed(true)
   }, [isThinking])
 
   const displayResult = typeof step.detail === 'string'
@@ -531,22 +563,22 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
     : JSON.stringify(step.detail, null, 2)
 
   return (
-    <div className="tool-step-item result">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <div
-        className="step-result-header"
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起具体内容"
+        title="点击展开/收起详情"
       >
-        <span className="step-result-title">
-          📝 {step.name === 'run_terminal_command' ? 'PowerShell 终端指令执行结果' : `${step.name} 工具返回结果`}
-        </span>
-        <span className="step-result-arrow">{isItemCollapsed ? ' ∨' : ' ∧'}</span>
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+        <span>工具返回结果: {step.name}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
       </div>
-
       {!isItemCollapsed && (
-        <pre className="step-result-code">
-          <code>{displayResult}</code>
-        </pre>
+        <div style={{ paddingLeft: '28px' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
+            {displayResult}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -586,7 +618,7 @@ function renderSvgGraph(debug: any) {
 
   // 计算坐标
   const centerNode = { x: 55, y: h / 2 }
-  
+
   const firstNodes = drawFirst.map((name: string, i: number) => ({
     name,
     x: 180,
@@ -608,7 +640,8 @@ function renderSvgGraph(debug: any) {
 
   return (
     <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: '#1e1b29', borderRadius: '10px', padding: '12px 10px', boxShadow: 'inset 0 0 20px rgba(0,0,0,0.5)', marginBottom: '16px' }}>
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes dash {
           to {
             stroke-dashoffset: -20;
@@ -814,7 +847,25 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
 
   const toolSteps = msg.toolSteps || []
   const callsCount = toolSteps.filter((s: any) => s.type === 'call').length
+  const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
+  const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || (s.type === 'think' && s.detail?.trim()))
   const msgsCount = toolSteps.length
+
+  let headerText = ''
+  let collapseText = ''
+  if (hasThink && callsCount > 0) {
+    headerText = `深度思考与工具调用 ${callsCount} 次`
+    collapseText = '收起深度思考与工具调用过程'
+  } else if (hasThink && callsCount === 0) {
+    headerText = `已深度思考`
+    collapseText = '收起深度思考过程'
+  } else if (!hasThink && callsCount > 0) {
+    headerText = `工具调用 ${callsCount} 次`
+    collapseText = '收起工具调用过程'
+  } else {
+    headerText = `运行过程`
+    collapseText = '收起运行过程'
+  }
 
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
 
@@ -830,7 +881,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
         <span className="msg-send-time">{msg.time}</span>
       </div>
 
-      <div className="message-bubble">
+      <div className="message-bubble" style={{ maxWidth: msg.isThinking ? '100%' : undefined }}>
         {msg.fileInfo && !msg.fileInfos && (() => {
           const f = msg.fileInfo
           const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
@@ -897,22 +948,39 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
           </div>
         )}
 
-        {/* 思考中且有系统工具调用时展示折叠区 */}
-        {toolSteps.length > 0 && (
-          <div className={`tool-steps-panel ${currentCollapsed ? 'collapsed' : 'expanded'}`}>
-            <div className="tool-steps-summary" onClick={() => setUserCollapsed(!currentCollapsed)}>
-              <span className="summary-arrow">{currentCollapsed ? '▶' : '▼'}</span>
-              <span className="summary-text">
-                工具调用 {callsCount} · 过程消息 {msgsCount}
-              </span>
-            </div>
-
-            {!currentCollapsed && (
-              <div className="tool-steps-list">
-                {toolSteps.map((step: any) => {
+        {/* 工具调用流（现代内联样式） */}
+        {shouldShowToolSteps && (
+          <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+            {currentCollapsed ? (
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+                onClick={() => setUserCollapsed(false)}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+                <span>{headerText}</span>
+                <span style={{ fontSize: '10px', opacity: 0.7 }}>▶</span>
+              </div>
+            ) : (
+              <>
+                {!msg.isThinking && (
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none', paddingBottom: '4px' }}
+                    onClick={() => setUserCollapsed(true)}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+                    <span>{collapseText}</span>
+                    <span style={{ fontSize: '10px', opacity: 0.7 }}>▼</span>
+                  </div>
+                )}
+                {toolSteps.map((step: any, index: number, arr: any[]) => {
                   if (step.type === 'call') {
+                    const isWaiting = msg.isThinking && !arr.some((s, i) => i > index && s.type === 'result' && s.name === step.name)
                     return (
-                      <ToolCallItem key={step.id} step={step} isThinking={msg.isThinking} />
+                      <ToolCallItem key={step.id} step={step} isThinking={msg.isThinking} isWaiting={isWaiting} />
+                    )
+                  } else if (step.type === 'think') {
+                    return (
+                      <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
                     )
                   } else {
                     return (
@@ -920,7 +988,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                     )
                   }
                 })}
-              </div>
+              </>
             )}
           </div>
         )}

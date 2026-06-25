@@ -677,20 +677,28 @@ export function useAppStore() {
     }).catch(() => {})
   }, [handlePendingInput])
 
+  const prevWechatStatusRef = useRef<string | null>(null)
+
   // 微信 Bot 链接成功时，把当前会话置顶，方便在最近会话列表顶部快速找到
   useEffect(() => {
     if (!window.api.onWechatStatusUpdated) return
     const unsubscribe = window.api.onWechatStatusUpdated((data: any) => {
-      if (data?.status !== 'connected') return
-      setSessions(prev => {
-        const target = prev.find(s => s.id === activeSessionId)
-        if (!target || target.pinned) return prev
-        const toggled = { ...target, pinned: true }
-        const rest = prev.filter(s => s.id !== activeSessionId)
-        const pinnedRest = rest.filter(s => s.pinned)
-        const unpinnedRest = rest.filter(s => !s.pinned)
-        return [...pinnedRest, toggled, ...unpinnedRest]
-      })
+      const status = data?.status || 'disconnected'
+      const prevStatus = prevWechatStatusRef.current
+      prevWechatStatusRef.current = status
+
+      // 仅当微信连接状态从非 connected 变更为 connected 时，才把当前会话置顶
+      if (status === 'connected' && prevStatus !== null && prevStatus !== 'connected') {
+        setSessions(prev => {
+          const target = prev.find(s => s.id === activeSessionId)
+          if (!target || target.pinned) return prev
+          const toggled = { ...target, pinned: true }
+          const rest = prev.filter(s => s.id !== activeSessionId)
+          const pinnedRest = rest.filter(s => s.pinned)
+          const unpinnedRest = rest.filter(s => !s.pinned)
+          return [...pinnedRest, toggled, ...unpinnedRest]
+        })
+      }
     })
     return () => unsubscribe()
   }, [activeSessionId])
@@ -857,7 +865,8 @@ export function useAppStore() {
       id: newId,
       name: '(未命名)',
       time: formatDateTime(),
-      messages: []
+      messages: [],
+      pinned: false
     }
     setSessions([...sessions, newSess])
     setActiveSessionId(newId)
@@ -952,7 +961,7 @@ export function useAppStore() {
   useEffect(() => {
     if (!window.api.onToolEvent) return
     const unsubscribe = window.api.onToolEvent((data: any) => {
-      const { type, name, args, result, sessionId } = data
+      const { type, name, args, result, detail, sessionId } = data
 
       // 1. 如果是定时任务后台执行产生的工具调用事件
       if (sessionId && sessionId.startsWith('cron:')) {
@@ -977,6 +986,13 @@ export function useAppStore() {
                 type: 'result',
                 name,
                 detail: result
+              })
+            } else if (type === 'think') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'think',
+                name,
+                detail: detail
               })
             }
             
@@ -1003,8 +1019,9 @@ export function useAppStore() {
       }
 
       // 2. 正常前台会话消息更新
+      const targetSessionId = sessionId || activeSessionId
       setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
+        if (s.id === targetSessionId) {
           const messages = [...s.messages]
           const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
           if (latestAgentIdx !== -1) {
@@ -1024,6 +1041,13 @@ export function useAppStore() {
                 type: 'result',
                 name,
                 detail: result
+              })
+            } else if (type === 'think') {
+              toolSteps.push({
+                id: `step-${Date.now()}-${Math.random()}`,
+                type: 'think',
+                name,
+                detail: detail
               })
             }
             
@@ -1212,9 +1236,9 @@ export function useAppStore() {
       }
 
       const mcpContext = activeMcpServers.length > 0
-        ? `\n\n🔗 你还可以通过 MCP（Model Context Protocol）协议调用以下外部扩展服务：
-${activeMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'} (已成功加载 ${s.toolsCount} 个工具)`).join('\n')}
-当主人的问题涉及这些服务的功能时（如网页搜索、地图导航、天气查询等），请主动调用对应的 MCP 服务来获取实时信息。`
+        ? `\n\n🔗 此外，你已成功接入 MCP（Model Context Protocol）扩展服务：
+${activeMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'} (包含 ${s.toolsCount} 个工具)`).join('\n')}
+当主人的问题涉及上述 MCP 服务领域时，请务必主动调用对应的扩展工具来完成任务。`
         : ''
 
       const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
@@ -1223,20 +1247,19 @@ ${stylePrompt}
 ${memoryContext}
 ${skillsContext}
 在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
-⚠️ 极重要约束：只有当主人的指令或问题明确指示进行”查看/操作文件、列出目录、获取系统状态、运行命令”等开发运维任务时，你才被允许调用本地系统工具。普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。
+⚠️ 极重要约束：普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁无意义地调用系统工具。
 
-🚫 工具调用严格约束：你只能使用以下列出的工具，绝对不允许调用或编造任何不在列表中的工具名称（如 get_current_date、search_web、calculate 等均不存在）。如果你需要获取当前日期时间等信息，请通过 run_terminal_command 执行系统命令（如 date /T）来获取。
-你当前可用的工具列表如下：
+你当前可用的本地核心系统工具如下：
 1. run_terminal_command — 执行终端命令（如运行脚本、查看文件、获取日期时间等）
 2. get_system_status — 获取 CPU/内存/系统负载状态
 3. manage_cron_task — 创建或删除定时任务
 4. get_location — 获取当前地理位置（经纬度）
 5. generate_file — 从零创建新文件（txt/xlsx/docx/pdf/pptx 等）
-6. modify_docx_file — 修改已上传的 docx 文件（保留原格式）
-7. modify_xlsx_file — 修改已上传的 xlsx 文件（保留原格式，批量在表尾追加行数据，必须优先使用其中的 append_rows 参数而非 modifications）
-8. read_file — 读取文件内容（xlsx/docx/pdf/csv/文本等）
-以上是全部可用工具，不存在其他工具。如需获取日期、时间、网络信息等，请使用 run_terminal_command 执行相应系统命令。
-${mcpContext}`
+6. modify_docx_file — 修改已上传的 docx 文件
+7. modify_xlsx_file — 修改已上传的 xlsx 文件
+8. read_file — 读取文件内容${mcpContext}
+
+🚫 工具调用严格约束：你只能使用已被提供的本地核心工具以及 MCP 扩展工具，绝对不允许调用或编造任何不存在的工具名称。例如，如果需要获取当前日期时间，由于没有专门的时间工具，此时你必须通过 run_terminal_command 执行终端命令（如 date /T）来变通获取。`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })
@@ -1404,7 +1427,8 @@ ${chatLogStr}
       const summaryResult = await window.api.callLLM(
         {
           ...llmConfig,
-          temperature: 0.3
+          temperature: 0.3,
+          sessionId: 'system:summary'
         },
         [
           { role: 'system', content: summarySystemPrompt },
@@ -1444,7 +1468,7 @@ ${chatLogStr}
   const handleTestConnection = async (): Promise<void> => {
     setTestStatus('testing')
     try {
-      const result = await window.api.callLLM(llmConfig, [{ role: 'user', content: 'Say "Success" in exactly one word.' }])
+      const result = await window.api.callLLM({ ...llmConfig, sessionId: 'system:test' }, [{ role: 'user', content: 'Say "Success" in exactly one word.' }])
       setTestStatus(`连接成功! 答复: "${result.trim()}"`)
     } catch (e: any) {
       setTestStatus(`连接失败: ${e.message || e}`)
