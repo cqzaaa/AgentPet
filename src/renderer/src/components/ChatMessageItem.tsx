@@ -1042,8 +1042,14 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
     const lastTime = timestamps.length > 0 ? Math.max(...timestamps) : msg.id
     const durationMs = lastTime - msg.id
     const durationSec = Math.max(1, Math.round(durationMs / 1000))
-    if (durationSec > 0 && durationSec < 3600) {
-      timeSuffix = ` ${durationSec}s`
+    if (durationSec > 0) {
+      if (durationSec >= 60) {
+        const mins = Math.floor(durationSec / 60)
+        const secs = durationSec % 60
+        timeSuffix = secs > 0 ? ` ${mins}m ${secs}s` : ` ${mins}m`
+      } else {
+        timeSuffix = ` ${durationSec}s`
+      }
     }
   }
 

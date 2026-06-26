@@ -1530,7 +1530,7 @@ body {
 .scroll-to-bottom-btn {
   position: sticky;
   bottom: 12px;
-  align-self: center;
+  align-self: flex-end;
   z-index: 10;
   display: inline-flex;
   align-items: center;
