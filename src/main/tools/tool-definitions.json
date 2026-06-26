@@ -15,7 +15,7 @@
     "search": {
       "name": "搜索查找",
       "description": "搜索文件和内容",
-      "tools": ["search_files", "grep_content", "glob_files"]
+      "tools": ["search_files", "grep_content", "glob_files", "web_search", "web_fetch"]
     },
     "office": {
       "name": "Office 文档",
@@ -440,6 +440,44 @@
         "disk": "object - 磁盘使用情况"
       },
       "usage": "获取当前系统的资源使用情况。"
+    },
+    "web_search": {
+      "name": "web_search",
+      "category": "search",
+      "description": "在互联网上搜索指定关键词，返回相关的网页标题、链接及清洗后的正文片段。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "要搜索的关键词"
+          }
+        },
+        "required": ["query"]
+      },
+      "returns": {
+        "result": "string - 搜索结果 Markdown 文本（包含网页标题、链接及简短正文摘要）"
+      },
+      "usage": "当需要获取实时新闻、最新信息、或解答大模型未知疑问时，调用此工具上网搜索。"
+    },
+    "web_fetch": {
+      "name": "web_fetch",
+      "category": "search",
+      "description": "获取指定网页的纯文本或 Markdown 格式正文内容。剔除广告和导航杂质，适合抓取特定 URL 的详细文字进行深入分析。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "要抓取的网页 URL"
+          }
+        },
+        "required": ["url"]
+      },
+      "returns": {
+        "content": "string - 网页经过剔除杂质后的 Markdown 正文内容"
+      },
+      "usage": "当大模型已知一个具体的网页 URL，并需要阅读和分析其主体文字内容时，调用此工具获取页面文字。"
     }
   }
 }
