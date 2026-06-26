@@ -84,6 +84,20 @@ export function useAppStore() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
 
+  // ── 打字机流式效果控制 ──────────────────────────────────────────
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isTypingRef = useRef<boolean>(false)
+
+  // 卸载时清理定时器，防止内存泄漏
+  useEffect(() => {
+    return () => {
+      isTypingRef.current = false
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+      }
+    }
+  }, [])
+
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
 
   // ── Cron Location Details ────────────────────────────────────
@@ -1062,6 +1076,69 @@ export function useAppStore() {
     return () => unsubscribe()
   }, [activeSessionId])
 
+  // 打字机流式打印辅助函数
+  const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
+    isTypingRef.current = true
+    let currentLength = 0
+    const textLength = fullText.length
+    
+    // 动态速度调整：期望在 1.2 秒内打字完成
+    const typingSpeed = 25 // 25ms 周期
+    const expectedDuration = 1200 // 1.2 秒内打完
+    const maxSteps = expectedDuration / typingSpeed
+    const step = Math.max(1, Math.ceil(textLength / maxSteps))
+
+    const typeNextChar = () => {
+      if (!isTypingRef.current) return
+
+      if (currentLength < textLength) {
+        currentLength = Math.min(textLength, currentLength + step)
+        const displayedText = fullText.slice(0, currentLength)
+
+        setSessions(prev => prev.map(s => {
+          if (s.id === sessionId) {
+            return {
+              ...s,
+              messages: s.messages.map(m => m.id === replyId ? { ...m, text: displayedText } : m)
+            }
+          }
+          return s
+        }))
+
+        typingTimerRef.current = setTimeout(typeNextChar, typingSpeed)
+      } else {
+        // 打印结束
+        isTypingRef.current = false
+        if (typingTimerRef.current) {
+          clearTimeout(typingTimerRef.current)
+          typingTimerRef.current = null
+        }
+
+        setSessions(prev => prev.map(s => {
+          if (s.id === sessionId) {
+            return {
+              ...s,
+              messages: s.messages.map(m => m.id === replyId ? { ...m, isThinking: false } : m)
+            }
+          }
+          return s
+        }))
+
+        setIsSending(false)
+
+        // 异步检测并触发记忆总结
+        setTimeout(() => {
+          setSessions(prev => {
+            triggerSessionSummary(sessionId, prev)
+            return prev
+          })
+        }, 500)
+      }
+    }
+
+    typeNextChar()
+  }
+
   const handleSendChat = async (): Promise<void> => {
     if ((!inputValue.trim() && attachedFiles.length === 0) || isSending) return
     const text = inputValue.trim()
@@ -1129,16 +1206,7 @@ export function useAppStore() {
           '这件事情听起来很有趣，我很乐意陪您一起探讨呢~'
         ]
         const randomReply = agentReplies[Math.floor(Math.random() * agentReplies.length)]
-        setSessions(prev => prev.map(s => {
-          if (s.id === activeSessionId) {
-            return {
-              ...s,
-              messages: s.messages.map(m => m.id === replyId ? { ...m, text: randomReply, isThinking: false } : m)
-            }
-          }
-          return s
-        }))
-        setIsSending(false)
+        startTypingEffect(replyId, randomReply, activeSessionId)
       }, 1000)
       return
     }
@@ -1306,20 +1374,11 @@ ${skillsContext}
         workspacePath
       )
       
-      // 更新该 replyId 占位消息的 text 并结束思考状态
-      let latestSessions: any[] = []
-      setSessions(prev => {
-        latestSessions = prev.map(s => {
-          if (s.id === activeSessionId) {
-            return {
-              ...s,
-              messages: s.messages.map(m => m.id === replyId ? { ...m, text: response, isThinking: false } : m)
-            }
-          }
-          return s
-        })
-        return latestSessions
-      })
+      let typingStarted = false
+      if (response !== undefined) {
+        typingStarted = true
+        startTypingEffect(replyId, response, activeSessionId)
+      }
 
       // TTS 语音合成：LLM 回复后自动朗读
       if (ttsEnabled && response && currentAvatarVoice) {
@@ -1332,13 +1391,6 @@ ${skillsContext}
           console.error('TTS 播放失败', ttsErr)
         }
       }
-
-      // 异步检测并触发记忆总结
-      setTimeout(() => {
-        if (latestSessions.length > 0) {
-          triggerSessionSummary(activeSessionId, latestSessions)
-        }
-      }, 500)
     } catch (e: any) {
       console.error(e)
       const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
@@ -1355,7 +1407,9 @@ ${skillsContext}
         return s
       }))
     } finally {
-      setIsSending(false)
+      if (!typingStarted) {
+        setIsSending(false)
+      }
     }
   }
 
@@ -1534,6 +1588,11 @@ ${chatLogStr}
 
   const handleAbortLlm = async (): Promise<void> => {
     try {
+      isTypingRef.current = false
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+        typingTimerRef.current = null
+      }
       await window.api.abortLlm()
       setIsSending(false)
       // 在中断时，立刻将当前处于正在思考（loading）的消息的状态更新为“已终止任务”并隐藏 loading 动画
@@ -1541,7 +1600,7 @@ ${chatLogStr}
         if (s.id === activeSessionId) {
           return {
             ...s,
-            messages: s.messages.map(m => m.isThinking ? { ...m, text: '⚠️ 对话生成已被手动终止。', isThinking: false } : m)
+            messages: s.messages.map(m => m.isThinking ? { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false } : m)
           }
         }
         return s

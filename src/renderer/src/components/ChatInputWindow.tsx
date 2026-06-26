@@ -319,9 +319,19 @@ export function ChatInputWindow(): React.JSX.Element {
       payload.text = userText
     }
 
-    window.api.sendPendingInput(JSON.stringify(payload))
-    window.api.openAgentWindow()
-    window.api.closeInputWindow()
+    if (allFiles.length > 0) {
+      window.api.sendPendingInput(JSON.stringify(payload))
+      window.api.openAgentWindow()
+      window.api.closeInputWindow()
+    } else {
+      // 纯文本普通提问直接在小窗口内交互，不弹窗跳转
+      setMessages(prev => [...prev, { sender: 'user', text: userText }])
+      setIsThinking(true)
+      setShowChat(true)
+      if (window.api.sendChatToPet) {
+        window.api.sendChatToPet(userText)
+      }
+    }
 
     setText('')
     setScreenshotImages([])

@@ -1550,8 +1550,8 @@ body {
 }
 
 .scroll-to-bottom-btn:hover {
-  background: var(--color-primary, #3b82f6);
-  color: #fff;
+  /* background: var(--color-primary, #3b82f6); */
+  /* color: #fff; */
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
   transform: translateY(-1px);
 }
@@ -1565,6 +1565,7 @@ body {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
