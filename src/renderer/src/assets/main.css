@@ -1527,6 +1527,50 @@ body {
   border-radius: 4px;
 }
 
+.scroll-to-bottom-btn {
+  position: sticky;
+  bottom: 12px;
+  align-self: center;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 20px;
+  background: var(--bg-card, #fff);
+  color: var(--text-primary, #333);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s ease;
+  animation: fadeInUp 0.2s ease;
+  white-space: nowrap;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+  transform: translateY(-1px);
+}
+
+.scroll-to-bottom-btn svg {
+  flex-shrink: 0;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Chat Empty State */
 .chat-empty-state {
   flex: 1;

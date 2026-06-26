@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { ChatMessageItem } from '../components/ChatMessageItem'
@@ -31,6 +31,42 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   } = store
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const messagesBoxRef = useRef<HTMLDivElement>(null)
+
+  // 检测是否在底部附近（阈值 100px）
+  const checkScrollPosition = useCallback(() => {
+    const el = messagesBoxRef.current
+    if (!el) return
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setShowScrollToBottom(distanceToBottom > 100)
+  }, [])
+
+  // 绑定滚动事件
+  useEffect(() => {
+    const el = messagesBoxRef.current
+    if (!el) return
+    el.addEventListener('scroll', checkScrollPosition, { passive: true })
+    checkScrollPosition()
+    return () => el.removeEventListener('scroll', checkScrollPosition)
+  }, [checkScrollPosition])
+
+  // 新消息到来时，如果已在底部则保持在底部
+  useEffect(() => {
+    if (!showScrollToBottom) {
+      const el = messagesBoxRef.current
+      if (el) {
+        el.scrollTop = el.scrollHeight
+      }
+    }
+  }, [activeSessMessages.length, showScrollToBottom])
+
+  const scrollToBottom = () => {
+    const el = messagesBoxRef.current
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
+  }
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
@@ -86,7 +122,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
       >
         {/* 消息滚动列表 */}
         {/* 消息滚动列表 */}
-        <div className="chat-messages-box">
+        <div className="chat-messages-box" ref={messagesBoxRef}>
           {!hasKey && (
             <div className="api-warn-banner">
               <span>⚠️ 未配置大模型 API Key。当前处于『演示模式』，{currentAvatarName} 将使用内置模拟语句回复您。请前往『设置 {"->"} 本地存储』配置大模型以开启真实交互。</span>
@@ -146,6 +182,14 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               ))}
               <div ref={chatEndRef} />
             </>
+          )}
+          {showScrollToBottom && (
+            <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              回到最新
+            </button>
           )}
         </div>
 
