@@ -325,6 +325,7 @@ export function ChatInputWindow(): React.JSX.Element {
       window.api.closeInputWindow()
     } else {
       // 纯文本普通提问直接在小窗口内交互，不弹窗跳转
+      shouldScrollRef.current = 'smooth'
       setMessages(prev => [...prev, { sender: 'user', text: userText }])
       setIsThinking(true)
       setShowChat(true)
@@ -514,7 +515,7 @@ export function ChatInputWindow(): React.JSX.Element {
       const input = e.target as HTMLInputElement
       const start = input.selectionStart || 0
       const end = input.selectionEnd || 0
-      
+
       setText(prev => {
         const newText = prev.substring(0, start) + plainText + prev.substring(end)
         // 使用 setTimeout 等待 React 更新 DOM 后再调整光标位置
@@ -603,7 +604,7 @@ export function ChatInputWindow(): React.JSX.Element {
   const sessionName = currentSession ? currentSession.name : ''
   const placeholderText = sessionName && sessionName !== '(未命名)' && sessionName !== '新会话'
     ? `在会话「${sessionName.length > 12 ? sessionName.substring(0, 12) + '...' : sessionName}」中继续提问...`
-    : '给桌面助手说点什么... (Enter 发送, Esc 退出, 支持粘贴文件/图片)'
+    : '今天要说点什么...'
 
   // 动态计算 wrapper 的高度，以提供平滑过渡的动效
   let wrapperHeight = '66px'
@@ -1133,9 +1134,7 @@ export function ChatInputWindow(): React.JSX.Element {
           -webkit-backdrop-filter: blur(30px) saturate(190%);
           border: 1px solid rgba(255, 255, 255, 0.6);
           border-radius: 16px;
-          box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.85),
-                      0 10px 30px rgba(0, 0, 0, 0.12),
-                      0 2px 8px rgba(0, 0, 0, 0.04);
+          box-shadow: none;
           padding: 10px 12px 12px 12px;
           box-sizing: border-box;
           display: flex;
