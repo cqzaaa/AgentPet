@@ -573,6 +573,13 @@ function createWindow(): void {
     createAgentWindow()
   })
 
+  // 转发快捷聊天窗口发出的会话更新通知到 Agent 窗口
+  ipcMain.on('api:wechat-session-updated', (_, sessionId?: string) => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('api:wechat-session-updated', sessionId)
+    }
+  })
+
   ipcMain.on('hide-window', () => {
     if (mainWindow) {
       mainWindow.hide()
