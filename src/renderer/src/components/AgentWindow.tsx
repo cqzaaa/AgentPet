@@ -772,13 +772,16 @@ export function AgentWindow(): React.JSX.Element {
                           // 监听容器尺寸变化，动态调整预览缩放
                           if (el && previewFile) {
                             const observer = new ResizeObserver(() => {
-                              // docx 缩放适配
+                              // docx 缩放适配 — 使用 CSS zoom 代替 transform: scale，zoom 会改变实际布局尺寸，避免循环缩放
                               const docxEl = el.querySelector('.docx-preview-container') as HTMLElement
-                              if (docxEl && docxEl.scrollWidth > el.clientWidth) {
-                                const scale = el.clientWidth / docxEl.scrollWidth
-                                docxEl.style.transform = `scale(${Math.min(1, scale)})`
-                                docxEl.style.transformOrigin = 'top left'
-                                docxEl.style.width = `${100 / Math.min(1, scale)}%`
+                              if (docxEl) {
+                                docxEl.style.zoom = '1'
+                                const contentWidth = docxEl.scrollWidth
+                                const containerWidth = el.clientWidth
+                                if (contentWidth > containerWidth) {
+                                  const z = containerWidth / contentWidth
+                                  docxEl.style.zoom = `${z}`
+                                }
                               }
                               // xlsx/csv 表格重建适配
                               const sheetEl = el.querySelector('.sheet-preview-container') as HTMLElement
@@ -808,7 +811,7 @@ export function AgentWindow(): React.JSX.Element {
                               return <div style={{ padding: '12px' }}><img src={`local-file:///${previewFile!.path.replace(/\\/g, '/')}`} style={{ maxWidth: '100%', borderRadius: '6px' }} /></div>
                             }
                             if (ext === 'docx') {
-                              return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff', transformOrigin: 'top left' }} />
+                              return <div ref={docxContainerRef} className="docx-preview-container" style={{ background: '#fff' }} />
                             }
                             if (['xlsx', 'xls', 'csv'].includes(ext)) {
                               return <div ref={sheetContainerRef} style={{ width: '100%', height: '100%' }} className="sheet-preview-container" />

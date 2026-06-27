@@ -4720,6 +4720,13 @@ body {
 }
 
 /* docx-preview 渲染样式 */
+.docx-preview-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
 .docx-preview-container .docx {
   margin: 0 !important;
   padding: 12px !important;
