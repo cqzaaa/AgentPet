@@ -173,7 +173,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
 
         {/* ── 记忆控制 ── */}
         {agentSubTab === 'memory' && (
-          <div className="settings-sub-panel" style={{ maxWidth: '900px' }}>
+          <div className="settings-sub-panel">
             <div className="settings-section-title">会话持久化控制</div>
             <div className="settings-row">
               <div className="settings-row-info">

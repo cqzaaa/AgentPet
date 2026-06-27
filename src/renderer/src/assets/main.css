@@ -2431,7 +2431,6 @@ body {
 
 .settings-sub-panel {
   width: 100%;
-  max-width: 900px;
   box-sizing: border-box;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
