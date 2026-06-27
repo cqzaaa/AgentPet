@@ -1077,66 +1077,25 @@ export function useAppStore() {
   }, [activeSessionId])
 
   // 打字机流式打印辅助函数
+  // 打字机流式打印辅助函数 (已优化为瞬间渲染以保证桌宠 Live2D 60FPS 帧率并消除卡顿)
   const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
-    isTypingRef.current = true
-    let currentLength = 0
-    const textLength = fullText.length
-    
-    // 动态速度调整：期望在 1.2 秒内打字完成
-    const typingSpeed = 25 // 25ms 周期
-    const expectedDuration = 1200 // 1.2 秒内打完
-    const maxSteps = expectedDuration / typingSpeed
-    const step = Math.max(1, Math.ceil(textLength / maxSteps))
-
-    const typeNextChar = () => {
-      if (!isTypingRef.current) return
-
-      if (currentLength < textLength) {
-        currentLength = Math.min(textLength, currentLength + step)
-        const displayedText = fullText.slice(0, currentLength)
-
-        setSessions(prev => prev.map(s => {
-          if (s.id === sessionId) {
-            return {
-              ...s,
-              messages: s.messages.map(m => m.id === replyId ? { ...m, text: displayedText } : m)
-            }
-          }
-          return s
-        }))
-
-        typingTimerRef.current = setTimeout(typeNextChar, typingSpeed)
-      } else {
-        // 打印结束
-        isTypingRef.current = false
-        if (typingTimerRef.current) {
-          clearTimeout(typingTimerRef.current)
-          typingTimerRef.current = null
+    setSessions(prev => prev.map(s => {
+      if (s.id === sessionId) {
+        return {
+          ...s,
+          messages: s.messages.map(m => m.id === replyId ? { ...m, text: fullText, isThinking: false } : m)
         }
-
-        setSessions(prev => prev.map(s => {
-          if (s.id === sessionId) {
-            return {
-              ...s,
-              messages: s.messages.map(m => m.id === replyId ? { ...m, isThinking: false } : m)
-            }
-          }
-          return s
-        }))
-
-        setIsSending(false)
-
-        // 异步检测并触发记忆总结
-        setTimeout(() => {
-          setSessions(prev => {
-            triggerSessionSummary(sessionId, prev)
-            return prev
-          })
-        }, 500)
       }
-    }
-
-    typeNextChar()
+      return s
+    }))
+    isTypingRef.current = false
+    setIsSending(false)
+    setTimeout(() => {
+      setSessions(prev => {
+        triggerSessionSummary(sessionId, prev)
+        return prev
+      })
+    }, 500)
   }
 
   const handleSendChat = async (): Promise<void> => {
@@ -1211,6 +1170,7 @@ export function useAppStore() {
       return
     }
 
+    let typingStarted = false
     try {
       const activeSessObj = updatedSessions.find(s => s.id === activeSessionId)
       const currentMessages = activeSessObj ? activeSessObj.messages : []
@@ -1309,25 +1269,29 @@ ${activeMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.descr
 当主人的问题涉及上述 MCP 服务领域时，请务必主动调用对应的扩展工具来完成任务。`
         : ''
 
-      const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
-${stylePrompt}
-当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
+      const systemPrompt = `# [角色设定]
+你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
+你的性格与语气：${stylePrompt}
+
+<avatar_profile>
+- 核心人设：你是专属的桌面萌宠助理，永远坚称自己是 ${currentAvatarName}。
+- 🚫 绝对约束：严禁泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免破坏人设。
+</avatar_profile>
 ${memoryContext}
 ${skillsContext}
-在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。
-⚠️ 极重要约束：普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁无意义地调用系统工具。
 
-你当前可用的本地核心系统工具如下：
-1. run_terminal_command — 执行终端命令（如运行脚本、查看文件、获取日期时间等）
-2. get_system_status — 获取 CPU/内存/系统负载状态
-3. manage_cron_task — 创建或删除定时任务
-4. get_location — 获取当前地理位置（经纬度）
-5. generate_file — 从零创建新文件（txt/xlsx/docx/pdf/pptx 等）
-6. modify_docx_file — 修改已上传的 docx 文件
-7. modify_xlsx_file — 修改已上传的 xlsx 文件
-8. read_file — 读取文件内容${mcpContext}
+<tool_use_rules>
+- 工具授权：主进程已为你绑定了本地系统操作工具（文件读写、终端命令执行、系统状态获取）与外部 MCP 扩展工具。
+- ⚠️ 调用原则：普通的打招呼（例如 hi、你好）、日常闲聊、常识问答等，请直接以文字回复，【严禁】无意义地调用系统工具。
+- 🚫 调用约束：你只能使用已提供给你的工具，绝对不允许编造任何不存在的工具名称。
+- 💡 变通调用：如果遇到未提供专用工具的需求（例如获取当前时间），请通过 'run_terminal_command' 执行相应的系统指令（如 'date /T'）来变通获取。${mcpContext}
 
-🚫 工具调用严格约束：你只能使用已被提供的本地核心工具以及 MCP 扩展工具，绝对不允许调用或编造任何不存在的工具名称。例如，如果需要获取当前日期时间，由于没有专门的时间工具，此时你必须通过 run_terminal_command 执行终端命令（如 date /T）来变通获取。`
+</tool_use_rules>
+
+<output_rules>
+- 对话风格：语气需保持人设风格（${currentAvatarStyle === 'cute' ? '可爱、萌系、活泼' : '专业、友好、自然'}）。
+- 错误处理：遇到工具执行报错或空结果时，请以萌宠的语气告知主人，并尝试提供替代的解决方法。
+</output_rules>`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })
@@ -1374,7 +1338,7 @@ ${skillsContext}
         workspacePath
       )
       
-      let typingStarted = false
+      typingStarted = false
       if (response !== undefined) {
         typingStarted = true
         startTypingEffect(replyId, response, activeSessionId)
@@ -1685,10 +1649,17 @@ ${chatLogStr}
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
         : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
 
-      const systemPrompt = `你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
-你正在后台为主人自动执行定时任务。为了保证安全和速度，请直接进行动作的执行（不需要过多客套、寒暄语），回答中要保留与设定相符的语气（${stylePrompt}），并在执行完后给出简明扼要的执行结果。
-${skillsContext}
-在开发任务中，你可以通过调用本地系统工具来读写主人工作空间下的文件，以及执行终端控制台命令（通过 run_terminal_command）以直接操控本地电脑来协助主人。请明智、安全地使用它们。`
+      const systemPrompt = `# [定时任务执行助手]
+你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
+你正在后台静默为主人执行定时任务。
+
+<execution_rules>
+- 速度优先：请直接调用相应工具执行动作，无需任何客套或多余寒暄。
+- 简明汇报：执行完成后，请用最精炼的一到两句话说明执行结果。
+- 语气保持：在汇报时，仍需保持符合设定的人设语气（${stylePrompt}）。
+- 安全操作：在开发任务中，你可以通过调用本地系统工具来读写工作空间文件或执行终端命令。请明智、安全地使用。
+</execution_rules>
+${skillsContext}`
       
       const chatMessages = [
         { role: 'system', content: systemPrompt },
