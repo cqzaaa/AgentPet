@@ -253,11 +253,12 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 // 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
   const parts: React.ReactNode[] = []
-  // 匹配三种模式：
+  // 匹配四种模式：
   //   1. ![alt](url)  — 显式图片
   //   2. [text](url)  — markdown 链接
-  //   3. https://...   — 裸 URL（不在 markdown 语法内的独立 URL）
-  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/)[^\s\])<>"]+)/g
+  //   3. https://... 或 local-file://... 或 file:///... — 裸 URL
+  //   4. C:\... 等裸露的 Windows 本地绝对路径
+  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/|[a-zA-Z]:[\\/])[^\s\])<>"'，。！？；：（）]+)/g
   let match
   let lastIndex = 0
 

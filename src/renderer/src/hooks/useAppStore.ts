@@ -182,16 +182,6 @@ export function useAppStore() {
         const parsed = JSON.parse(saved)
         if (parsed && Array.isArray(parsed.servers)) {
           currentConfig = parsed
-          currentConfig.servers = currentConfig.servers.map((s: any) => {
-            if (s.name === '默认外部服务' || s.name === '高德地图服务') {
-              return {
-                ...s,
-                name: '高德地图mcp',
-                url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6'
-              }
-            }
-            return s
-          })
         }
         // 向下兼容：如果以前是单个配置格式
         else if (parsed && parsed.url) {
@@ -199,8 +189,8 @@ export function useAppStore() {
             servers: [
               {
                 id: 'legacy-default',
-                name: '高德地图mcp',
-                url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
+                name: parsed.name || '默认外部服务',
+                url: parsed.url,
                 apiKey: parsed.apiKey || '',
                 enabled: parsed.enabled ?? false
               }
@@ -210,24 +200,8 @@ export function useAppStore() {
       } catch (e) { console.error(e) }
     }
 
-    if (!currentConfig || !currentConfig.servers || currentConfig.servers.length === 0) {
-      const defaultServers = [
-        {
-          id: 'mcp-default-bing',
-          name: 'Bing 网页搜索',
-          url: 'https://mcpmarket.cn/mcp/93c3bda00747681006348634',
-          apiKey: '',
-          enabled: true
-        },
-        {
-          id: 'mcp-default-amap',
-          name: '高德地图mcp',
-          url: 'https://mcpmarket.cn/mcp/de5dc2cd1aa574509a53c4d6',
-          apiKey: '',
-          enabled: true
-        }
-      ]
-      currentConfig = { servers: defaultServers }
+    if (!currentConfig || !currentConfig.servers) {
+      currentConfig = { servers: [] }
       localStorage.setItem('agentpet_mcp_config', JSON.stringify(currentConfig))
     }
     return currentConfig

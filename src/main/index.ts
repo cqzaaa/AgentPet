@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
-import { join, basename } from 'path'
+import { join, basename, dirname } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -16,6 +16,26 @@ import { sshManager } from './tools/builtin/terminal/ssh-manager'
 
 
 
+
+// 限制单实例运行，防止重复打开导致多个托盘图标和数据库占用冲突
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+  process.exit(0)
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      if (agentWindow.isMinimized()) agentWindow.restore()
+      agentWindow.show()
+      agentWindow.focus()
+    }
+  })
+}
 
 // 强制使用 Electron 的 net.fetch 代理 Node 的全局 fetch，以继承系统/代理工具（如 Clash/V2ray）的代理设置
 // 解决 MCP SDK 或内部请求抛出 fetch failed: ECONNRESET 的问题
@@ -44,6 +64,29 @@ try {
 } catch (e) {
   console.error('[Env] 读取本地 .env 失败', e)
 }
+
+// ---------------------------------------------------------
+// [自定义数据存储目录]
+// 1. 优先读取 .env 或系统环境变量中的 USER_DATA_PATH
+// 2. 否则，如果是打包后的应用，尝试在 exe 同级目录下创建/使用 data 文件夹（便携模式，避免占用 C 盘）
+// ---------------------------------------------------------
+if (process.env.USER_DATA_PATH) {
+  app.setPath('userData', process.env.USER_DATA_PATH)
+  console.log('[DataPath] 使用环境变量自定义目录:', process.env.USER_DATA_PATH)
+} else if (app.isPackaged) {
+  const exeDir = dirname(app.getPath('exe'))
+  const portableDataPath = join(exeDir, 'data')
+  try {
+    if (!fs.existsSync(portableDataPath)) {
+      fs.mkdirSync(portableDataPath, { recursive: true })
+    }
+    app.setPath('userData', portableDataPath)
+    console.log('[DataPath] 启用便携模式，数据存储于:', portableDataPath)
+  } catch (e) {
+    console.warn('[DataPath] 无法在安装目录创建 data 文件夹(可能无权限)，退回默认 AppData 目录:', e)
+  }
+}
+
 import { WechatBotManager } from './wechatBot'
 
 let wechatBotManager: WechatBotManager | null = null
@@ -501,6 +544,9 @@ function createWindow(): void {
     // 初始开启穿透，直到鼠标移动到宠物元素上
     win.setIgnoreMouseEvents(true, { forward: true })
     createTray(win)
+    if (!is.dev) {
+      win.webContents.openDevTools({ mode: 'detach' })
+    }
   })
 
   win.on('blur', () => {
@@ -765,7 +811,7 @@ app.whenReady().then(() => {
   // 生产模式：process.resourcesPath/live2d
   const live2dRoot = is.dev
     ? join(process.cwd(), 'resources', 'live2d')
-    : join(process.resourcesPath, 'live2d')
+    : join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'live2d')
 
   protocol.handle('live2d', async (request) => {
     try {
@@ -1698,7 +1744,7 @@ app.whenReady().then(() => {
       const defaultConfig = avatarConfigs['default'] || {}
       list.push({
         id: 'default',
-        name: defaultConfig.name || 'Mao (默认形象)',
+        name: defaultConfig.name || 'Mao',
         dir: '',
         configFile: '',
         languageStyle: defaultConfig.languageStyle || 'normal',
@@ -3417,31 +3463,38 @@ app.whenReady().then(() => {
     }
     const body: any = {}
 
+    // 对 Base URL 进行健壮性与防呆化过滤（去掉末尾多余斜杠）
+    let cleanBaseUrl = (baseUrl || '').trim().replace(/\/+$/, '')
+    // 鲁棒性防呆：如果用户填写的 baseUrl 已经包含了 /chat/completions，则将其自动截断，防止下方拼接重复路径导致 404
+    if (cleanBaseUrl.toLowerCase().endsWith('/chat/completions')) {
+      cleanBaseUrl = cleanBaseUrl.slice(0, -'/chat/completions'.length)
+    }
+
     if (provider === 'gemini') {
-      const effectiveBaseUrl = baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'
+      const effectiveBaseUrl = cleanBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'
       url = `${effectiveBaseUrl}/chat/completions`
       headers['Authorization'] = `Bearer ${apiKey}`
       body.model = model || 'gemini-1.5-flash'
       body.temperature = temperature ?? 0.7
     } else if (provider === 'openai') {
-      const effectiveBaseUrl = baseUrl || 'https://api.openai.com/v1'
+      const effectiveBaseUrl = cleanBaseUrl || 'https://api.openai.com/v1'
       url = `${effectiveBaseUrl}/chat/completions`
       headers['Authorization'] = `Bearer ${apiKey}`
       body.model = model || 'gpt-4o-mini'
       body.temperature = temperature ?? 0.7
     } else if (provider === 'deepseek') {
-      const effectiveBaseUrl = baseUrl || 'https://api.deepseek.com/v1'
+      const effectiveBaseUrl = cleanBaseUrl || 'https://api.deepseek.com/v1'
       url = `${effectiveBaseUrl}/chat/completions`
       headers['Authorization'] = `Bearer ${apiKey}`
       body.model = model || 'deepseek-chat'
       body.temperature = temperature ?? 0.7
     } else if (provider === 'ollama') {
-      const effectiveBaseUrl = baseUrl || 'http://localhost:11434/v1'
+      const effectiveBaseUrl = cleanBaseUrl || 'http://localhost:11434/v1'
       url = `${effectiveBaseUrl}/chat/completions`
       body.model = model || 'llama3'
       body.temperature = temperature ?? 0.7
     } else {
-      url = `${baseUrl}/chat/completions`
+      url = `${cleanBaseUrl}/chat/completions`
       if (apiKey) {
         headers['Authorization'] = `Bearer ${apiKey}`
       }
@@ -3550,7 +3603,15 @@ app.whenReady().then(() => {
             loopCount = 0
             continue
           }
-          throw new Error(`HTTP ${response.status}: ${errorText}`)
+          
+          let displayError = errorText
+          if (displayError.trim().toLowerCase().startsWith('<!doctype html') || displayError.toLowerCase().includes('<html')) {
+            displayError = '服务端返回了 HTML 页面而非有效的 API 响应（通常是因为 Base URL 配置错误，例如填入了网页地址而非 API 接口地址）。请检查设置中的大模型 Base URL。'
+          } else if (displayError.length > 500) {
+            displayError = displayError.substring(0, 500) + '... (省略过多内容)'
+          }
+          
+          throw new Error(`HTTP ${response.status}: ${displayError}`)
         }
 
         const data: any = await response.json()

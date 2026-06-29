@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "cheer.com",
+  "homepage": "http://cheer472.cloud:3031/",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
@@ -25,7 +25,6 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openilink/openilink-sdk-node": "^0.6.0",
-    "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.1",
     "docx": "^9.7.1",
     "docx-preview": "^0.3.7",
@@ -42,12 +41,12 @@
     "pptxgenjs": "^4.0.1",
     "react-virtuoso": "^4.18.7",
     "ssh2": "^1.17.0",
-    "three": "^0.184.0",
     "ws": "^8.21.0",
     "x-data-spreadsheet": "^1.1.9",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
