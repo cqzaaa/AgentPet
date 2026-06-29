@@ -142,18 +142,18 @@ export class ShellManager {
 
     switch (commandType) {
       case 'powershell':
-        return execAsync(`powershell -Command "${cmd.replace(/"/g, '\\"')}"`, {
+        return execAsync(cmd, {
           ...options,
           shell: 'powershell.exe',
         })
       case 'bash':
         if (bashPath) {
-          return execAsync(`"${bashPath}" -c "${cmd.replace(/"/g, '\\"')}"`, {
+          return execAsync(cmd, {
             ...options,
             shell: bashPath,
           })
         } else {
-          return execAsync(`sh -c "${cmd.replace(/"/g, '\\"')}"`, options)
+          return execAsync(cmd, { ...options, shell: 'sh' })
         }
       case 'cmd':
       default:
@@ -231,6 +231,11 @@ export class ShellManager {
     return { output, isRunning: session.isRunning }
   }
 
+  // 注册外部会话（如远程 SSH 异步通道）
+  public registerSession(session: ShellSession): void {
+    this.sessions.set(session.id, session)
+  }
+
   // 终止 shell 会话
   public killSession(shellId: string): boolean {
     const session = this.sessions.get(shellId)
@@ -239,12 +244,17 @@ export class ShellManager {
     }
 
     if (session.isRunning) {
-      session.process.kill('SIGTERM')
-      setTimeout(() => {
-        if (session.isRunning) {
-          session.process.kill('SIGKILL')
-        }
-      }, 2000)
+      if (session.process && typeof session.process.kill === 'function') {
+        session.process.kill('SIGTERM')
+        setTimeout(() => {
+          if (session.isRunning) {
+            try { session.process.kill('SIGKILL') } catch (e) {}
+          }
+        }, 2000)
+      } else if (session.process && typeof session.process.destroy === 'function') {
+        try { session.process.destroy() } catch (e) {}
+      }
+      session.isRunning = false
     }
 
     this.sessions.delete(shellId)

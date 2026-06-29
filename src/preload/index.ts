@@ -323,7 +323,19 @@ const api = {
   getAllToolsInfo: (): Promise<any> =>
     ipcRenderer.invoke('api:get-all-tools-info'),
   reloadTools: (): Promise<{ success: boolean; count?: number; error?: string }> =>
-    ipcRenderer.invoke('api:reload-tools')
+    ipcRenderer.invoke('api:reload-tools'),
+  testSshConnection: (config: any): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke('api:test-ssh-connection', config),
+  connectSsh: (sessionId: string, config: any): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke('api:connect-ssh', sessionId, config),
+  disconnectSsh: (sessionId: string): Promise<void> =>
+    ipcRenderer.invoke('api:disconnect-ssh', sessionId),
+  getSshStatus: (sessionId: string): Promise<{ connected: boolean; host?: string; username?: string }> =>
+    ipcRenderer.invoke('api:get-ssh-status', sessionId),
+  setExecutionDevice: (sessionId: string, type: 'local' | 'ssh'): Promise<void> =>
+    ipcRenderer.invoke('api:set-execution-device', sessionId, type),
+  getExecutionDevice: (sessionId: string): Promise<'local' | 'ssh'> =>
+    ipcRenderer.invoke('api:get-execution-device', sessionId)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

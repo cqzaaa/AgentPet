@@ -150,72 +150,6 @@ export class FileExecutor implements IToolExecutor {
         return { content: `成功：已删除 ${file_path}`, success: true }
       }
 
-      // 工作空间默认路径处理
-      let workspacePath = context.workspacePath
-      if (!workspacePath) {
-        workspacePath = join(getActiveStorageDir(), 'workspace')
-        if (!fs.existsSync(workspacePath)) {
-          try { fs.mkdirSync(workspacePath, { recursive: true }) } catch (e) {}
-        }
-      }
-
-      if (!fs.existsSync(workspacePath)) {
-        return { content: `错误：工作空间路径不存在：${workspacePath}`, success: false }
-      }
-
-      // 6. list_workspace_files
-      if (api === 'list_workspace_files') {
-        const files = await fs.promises.readdir(workspacePath)
-        const listInfo: any[] = []
-        for (const file of files) {
-          const fullPath = join(workspacePath, file)
-          const stat = await fs.promises.stat(fullPath)
-          listInfo.push({
-            name: file,
-            isDirectory: stat.isDirectory(),
-            size: stat.isFile() ? stat.size : undefined
-          })
-        }
-        return { content: JSON.stringify(listInfo, null, 2), success: true }
-      }
-
-      // 7. read_workspace_file
-      if (api === 'read_workspace_file') {
-        const { relative_path } = args
-        const fullPath = join(workspacePath, relative_path)
-        if (!fullPath.startsWith(workspacePath)) {
-          return { content: '错误：安全限制，无法读取工作空间外部的文件。', success: false }
-        }
-        if (!fs.existsSync(fullPath)) {
-          return { content: `错误：文件不存在：${relative_path}`, success: false }
-        }
-        const stat = await fs.promises.stat(fullPath)
-        if (stat.isDirectory()) {
-          return { content: `错误：${relative_path} 是一个目录，不能读取为文本文件。`, success: false }
-        }
-        let content = await fs.promises.readFile(fullPath, 'utf-8')
-        const MAX_READ_LEN = 30000
-        if (content.length > MAX_READ_LEN) {
-          content = content.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请通过命令拆分读取或使用其他方式。]`
-        }
-        return { content, success: true }
-      }
-
-      // 8. write_workspace_file
-      if (api === 'write_workspace_file') {
-        const { relative_path, content } = args
-        const fullPath = join(workspacePath, relative_path)
-        if (!fullPath.startsWith(workspacePath)) {
-          return { content: '错误：安全限制，无法写入到工作空间外部。', success: false }
-        }
-        const parentDir = dirname(fullPath)
-        if (!fs.existsSync(parentDir)) {
-          await fs.promises.mkdir(parentDir, { recursive: true })
-        }
-        await fs.promises.writeFile(fullPath, content, 'utf-8')
-        return { content: `成功：文件已写入到相对路径 ${relative_path}`, success: true }
-      }
-
       return { content: `未知的操作类型: ${api}`, success: false }
     } catch (err: any) {
       return {
@@ -227,10 +161,7 @@ export class FileExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return [
-      'read_file', 'write_file', 'edit_file', 'move_file', 'delete_file',
-      'list_workspace_files', 'read_workspace_file', 'write_workspace_file'
-    ]
+    return ['read_file', 'write_file', 'edit_file', 'move_file', 'delete_file']
   }
 }
 

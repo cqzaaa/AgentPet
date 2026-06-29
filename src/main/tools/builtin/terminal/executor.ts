@@ -3,6 +3,7 @@ import * as os from 'os'
 import { join } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { shellManager } from './shell-manager'
+import { sshManager } from './ssh-manager'
 import { getActiveStorageDir } from '../../utils/paths'
 
 export class TerminalExecutor implements IToolExecutor {
@@ -14,9 +15,19 @@ export class TerminalExecutor implements IToolExecutor {
     try {
       if (api === 'run_terminal_command') {
         const { command } = args
-        const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
 
-        const { stdout, stderr } = await shellManager.execWithBash(command, { cwd: execCwd })
+        if (context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh') {
+          // SSH 模式下不传递本地物理盘符的路径作为 cwd
+          const { stdout, stderr } = await sshManager.executeCommand(context.sessionId, command, undefined)
+          return {
+            content: `[远程 SSH 命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
+            success: true
+          }
+        }
+
+        const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
+        // run_terminal_command 同步执行，限制最长 2 分钟，防止命令挂起
+        const { stdout, stderr } = await shellManager.execWithBash(command, { cwd: execCwd, timeout: 120000 })
         return {
           content: `[命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
           success: true
@@ -25,8 +36,22 @@ export class TerminalExecutor implements IToolExecutor {
 
       if (api === 'run_command') {
         const { command, description, cwd } = args
-        const execCwd = cwd || this.resolveCwd(context.sessionId, context.workspacePath)
 
+        if (context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh') {
+          // 过滤 Windows 本地物理路径，非 Windows 物理路径才被视作远程路径带给 SSH
+          let remoteCwd: string | undefined = undefined
+          if (cwd && !cwd.includes(':\\') && !cwd.includes(':/') && cwd !== context.workspacePath) {
+            remoteCwd = cwd
+          }
+          const session = sshManager.startSshShellSession(context.sessionId, command, remoteCwd)
+          return {
+            content: `[远程 SSH 命令已启动]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
+            state: { shell_id: session.id, command },
+            success: true
+          }
+        }
+
+        const execCwd = cwd || this.resolveCwd(context.sessionId, context.workspacePath)
         const session = shellManager.startSession(command, execCwd)
         return {
           content: `[命令已启动]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,

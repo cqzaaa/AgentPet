@@ -48,6 +48,11 @@ export function checkCommandSafety(command: string): { safe: boolean; warning?: 
     return { safe: false, warning: '检测到尝试递归删除系统盘根目录文件或整盘数据 (del /s) 的高危操作！' }
   }
 
+  // 6.5. 任何常规文件/目录删除指令
+  if (/\b(rm|del|rd|rmdir)\b/.test(trimmed)) {
+    return { safe: false, warning: '检测到文件或目录删除指令（rm/del/rd/rmdir）。系统默认不开启自动删除权限，必须由您手动核对批准后方可执行。' }
+  }
+
   // 7. 绕过脚本执行策略
   if (/-executionpolicy\s+bypass\b/.test(trimmed) || /-ep\s+bypass\b/.test(trimmed)) {
     return { safe: false, warning: '检测到尝试绕过系统 PowerShell 脚本安全执行策略 (Bypass) 的行为。' }

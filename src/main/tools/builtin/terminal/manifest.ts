@@ -65,7 +65,8 @@ export const terminalManifest: ToolManifest = {
     },
     {
       name: 'run_terminal_command',
-      description: '同步执行终端命令并返回结果。适用于快速命令（<30秒）。',
+      description: '同步执行终端命令并返回结果。适用于快速命令（≤2分钟），超时自动终止。',
+      timeout: 120000,
       parameters: {
         type: 'object',
         properties: {
@@ -81,7 +82,7 @@ export const terminalManifest: ToolManifest = {
   systemRole: `<tool_instructions>
 你有一组终端工具可以执行系统命令。
 <rules>
-- 对于 <30秒的快速命令，优先使用 run_terminal_command
+- 对于 ≤2分钟的快速命令，优先使用 run_terminal_command
 - 对于长时间运行的命令（如服务器启动、打包编译），必须使用 run_command 异步执行
 - 异步命令执行后，使用 get_command_output 跟踪最新的输出进度
 - 使用 kill_command 终止不再需要的挂起或超时进程

@@ -314,6 +314,12 @@ export function useAppStore() {
     execCwd: string
   } | null>(null)
 
+  // ── SSH & Execution Device ───────────────────────────────────
+  const [executionDevice, setExecutionDeviceState] = useState<'local' | 'ssh'>('local')
+  const [sshConnected, setSshConnected] = useState<boolean>(false)
+  const [sshHost, setSshHost] = useState<string>('')
+  const [sshUsername, setSshUsername] = useState<string>('')
+
   // ── Avatar ───────────────────────────────────────────────────
   const [customModelDir, setCustomModelDir] = useState('')
   const [customModelFile, setCustomModelFile] = useState('')
@@ -1550,6 +1556,55 @@ ${chatLogStr}
     }
   }
 
+  const refreshSshAndDeviceStatus = useCallback(async (sessId: string) => {
+    if (!window.api || !window.api.getExecutionDevice) return
+    try {
+      const dev = await window.api.getExecutionDevice(sessId)
+      setExecutionDeviceState(dev)
+      const status = await window.api.getSshStatus(sessId)
+      setSshConnected(status.connected)
+      setSshHost(status.host || '')
+      setSshUsername(status.username || '')
+    } catch (e) {
+      console.error('获取会话 SSH 状态失败', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeSessionId) {
+      refreshSshAndDeviceStatus(activeSessionId)
+    }
+  }, [activeSessionId, refreshSshAndDeviceStatus])
+
+  const handleUpdateExecutionDevice = async (type: 'local' | 'ssh') => {
+    if (!activeSessionId) return
+    await window.api.setExecutionDevice(activeSessionId, type)
+    setExecutionDeviceState(type)
+  }
+
+  const handleConnectSsh = async (config: any): Promise<{ success: boolean; message?: string }> => {
+    if (!activeSessionId) return { success: false, message: '会话不存在' }
+    const res = await window.api.connectSsh(activeSessionId, config)
+    if (res.success) {
+      await window.api.setExecutionDevice(activeSessionId, 'ssh')
+      setExecutionDeviceState('ssh')
+      setSshConnected(true)
+      setSshHost(config.host)
+      setSshUsername(config.username)
+    }
+    return res
+  }
+
+  const handleDisconnectSsh = async () => {
+    if (!activeSessionId) return
+    await window.api.disconnectSsh(activeSessionId)
+    await window.api.setExecutionDevice(activeSessionId, 'local')
+    setExecutionDeviceState('local')
+    setSshConnected(false)
+    setSshHost('')
+    setSshUsername('')
+  }
+
   const handleAbortLlm = async (): Promise<void> => {
     try {
       isTypingRef.current = false
@@ -1913,6 +1968,15 @@ ${skillsContext}`
     activePermissionRequest,
     handleRespondPermission,
     handleAbortLlm,
+    // SSH
+    executionDevice,
+    sshConnected,
+    sshHost,
+    sshUsername,
+    handleUpdateExecutionDevice,
+    handleConnectSsh,
+    handleDisconnectSsh,
+    refreshSshAndDeviceStatus,
     // mcp
     mcpConfig,
     saveMcpConfig,

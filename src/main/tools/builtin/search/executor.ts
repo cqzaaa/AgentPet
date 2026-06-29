@@ -1,7 +1,63 @@
 import * as os from 'os'
-import { basename } from 'path'
+import * as fs from 'fs'
+import * as path from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { shellManager } from '../terminal/shell-manager'
+
+// 需要忽略的开发与构建庞大文件夹，保证遍历速度
+const IGNORE_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.svn',
+  '.vscode',
+  '.idea',
+  'dist',
+  'build',
+  'out',
+  '.electron',
+  'tmp',
+  'temp'
+])
+
+/**
+ * 跨平台高效 JS 递归文件遍历方法 (最大深度限制为 12 级)
+ * 使用 withFileTypes 一次性获取文件类型，省去每个文件的 stat() 系统调用
+ */
+async function findFiles(
+  dir: string,
+  filterFn: (filePath: string) => boolean,
+  limit = 100,
+  currentDepth = 0,
+  maxDepth = 12
+): Promise<string[]> {
+  const results: string[] = []
+  if (currentDepth > maxDepth) return results
+
+  try {
+    const list = await fs.promises.readdir(dir, { withFileTypes: true })
+    for (const entry of list) {
+      if (results.length >= limit) break
+
+      const fullPath = path.join(dir, entry.name)
+      try {
+        if (entry.isDirectory()) {
+          // 忽略无关的大型开发目录
+          if (IGNORE_DIRS.has(entry.name.toLowerCase())) continue
+          const subResults = await findFiles(fullPath, filterFn, limit - results.length, currentDepth + 1, maxDepth)
+          results.push(...subResults)
+        } else if (entry.isFile()) {
+          if (filterFn(fullPath)) {
+            results.push(fullPath)
+          }
+        }
+      } catch (e) {
+        // 忽略系统保护文件或无读权限文件的异常
+      }
+    }
+  } catch (e) {
+    // 忽略无权限读取的目录异常
+  }
+  return results
+}
 
 export class SearchExecutor implements IToolExecutor {
   public async execute(
@@ -10,86 +66,74 @@ export class SearchExecutor implements IToolExecutor {
     context: ToolContext
   ): Promise<ToolResult> {
     try {
-      // 1. search_files
-      if (api === 'search_files') {
-        const { keywords, scope, file_types, limit } = args
-        if (!keywords) return { content: '错误：缺少必要参数 keywords', success: false }
-
-        const searchDir = scope || context.workspacePath || os.homedir()
-        const keywordList = keywords.split(/\s+/).filter(Boolean)
-
-        // 使用 find 命令搜索文件名
-        let cmd = `find "${searchDir}" -type f`
-        if (file_types && file_types.length > 0) {
-          const extFilter = file_types.map((t: string) => `-name "*.${t}"`).join(' -o ')
-          cmd += ` \\( ${extFilter} \\)`
-        }
-
-        const { stdout } = await shellManager.execWithBash(cmd, { timeout: 30000 })
-        let files = stdout.split('\n').filter(Boolean)
-
-        // 过滤包含所有关键词的文件
-        files = files.filter(file => {
-          const fileName = basename(file).toLowerCase()
-          return keywordList.every((kw: string) => fileName.includes(kw.toLowerCase()))
-        })
-
-        if (limit && limit > 0) {
-          files = files.slice(0, limit)
-        }
-
-        return {
-          content: `[搜索结果] 找到 ${files.length} 个文件\n${files.join('\n')}`,
-          success: true
-        }
-      }
-
-      // 2. grep_content
+      // 1. grep_content
       if (api === 'grep_content') {
         const { pattern, scope, glob, output_mode, case_insensitive } = args
         if (!pattern) return { content: '错误：缺少必要参数 pattern', success: false }
 
         const searchDir = scope || context.workspacePath || os.homedir()
-        let cmd = `grep -r`
+        const matchPattern = case_insensitive ? pattern.toLowerCase() : pattern
 
-        if (case_insensitive) cmd += 'i'
-        if (output_mode === 'content') cmd += 'n'
+        const matchedResults: { file: string; line: number; content: string }[] = []
+        const maxMatches = 200
 
-        cmd += ` "${pattern}"`
-
-        if (glob) {
-          cmd += ` --include="${glob}"`
+        // 判定文件是否是常见可读文本文件，过滤常见二进制大文件
+        const isTextFile = (filePath: string) => {
+          const ext = path.extname(filePath).toLowerCase()
+          const binaryExtensions = new Set([
+            '.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar', '.gz',
+            '.mp3', '.mp4', '.avi', '.mov', '.exe', '.dll', '.so', '.dylib', '.woff', '.woff2', '.ttf'
+          ])
+          return !binaryExtensions.has(ext)
         }
 
-        cmd += ` "${searchDir}"`
+        // 支持简易的 glob 规则过滤
+        const checkGlob = (filePath: string) => {
+          if (!glob) return true
+          const fileName = path.basename(filePath)
+          const regexStr = '^' + glob.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$'
+          try {
+            const regex = new RegExp(regexStr, 'i')
+            return regex.test(fileName)
+          } catch (e) {
+            return true
+          }
+        }
 
-        const { stdout } = await shellManager.execWithBash(cmd, { timeout: 30000 })
+        // 首先检索目标目录下的全部文本文件 (限制扫入前 500 个文本文件)
+        const files = await findFiles(searchDir, (filePath) => {
+          return isTextFile(filePath) && checkGlob(filePath)
+        }, 500)
+
+        // 逐个文件内查找匹配行
+        for (const file of files) {
+          if (matchedResults.length >= maxMatches) break
+          try {
+            const fileContent = await fs.promises.readFile(file, 'utf-8')
+            const lines = fileContent.split(/\r?\n/)
+            lines.forEach((line, index) => {
+              const checkLine = case_insensitive ? line.toLowerCase() : line
+              if (checkLine.includes(matchPattern)) {
+                matchedResults.push({
+                  file,
+                  line: index + 1,
+                  content: line.trim()
+                })
+              }
+            })
+          } catch (e) {
+            // 忽略读取单个文件的失败
+          }
+        }
 
         if (output_mode === 'count') {
-          const count = stdout.split('\n').filter(Boolean).length
-          return { content: `[搜索结果] 找到 ${count} 处匹配`, success: true }
+          return { content: `[搜索结果] 找到 ${matchedResults.length} 处匹配`, success: true }
         } else if (output_mode === 'files_with_matches') {
-          const files = [...new Set(stdout.split('\n').filter(Boolean).map(line => line.split(':')[0]))]
-          return { content: `[搜索结果] 在 ${files.length} 个文件中找到匹配\n${files.join('\n')}`, success: true }
+          const filesWithMatch = [...new Set(matchedResults.map(r => r.file))]
+          return { content: `[搜索结果] 在 ${filesWithMatch.length} 个文件中找到匹配\n${filesWithMatch.join('\n')}`, success: true }
         } else {
-          return { content: `[搜索结果]\n${stdout || '(无匹配)'}`, success: true }
-        }
-      }
-
-      // 3. glob_files
-      if (api === 'glob_files') {
-        const { pattern, scope } = args
-        if (!pattern) return { content: '错误：缺少必要参数 pattern', success: false }
-
-        const searchDir = scope || context.workspacePath || os.homedir()
-        const cmd = `find "${searchDir}" -name "${pattern}" -type f | head -100`
-
-        const { stdout } = await shellManager.execWithBash(cmd, { timeout: 30000 })
-        const files = stdout.split('\n').filter(Boolean)
-
-        return {
-          content: `[搜索结果] 找到 ${files.length} 个文件\n${files.join('\n')}`,
-          success: true
+          const content = matchedResults.map(r => `${r.file}:${r.line}:${r.content}`).join('\n')
+          return { content: `[搜索结果]\n${content || '(无匹配)'}`, success: true }
         }
       }
 
@@ -104,7 +148,7 @@ export class SearchExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return ['search_files', 'grep_content', 'glob_files']
+    return ['grep_content']
   }
 }
 

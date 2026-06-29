@@ -110,6 +110,12 @@ declare global {
       maximizeAgentWindow: () => void
       closeAgentWindow: () => void
       isAgentWindowMaximized: () => Promise<boolean>
+      testSshConnection: (config: any) => Promise<{ success: boolean; message?: string }>
+      connectSsh: (sessionId: string, config: any) => Promise<{ success: boolean; message?: string }>
+      disconnectSsh: (sessionId: string) => Promise<void>
+      getSshStatus: (sessionId: string) => Promise<{ connected: boolean; host?: string; username?: string }>
+      setExecutionDevice: (sessionId: string, type: 'local' | 'ssh') => Promise<void>
+      getExecutionDevice: (sessionId: string) => Promise<'local' | 'ssh'>
     }
   }
 }

@@ -12,6 +12,7 @@ import { registerBuiltinTools } from './tools/builtin'
 import { unifiedToolExecutor } from './tools/core/tool-executor'
 import { mcpManager } from './tools/mcp/mcp-manager'
 import { permissionManager } from './tools/security/permission-manager'
+import { sshManager } from './tools/builtin/terminal/ssh-manager'
 
 
 
@@ -1126,6 +1127,30 @@ app.whenReady().then(() => {
     sandboxMode = !!enabled
     writeConfig({ sandboxMode })
     return sandboxMode
+  })
+
+  ipcMain.handle('api:test-ssh-connection', async (_, config) => {
+    return sshManager.testConnection(config)
+  })
+
+  ipcMain.handle('api:connect-ssh', async (_, sessionId: string, config) => {
+    return sshManager.connect(sessionId, config)
+  })
+
+  ipcMain.handle('api:disconnect-ssh', async (_, sessionId: string) => {
+    sshManager.disconnect(sessionId)
+  })
+
+  ipcMain.handle('api:get-ssh-status', async (_, sessionId: string) => {
+    return sshManager.getStatus(sessionId)
+  })
+
+  ipcMain.handle('api:set-execution-device', async (_, sessionId: string, type: 'local' | 'ssh') => {
+    sshManager.setDeviceType(sessionId, type)
+  })
+
+  ipcMain.handle('api:get-execution-device', async (_, sessionId: string) => {
+    return sshManager.getDeviceType(sessionId)
   })
 
   ipcMain.handle('api:save-chat-file', async (_, sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => {
@@ -3501,6 +3526,8 @@ app.whenReady().then(() => {
 
     let loopCount = 0
     const maxLoops = 40
+    // 工具调用中断阈值：超过此次数后强制暂停工具链，引导用户补全关键信息
+    const TOOL_INTERRUPT_THRESHOLD = 10
 
     while (loopCount < maxLoops) {
       loopCount++
@@ -3581,6 +3608,60 @@ app.whenReady().then(() => {
 
         const toolCalls = message.tool_calls
         if (toolCalls && toolCalls.length > 0) {
+          // ⭐ 工具调用超阈值：强制中断工具链，引导用户补全关键信息
+          if (loopCount >= TOOL_INTERRUPT_THRESHOLD) {
+            console.warn(`[callLlm] 工具调用已达 ${loopCount} 次，触发中断阈值，强制生成引导追问...`)
+
+            // 将 assistant 消息（含 tool_calls）加入历史，保持对话连贯性
+            chatHistory.push(message)
+            // 为每个未执行的 tool_call 补充虚拟占位结果，避免 API 因缺少 tool 结果而报错
+            for (const tc of toolCalls) {
+              chatHistory.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                name: tc.function.name,
+                content: '[系统中断：工具调用次数已达上限，等待用户补充信息]'
+              })
+            }
+
+            // 注入引导追问的 system 指令（置于消息末尾以提高优先级）
+            chatHistory.push({
+              role: 'system',
+              content: `【系统强制中断指令】你已进行了 ${loopCount} 次工具调用，仍未找到明确答案。这通常说明用户提供的信息不够具体。请立即停止调用任何工具，改为以友好自然的语气向用户提问，帮助补全以下关键信息（结合任务上下文判断哪些最重要）：具体的文件名或路径、所在项目或目录范围、相关关键词或版本号。请直接输出追问内容，不要解释，不要再调用工具。`
+            })
+
+            // 发起最后一轮无工具的纯对话，让模型生成追问内容
+            const interruptBodyCopy = { ...body, messages: chatHistory }
+            delete interruptBodyCopy.tools
+            delete interruptBodyCopy.tool_choice
+
+            try {
+              const interruptResponse = await net.fetch(url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(interruptBodyCopy),
+                signal: currentLlmAbortController?.signal
+              })
+
+              sendTokenEvent()
+              currentLlmAbortController = null
+
+              if (interruptResponse.ok) {
+                const interruptData: any = await interruptResponse.json()
+                const interruptMsg = interruptData.choices?.[0]?.message?.content || ''
+                return interruptMsg.trim() || '我已搜索多次但未能定位目标，请提供更具体的信息，例如文件名、所在目录或相关关键词，我来帮您精准查找。'
+              } else {
+                return '我已搜索多次但未能定位目标，请提供更具体的信息，例如文件名、所在目录或相关关键词，我来帮您精准查找。'
+              }
+            } catch (interruptErr: any) {
+              if (thisController.signal.aborted) {
+                currentLlmAbortController = null
+                throw new Error('UserAborted')
+              }
+              return '我已搜索多次但未能定位目标，请提供更具体的信息，例如文件名、所在目录或相关关键词，我来帮您精准查找。'
+            }
+          }
+
           // 第二阶段参数填充逻辑：对于每个被调用的工具，若其包含非空 properties 参数定义，则按需填充
           for (let i = 0; i < toolCalls.length; i++) {
             const toolCall = toolCalls[i]

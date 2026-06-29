@@ -5,7 +5,7 @@ export const fileManifest: ToolManifest = {
   category: 'file',
   meta: {
     title: '文件操作',
-    description: '读取、写入、修改、重命名、移动和删除文件，或操作工作区文件',
+    description: '读取、写入、修改、重命名、移动和删除文件',
     avatar: '📂'
   },
   api: [
@@ -107,45 +107,5 @@ export const fileManifest: ToolManifest = {
         required: ['file_path']
       }
     },
-    {
-      name: 'list_workspace_files',
-      description: '列出当前工作空间根目录下的所有文件和文件夹列表。',
-      parameters: {
-        type: 'object',
-        properties: {}
-      }
-    },
-    {
-      name: 'read_workspace_file',
-      description: '读取工作空间内的相对路径文本文件。',
-      parameters: {
-        type: 'object',
-        properties: {
-          relative_path: {
-            type: 'string',
-            description: '工作空间内的相对路径（如 src/main.js）'
-          }
-        },
-        required: ['relative_path']
-      }
-    },
-    {
-      name: 'write_workspace_file',
-      description: '向工作空间内的指定相对路径写入文本文件。',
-      parameters: {
-        type: 'object',
-        properties: {
-          relative_path: {
-            type: 'string',
-            description: '工作空间内的相对路径'
-          },
-          content: {
-            type: 'string',
-            description: '写入文件的内容'
-          }
-        },
-        required: ['relative_path', 'content']
-      }
-    }
   ]
 }

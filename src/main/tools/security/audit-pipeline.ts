@@ -44,14 +44,22 @@ export class AuditPipeline {
 
       // 2. 检查是否有高危操作
       const safety = checkCommandSafety(command)
-
-      // 3. 在 sandboxMode 下需要用户审批
-      if (context.sandboxMode) {
+      if (!safety.safe) {
         return {
           blocked: false,
           requireApproval: true,
           warning: safety.warning
         }
+      }
+    }
+
+    // 处理内置文件删除工具安全审计 (delete_file)
+    if (toolName === 'delete_file') {
+      const filePath = args.file_path || ''
+      return {
+        blocked: false,
+        requireApproval: true,
+        warning: `检测到 AI 助理正在请求调用内置删除工具 'delete_file' 物理删除路径：${filePath}。系统默认不开启自动删除权限，此操作必须经由您手动核对批准后方可执行。`
       }
     }
 

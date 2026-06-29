@@ -28,9 +28,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     showToast,
     // tts
     ttsEnabled, setTtsEnabled,
-    // sandbox
-    sandboxMode,
-    handleToggleSandboxMode
   } = store
 
   // 虚拟体编辑弹窗状态
@@ -291,38 +288,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                 {storageSaveStatus.message}
               </div>
             )}
-
-            <hr style={{ border: '0', borderTop: '1px solid var(--border-color, rgba(128,128,128,0.15))', margin: '24px 0' }} />
-
-            <div className="settings-section-title" style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>安全控制</div>
-            <div className="form-desc-text">
-              控制 AI 助理在本地执行指令时的安全级别。开启后，任何命令执行前都需要您手动审批授权。
-            </div>
-
-            <div className="form-group" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-card-sub, rgba(128,128,128,0.04))', padding: '14px 18px', borderRadius: '8px', border: '1px solid var(--border-color, rgba(128,128,128,0.1))', marginTop: '12px' }}>
-              <div style={{ paddingRight: '16px' }}>
-                <div style={{ fontWeight: 600, fontSize: '13.5px', marginBottom: '4px' }}>终端命令安全沙盒模式</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted, #777)', lineHeight: 1.4 }}>开启后，AI 尝试在本地运行终端指令前会弹出系统确认框，且系统将直接拦截毁灭性高危指令。</div>
-              </div>
-              <label className="switch-toggle" style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={sandboxMode}
-                  onChange={e => handleToggleSandboxMode(e.target.checked)}
-                  style={{ opacity: 0, width: 0, height: 0 }}
-                />
-                <span className="slider-round-toggle" style={{
-                  position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: sandboxMode ? '#10b981' : 'rgba(128,128,128,0.3)',
-                  transition: '.2s', borderRadius: '24px'
-                }}>
-                  <span style={{
-                    position: 'absolute', content: '""', height: '18px', width: '18px', left: sandboxMode ? '24px' : '4px', bottom: '3px',
-                    backgroundColor: '#fff', transition: '.2s', borderRadius: '50%', boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
-                  }} />
-                </span>
-              </label>
-            </div>
           </div>
         )}
 
