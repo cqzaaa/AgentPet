@@ -51,6 +51,13 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     return () => el.removeEventListener('scroll', checkScrollPosition)
   }, [checkScrollPosition])
 
+  // 切换会话时重置滚动状态，避免"回到最新"按钮残留
+  useEffect(() => {
+    setShowScrollToBottom(false)
+    // 会话切换后重新检测滚动位置
+    requestAnimationFrame(() => checkScrollPosition())
+  }, [activeSessionId, checkScrollPosition])
+
   // 新消息到来时，如果已在底部则保持在底部
   useEffect(() => {
     if (!showScrollToBottom) {
