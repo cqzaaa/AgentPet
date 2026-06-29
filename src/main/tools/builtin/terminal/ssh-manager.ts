@@ -227,7 +227,7 @@ export class SshManager {
           stderr += data.toString()
         })
 
-        stream.on('close', (code: number) => {
+        stream.on('close', () => {
           // 可以在这里根据 exit code 处理异常，但为了工具返回，通常返回 stdout 和 stderr
           resolve({ stdout, stderr })
         })

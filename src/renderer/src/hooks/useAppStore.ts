@@ -1237,7 +1237,7 @@ export function useAppStore() {
       let relevantExperiences: any[] = []
       let recallDebug: any = null
       try {
-        const recallRes = await window.api.recallExperiences(text)
+        const recallRes: any = await window.api.recallExperiences(text)
         if (recallRes && !Array.isArray(recallRes)) {
           relevantExperiences = recallRes.results || []
           recallDebug = recallRes.debug || null

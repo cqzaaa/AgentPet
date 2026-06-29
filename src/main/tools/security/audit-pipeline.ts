@@ -24,7 +24,7 @@ export class AuditPipeline {
     toolName: string,
     args: Record<string, any>,
     manifest: ToolManifest,
-    context: ToolContext
+    _context: ToolContext
   ): Promise<AuditResult> {
     const api = manifest.api.find(a => a.name === toolName)
     

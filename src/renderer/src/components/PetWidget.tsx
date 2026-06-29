@@ -41,7 +41,7 @@ function isCubismReady(): boolean {
 export function PetWidget(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const [modelReady, setModelReady] = useState(false)
-  const [isHoveringBody, setIsHoveringBody] = useState(false)
+  const [_isHoveringBody, setIsHoveringBody] = useState(false)
   const [widgetHeight, setWidgetHeight] = useState(SIZE_CONFIG.targetHeight)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -84,7 +84,7 @@ export function PetWidget(): React.JSX.Element {
     return lines.map((line, idx) => {
       let cleanLine = line
       const boldRegexStrict = /\*\*(.*?)\*\*/g
-      const parts = []
+      const parts: React.ReactNode[] = []
       let lastIndex = 0
       let match
       
@@ -358,7 +358,7 @@ export function PetWidget(): React.JSX.Element {
 
       let relevantExperiences: any[] = []
       try {
-        const recallRes = await window.api.recallExperiences(text)
+        const recallRes: any = await window.api.recallExperiences(text)
         if (recallRes) {
           relevantExperiences = Array.isArray(recallRes) ? recallRes : (recallRes.results || [])
         }
@@ -520,10 +520,8 @@ ${memoryContext}
       if (isDraggingRef.current) { isDraggingRef.current = false; window.api.endDrag() }
     }
     const handleGlobalClick = (): void => {
-      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
     }
     const handleBlur = (): void => {
-      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -688,7 +686,7 @@ ${memoryContext}
       const gl = (renderer as any).gl
       if (gl) {
         const pixels = new Uint8Array(4)
-        renderer.framebuffer.bind()
+        ;(renderer as any).framebuffer.bind()
         gl.readPixels(canvasX, canvasY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
         const alpha = pixels[3]
         return alpha > 10 // 大于 10 则判定鼠标触及有颜色的身体部分

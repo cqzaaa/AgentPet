@@ -717,7 +717,8 @@ function renderSvgGraph(debug: any) {
             <circle cx={fn.x} cy={fn.y} r="14" fill="#10b981" className="node-glow-green" />
             <text x={fn.x} y={fn.y + 4} fill="#fff" fontSize="9" textAnchor="middle" fontWeight="bold">一阶</text>
             <rect x={fn.x - 45} y={fn.y - 30} width="90" height="14" rx="3" fill="rgba(16,185,129,0.95)" />
-            <text x={fn.x} y={fn.y - 20} fill="#fff" fontSize="9" textAnchor="middle" title={fn.name}>
+            <text x={fn.x} y={fn.y - 20} fill="#fff" fontSize="9" textAnchor="middle">
+              <title>{fn.name}</title>
               {fn.name.length > 8 ? fn.name.substring(0, 7) + '..' : fn.name}
             </text>
           </g>
@@ -729,7 +730,8 @@ function renderSvgGraph(debug: any) {
             <circle cx={sn.x} cy={sn.y} r="14" fill="#3b82f6" className="node-glow-blue" />
             <text x={sn.x} y={sn.y + 4} fill="#fff" fontSize="9" textAnchor="middle" fontWeight="bold">二阶</text>
             <rect x={sn.x - 45} y={sn.y - 30} width="90" height="14" rx="3" fill="rgba(59,130,246,0.95)" />
-            <text x={sn.x} y={sn.y - 20} fill="#fff" fontSize="9" textAnchor="middle" title={sn.name}>
+            <text x={sn.x} y={sn.y - 20} fill="#fff" fontSize="9" textAnchor="middle">
+              <title>{sn.name}</title>
               {sn.name.length > 8 ? sn.name.substring(0, 7) + '..' : sn.name}
             </text>
           </g>
@@ -740,7 +742,8 @@ function renderSvgGraph(debug: any) {
           <g key={`gn-fact-${idx}`}>
             <rect x={fn.x} y={fn.y - 18} width="200" height="36" rx="6" fill="#2d2a45" stroke="#8b5cf6" strokeWidth="1" className="node-glow-purple" />
             <text x={fn.x + 8} y={fn.y - 4} fill="#10b981" fontSize="9" fontWeight="bold">[已召回避坑事实]</text>
-            <text x={fn.x + 8} y={fn.y + 10} fill="#ddd" fontSize="9" title={fn.fullFact}>
+            <text x={fn.x + 8} y={fn.y + 10} fill="#ddd" fontSize="9">
+              <title>{fn.fullFact}</title>
               {fn.fact}
             </text>
           </g>
@@ -1015,10 +1018,8 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
 
   const toolSteps = msg.toolSteps || []
-  const callsCount = toolSteps.filter((s: any) => s.type === 'call').length
   const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
   const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || (s.type === 'think' && s.detail?.trim()))
-  const msgsCount = toolSteps.length
 
   const callSteps = toolSteps.filter((s: any) => s.type === 'call')
   let summaryText = ''

@@ -325,10 +325,10 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
             {/* 内容区域 */}
             <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-color)' }}>
-                {activePermissionRequest.warning ? (
+                {(activePermissionRequest as any).warning ? (
                   <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'flex-start', gap: '4px' }}>
                     <span style={{ transform: 'translateY(1px)' }}>⚠️</span>
-                    <span>{activePermissionRequest.warning}</span>
+                    <span>{(activePermissionRequest as any).warning}</span>
                   </div>
                 ) : (
                   <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px' }}>

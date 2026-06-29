@@ -1,13 +1,13 @@
 import * as fs from 'fs'
-import { join, dirname, basename } from 'path'
+import { dirname, basename } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath, getActiveStorageDir } from '../../utils/paths'
+import { resolveLocalPath } from '../../utils/paths'
 
 export class FileExecutor implements IToolExecutor {
   public async execute(
     api: string,
     args: Record<string, any>,
-    context: ToolContext
+    _context: ToolContext
   ): Promise<ToolResult> {
     try {
       // 1. read_file

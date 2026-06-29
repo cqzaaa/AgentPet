@@ -201,20 +201,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
     }
   }
 
-  // 微信注销
-  const handleLogout = async () => {
-    if (confirm('确认断开微信 Bot 托管连接吗？这会清除您的登录会话并移除该渠道。')) {
-      setIsLoading(true)
-      try {
-        await window.api.wechatLogout()
-        showToast('微信 Bot 已断开连接，已移除此频道', 'info')
-      } catch (err: any) {
-        showToast(`注销失败: ${err.message || err}`, 'error')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-  }
+
 
   // 切换“已启用”状态。当关闭启用时，自动切断微信托管连接并保存配置；当开启时，自动保存配置。
   const handleToggleEnable = async (checked: boolean) => {

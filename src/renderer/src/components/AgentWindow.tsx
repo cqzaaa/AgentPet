@@ -52,7 +52,6 @@ export function AgentWindow(): React.JSX.Element {
     activeTab, setActiveTab,
     sessions, activeSessionId, setActiveSessionId,
     handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession,
-    llmConfig,
     customModelFile,
     skillsList, contextRounds,
     toast,

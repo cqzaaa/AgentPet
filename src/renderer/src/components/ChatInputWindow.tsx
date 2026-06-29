@@ -208,6 +208,8 @@ export function ChatInputWindow(): React.JSX.Element {
   useEffect(() => {
     if (!messagesEndRef.current) return
 
+    let cleanup: (() => void) | undefined = undefined
+
     if (shouldScrollRef.current === 'smooth') {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
       shouldScrollRef.current = false
@@ -219,8 +221,10 @@ export function ChatInputWindow(): React.JSX.Element {
         }
       }, 30) // 延迟 30ms 确保真实 DOM 渲染完毕，瞬间定格在最底端
       shouldScrollRef.current = false
-      return () => clearTimeout(timer)
+      cleanup = () => clearTimeout(timer)
     }
+
+    return cleanup
   }, [messages, isThinking])
 
   // 切换历史会话
