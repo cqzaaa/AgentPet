@@ -19,7 +19,7 @@ export function checkCommandSafety(command: string): { safe: boolean; warning?: 
   const trimmed = command.trim().toLowerCase();
   
   // 1. 磁盘格式化/低级操作
-  if (/\b(format)\b/.test(trimmed) || /\b(mkfs|dd if=)\b/.test(trimmed)) {
+  if (/(^|[\s;&|])(format)\b/.test(trimmed) || /(^|[\s;&|])(mkfs|dd\s+if=)\b/.test(trimmed)) {
     return { safe: false, warning: '检测到磁盘格式化或底层硬盘扇区写入操作，此操作极其危险，可能导致不可逆的数据丢失。' }
   }
   

@@ -55,6 +55,32 @@ export const systemManifest: ToolManifest = {
         },
         required: ['action_type']
       }
+    },
+    {
+      name: 'extend_task_loop',
+      description: '当执行长任务预感当前工具调用次数不足时，调用此工具申请延长最大执行轮数，避免被系统强制中断。',
+      parameters: {
+        type: 'object',
+        properties: {
+          extra_loops: {
+            type: 'number',
+            description: '希望增加的轮数，例如 20'
+          },
+          reason: {
+            type: 'string',
+            description: '申请延长的原因'
+          }
+        },
+        required: ['extra_loops']
+      }
+    },
+    {
+      name: 'trigger_memory_purify',
+      description: '长任务或重要探索结束后，调用此工具主动触发后台的经验沉淀 Pipeline，将刚才学到的知识转化为长期记忆。',
+      parameters: {
+        type: 'object',
+        properties: {}
+      }
     }
   ]
 }

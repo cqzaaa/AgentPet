@@ -766,13 +766,17 @@ export function useAppStore() {
     return undefined
   }, [sessions, activeTab])
 
-  // Auto-save sessions
+  // Auto-save sessions (Debounced to prevent SQLite and IPC pressure during streaming)
   useEffect(() => {
     if (autoSaveHistory) {
-      localStorage.setItem('agentself_sessions', JSON.stringify(sessions))
-      window.api.saveLocalSessions(sessions)
+      const timer = setTimeout(() => {
+        localStorage.setItem('agentself_sessions', JSON.stringify(sessions))
+        window.api.saveLocalSessions(sessions)
+      }, 2000)
+      return () => clearTimeout(timer)
     } else {
       localStorage.removeItem('agentself_sessions')
+      return undefined
     }
   }, [sessions, autoSaveHistory])
 
