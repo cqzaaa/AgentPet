@@ -142,7 +142,10 @@ export class ShellManager {
 
     switch (commandType) {
       case 'powershell':
-        return execAsync(cmd, {
+        const psCmd = process.platform === 'win32'
+          ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${cmd}`
+          : cmd
+        return execAsync(psCmd, {
           ...options,
           shell: 'powershell.exe',
         })
@@ -157,7 +160,10 @@ export class ShellManager {
         }
       case 'cmd':
       default:
-        return execAsync(cmd, { ...options, shell: 'cmd.exe' })
+        const cmdCmd = process.platform === 'win32'
+          ? `chcp 65001 >nul && ${cmd}`
+          : cmd
+        return execAsync(cmdCmd, { ...options, shell: 'cmd.exe' })
     }
   }
 
@@ -174,7 +180,11 @@ export class ShellManager {
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else {
-      proc = spawn(command, [], {
+      let finalCommand = command
+      if (process.platform === 'win32') {
+        finalCommand = `chcp 65001 >nul && ${command}`
+      }
+      proc = spawn(finalCommand, [], {
         cwd: cwd || process.cwd(),
         shell: true,
         stdio: ['pipe', 'pipe', 'pipe'],

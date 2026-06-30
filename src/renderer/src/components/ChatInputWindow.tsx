@@ -283,7 +283,9 @@ export function ChatInputWindow(): React.JSX.Element {
       const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-      window.api.saveLocalSessions(updated).catch(() => { })
+      
+      // 增量写入数据库
+      window.api.createSession(newSession).catch(() => { })
     } catch (e) { }
 
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
@@ -359,7 +361,9 @@ export function ChatInputWindow(): React.JSX.Element {
       const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-      window.api.saveLocalSessions(updated).catch(() => { })
+      
+      // 增量写入数据库
+      window.api.createSession(newSession).catch(() => { })
     } catch (e) { }
 
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)

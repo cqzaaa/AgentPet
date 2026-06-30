@@ -302,6 +302,7 @@ export function PetWidget(): React.JSX.Element {
       }
 
       let activeSession = sessions.find(s => s.id === activeSessionId)
+      let isNew = false
       if (!activeSession) {
         activeSession = {
           id: activeSessionId,
@@ -310,6 +311,7 @@ export function PetWidget(): React.JSX.Element {
           messages: []
         }
         sessions.push(activeSession)
+        isNew = true
       }
 
       const contextRoundsStr = localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'
@@ -418,7 +420,14 @@ ${memoryContext}
       })
 
       localStorage.setItem('agentpet_sessions', JSON.stringify(updatedSessions))
-      await window.api.saveLocalSessions(updatedSessions)
+      // 增量持久化到数据库，避免全量重写
+      if (isNew) {
+        await window.api.createSession({ id: activeSessionId, name, time: activeSession.time })
+      } else {
+        await window.api.updateSession(activeSessionId, { name })
+      }
+      await window.api.saveMessage({ ...userMsg, sessionId: activeSessionId })
+      await window.api.saveMessage({ ...agentPlaceholderMsg, sessionId: activeSessionId })
 
       const workspacePath = localStorage.getItem('agentpet_workspace_path') || ''
       const response = await window.api.callLLM(
@@ -442,7 +451,15 @@ ${memoryContext}
       })
 
       localStorage.setItem('agentpet_sessions', JSON.stringify(finalSessions))
-      await window.api.saveLocalSessions(finalSessions)
+      // 增量写入最终生成的助理回复到数据库
+      await window.api.saveMessage({
+        id: replyId,
+        sessionId: activeSessionId,
+        sender: 'agent',
+        text: response,
+        time: formatDateTime(),
+        isThinking: false
+      })
 
 
 
@@ -586,10 +603,12 @@ ${memoryContext}
         height: SIZE_CONFIG.targetHeight,
         backgroundAlpha: 0,
         antialias: true,
-        resolution: window.devicePixelRatio || 1,
+        resolution: Math.min(window.devicePixelRatio || 1, 1.5),
         autoDensity: true,
+        powerPreference: 'low-power',
         preserveDrawingBuffer: true // 开启绘图缓冲保留，用于 readPixels 检测不规则碰撞
       })
+      app.ticker.maxFPS = 30
       appRef.current = app
 
       const canvas = app.view as HTMLCanvasElement

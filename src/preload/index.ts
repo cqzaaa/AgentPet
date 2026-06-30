@@ -108,8 +108,23 @@ const api = {
     ipcRenderer.invoke('api:get-models', config),
   getLocalSessions: (): Promise<any[] | null> =>
     ipcRenderer.invoke('api:get-local-sessions'),
-  saveLocalSessions: (sessions: any[]): Promise<boolean> =>
-    ipcRenderer.invoke('api:save-local-sessions', sessions),
+  createSession: (session: any): Promise<boolean> =>
+    ipcRenderer.invoke('api:create-session', session),
+  updateSession: (sessionId: string, updates: any): Promise<boolean> =>
+    ipcRenderer.invoke('api:update-session', sessionId, updates),
+  deleteSession: (sessionId: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:delete-session', sessionId),
+  saveMessage: (message: any): Promise<boolean> =>
+    ipcRenderer.invoke('api:save-message', message),
+  deleteMessage: (messageId: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:delete-message', messageId),
+  onSessionsUpdated: (callback: () => void): (() => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on('api:sessions-updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('api:sessions-updated', subscription)
+    }
+  },
   appendMemorySummary: (sessionId: string, text: string): Promise<boolean> =>
     ipcRenderer.invoke('api:append-memory-summary', sessionId, text),
   getMemoryProfile: (): Promise<string> =>

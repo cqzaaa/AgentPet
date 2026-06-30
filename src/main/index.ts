@@ -136,6 +136,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 // 消除 GPU Shader Disk Cache 权限警告（不影响渲染性能）
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+// 优化 GPU 进程显存占用：在空闲时主动修剪 GPU 命令缓冲区并禁用视频帧 GPU 缓冲以释放显存
+app.commandLine.appendSwitch('prune-gpu-command-buffer')
+app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
 
 // 自定义协议必须在 app.whenReady 之前注册！
 protocol.registerSchemesAsPrivileged([
@@ -321,6 +324,14 @@ async function copyFolderRecursive(src: string, dest: string): Promise<void> {
 }
 
 function createAgentWindow(openParams?: { taskId: string; logId: string }): void {
+  // 打开 Agent 窗口时自动关闭虚拟体和快捷输入窗口，释放渲染进程和 Live2D GPU 资源
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.close()
+  }
+  if (inputWindow && !inputWindow.isDestroyed()) {
+    inputWindow.close()
+  }
+
   if (agentWindow) {
     if (agentWindow.isMinimized()) agentWindow.restore()
     agentWindow.focus()
@@ -473,13 +484,24 @@ function createInputWindow(x?: number, y?: number, initialImage?: { path: string
   })
 }
 
-function createTray(mainWindow: BrowserWindow): void {
+function showOrCreateMainWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    createWindow()
+  }
+}
+
+function createTray(): void {
+  if (tray) return
   tray = new Tray(icon)
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示虚拟体',
       click: () => {
-        mainWindow.show()
+        showOrCreateMainWindow()
       }
     },
     {
@@ -509,6 +531,8 @@ function createTray(mainWindow: BrowserWindow): void {
     createAgentWindow()
   })
 }
+
+let ipcWindowHandlersRegistered = false
 
 function createWindow(): void {
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -541,11 +565,14 @@ function createWindow(): void {
 
   mainWindow = win
 
+  win.on('closed', () => {
+    mainWindow = null
+  })
+
   win.on('ready-to-show', () => {
     win.show()
     // 初始开启穿透，直到鼠标移动到宠物元素上
     win.setIgnoreMouseEvents(true, { forward: true })
-    createTray(win)
     if (!is.dev) {
       win.webContents.openDevTools({ mode: 'detach' })
     }
@@ -568,6 +595,10 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+  // IPC 监听只注册一次，防止窗口重建时重复注册导致崩溃
+  if (!ipcWindowHandlersRegistered) {
+  ipcWindowHandlersRegistered = true
+
   // 注册窗口拖动 IPC 监听
   ipcMain.on('start-drag', () => {
     // 拖拽开始，无需特殊处理
@@ -585,7 +616,9 @@ function createWindow(): void {
     // 拖拽结束，无需边缘贴合半隐藏逻辑
   })
   ipcMain.on('set-ignore-mouse-events', (_, ignore: boolean, options?: { forward: boolean }) => {
-    win.setIgnoreMouseEvents(ignore, options)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setIgnoreMouseEvents(ignore, options)
+    }
   })
 
   ipcMain.on('set-window-size', (event, width: number, height: number, anchor?: 'bottom' | 'top') => {
@@ -630,8 +663,8 @@ function createWindow(): void {
   })
 
   ipcMain.on('hide-window', () => {
-    if (mainWindow) {
-      mainWindow.hide()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close()
     }
     if (inputWindow && !inputWindow.isDestroyed()) {
       inputWindow.close()
@@ -759,6 +792,8 @@ function createWindow(): void {
     pendingAgentInput = ''
     return hasPending ? '__pending__' : ''
   })
+
+  } // end of ipcWindowHandlersRegistered guard
 }
 
 // This method will be called when Electron has finished
@@ -1534,8 +1569,8 @@ app.whenReady().then(() => {
       {
         label: '👁️ 隐藏桌宠',
         click: () => {
-          if (mainWindow) {
-            mainWindow.hide()
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.close()
           }
           if (inputWindow && !inputWindow.isDestroyed()) {
             inputWindow.close()
@@ -2190,7 +2225,7 @@ app.whenReady().then(() => {
       const result: any[] = []
 
       for (const s of dbSessions as any[]) {
-        const dbMessages = await database.all('SELECT * FROM (SELECT * FROM messages WHERE session_id = ? ORDER BY rowid DESC LIMIT 50) ORDER BY rowid ASC', s.id)
+        const dbMessages = await database.all('SELECT * FROM (SELECT rowid, * FROM messages WHERE session_id = ? ORDER BY rowid DESC LIMIT 50) ORDER BY rowid ASC', s.id)
         const messages = dbMessages.map((m: any) => {
           let toolSteps = undefined
           if (m.tool_steps) {
@@ -2254,108 +2289,138 @@ app.whenReady().then(() => {
     return null
   })
 
-  // 保存聊天记录到本地物理文件
-  ipcMain.handle('api:save-local-sessions', async (_, sessions: any[]) => {
+  const broadcastSessionsUpdated = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('api:sessions-updated')
+    }
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('api:sessions-updated')
+    }
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.webContents.send('api:sessions-updated')
+    }
+  }
+
+  // 创建会话
+  ipcMain.handle('api:create-session', async (_, session: any) => {
     try {
       const database = await getDB()
-
-      const sessionIds = sessions.map(s => s.id)
-
-      // 在事务开始前找出将被删除的会话
-      let deletedSessions: { id: string }[] = []
-      try {
-        if (sessionIds.length > 0) {
-          const placeholders = sessionIds.map(() => '?').join(',')
-          deletedSessions = await database.all(`SELECT id FROM sessions WHERE id NOT IN (${placeholders})`, ...sessionIds) as { id: string }[]
-        } else {
-          deletedSessions = await database.all('SELECT id FROM sessions') as { id: string }[]
-        }
-      } catch (err) {
-        console.error('获取即将删除的会话失败', err)
-      }
-
-      await database.run('BEGIN TRANSACTION')
-      try {
-        // 1. 删除已被删除 of sessions
-        if (sessionIds.length > 0) {
-          const placeholders = sessionIds.map(() => '?').join(',')
-          await database.run(`DELETE FROM sessions WHERE id NOT IN (${placeholders})`, ...sessionIds)
-        } else {
-          await database.run('DELETE FROM sessions')
-        }
-
-        for (const s of sessions) {
-          await database.run('INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, ?, ?)', s.id, s.name, s.time, s.pinned ? 1 : 0, s.userId || 'system')
-
-          // 收集当前 session 里的所有 message ID，用于删除已经不存在 the message
-          const msgList = s.messages || []
-          const msgIds = msgList.map((m: any) => String(m.id))
-
-          if (msgIds.length > 0) {
-            const placeholders = msgIds.map(() => '?').join(',')
-            await database.run(`DELETE FROM messages WHERE session_id = ? AND id NOT IN (${placeholders})`, s.id, ...msgIds)
-          } else {
-            await database.run('DELETE FROM messages WHERE session_id = ?', s.id)
-          }
-
-          for (const m of msgList) {
-            const msgId = String(m.id)
-            const sender = m.sender || 'system'
-            const text = m.text || ''
-            const time = m.time || ''
-            const isThinking = m.isThinking ? 1 : 0
-            const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
-            const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
-            // fileInfos 保存时剔除 objectUrl（blob URL 重启后失效）
-            const fileInfos = m.fileInfos
-              ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
-              : null
-            const isError = m.isError ? 1 : 0
-            const userId = m.userId || 'system'
-            const isSummarized = m.isSummarized ? 1 : 0
-
-            await database.run(`
-              INSERT OR REPLACE INTO messages
-              (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, msgId, s.id, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized)
-          }
-        }
-        await database.run('COMMIT')
-      } catch (txErr) {
-        await database.run('ROLLBACK')
-        throw txErr
-      }
-
-      // 事务执行成功后，物理清理关联的本地物理文件目录
-      if (deletedSessions.length > 0) {
-        const chatDir = getActiveChatDir()
-        for (const ds of deletedSessions) {
-          // 兼容并清理两种安全命名替换方式的目录
-          const safe1 = ds.id.replace(/[^a-zA-Z0-9_-]/g, '_')
-          const safe2 = ds.id.replace(/[<>:"/\\|?*]/g, '_')
-          
-          const path1 = join(chatDir, safe1)
-          const path2 = join(chatDir, safe2)
-          
-          try {
-            if (fs.existsSync(path1)) {
-              await fs.promises.rm(path1, { recursive: true, force: true })
-              console.log(`[SaveLocalSessions] 成功物理清理会话目录: ${path1}`)
-            }
-            if (safe2 !== safe1 && fs.existsSync(path2)) {
-              await fs.promises.rm(path2, { recursive: true, force: true })
-              console.log(`[SaveLocalSessions] 成功物理清理会话目录: ${path2}`)
-            }
-          } catch (err) {
-            console.error(`[SaveLocalSessions] 清理被删除会话目录失败 (${ds.id}):`, err)
-          }
-        }
-      }
-
+      await database.run(
+        'INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, ?, ?)',
+        session.id,
+        session.name || '(未命名)',
+        session.time,
+        session.pinned ? 1 : 0,
+        session.userId || 'system'
+      )
+      broadcastSessionsUpdated()
       return true
     } catch (e) {
-      console.error('保存聊天记录到 SQLite 失败', e)
+      console.error('创建会话失败', e)
+      return false
+    }
+  })
+
+  // 更新会话
+  ipcMain.handle('api:update-session', async (_, sessionId: string, updates: any) => {
+    try {
+      const database = await getDB()
+      const keys = Object.keys(updates)
+      if (keys.length === 0) return true
+      const sets: string[] = []
+      const values: any[] = []
+      for (const key of keys) {
+        let dbKey = key
+        if (key === 'userId') dbKey = 'user_id'
+        let val = updates[key]
+        if (key === 'pinned') val = val ? 1 : 0
+        sets.push(`${dbKey} = ?`)
+        values.push(val)
+      }
+      values.push(sessionId)
+      const sql = `UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`
+      await database.run(sql, ...values)
+      broadcastSessionsUpdated()
+      return true
+    } catch (e) {
+      console.error('更新会话失败', e)
+      return false
+    }
+  })
+
+  // 删除会话
+  ipcMain.handle('api:delete-session', async (_, sessionId: string) => {
+    try {
+      const database = await getDB()
+      await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
+      
+      const chatDir = getActiveChatDir()
+      const safe1 = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+      const safe2 = sessionId.replace(/[<>:"/\\|?*]/g, '_')
+      
+      const path1 = join(chatDir, safe1)
+      const path2 = join(chatDir, safe2)
+      
+      try {
+        if (fs.existsSync(path1)) {
+          await fs.promises.rm(path1, { recursive: true, force: true })
+        }
+        if (safe2 !== safe1 && fs.existsSync(path2)) {
+          await fs.promises.rm(path2, { recursive: true, force: true })
+        }
+      } catch (err) {
+        console.error(`删除会话附件目录失败 (${sessionId}):`, err)
+      }
+      
+      broadcastSessionsUpdated()
+      return true
+    } catch (e) {
+      console.error('删除会话失败', e)
+      return false
+    }
+  })
+
+  // 保存消息
+  ipcMain.handle('api:save-message', async (_, m: any) => {
+    try {
+      const database = await getDB()
+      const msgId = String(m.id)
+      const sender = m.sender || 'system'
+      const text = m.text || ''
+      const time = m.time || ''
+      const isThinking = m.isThinking ? 1 : 0
+      const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
+      const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
+      const fileInfos = m.fileInfos
+        ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
+        : null
+      const isError = m.isError ? 1 : 0
+      const userId = m.userId || 'system'
+      const isSummarized = m.isSummarized ? 1 : 0
+
+      await database.run(`
+        INSERT OR REPLACE INTO messages
+        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized)
+      
+      broadcastSessionsUpdated()
+      return true
+    } catch (e) {
+      console.error('保存消息失败', e)
+      return false
+    }
+  })
+
+  // 删除消息
+  ipcMain.handle('api:delete-message', async (_, messageId: string) => {
+    try {
+      const database = await getDB()
+      await database.run('DELETE FROM messages WHERE id = ?', messageId)
+      broadcastSessionsUpdated()
+      return true
+    } catch (e) {
+      console.error('删除消息失败', e)
       return false
     }
   })
@@ -3439,6 +3504,7 @@ app.whenReady().then(() => {
     }
   })
 
+  createTray()
   createWindow()
 
   app.on('activate', function () {
@@ -3450,9 +3516,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // 保持后台系统托盘常驻，所有窗口关闭时不自动退出整个应用
 })
 
 

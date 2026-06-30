@@ -48,7 +48,12 @@ declare global {
       getOllamaModels: (baseUrl: string) => Promise<string[]>
       getModels: (config: any) => Promise<string[]>
       getLocalSessions: () => Promise<any[] | null>
-      saveLocalSessions: (sessions: any[]) => Promise<boolean>
+      createSession: (session: any) => Promise<boolean>
+      updateSession: (sessionId: string, updates: any) => Promise<boolean>
+      deleteSession: (sessionId: string) => Promise<boolean>
+      saveMessage: (message: any) => Promise<boolean>
+      deleteMessage: (messageId: string) => Promise<boolean>
+      onSessionsUpdated: (callback: () => void) => () => void
       appendMemorySummary: (sessionId: string, text: string) => Promise<boolean>
       getMemoryProfile: () => Promise<string>
       writeMemoryProfile: (text: string) => Promise<boolean>

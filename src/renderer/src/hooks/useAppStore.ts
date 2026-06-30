@@ -766,19 +766,15 @@ export function useAppStore() {
     return undefined
   }, [sessions, activeTab])
 
-  // Auto-save sessions (Debounced to prevent SQLite and IPC pressure during streaming)
+  // 监听原子接口引发的数据修改通知（跨窗口或其它事件）
   useEffect(() => {
-    if (autoSaveHistory) {
-      const timer = setTimeout(() => {
-        localStorage.setItem('agentself_sessions', JSON.stringify(sessions))
-        window.api.saveLocalSessions(sessions)
-      }, 2000)
-      return () => clearTimeout(timer)
-    } else {
-      localStorage.removeItem('agentself_sessions')
-      return undefined
-    }
-  }, [sessions, autoSaveHistory])
+    if (!window.api.onSessionsUpdated) return
+    const unsubscribe = window.api.onSessionsUpdated(() => {
+      // 保持静默数据重新拉取以同步状态
+      refreshSessions()
+    })
+    return () => unsubscribe()
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('agentself_active_session_id', activeSessionId)
@@ -808,48 +804,53 @@ export function useAppStore() {
     }
   }
 
-  const handleDeleteSession = (id: string): void => {
+  const handleDeleteSession = async (id: string): Promise<void> => {
     const filtered = sessions.filter(s => s.id !== id)
     let nextSessions = filtered
     if (filtered.length === 0) {
       const timeStr = formatDateTime()
-      nextSessions = [{
+      const defaultSess = {
         id: 'agent:main:dashboard:default',
         name: '(未命名)',
         time: timeStr,
         messages: []
-      }]
+      }
+      nextSessions = [defaultSess]
+      await window.api.createSession(defaultSess)
     }
     setSessions(nextSessions)
     if (activeSessionId === id) setActiveSessionId(nextSessions[0].id)
+    await window.api.deleteSession(id)
   }
 
   // 切换会话置顶状态
-  const handleTogglePinSession = (id: string): void => {
+  const handleTogglePinSession = async (id: string): Promise<void> => {
+    let newPinned = false
     setSessions(prev => {
       const target = prev.find(s => s.id === id)
       if (!target) return prev
-      const toggled = { ...target, pinned: !target.pinned }
-      // 置顶的排到最前；取消置顶的回到非置顶组的开头
+      newPinned = !target.pinned
+      const toggled = { ...target, pinned: newPinned }
       const rest = prev.filter(s => s.id !== id)
       if (toggled.pinned) {
-        // 把它放到所有已置顶项之后、非置顶项之前
         const pinnedRest = rest.filter(s => s.pinned)
         const unpinnedRest = rest.filter(s => !s.pinned)
         return [...pinnedRest, toggled, ...unpinnedRest]
       }
       return [...rest, toggled]
     })
+    await window.api.updateSession(id, { pinned: newPinned })
   }
 
   // 重命名会话
-  const handleRenameSession = (id: string, name: string): void => {
+  const handleRenameSession = async (id: string, name: string): Promise<void> => {
     const trimmed = name.trim()
     if (!trimmed) return
     setSessions(prev => prev.map(s => (s.id === id ? { ...s, name: trimmed } : s)))
+    await window.api.updateSession(id, { name: trimmed })
   }
 
-  const handleCreateNewSession = (): void => {
+  const handleCreateNewSession = async (): Promise<void> => {
     if (sessions.length > 0 && sessions[sessions.length - 1].name === '(未命名)') {
       setActiveSessionId(sessions[sessions.length - 1].id)
       setAttachedFiles([])
@@ -871,6 +872,7 @@ export function useAppStore() {
     setAttachedFiles([])
     setInputValue('')
     setActiveTab('chat')
+    await window.api.createSession(newSess)
   }
 
   // ── 工作空间与文件上传管理 ────────────────────────────────────
@@ -1018,44 +1020,52 @@ export function useAppStore() {
 
       // 2. 正常前台会话消息更新
       const targetSessionId = sessionId || activeSessionId
-      setSessions(prev => prev.map(s => {
-        if (s.id === targetSessionId) {
-          const messages = [...s.messages]
-          const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
-          if (latestAgentIdx !== -1) {
-            const agentMsg = { ...messages[latestAgentIdx] }
-            const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
-            
-            if (type === 'tool_call') {
-              toolSteps.push({
-                id: `step-${Date.now()}-${Math.random()}`,
-                type: 'call',
-                name,
-                detail: args
-              })
-            } else if (type === 'tool_result') {
-              toolSteps.push({
-                id: `step-${Date.now()}-${Math.random()}`,
-                type: 'result',
-                name,
-                detail: result
-              })
-            } else if (type === 'think') {
-              toolSteps.push({
-                id: `step-${Date.now()}-${Math.random()}`,
-                type: 'think',
-                name,
-                detail: detail
-              })
+      let updatedMsg: any = null
+      setSessions(prev => {
+        const next = prev.map(s => {
+          if (s.id === targetSessionId) {
+            const messages = [...s.messages]
+            const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
+            if (latestAgentIdx !== -1) {
+              const agentMsg = { ...messages[latestAgentIdx] }
+              const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
+              
+              if (type === 'tool_call') {
+                toolSteps.push({
+                  id: `step-${Date.now()}-${Math.random()}`,
+                  type: 'call',
+                  name,
+                  detail: args
+                })
+              } else if (type === 'tool_result') {
+                toolSteps.push({
+                  id: `step-${Date.now()}-${Math.random()}`,
+                  type: 'result',
+                  name,
+                  detail: result
+                })
+              } else if (type === 'think') {
+                toolSteps.push({
+                  id: `step-${Date.now()}-${Math.random()}`,
+                  type: 'think',
+                  name,
+                  detail: detail
+                })
+              }
+              
+              agentMsg.toolSteps = toolSteps
+              messages[latestAgentIdx] = agentMsg
+              updatedMsg = agentMsg
             }
-            
-            agentMsg.toolSteps = toolSteps
-            messages[latestAgentIdx] = agentMsg
+            return { ...s, messages }
           }
-          return { ...s, messages }
+          return s
+        })
+        if (updatedMsg) {
+          window.api.saveMessage({ ...updatedMsg, sessionId: targetSessionId })
         }
-        return s
-      }))
+        return next
+      })
     })
     return () => unsubscribe()
   }, [activeSessionId])
@@ -1063,15 +1073,22 @@ export function useAppStore() {
   // 打字机流式打印辅助函数
   // 打字机流式打印辅助函数 (已优化为瞬间渲染以保证桌宠 Live2D 60FPS 帧率并消除卡顿)
   const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
-    setSessions(prev => prev.map(s => {
-      if (s.id === sessionId) {
-        return {
-          ...s,
-          messages: s.messages.map(m => m.id === replyId ? { ...m, text: fullText, isThinking: false } : m)
+    let savedMsg: any = null
+    setSessions(prev => {
+      const next = prev.map(s => {
+        if (s.id === sessionId) {
+          const messages = s.messages.map(m => m.id === replyId ? { ...m, text: fullText, isThinking: false } : m)
+          const target = messages.find(m => m.id === replyId)
+          if (target) savedMsg = target
+          return { ...s, messages }
         }
+        return s
+      })
+      if (savedMsg) {
+        window.api.saveMessage({ ...savedMsg, sessionId })
       }
-      return s
-    }))
+      return next
+    })
     isTypingRef.current = false
     setIsSending(false)
     setTimeout(() => {
@@ -1135,6 +1152,14 @@ export function useAppStore() {
     setInputValue('')
     setAttachedFiles([]) // 发送后清空附件
     setIsSending(true)
+
+    // 增量落库会话标题变更和消息
+    const activeSess = updatedSessions.find(s => s.id === activeSessionId)
+    if (activeSess) {
+      await window.api.updateSession(activeSessionId, { name: activeSess.name })
+    }
+    await window.api.saveMessage({ ...userMsg, sessionId: activeSessionId })
+    await window.api.saveMessage({ ...agentPlaceholderMsg, sessionId: activeSessionId })
 
     const isOllama = llmConfig.provider === 'ollama'
     const hasKey = isOllama || !!llmConfig.apiKey
@@ -1446,19 +1471,27 @@ ${chatLogStr}
         console.log('[Summary] 成功追加到本地 Markdown 记忆日志文件。')
 
         const batchIds = summaryBatch.map(m => m.id)
+        let savedMsgs: any[] = []
         setSessions(prev => {
           const updated = prev.map(s => {
             if (s.id === sessionId) {
-              return {
-                ...s,
-                messages: s.messages.map(m => batchIds.includes(m.id) ? { ...m, isSummarized: true } : m)
-              }
+              const messages = s.messages.map(m => {
+                if (batchIds.includes(m.id)) {
+                  const updatedMsg = { ...m, isSummarized: true }
+                  savedMsgs.push(updatedMsg)
+                  return updatedMsg
+                }
+                return m
+              })
+              return { ...s, messages }
             }
             return s
           })
-          if (autoSaveHistory) {
-            window.api.saveLocalSessions(updated)
-          }
+          
+          savedMsgs.forEach(m => {
+            window.api.saveMessage({ ...m, sessionId })
+          })
+
           return updated
         })
       }

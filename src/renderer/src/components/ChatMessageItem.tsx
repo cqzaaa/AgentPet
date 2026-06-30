@@ -258,7 +258,7 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
   //   2. [text](url)  — markdown 链接
   //   3. https://... 或 local-file://... 或 file:///... — 裸 URL
   //   4. C:\... 等裸露的 Windows 本地绝对路径
-  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/|[a-zA-Z]:[\\/])[^\s\])<>"'，。！？；：（）]+)/g
+  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/|[a-zA-Z]:[\\\/])[^\s\])<>"'`*，。！？；：（）]+)/g
   let match
   let lastIndex = 0
 
@@ -306,28 +306,18 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
     }
 
     // 4. 特殊本地图片协议处理：如果是以 local-file:// 或 wechat-file:// 开头
+    //    采用白名单模式：只有确认是图片后缀才渲染为图片，避免非图片文件被误判后触发 onError 显示"已被删除"
     if (lowerUrl.startsWith('local-file://') || lowerUrl.startsWith('wechat-file://')) {
-      // 排除一些明显的非图片格式后缀，其余默认当做图片预览
-      const isNonImageExt =
-        cleanUrl.endsWith('.txt') ||
-        cleanUrl.endsWith('.json') ||
-        cleanUrl.endsWith('.md') ||
-        cleanUrl.endsWith('.zip') ||
-        cleanUrl.endsWith('.rar') ||
-        cleanUrl.endsWith('.pdf') ||
-        cleanUrl.endsWith('.doc') ||
-        cleanUrl.endsWith('.docx') ||
-        cleanUrl.endsWith('.xls') ||
-        cleanUrl.endsWith('.xlsx') ||
-        cleanUrl.endsWith('.ppt') ||
-        cleanUrl.endsWith('.pptx') ||
-        cleanUrl.endsWith('.mp3') ||
-        cleanUrl.endsWith('.mp4') ||
-        cleanUrl.endsWith('.js') ||
-        cleanUrl.endsWith('.ts')
-
-      if (!isNonImageExt) {
+      if (isCommonImageExt) {
         return true
+      }
+      // 微信图片经常没有后缀（如 dat 文件已解码后的临时路径），对无后缀或未知后缀的 wechat-file:// 仍兜底当图片
+      if (lowerUrl.startsWith('wechat-file://')) {
+        const lastSegment = cleanUrl.split('/').pop() || ''
+        const hasKnownExt = lastSegment.includes('.') && lastSegment.split('.').pop()!.length <= 5
+        if (!hasKnownExt) {
+          return true
+        }
       }
     }
 
