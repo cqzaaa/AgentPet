@@ -8,7 +8,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
-import { EdgeTTS } from 'node-edge-tts'
+
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
 import { unifiedToolExecutor } from './tools/core/tool-executor'
@@ -140,6 +140,12 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 app.commandLine.appendSwitch('prune-gpu-command-buffer')
 app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
 
+// 限制老生代堆内存，强制更激进和频繁的垃圾回收，并暴露 gc 接口
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --expose-gc')
+// 限制 HTTP 缓存和媒体缓存的大小，防止内存长期驻留过大缓存
+app.commandLine.appendSwitch('disk-cache-size', '1048576')
+app.commandLine.appendSwitch('media-cache-size', '1048576')
+
 // 自定义协议必须在 app.whenReady 之前注册！
 protocol.registerSchemesAsPrivileged([
   {
@@ -174,6 +180,34 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ])
+
+function trimPhysicalMemory(): void {
+  if (process.platform !== 'win32') return
+  try {
+    const { exec } = require('child_process')
+    const cmd = `powershell -Command "Get-Process -Name 'agentpet', 'Electron' -ErrorAction SilentlyContinue | ForEach-Object { try { $_.MinWorkingSet = [System.IntPtr]::Zero } catch {} }"`
+    exec(cmd)
+  } catch (err) {
+    console.warn('[Memory] 触发物理内存修剪失败:', err)
+  }
+}
+
+function runImmediateGarbageCollection(): void {
+  setTimeout(() => {
+    try {
+      if (global.gc) {
+        global.gc()
+      }
+      if (session.defaultSession) {
+        session.defaultSession.clearCache().catch(() => {})
+        session.defaultSession.clearCodeCaches({}).catch(() => {})
+      }
+      trimPhysicalMemory()
+    } catch (err) {
+      console.error('[Memory] 立即回收内存失败:', err)
+    }
+  }, 500)
+}
 
 // 窗口尺寸
 const winWidth = 260
@@ -384,6 +418,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   agentWindow.on('closed', () => {
     agentWindow = null
+    runImmediateGarbageCollection()
   })
 }
 
@@ -481,6 +516,7 @@ function createInputWindow(x?: number, y?: number, initialImage?: { path: string
 
   inputWindow.on('closed', () => {
     inputWindow = null
+    runImmediateGarbageCollection()
   })
 }
 
@@ -567,6 +603,7 @@ function createWindow(): void {
 
   win.on('closed', () => {
     mainWindow = null
+    runImmediateGarbageCollection()
   })
 
   win.on('ready-to-show', () => {
@@ -576,6 +613,12 @@ function createWindow(): void {
     if (!is.dev) {
       win.webContents.openDevTools({ mode: 'detach' })
     }
+
+    // 启动 3 秒后自动执行一次即时垃圾回收和内存修剪
+    // 清除启动初始化阶段（模块加载、Live2D 纹理载入等）产生的大量临时内存垃圾
+    setTimeout(() => {
+      runImmediateGarbageCollection()
+    }, 3000)
   })
 
   win.on('blur', () => {
@@ -3506,6 +3549,31 @@ app.whenReady().then(() => {
 
   createTray()
   createWindow()
+
+  // 启动后台物理内存和 V8 缓存垃圾清理定时器 (每 60 秒运行一次)
+  setInterval(() => {
+    try {
+      // 1. 主进程 V8 垃圾回收
+      if (global.gc) {
+        global.gc()
+      }
+      // 2. 清理全局 session 缓存与 Code Cache，避免 Chromium 网络/代码缓存无限增加
+      if (session.defaultSession) {
+        session.defaultSession.clearCache().catch(() => {})
+        session.defaultSession.clearCodeCaches({}).catch(() => {})
+      }
+      // 3. 遍历所有活动窗口，在其对应的渲染进程中强行触发 GC
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed() && win.webContents) {
+          win.webContents.executeJavaScript('window.gc && window.gc()').catch(() => {})
+        }
+      })
+      // 4. 强制修剪物理工作集内存，将不活跃物理内存压降回虚拟内存
+      trimPhysicalMemory()
+    } catch (err) {
+      console.error('[Memory] 定时内存清理失败:', err)
+    }
+  }, 60000)
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

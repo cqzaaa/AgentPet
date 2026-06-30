@@ -181,9 +181,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     }
   }, [])
 
-  const isOllama = llmConfig.provider === 'ollama'
-  const hasKey = isOllama || !!llmConfig.apiKey
-
   return (
     <div className="chat-split-container">
       <div
@@ -200,11 +197,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
         {/* 消息滚动列表 */}
         {/* 消息滚动列表 */}
         <div className="chat-messages-box" ref={messagesBoxRef}>
-          {!hasKey && (
-            <div className="api-warn-banner">
-              <span>⚠️ 未配置大模型 API Key。当前处于『演示模式』，{currentAvatarName} 将使用内置模拟语句回复您。请前往『设置 {"->"} 本地存储』配置大模型以开启真实交互。</span>
-            </div>
-          )}
           {isSessionSwitching ? (
             <div className="chat-skeleton-container">
               <div className="skeleton-message agent">

@@ -50,6 +50,8 @@ export function AgentWindow(): React.JSX.Element {
     theme, handleThemeToggle,
     isCollapsed, setIsCollapsed,
     activeTab, setActiveTab,
+    setSettingsSubTab,
+    showApiKeyModal, setShowApiKeyModal,
     sessions, activeSessionId, setActiveSessionId,
     handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession,
     customModelFile,
@@ -952,6 +954,119 @@ export function AgentWindow(): React.JSX.Element {
                 onMouseLeave={e => e.currentTarget.style.filter = 'none'}
               >
                 删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API Key 引导配置弹窗 */}
+      {showApiKeyModal && (
+        <div 
+          className="mcp-modal-overlay" 
+          style={{ 
+            backdropFilter: 'blur(10px)', 
+            backgroundColor: 'rgba(0, 0, 0, 0.45)',
+            zIndex: 99999
+          }}
+        >
+          <style>{`
+            @keyframes modalSlideIn {
+              from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+              }
+              to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+              }
+            }
+          `}</style>
+          <div 
+            className="mcp-modal-card" 
+            style={{ 
+              maxWidth: '420px', 
+              width: '90%',
+              background: 'var(--bg-card, rgba(255, 255, 255, 0.85))',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid var(--border-color, rgba(255, 255, 255, 0.25))',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
+              borderRadius: '16px',
+              animation: 'modalSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+            }}
+          >
+            <div className="mcp-modal-header" style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                <span>🔑 缺少大模型配置</span>
+              </div>
+              <button 
+                className="mcp-modal-close-btn" 
+                style={{ fontSize: '20px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} 
+                onClick={() => setShowApiKeyModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="mcp-modal-body" style={{ padding: '24px', fontSize: '13.5px', color: 'var(--text-secondary, #4b5563)', lineHeight: '1.6' }}>
+              <p style={{ margin: 0, fontWeight: 500, color: 'var(--text-primary)' }}>
+                为了体验桌宠 {currentAvatarName} 的全部智能交互功能，建议您先配置大模型 API 密钥。
+              </p>
+              <p style={{ margin: '10px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted, #6b7280)' }}>
+                未配置 Key 状态下将无法开启 AI 聊天、代码编写、定时运行、系统操作等核心功能。
+              </p>
+            </div>
+            <div className="mcp-modal-footer" style={{ padding: '16px 24px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: 'none', background: 'transparent' }}>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color, rgba(128, 128, 128, 0.2))',
+                  background: 'transparent',
+                  color: 'var(--text-primary, #374151)',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                暂不配置
+              </button>
+              <button
+                onClick={() => {
+                  setShowApiKeyModal(false)
+                  setActiveTab('settings')
+                  setSettingsSubTab('keys')
+                }}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #4f8cff 0%, #3b82f6 100%)',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 'bold',
+                  boxShadow: '0 4px 12px rgba(79, 140, 255, 0.3)',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.filter = 'brightness(1.08)'
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(79, 140, 255, 0.4)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.filter = 'none'
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(79, 140, 255, 0.3)'
+                }}
+              >
+                前往配置 API Key
               </button>
             </div>
           </div>

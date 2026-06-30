@@ -348,7 +348,10 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
         const rawSrc = mdMatch[3]
         const src = normalizeLocalSrc(rawSrc)
 
-        if (isExplicitImg || isImageSrc(src)) {
+        // 只有显式图片语法，或者非本地文件的图片源，才渲染为行内图片
+        const shouldRenderAsImg = isExplicitImg || (isImageSrc(src) && !src.startsWith('local-file://'))
+
+        if (shouldRenderAsImg) {
           parts.push(
             <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
           )
@@ -386,7 +389,10 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
       const rawUrl = match[2]
       const src = normalizeLocalSrc(rawUrl)
 
-      if (isImageSrc(src)) {
+      // 对于裸路径，只有不是本地文件路径的图片源才渲染为图片
+      const shouldRenderAsImg = isImageSrc(src) && !src.startsWith('local-file://')
+
+      if (shouldRenderAsImg) {
         parts.push(
           <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt="image" />
         )

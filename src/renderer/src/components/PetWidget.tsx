@@ -87,7 +87,7 @@ export function PetWidget(): React.JSX.Element {
       const parts: React.ReactNode[] = []
       let lastIndex = 0
       let match
-      
+
       while ((match = boldRegexStrict.exec(cleanLine)) !== null) {
         if (match.index > lastIndex) {
           parts.push(cleanLine.substring(lastIndex, match.index))
@@ -95,7 +95,7 @@ export function PetWidget(): React.JSX.Element {
         parts.push(<strong key={match.index} style={{ color: '#ffb638', fontWeight: 'bold' }}>{match[1]}</strong>)
         lastIndex = boldRegexStrict.lastIndex
       }
-      
+
       if (lastIndex < cleanLine.length) {
         parts.push(cleanLine.substring(lastIndex))
       }
@@ -224,7 +224,7 @@ export function PetWidget(): React.JSX.Element {
               }
             } catch { /* ignore */ }
           }
-          audioCtx.close().catch(() => {})
+          audioCtx.close().catch(() => { })
           URL.revokeObjectURL(url)
         }
 
@@ -243,7 +243,7 @@ export function PetWidget(): React.JSX.Element {
     localStorage.setItem('agentpet_llm_thinking_at', String(Date.now()))
 
     if (modelRef.current) {
-      modelRef.current.motion('TapBody').catch(() => {})
+      modelRef.current.motion('TapBody').catch(() => { })
     }
 
     await new Promise(resolve => setTimeout(resolve, 1200))
@@ -252,25 +252,25 @@ export function PetWidget(): React.JSX.Element {
       const savedLlmConfig = localStorage.getItem('agentpet_llm_config') || localStorage.getItem('agentself_llm_config')
       let llmConfig = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
       if (savedLlmConfig) {
-        try { llmConfig = JSON.parse(savedLlmConfig) } catch (e) {}
+        try { llmConfig = JSON.parse(savedLlmConfig) } catch (e) { }
       }
 
       const isOllama = llmConfig.provider === 'ollama'
       const hasKey = isOllama || !!llmConfig.apiKey
 
       if (!hasKey) {
-        const replies = [
-          '主人，今天天气真好，但我还没配大模型 Key 哦，快去设置里配置吧！',
-          '配置了模型 Key 后，我就可以和你无限畅聊啦！',
-          '哎呀，没有 Key 的我只是个精美的花瓶，快快给我配个 API Key 吧！'
-        ]
-        const reply = replies[Math.floor(Math.random() * replies.length)]
+        const reply = '主人，您还没有配置大模型 API Key 呢，我已经为您打开配置页面，请先配置一下密钥哦~'
         await new Promise(resolve => setTimeout(resolve, 1000))
         setIsLlmThinking(false)
 
         // 将兜底答复同步传回给快捷输入框显示
         if (window.api.sendPetReplyToInput) {
           window.api.sendPetReplyToInput(reply)
+        }
+
+        // 自动打开大窗口
+        if (window.api.openAgentWindow) {
+          window.api.openAgentWindow()
         }
 
         // 默认开启 TTS 朗读发声（除非用户明确关闭）
@@ -284,7 +284,7 @@ export function PetWidget(): React.JSX.Element {
       }
 
       let activeSessionId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default'
-      
+
       if (isNewSession) {
         activeSessionId = 'agent:session:' + Date.now()
         localStorage.setItem('agentself_active_session_id', activeSessionId)
@@ -298,7 +298,7 @@ export function PetWidget(): React.JSX.Element {
       const savedSessions = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
       let sessions: any[] = []
       if (savedSessions) {
-        try { sessions = JSON.parse(savedSessions) } catch (e) {}
+        try { sessions = JSON.parse(savedSessions) } catch (e) { }
       }
 
       let activeSession = sessions.find(s => s.id === activeSessionId)
@@ -318,7 +318,7 @@ export function PetWidget(): React.JSX.Element {
       const contextRounds = Number(contextRoundsStr)
       const currentMessages = activeSession.messages || []
       const filtered = currentMessages.filter((m: any) => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError)
-      
+
       const parseMessageToBlocks = (msgText: string) => {
         const imageRegex = /!\[([^\]]*)\]\((local-file:\/\/[^)]+)\)/g
         imageRegex.lastIndex = 0
@@ -335,9 +335,9 @@ export function PetWidget(): React.JSX.Element {
       }
 
       const chatMessages = filtered.slice(-contextRounds * 2).map((m: any) => {
-        return { 
-          role: m.sender === 'user' ? 'user' : 'assistant', 
-          content: parseMessageToBlocks(m.text || '') 
+        return {
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: parseMessageToBlocks(m.text || '')
         }
       })
 
@@ -356,7 +356,7 @@ export function PetWidget(): React.JSX.Element {
       let profileContent = ''
       try {
         profileContent = await window.api.getMemoryProfile()
-      } catch (err) {}
+      } catch (err) { }
 
       let relevantExperiences: any[] = []
       try {
@@ -364,10 +364,10 @@ export function PetWidget(): React.JSX.Element {
         if (recallRes) {
           relevantExperiences = Array.isArray(recallRes) ? recallRes : (recallRes.results || [])
         }
-      } catch (err) {}
+      } catch (err) { }
 
-      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` + 
-        (relevantExperiences.length > 0 
+      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` +
+        (relevantExperiences.length > 0
           ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}`).join('\n')}`
           : '')
 
@@ -405,7 +405,7 @@ ${memoryContext}
       }
 
       const updatedMessages = [...(activeSession.messages || []), userMsg, agentPlaceholderMsg]
-      
+
       let name = activeSession.name
       const isFirstUserMsg = (activeSession.messages || []).filter((m: any) => m.sender === 'user').length === 0
       if (isFirstUserMsg || activeSession.name === '(未命名)' || activeSession.name === '新会话') {
@@ -678,11 +678,22 @@ ${memoryContext}
 
     return () => {
       destroyed = true
+      if (modelRef.current) {
+        try {
+          modelRef.current.destroy({ children: true, texture: true, baseTexture: true })
+        } catch (e) {
+          console.error('[Live2D] 销毁模型异常:', e)
+        }
+        modelRef.current = null
+      }
       if (appRef.current) {
-        appRef.current.destroy(true, { children: true, texture: true, baseTexture: true })
+        try {
+          appRef.current.destroy(true, { children: true, texture: true, baseTexture: true })
+        } catch (e) {
+          console.error('[PixiJS] 销毁 app 异常:', e)
+        }
         appRef.current = null
       }
-      modelRef.current = null
     }
   }, [reloadKey])
 
@@ -705,7 +716,7 @@ ${memoryContext}
       const gl = (renderer as any).gl
       if (gl) {
         const pixels = new Uint8Array(4)
-        ;(renderer as any).framebuffer.bind()
+          ; (renderer as any).framebuffer.bind()
         gl.readPixels(canvasX, canvasY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
         const alpha = pixels[3]
         return alpha > 10 // 大于 10 则判定鼠标触及有颜色的身体部分
@@ -724,7 +735,7 @@ ${memoryContext}
     try {
       const localBounds = modelRef.current.getLocalBounds()
       const finalScale = modelRef.current.scale.x
-      
+
       const modelX = modelRef.current.x + localBounds.x * finalScale
       const modelY = modelRef.current.y + localBounds.y * finalScale
       const modelW = localBounds.width * finalScale
@@ -733,7 +744,7 @@ ${memoryContext}
       if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) {
         return true
       }
-    } catch (e) {}
+    } catch (e) { }
 
     return false
   }
@@ -748,11 +759,11 @@ ${memoryContext}
 
   const handleMouseEnter = (e: React.MouseEvent): void => {
     if (!modelRef.current) return
-    
+
     // 检查鼠标下方是不是交互式 HTML 元素（气泡或快捷聊天按钮）
     const element = document.elementFromPoint(e.clientX, e.clientY)
     const isInteractive = element && (element.closest('.pet-chat-icon-btn') || element.closest('.pet-toast-bubble'))
-    
+
     const isHovering = isInteractive ? true : checkHoveringModel(e.clientX, e.clientY)
     setIsHoveringBody(isHovering)
     if (isHovering) {
@@ -818,14 +829,14 @@ ${memoryContext}
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
       onContextMenu={handleContextMenu}
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        position: 'relative', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        justifyContent: 'flex-end', 
-        overflow: 'visible' 
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
+        overflow: 'visible'
       }}
     >
       <style>{`
@@ -957,9 +968,9 @@ ${memoryContext}
 
       {/* 快捷输入聊天悬浮按钮 */}
       {modelReady && (
-        <div 
-          className="pet-chat-icon-btn" 
-          onClick={handleOpenInput} 
+        <div
+          className="pet-chat-icon-btn"
+          onClick={handleOpenInput}
           title="快捷聊天"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

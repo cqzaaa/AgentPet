@@ -78,6 +78,7 @@ export function useAppStore() {
   // ── UI State ─────────────────────────────────────────────────
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [availableModels, setAvailableModels] = useState<string[]>([])
@@ -354,6 +355,15 @@ export function useAppStore() {
     }
   }, [llmConfig.provider, llmConfig.apiKey, llmConfig.baseUrl])
 
+  // 校验 API Key 初始化，如果没有有效的 key，就弹出需要配置 key
+  useEffect(() => {
+    const isOllama = llmConfig.provider === 'ollama'
+    const hasKey = isOllama || !!llmConfig.apiKey
+    if (!hasKey) {
+      setShowApiKeyModal(true)
+    }
+  }, [llmConfig.provider, llmConfig.apiKey])
+
   // Click outside to close model dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -386,7 +396,7 @@ export function useAppStore() {
       const path = await window.api.getSkillsPath()
       setSkillsPath(path)
       const customPath = await window.api.getStoragePath()
-      setActualStoragePath(customPath || path)
+      setActualStoragePath(customPath || path.replace(/[\\/]skills$/, ''))
       setStorageInputPath(customPath)
     } catch (e) { console.error(e) }
   }
@@ -1101,6 +1111,14 @@ export function useAppStore() {
 
   const handleSendChat = async (): Promise<void> => {
     if ((!inputValue.trim() && attachedFiles.length === 0) || isSending) return
+
+    const isOllama = llmConfig.provider === 'ollama'
+    const hasKey = isOllama || !!llmConfig.apiKey
+    if (!hasKey) {
+      setShowApiKeyModal(true)
+      return
+    }
+
     const text = inputValue.trim()
     const timeStr = formatDateTime()
     
@@ -1160,24 +1178,6 @@ export function useAppStore() {
     }
     await window.api.saveMessage({ ...userMsg, sessionId: activeSessionId })
     await window.api.saveMessage({ ...agentPlaceholderMsg, sessionId: activeSessionId })
-
-    const isOllama = llmConfig.provider === 'ollama'
-    const hasKey = isOllama || !!llmConfig.apiKey
-
-    if (!hasKey) {
-      setTimeout(() => {
-        const agentReplies = [
-          '您的指令我已经收到并加入核心记忆库中！',
-          '好的，我正在为您分析这部分数据，请稍等。',
-          '主人，今天的天气很适合写代码，但也要多注意休息哦！',
-          '正在为您检索网络资源...',
-          '这件事情听起来很有趣，我很乐意陪您一起探讨呢~'
-        ]
-        const randomReply = agentReplies[Math.floor(Math.random() * agentReplies.length)]
-        startTypingEffect(replyId, randomReply, activeSessionId)
-      }, 1000)
-      return
-    }
 
     let typingStarted = false
     try {
@@ -1916,6 +1916,7 @@ ${skillsContext}`
     // ui
     isCollapsed, setIsCollapsed,
     showApiKey, setShowApiKey,
+    showApiKeyModal, setShowApiKeyModal,
     showModelDropdown, setShowModelDropdown,
     isLoadingModels,
     availableModels,
