@@ -58,9 +58,9 @@ function parseInlineMarkdown(text: string): string {
   // 2. 内联代码 `code`
   html = html.replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
   // 3. 图片 ![alt](url)
-  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>⚠️ 已被删除 (\'+this.alt+\')</div>\'" />')
+  html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>⚠️ 已被删除 (\'+this.alt+\')</div>\'" />')
   // 4. 链接 [text](url)
-  html = html.replace(/(?<!!)\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
+  html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
   return html
 }
 
@@ -254,7 +254,7 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 
 // 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
-  const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/|[a-zA-Z]:[\\\/])[^\s\])<>"'`*，。！？；：（）]+)/g
+  const linkOrImgRegex = /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/)[^\s\])<>"'`*，。！？；：（）]+)|([a-zA-Z]:[\\\/](?:[^<>:"|?*\n\u4e00-\u9fa5，。！？；：、\[\]]*[^<>:"|?*\n\u4e00-\u9fa5，。！？；：、\[\]\s.,!?;'"`])?)/g
   let match
   let lastIndex = 0
 
@@ -289,7 +289,7 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
     processedText += text.substring(lastIndex, match.index)
 
     if (match[1]) {
-      const mdMatch = match[1].match(/^(!?)\[(.*?)\]\((.*?)\)$/)
+      const mdMatch = match[1].match(/^(!?)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)$/)
       if (mdMatch) {
         const isExplicitImg = mdMatch[1] === '!'
         const alt = mdMatch[2]
@@ -304,8 +304,8 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
       } else {
         processedText += match[1]
       }
-    } else if (match[2]) {
-      const rawUrl = match[2]
+    } else if (match[2] || match[3]) {
+      const rawUrl = match[2] || match[3]
       const src = normalizeLocalSrc(rawUrl)
       const shouldRenderAsImg = isImageSrc(src) && !src.startsWith('local-file://')
       if (shouldRenderAsImg) {
@@ -368,9 +368,9 @@ export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Elemen
 
   return (
     <>
-      <div 
-        className="markdown-body" 
-        dangerouslySetInnerHTML={{ __html: html }} 
+      <div
+        className="markdown-body"
+        dangerouslySetInnerHTML={{ __html: html }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
       />

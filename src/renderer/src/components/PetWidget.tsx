@@ -248,6 +248,9 @@ export function PetWidget(): React.JSX.Element {
 
     await new Promise(resolve => setTimeout(resolve, 1200))
 
+    let activeSessionId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default'
+    let replyId = Date.now() + 1
+
     try {
       const savedLlmConfig = localStorage.getItem('agentpet_llm_config') || localStorage.getItem('agentself_llm_config')
       let llmConfig = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
@@ -282,8 +285,6 @@ export function PetWidget(): React.JSX.Element {
         }
         return
       }
-
-      let activeSessionId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default'
 
       if (isNewSession) {
         activeSessionId = 'agent:session:' + Date.now()
@@ -394,7 +395,6 @@ ${memoryContext}
         text: displayFormatText,
         time: timeStr
       }
-      const replyId = Date.now() + 1
       const agentPlaceholderMsg = {
         id: replyId,
         sender: 'agent',
@@ -490,9 +490,40 @@ ${memoryContext}
 
     } catch (e: any) {
       console.error('[PetWidget] 对话生成失败:', e)
-      const errMsg = `⚠️ 哎呀，出错了（${e.message || e}）。请检查你的模型 API Key 是否正确配置。`
+      const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
+      const errMsg = isAbort
+        ? '⚠️ 对话生成已被中断。'
+        : `⚠️ 哎呀，出错了（${e.message || e}）。请检查你的模型 API Key 是否正确配置。`
       if (window.api.sendPetReplyToInput) {
         window.api.sendPetReplyToInput(errMsg)
+      }
+      // 同步报错状态到本地状态和数据库，去除假死的 loading 状态
+      try {
+        const savedSessions = localStorage.getItem('agentpet_sessions')
+        if (savedSessions) {
+          const sessions = JSON.parse(savedSessions)
+          const updatedSessions = sessions.map((s: any) => {
+            if (s.id === activeSessionId) {
+              return {
+                ...s,
+                messages: (s.messages || []).map((m: any) => m.id === replyId ? { ...m, text: errMsg, isThinking: false, isError: !isAbort } : m)
+              }
+            }
+            return s
+          })
+          localStorage.setItem('agentpet_sessions', JSON.stringify(updatedSessions))
+        }
+        await window.api.saveMessage({
+          id: replyId,
+          sessionId: activeSessionId,
+          sender: 'agent',
+          text: errMsg,
+          time: formatDateTime(),
+          isThinking: false,
+          isError: !isAbort
+        })
+      } catch (err) {
+        console.error('保存错误状态失败', err)
       }
     } finally {
       setIsLlmThinking(false)

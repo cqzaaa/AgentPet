@@ -3100,8 +3100,28 @@ app.whenReady().then(() => {
           let displayError = errorText
           if (displayError.trim().toLowerCase().startsWith('<!doctype html') || displayError.toLowerCase().includes('<html')) {
             displayError = '服务端返回了 HTML 页面而非有效的 API 响应（通常是因为 Base URL 配置错误，例如填入了网页地址而非 API 接口地址）。请检查设置中的大模型 Base URL。'
-          } else if (displayError.length > 500) {
-            displayError = displayError.substring(0, 500) + '... (省略过多内容)'
+          } else {
+            // 尝试解析 JSON 错误以提取更有用的信息
+            try {
+              const errObj = JSON.parse(errorText)
+              if (errObj.error && errObj.error.message) {
+                displayError = errObj.error.message
+              }
+            } catch (e) {
+              // 忽略 JSON 解析错误，继续使用原始文本
+            }
+            if (displayError.length > 500) {
+              displayError = displayError.substring(0, 500) + '... (省略过多内容)'
+            }
+          }
+          
+          // 针对常见的 HTTP 错误状态提供人性化的中文翻译与排查建议
+          if (response.status >= 500) {
+            throw new Error(`[大模型服务端故障] 服务器遇到内部错误 (HTTP ${response.status})。可能是中转节点宕机或模型过载，请稍后重试。详情: ${displayError}`)
+          } else if (response.status === 401 || response.status === 403) {
+            throw new Error(`[鉴权失败] API Key 可能无效、未授权或已欠费 (HTTP ${response.status})。详情: ${displayError}`)
+          } else if (response.status === 429) {
+            throw new Error(`[请求限流] 您的请求过于频繁或额度已耗尽 (HTTP 429)。详情: ${displayError}`)
           }
           
           throw new Error(`HTTP ${response.status}: ${displayError}`)

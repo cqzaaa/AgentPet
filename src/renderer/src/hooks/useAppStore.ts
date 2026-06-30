@@ -1419,6 +1419,16 @@ ${skillsContext}
         }
         return s
       }))
+      // 同步报错状态到数据库，防止刷新后假死
+      window.api.saveMessage({
+        id: replyId,
+        sessionId: activeSessionId,
+        sender: 'agent',
+        text: errMsg,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isThinking: false,
+        isError: !isAbort
+      }).catch(console.error)
     } finally {
       if (!typingStarted) {
         setIsSending(false)
