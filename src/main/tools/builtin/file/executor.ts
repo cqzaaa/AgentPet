@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import { dirname, basename } from 'path'
+import { shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveLocalPath } from '../../utils/paths'
 
@@ -135,19 +136,14 @@ export class FileExecutor implements IToolExecutor {
 
       // 5. delete_file
       if (api === 'delete_file') {
-        let { file_path, recursive } = args
+        let { file_path } = args
         if (!file_path) return { content: '错误：缺少参数 file_path', success: false }
         file_path = resolveLocalPath(file_path)
         if (!fs.existsSync(file_path)) {
           return { content: `错误：文件或目录不存在: ${file_path}`, success: false }
         }
-        const stat = await fs.promises.stat(file_path)
-        if (stat.isDirectory()) {
-          await fs.promises.rm(file_path, { recursive: !!recursive, force: true })
-        } else {
-          await fs.promises.unlink(file_path)
-        }
-        return { content: `成功：已删除 ${file_path}`, success: true }
+        await shell.trashItem(file_path)
+        return { content: `成功：已将 ${file_path} 移入回收站`, success: true }
       }
 
       return { content: `未知的操作类型: ${api}`, success: false }

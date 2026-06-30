@@ -57,8 +57,10 @@ function parseInlineMarkdown(text: string): string {
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
   // 2. 内联代码 `code`
   html = html.replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
-  // 3. 链接 [text](url)
-  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="markdown-link">$1</a>')
+  // 3. 图片 ![alt](url)
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>⚠️ 已被删除 (\'+this.alt+\')</div>\'" />')
+  // 4. 链接 [text](url)
+  html = html.replace(/(?<!!)\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
   return html
 }
 
@@ -252,194 +254,136 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 
 // 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
-  const parts: React.ReactNode[] = []
-  // 匹配四种模式：
-  //   1. ![alt](url)  — 显式图片
-  //   2. [text](url)  — markdown 链接
-  //   3. https://... 或 local-file://... 或 file:///... — 裸 URL
-  //   4. C:\... 等裸露的 Windows 本地绝对路径
   const linkOrImgRegex = /(!?\[.*?\]\(.*?\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/|[a-zA-Z]:[\\\/])[^\s\])<>"'`*，。！？；：（）]+)/g
   let match
   let lastIndex = 0
 
   const normalizeLocalSrc = (url: string): string => {
     if (!url) return url
-    // 1. 将 file:/// 替换为 local-file:///
-    if (url.startsWith('file:///')) {
-      return url.replace('file:///', 'local-file:///')
-    }
-    // 2. 如果是 Windows 盘符绝对路径 (例如 C:\ 或 D:/)
-    if (/^[A-Za-z]:[/\\]/.test(url)) {
-      // 统一转换为 local-file:/// 协议，并将反斜杠替换为正斜杠
-      const cleanPath = url.replace(/\\/g, '/')
-      return `local-file:///${cleanPath}`
-    }
+    if (url.startsWith('file:///')) return url.replace('file:///', 'local-file:///')
+    if (/^[A-Za-z]:[/\\]/.test(url)) return `local-file:///${url.replace(/\\/g, '/')}`
     return url
   }
 
   const isImageSrc = (url: string) => {
     if (!url) return false
     const lowerUrl = url.toLowerCase()
-
-    // 1. base64图片数据
-    if (lowerUrl.startsWith('data:image/')) {
-      return true
-    }
-
-    // 2. 获取去掉参数和锚点后的干净路径
+    if (lowerUrl.startsWith('data:image/')) return true
     const cleanUrl = lowerUrl.split('?')[0].split('#')[0]
-
-    // 3. 检查常见图片后缀
-    const isCommonImageExt =
-      cleanUrl.endsWith('.png') ||
-      cleanUrl.endsWith('.jpg') ||
-      cleanUrl.endsWith('.jpeg') ||
-      cleanUrl.endsWith('.gif') ||
-      cleanUrl.endsWith('.webp') ||
-      cleanUrl.endsWith('.bmp') ||
-      cleanUrl.endsWith('.svg') ||
-      cleanUrl.endsWith('.jfif') ||
-      cleanUrl.endsWith('.tiff')
-
-    if (isCommonImageExt) {
-      return true
-    }
-
-    // 4. 特殊本地图片协议处理：如果是以 local-file:// 或 wechat-file:// 开头
-    //    采用白名单模式：只有确认是图片后缀才渲染为图片，避免非图片文件被误判后触发 onError 显示"已被删除"
+    const isCommonImageExt = cleanUrl.endsWith('.png') || cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.gif') || cleanUrl.endsWith('.webp') || cleanUrl.endsWith('.bmp') || cleanUrl.endsWith('.svg') || cleanUrl.endsWith('.jfif') || cleanUrl.endsWith('.tiff')
+    if (isCommonImageExt) return true
     if (lowerUrl.startsWith('local-file://') || lowerUrl.startsWith('wechat-file://')) {
-      if (isCommonImageExt) {
-        return true
-      }
-      // 微信图片经常没有后缀（如 dat 文件已解码后的临时路径），对无后缀或未知后缀的 wechat-file:// 仍兜底当图片
+      if (isCommonImageExt) return true
       if (lowerUrl.startsWith('wechat-file://')) {
         const lastSegment = cleanUrl.split('/').pop() || ''
         const hasKnownExt = lastSegment.includes('.') && lastSegment.split('.').pop()!.length <= 5
-        if (!hasKnownExt) {
-          return true
-        }
+        if (!hasKnownExt) return true
       }
     }
-
-    // 5. 针对特殊远程图床或链接特征的匹配 (例如蚂蚁金服 afts 图床等)
-    if (
-      lowerUrl.includes('alipayobjects.com') ||
-      lowerUrl.includes('/afts/img/') ||
-      (lowerUrl.includes('original') && (lowerUrl.includes('img') || lowerUrl.includes('image') || lowerUrl.includes('chart')))
-    ) {
-      return true
-    }
-
+    if (lowerUrl.includes('alipayobjects.com') || lowerUrl.includes('/afts/img/') || (lowerUrl.includes('original') && (lowerUrl.includes('img') || lowerUrl.includes('image') || lowerUrl.includes('chart')))) return true
     return false
   }
 
+  let processedText = ''
   while ((match = linkOrImgRegex.exec(text)) !== null) {
-    const textBefore = text.substring(lastIndex, match.index)
-    if (textBefore.trim()) {
-      parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textBefore} />)
-    }
+    processedText += text.substring(lastIndex, match.index)
 
     if (match[1]) {
-      // 分支1：匹配到 markdown 格式 ![alt](url) 或 [text](url)
       const mdMatch = match[1].match(/^(!?)\[(.*?)\]\((.*?)\)$/)
       if (mdMatch) {
         const isExplicitImg = mdMatch[1] === '!'
         const alt = mdMatch[2]
         const rawSrc = mdMatch[3]
         const src = normalizeLocalSrc(rawSrc)
-
-        // 只有显式图片语法，或者非本地文件的图片源，才渲染为行内图片
         const shouldRenderAsImg = isExplicitImg || (isImageSrc(src) && !src.startsWith('local-file://'))
-
         if (shouldRenderAsImg) {
-          parts.push(
-            <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt={alt} />
-          )
+          processedText += `![${alt}](${src})`
         } else {
-          const isLocal = src.startsWith('local-file://') || src.startsWith('wechat-file://')
-          const handleLocalClick = async (e: React.MouseEvent) => {
-            if (isLocal) {
-              e.preventDefault()
-              if (window.api && typeof window.api.openLocalFile === 'function') {
-                const res = await window.api.openLocalFile(src)
-                if (res && !res.success) {
-                  alert(res.error || '无法打开此本地文件')
-                }
-              } else {
-                alert('当前环境不支持直接打开本地文件')
-              }
-            }
-          }
-          parts.push(
-            <a
-              key={`link-${keyIdxStart.val++}`}
-              href={src}
-              target={isLocal ? undefined : "_blank"}
-              rel="noreferrer"
-              className="markdown-link"
-              onClick={handleLocalClick}
-            >
-              {alt}
-            </a>
-          )
+          processedText += `[${alt}](${src})`
         }
+      } else {
+        processedText += match[1]
       }
     } else if (match[2]) {
-      // 分支2：匹配到裸 URL
       const rawUrl = match[2]
       const src = normalizeLocalSrc(rawUrl)
-
-      // 对于裸路径，只有不是本地文件路径的图片源才渲染为图片
       const shouldRenderAsImg = isImageSrc(src) && !src.startsWith('local-file://')
-
       if (shouldRenderAsImg) {
-        parts.push(
-          <ChatImage key={`img-${keyIdxStart.val++}`} src={src} alt="image" />
-        )
+        processedText += `![image](${src})`
       } else {
-        const isLocal = src.startsWith('local-file://') || src.startsWith('wechat-file://')
-        const handleLocalClick = async (e: React.MouseEvent) => {
-          if (isLocal) {
-            e.preventDefault()
-            if (window.api && typeof window.api.openLocalFile === 'function') {
-              const res = await window.api.openLocalFile(src)
-              if (res && !res.success) {
-                alert(res.error || '无法打开此本地文件')
-              }
-            } else {
-              alert('当前环境不支持直接打开本地文件')
-            }
-          }
-        }
-        parts.push(
-          <a
-            key={`link-${keyIdxStart.val++}`}
-            href={src}
-            target={isLocal ? undefined : "_blank"}
-            rel="noreferrer"
-            className="markdown-link"
-            onClick={handleLocalClick}
-          >
-            {rawUrl}
-          </a>
-        )
+        processedText += `[${rawUrl}](${src})`
       }
     }
 
     lastIndex = linkOrImgRegex.lastIndex
   }
 
-  const textAfter = text.substring(lastIndex)
-  if (textAfter.trim()) {
-    parts.push(<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={textAfter} />)
-  }
+  processedText += text.substring(lastIndex)
 
-  return parts
+  if (processedText.trim()) {
+    return [<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={processedText} />]
+  }
+  return []
 }
 
 export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Element {
   const html = React.useMemo(() => parseMarkdownToHtml(rawText), [rawText])
-  return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+
+  const handleClick = (e: React.MouseEvent) => {
+    const a = (e.target as HTMLElement).closest('a.local-link')
+    if (a) {
+      const href = a.getAttribute('href')
+      if (href && (href.startsWith('local-file://') || href.startsWith('wechat-file://'))) {
+        e.preventDefault()
+        if (window.api && typeof window.api.openLocalFile === 'function') {
+          window.api.openLocalFile(href).then((res: any) => {
+            if (res && !res.success) alert(res.error || '无法打开此本地文件')
+          })
+        } else {
+          alert('当前环境不支持直接打开本地文件')
+        }
+      }
+      return
+    }
+
+    const img = (e.target as HTMLElement).closest('img.chat-inline-image')
+    if (img) {
+      const src = img.getAttribute('src')
+      if (src) setPreviewSrc(src)
+    }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const img = (e.target as HTMLElement).closest('img.chat-inline-image')
+    if (img) {
+      const src = img.getAttribute('src')
+      if (src && window.api && typeof window.api.showImageContextMenu === 'function') {
+        e.preventDefault()
+        e.stopPropagation()
+        window.api.showImageContextMenu(src)
+      }
+    }
+  }
+
+  return (
+    <>
+      <div 
+        className="markdown-body" 
+        dangerouslySetInnerHTML={{ __html: html }} 
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
+      />
+      {previewSrc && (
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          onClick={() => setPreviewSrc(null)}
+        >
+          <img src={previewSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+        </div>
+      )}
+    </>
+  )
 }
 
 export function renderAdvancedMessage(text: string): React.ReactNode {

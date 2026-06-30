@@ -6,7 +6,7 @@ import { join } from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { getActiveStorageDir } from '../../utils/paths'
+import { getActiveStorageDir, getGeneratedFilesDir } from '../../utils/paths'
 import { permissionManager } from '../../security/permission-manager'
 
 const execAsync = promisify(exec)
@@ -222,6 +222,55 @@ if (-not $task.Wait(15000)) {
         return { content: `未知的操作类型: ${action_type}`, success: false }
       }
 
+      // 4. extend_task_loop (实际逻辑在 callLlmInternal 中拦截处理)
+      if (api === 'extend_task_loop') {
+        return { content: '此工具由系统内部 LLM 循环拦截处理。', success: true }
+      }
+
+      // 5. trigger_memory_purify (实际逻辑在 callLlmInternal 中拦截处理)
+      if (api === 'trigger_memory_purify') {
+        return { content: '此工具由系统内部 LLM 循环拦截处理。', success: true }
+      }
+
+
+      // 7. append_memory_summary
+      if (api === 'append_memory_summary') {
+        const { content } = args
+        if (!content) {
+          return { content: '错误：缺少必要参数 content', success: false }
+        }
+        if (!context.sessionId) {
+          return { content: '错误：无法获取当前会话 ID (sessionId为空)', success: false }
+        }
+
+        const safeSessionId = context.sessionId.replace(/[<>:"/\\|?*]/g, '_')
+        const sessionMemoryDir = join(getActiveStorageDir(), 'chat', safeSessionId, 'memory')
+        
+        try {
+          if (!fs.existsSync(sessionMemoryDir)) {
+            await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
+          }
+
+          const now = new Date()
+          const year = now.getFullYear()
+          const month = String(now.getMonth() + 1).padStart(2, '0')
+          const day = String(now.getDate()).padStart(2, '0')
+          const fileName = `${year}-${month}-${day}.md`
+          const filePath = join(sessionMemoryDir, fileName)
+
+          await fs.promises.appendFile(filePath, content + '\n\n', 'utf-8')
+          return {
+            content: `成功：已将摘要追加写入今日记忆文件 ${fileName}。绝对物理路径: ${filePath}`,
+            success: true
+          }
+        } catch (err: any) {
+          return {
+            content: `追加记忆失败: ${err.message || err}`,
+            success: false
+          }
+        }
+      }
+
       return { content: `未知的操作类型: ${api}`, success: false }
     } catch (err: any) {
       return {
@@ -233,7 +282,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['get_system_status', 'get_location', 'manage_cron_task']
+    return ['get_system_status', 'get_location', 'manage_cron_task', 'extend_task_loop', 'trigger_memory_purify', 'append_memory_summary']
   }
 }
 

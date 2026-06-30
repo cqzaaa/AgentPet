@@ -2,8 +2,22 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
+import * as iconv from 'iconv-lite'
 
 const execAsync = promisify(exec)
+
+function decodeOutputBuffer(data: Buffer | string): string {
+  if (typeof data === 'string') return data
+  const utf8Str = data.toString('utf8')
+  if (process.platform === 'win32' && utf8Str.includes('\uFFFD')) {
+    try {
+      return iconv.decode(data, 'cp936')
+    } catch (e) {
+      return utf8Str
+    }
+  }
+  return utf8Str
+}
 
 export interface ShellSession {
   id: string
@@ -134,8 +148,24 @@ export class ShellManager {
       /^sh\s+-c\s+/i.test(cmd) ||
       /^cmd\s+\/c\s+/i.test(cmd)
 
+    const runExec = async (cmdStr: string, execOptions: any) => {
+      try {
+        const result: any = await execAsync(cmdStr, { ...execOptions, encoding: 'buffer' })
+        return {
+          stdout: decodeOutputBuffer(result.stdout),
+          stderr: decodeOutputBuffer(result.stderr)
+        }
+      } catch (err: any) {
+        if (err.stdout !== undefined && err.stderr !== undefined) {
+          err.stdout = decodeOutputBuffer(err.stdout)
+          err.stderr = decodeOutputBuffer(err.stderr)
+        }
+        throw err
+      }
+    }
+
     if (isAlreadyWrapped) {
-      return execAsync(cmd, options)
+      return runExec(cmd, options)
     }
 
     const commandType = this.detectCommandType(cmd)
@@ -145,25 +175,25 @@ export class ShellManager {
         const psCmd = process.platform === 'win32'
           ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${cmd}`
           : cmd
-        return execAsync(psCmd, {
+        return runExec(psCmd, {
           ...options,
           shell: 'powershell.exe',
         })
       case 'bash':
         if (bashPath) {
-          return execAsync(cmd, {
+          return runExec(cmd, {
             ...options,
             shell: bashPath,
           })
         } else {
-          return execAsync(cmd, { ...options, shell: 'sh' })
+          return runExec(cmd, { ...options, shell: 'sh' })
         }
       case 'cmd':
       default:
         const cmdCmd = process.platform === 'win32'
           ? `chcp 65001 >nul && ${cmd}`
           : cmd
-        return execAsync(cmdCmd, { ...options, shell: 'cmd.exe' })
+        return runExec(cmdCmd, { ...options, shell: 'cmd.exe' })
     }
   }
 
@@ -201,11 +231,11 @@ export class ShellManager {
     }
 
     proc.stdout.on('data', (data: Buffer) => {
-      session.output += data.toString()
+      session.output += decodeOutputBuffer(data)
     })
 
     proc.stderr.on('data', (data: Buffer) => {
-      session.output += data.toString()
+      session.output += decodeOutputBuffer(data)
     })
 
     proc.on('close', (code: number) => {

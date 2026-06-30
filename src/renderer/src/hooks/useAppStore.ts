@@ -215,12 +215,31 @@ export function useAppStore() {
   }
 
   // ── Cron Tasks ───────────────────────────────────────────────
+  const BUILTIN_MEMORY_TASK: CronTask = {
+    id: 'builtin-memory-purify',
+    name: '系统画像提纯与经验沉淀',
+    interval: 1800,
+    isActive: true,
+    action: '自动收集未处理的对话摘要，合并更新全局人物画像，并提取避坑经验写入长期记忆库。',
+    triggerCount: 0,
+    lastTriggered: '从未执行',
+    logs: []
+  }
+
   const [cronTasks, setCronTasks] = useState<CronTask[]>(() => {
     const saved = localStorage.getItem('agentself_cron_tasks') || localStorage.getItem('agentpet_cron_tasks')
     if (saved) {
-      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+      try {
+        const parsed = JSON.parse(saved)
+        // 确保内置的"系统画像提纯与经验沉淀"任务始终存在（防止被误删或迁移丢失）
+        const hasBuiltin = parsed.some((t: any) => t.name === '系统画像提纯与经验沉淀')
+        if (!hasBuiltin) {
+          return [BUILTIN_MEMORY_TASK, ...parsed]
+        }
+        return parsed
+      } catch (e) { console.error(e) }
     }
-    return [] // 默认无预设任务，由用户自行添加
+    return [BUILTIN_MEMORY_TASK]
   })
 
 
@@ -564,17 +583,22 @@ export function useAppStore() {
           const llmThinkingAt = localStorage.getItem('agentpet_llm_thinking_at')
           const isLlmActive = llmThinkingAt && (Date.now() - Number(llmThinkingAt) < 30000)
 
+          let cleanedMessagesToSave: { msg: any, sessionId: string }[] = []
           const cleaned = localSess.map((s: any) => ({
             ...s,
-            messages: (s.messages || []).map((m: any) =>
-              m.isThinking
-                ? (isLlmActive
-                    ? m  // LLM 正在工作，保留 isThinking 状态
-                    : { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' })
-                : m
-            )
+            messages: (s.messages || []).map((m: any) => {
+              if (m.isThinking && !isLlmActive) {
+                const cleanedMsg = { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
+                cleanedMessagesToSave.push({ msg: cleanedMsg, sessionId: s.id })
+                return cleanedMsg
+              }
+              return m
+            })
           }))
           setSessions(cleaned)
+          cleanedMessagesToSave.forEach(item => {
+            window.api.saveMessage({ ...item.msg, sessionId: item.sessionId }).catch(console.error)
+          })
         } else {
           setSessions(localSess)
         }
@@ -1160,8 +1184,17 @@ export function useAppStore() {
           const displayTitle = text || (attachedFiles.length > 0 ? attachedFiles[0].name : '新会话')
           name = displayTitle.length > 15 ? displayTitle.substring(0, 15) + '...' : displayTitle
         }
+        // 先清理上一次可能残留的 isThinking 状态（异常退出或工具调用失败时可能遗留）
+        const cleanedMessages = s.messages.map(m => {
+          if (m.isThinking) {
+            const cleanedMsg = { ...m, isThinking: false, text: m.text || '⚠️ 对话生成被中断。' }
+            window.api.saveMessage({ ...cleanedMsg, sessionId: activeSessionId }).catch(console.error)
+            return cleanedMsg
+          }
+          return m
+        })
         // 同步塞入用户消息和机器人的空白占位消息
-        return { ...s, name, messages: [...s.messages, userMsg, agentPlaceholderMsg] }
+        return { ...s, name, messages: [...cleanedMessages, userMsg, agentPlaceholderMsg] }
       }
       return s
     })
@@ -1335,6 +1368,13 @@ ${skillsContext}
         }
         return s
       }))
+
+      // 同步保存到本地 SQLite 数据库中，防止流式回答或工具调用触发的 refreshSessions 覆写抹除状态
+      await window.api.saveMessage({
+        ...userMsg,
+        promptInfo,
+        sessionId: activeSessionId
+      })
 
       // 调用大模型接口，传入 workspacePath 参数，同时把 sessionId 和 messageId 传进去
       const response = await window.api.callLLM(
@@ -1626,6 +1666,13 @@ ${chatLogStr}
       await window.api.abortLlm()
       setIsSending(false)
       // 在中断时，立刻将当前处于正在思考（loading）的消息的状态更新为“已终止任务”并隐藏 loading 动画
+      const currentActiveSess = sessions.find(s => s.id === activeSessionId)
+      if (currentActiveSess) {
+        currentActiveSess.messages.filter(m => m.isThinking).forEach(m => {
+          const updatedMsg = { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false }
+          window.api.saveMessage({ ...updatedMsg, sessionId: activeSessionId }).catch(console.error)
+        })
+      }
       setSessions(prev => prev.map(s => {
         if (s.id === activeSessionId) {
           return {

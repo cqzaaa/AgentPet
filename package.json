@@ -29,6 +29,7 @@
     "docx-preview": "^0.3.7",
     "electron-updater": "^6.3.9",
     "exceljs": "^4.4.0",
+    "iconv-lite": "^0.7.2",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "node-edge-tts": "^1.2.10",

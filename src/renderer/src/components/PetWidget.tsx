@@ -404,7 +404,13 @@ ${memoryContext}
         time: timeStr
       }
 
-      const updatedMessages = [...(activeSession.messages || []), userMsg, agentPlaceholderMsg]
+      // 先清理上一次可能残留的 isThinking 状态（异常退出或工具调用失败时可能遗留）
+      const cleanedMessages = (activeSession.messages || []).map(m =>
+        m.isThinking
+          ? { ...m, isThinking: false, text: m.text || '⚠️ 对话生成被中断。' }
+          : m
+      )
+      const updatedMessages = [...cleanedMessages, userMsg, agentPlaceholderMsg]
 
       let name = activeSession.name
       const isFirstUserMsg = (activeSession.messages || []).filter((m: any) => m.sender === 'user').length === 0

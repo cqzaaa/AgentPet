@@ -76,10 +76,25 @@ export const systemManifest: ToolManifest = {
     },
     {
       name: 'trigger_memory_purify',
-      description: '长任务或重要探索结束后，调用此工具主动触发后台的经验沉淀 Pipeline，将刚才学到的知识转化为长期记忆。',
+      description: '主动触发后台的记忆整理与经验沉淀 Pipeline。适用场景：长任务或重要探索结束后，将学到的知识归档整理为长期记忆。调用后系统会自动收集所有未处理的对话摘要，合并更新全局人物画像，并提取避坑经验写入长期记忆库。',
       parameters: {
         type: 'object',
         properties: {}
+      }
+    },
+
+    {
+      name: 'append_memory_summary',
+      description: '当主人要求总结当前对话或保存重要记忆时调用。将总结后的 Markdown 内容追加写入当天的记忆文件，归档沉淀。',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: {
+            type: 'string',
+            description: '总结后的 Markdown 格式内容'
+          }
+        },
+        required: ['content']
       }
     }
   ]

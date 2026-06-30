@@ -499,18 +499,47 @@ export async function runPurifyMemoryPipeline() {
     let allSummariesCombined = ''
     const processedFiles: string[] = []
     
-    // 搜集所有会话下的 memory 文件夹内的 md 摘要
+    // 搜集所有会话下的 memory 文件夹内的 md 摘要，以及会话主目录下的关键字 md 文件
     for (const sess of sessions) {
       const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
+      
+      // 1. 扫描会话 memory 文件夹（全部 md 文件）
       const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
       if (fs.existsSync(sessionMemoryDir)) {
         const files = await fs.promises.readdir(sessionMemoryDir)
         const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
         for (const file of mdFiles) {
           const filePath = join(sessionMemoryDir, file)
-          const content = await fs.promises.readFile(filePath, 'utf-8')
-          allSummariesCombined += `\n### 会话: ${sess.name} (日期: ${file.replace(/\.md$/i, '')})\n${content}\n`
-          processedFiles.push(filePath)
+          try {
+            const stat = await fs.promises.stat(filePath)
+            if (stat.isFile()) {
+              const content = await fs.promises.readFile(filePath, 'utf-8')
+              allSummariesCombined += `\n### 会话: ${sess.name} (日期: ${file.replace(/\.md$/i, '')})\n${content}\n`
+              processedFiles.push(filePath)
+            }
+          } catch (e) {
+            console.error(`读取 memory 目录文件失败: ${filePath}`, e)
+          }
+        }
+      }
+
+      // 2. 扫描会话主目录本身（全部 md 文件，不包括子目录）
+      const sessionRootDir = join(chatDir, safeSessionId)
+      if (fs.existsSync(sessionRootDir)) {
+        const files = await fs.promises.readdir(sessionRootDir)
+        const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
+        for (const file of mdFiles) {
+          const filePath = join(sessionRootDir, file)
+          try {
+            const stat = await fs.promises.stat(filePath)
+            if (stat.isFile()) {
+              const content = await fs.promises.readFile(filePath, 'utf-8')
+              allSummariesCombined += `\n### 会话: ${sess.name} (根文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
+              processedFiles.push(filePath)
+            }
+          } catch (e) {
+            console.error(`读取会话根目录文件失败: ${filePath}`, e)
+          }
         }
       }
     }

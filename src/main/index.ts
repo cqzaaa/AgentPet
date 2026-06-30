@@ -2087,6 +2087,7 @@ app.whenReady().then(() => {
           is_error INTEGER DEFAULT 0,
           user_id TEXT DEFAULT 'system',
           is_summarized INTEGER DEFAULT 0,
+          prompt_info TEXT,
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS persona_memories (
@@ -2160,6 +2161,17 @@ app.whenReady().then(() => {
           console.log("成功升级 SQLite messages 表结构，加入 is_summarized 列")
         } catch (alterErr) {
           console.error("升级 messages 表结构添加 is_summarized 失败", alterErr)
+        }
+      }
+      // 动态升级：为老数据库添加 prompt_info 列（用于提示词及模型配置查看）
+      try {
+        await db.get("SELECT prompt_info FROM messages LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE messages ADD COLUMN prompt_info TEXT")
+          console.log("成功升级 SQLite messages 表结构，加入 prompt_info 列")
+        } catch (alterErr) {
+          console.error("升级 messages 表结构添加 prompt_info 失败", alterErr)
         }
       }
       // 动态升级：为 persona_memories 添加 category, keywords, embedding 字段
@@ -2291,6 +2303,10 @@ app.whenReady().then(() => {
               fileInfos = arr.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest })
             } catch (e) { console.error(e) }
           }
+          let promptInfo = undefined
+          if (m.prompt_info) {
+            try { promptInfo = JSON.parse(m.prompt_info) } catch (e) { console.error(e) }
+          }
 
           // 还原 id。如果是纯数字，转回 number
           let restoredId: string | number = m.id
@@ -2312,7 +2328,8 @@ app.whenReady().then(() => {
             fileInfos,
             isError: m.is_error === 1,
             userId: m.user_id || 'system',
-            isSummarized: m.is_summarized === 1
+            isSummarized: m.is_summarized === 1,
+            promptInfo
           }
         })
 
@@ -2406,10 +2423,10 @@ app.whenReady().then(() => {
       
       try {
         if (fs.existsSync(path1)) {
-          await fs.promises.rm(path1, { recursive: true, force: true })
+          await shell.trashItem(path1)
         }
         if (safe2 !== safe1 && fs.existsSync(path2)) {
-          await fs.promises.rm(path2, { recursive: true, force: true })
+          await shell.trashItem(path2)
         }
       } catch (err) {
         console.error(`删除会话附件目录失败 (${sessionId}):`, err)
@@ -2440,12 +2457,24 @@ app.whenReady().then(() => {
       const isError = m.isError ? 1 : 0
       const userId = m.userId || 'system'
       const isSummarized = m.isSummarized ? 1 : 0
+      const promptInfo = m.promptInfo ? JSON.stringify(m.promptInfo) : null
 
-      await database.run(`
-        INSERT OR REPLACE INTO messages
-        (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized)
+      const existing = await database.get('SELECT id FROM messages WHERE id = ?', msgId)
+      if (existing) {
+        await database.run(`
+          UPDATE messages SET
+            session_id = ?, sender = ?, text = ?, time = ?, is_thinking = ?,
+            tool_steps = ?, file_info = ?, file_infos = ?, is_error = ?,
+            user_id = ?, is_summarized = ?, prompt_info = ?
+          WHERE id = ?
+        `, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo, msgId)
+      } else {
+        await database.run(`
+          INSERT INTO messages
+          (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo)
+      }
       
       broadcastSessionsUpdated()
       return true
@@ -2539,7 +2568,7 @@ app.whenReady().then(() => {
       const skillsPath = getActiveSkillsDir()
       const filePath = join(skillsPath, name)
       if (fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath)
+        await shell.trashItem(filePath)
       }
     } catch (e) {
       console.error(e)
@@ -2826,7 +2855,7 @@ app.whenReady().then(() => {
     try {
       const genDir = getGeneratedFilesDir(sessionId)
       if (!filePath.startsWith(genDir)) return false
-      await fs.promises.unlink(filePath)
+      await shell.trashItem(filePath)
       return true
     } catch (e) {
       return false
@@ -3054,7 +3083,7 @@ app.whenReady().then(() => {
           method: 'POST',
           headers,
           body: JSON.stringify({ ...body, messages: chatHistory }),
-          signal: currentLlmAbortController?.signal
+          signal: thisController.signal
         })
 
         if (!response.ok) {
@@ -3193,7 +3222,7 @@ app.whenReady().then(() => {
                   method: 'POST',
                   headers,
                   body: JSON.stringify(fillBody),
-                  signal: currentLlmAbortController?.signal
+                  signal: thisController.signal
                 })
 
                 if (!fillResponse.ok) {
@@ -3273,7 +3302,7 @@ app.whenReady().then(() => {
 
             // 工具执行完成后再次检查是否已中止
             if (thisController.signal.aborted) {
-              currentLlmAbortController = null
+              if (currentLlmAbortController === thisController) currentLlmAbortController = null
               throw new Error('UserAborted')
             }
 
@@ -3304,7 +3333,7 @@ app.whenReady().then(() => {
           continue
         } else {
           sendTokenEvent()
-          currentLlmAbortController = null
+          if (currentLlmAbortController === thisController) currentLlmAbortController = null
           let finalResponse = message.content || ''
           finalResponse = finalResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
           if (!finalResponse.trim() && loopCount > 1) {
@@ -3324,17 +3353,17 @@ app.whenReady().then(() => {
         sendTokenEvent()
         // 只有当前请求的 controller 被中止才抛 UserAborted，避免被后续请求误清理
         if (thisController.signal.aborted) {
-          currentLlmAbortController = null
+          if (currentLlmAbortController === thisController) currentLlmAbortController = null
           throw new Error('UserAborted')
         }
         // 非中止错误，清理 controller 并抛出原始错误
-        currentLlmAbortController = null
+        if (currentLlmAbortController === thisController) currentLlmAbortController = null
         throw new Error(e.message || 'LLM 请求代理失败')
       }
     }
 
     sendTokenEvent()
-    currentLlmAbortController = null
+    if (currentLlmAbortController === thisController) currentLlmAbortController = null
 
     if (isLongTask) {
       console.log('[System] 长任务因达到最大轮数上限退出，自动触发后台经验沉淀...')
