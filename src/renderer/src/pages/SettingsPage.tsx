@@ -85,7 +85,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     key={prov}
                     className={`provider-btn ${llmConfig.provider === prov ? 'active' : ''}`}
                     onClick={() => {
-                      let defaults = { provider: prov, apiKey: '', baseUrl: '', model: '', temperature: llmConfig.temperature, maxTokens: llmConfig.maxTokens }
+                      let defaults = { provider: prov, apiKey: '', baseUrl: '', model: '', temperature: llmConfig.temperature, maxTokens: undefined }
                       if (prov === 'gemini') { defaults.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai' }
                       else if (prov === 'openai') { defaults.baseUrl = 'https://api.openai.com/v1' }
                       else if (prov === 'deepseek') { defaults.baseUrl = 'https://api.deepseek.com/v1' }

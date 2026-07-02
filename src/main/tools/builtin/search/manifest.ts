@@ -21,7 +21,7 @@ export const searchManifest: ToolManifest = {
           },
           scope: {
             type: 'string',
-            description: '搜索范围目录（可选）'
+            description: '搜索范围目录或文件的【绝对路径】（可选）。⚠️ 警告：这必须是本地路径（如 D:/xx），绝不能是 URL！如果需要搜索网页，请先使用 web_fetch 抓取落盘。'
           },
           glob: {
             type: 'string',

@@ -85,16 +85,20 @@ export const systemManifest: ToolManifest = {
 
     {
       name: 'append_memory_summary',
-      description: '当主人要求总结当前对话或保存重要记忆时调用。将总结后的 Markdown 内容追加写入当天的记忆文件，归档沉淀。',
+      description: '保存重要对话摘要或报错避坑总结。title 用作主题文件名归档，系统将自动去除其中非法字符并加入基础元数据。',
       parameters: {
         type: 'object',
         properties: {
+          title: {
+            type: 'string',
+            description: '记忆/摘要的主题或报错标题（如 Windows下Excel读取报错）'
+          },
           content: {
             type: 'string',
             description: '总结后的 Markdown 格式内容'
           }
         },
-        required: ['content']
+        required: ['title', 'content']
       }
     }
   ]

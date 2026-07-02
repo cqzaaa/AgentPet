@@ -16,6 +16,17 @@ export class FileExecutor implements IToolExecutor {
         let { file_path } = args
         if (!file_path) return { content: '错误：缺少必要参数 file_path', success: false }
         file_path = resolveLocalPath(file_path)
+
+        // 兼容记忆提纯重命名：如果原 md 文件不存在，检查是否存在带 '_已更新.md' 后缀的同名文件
+        if (!fs.existsSync(file_path)) {
+          if (file_path.toLowerCase().endsWith('.md') && !file_path.toLowerCase().endsWith('_已更新.md')) {
+            const updatedPath = file_path.replace(/\.md$/i, '_已更新.md')
+            if (fs.existsSync(updatedPath)) {
+              file_path = updatedPath
+            }
+          }
+        }
+
         if (!fs.existsSync(file_path)) return { content: `错误：文件不存在：${file_path}`, success: false }
 
         const ext = file_path.split('.').pop()?.toLowerCase() || ''
@@ -65,11 +76,40 @@ export class FileExecutor implements IToolExecutor {
           content = await fs.promises.readFile(file_path, 'utf-8')
         }
 
-        const MAX_READ_LEN = 30000
-        if (content.length > MAX_READ_LEN) {
-          content = content.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请通过命令拆分读取或使用其他方式。]`
+        let finalContent = content
+        const { start_line, end_line } = args
+
+        const DEFAULT_LIMIT_LINES = 800
+        const lines = content.split(/\r?\n/)
+        let s = start_line
+        let e = end_line
+
+        // 如果是 md 文件，且未指定行范围，默认全量读取；其它类型文件依然保持 800 行安全保护
+        if (s === undefined && e === undefined) {
+          s = 1
+          e = ext === 'md' ? lines.length : Math.min(lines.length, DEFAULT_LIMIT_LINES)
+        } else {
+          s = s ? Math.max(1, s) : 1
+          e = e ? Math.min(lines.length, e) : lines.length
         }
-        return { content, success: true }
+
+        if (s > lines.length) {
+          finalContent = `[提示] 起始行号 ${s} 超出文件总行数 ${lines.length}`
+        } else {
+          const sliced = lines.slice(s - 1, e)
+          finalContent = `[读取文件 ${basename(file_path)}，第 ${s} 行 到 第 ${e} 行，总行数: ${lines.length}]\n` +
+            sliced.map((line, idx) => `${s + idx}: ${line}`).join('\n')
+          
+          if (lines.length > e && end_line === undefined) {
+            finalContent += `\n\n... [系统提示：文件较长，已默认截取展示前 ${DEFAULT_LIMIT_LINES} 行。如果需要阅读剩余内容，请在下一次工具参数中指定 start_line（例如 ${e + 1}）和 end_line 范围进行精确的分页读取]`
+          }
+        }
+
+        const MAX_READ_LEN = 30000
+        if (finalContent.length > MAX_READ_LEN) {
+          finalContent = finalContent.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请在参数中使用 start_line 和 end_line 进行精确的分页读取。]`
+        }
+        return { content: finalContent, success: true }
       }
 
       // 2. write_file

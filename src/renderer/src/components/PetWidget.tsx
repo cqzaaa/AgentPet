@@ -369,7 +369,7 @@ export function PetWidget(): React.JSX.Element {
 
       const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` +
         (relevantExperiences.length > 0
-          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}`).join('\n')}`
+          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}${e.absolutePath ? `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${e.absolutePath}` : ''}`).join('\n')}`
           : '')
 
       const stylePrompt = currentAvatarStyle === 'cute'
@@ -380,7 +380,12 @@ export function PetWidget(): React.JSX.Element {
 ${stylePrompt}
 当主人问起你是谁或者是什么大模型时，你必须坚持自己是专属桌面助手 ${currentAvatarName}，绝对不要泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免让人设割裂。
 ${memoryContext}
-⚠️ 极重要约束：普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。由于这是桌面悬浮聊天，绝对不要返回包含代码、文件写入等本地系统工具的指令，以文本交流为主。`
+⚠️ 极重要约束：普通的打招呼（例如 hi, 你好）、日常闲聊、常识问答等，请直接以自然的文字进行回复，严禁滥用并调用任何系统工具。由于这是桌面悬浮聊天，绝对不要返回包含代码、文件写入等本地系统工具的指令，以文本交流为主。
+
+🔍 主动澄清与消歧准则（Disambiguation Rules）：
+1. 识别模糊与多义性：当用户的提问存在多种合理的解释，或者你无法确定具体指向（例如“记忆api”可能指代码文件，也可能指持久化数据，或外部项目）时，禁止擅自做假设或发散脑补。
+2. 停止并提问：此时你必须立刻暂停长篇大论的回答，转而向用户提出一个简明、有针对性的澄清问题。
+3. 提问模板：明确罗列出你怀疑的几种可能性，友好地请用户进行选择或补充。`
 
       chatMessages.unshift({ role: 'system', content: systemPrompt })
 

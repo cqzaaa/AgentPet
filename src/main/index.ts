@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
 import { join, basename, dirname } from 'path'
-import { registerMemoryAPIs, runPurifyMemoryPipeline } from './api/memory'
+import { registerMemoryAPIs, runPurifyMemoryPipeline, appendMemorySummaryInternal } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,6 +8,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
+import { EdgeTTS } from 'node-edge-tts'
 
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
@@ -199,8 +200,8 @@ function runImmediateGarbageCollection(): void {
         global.gc()
       }
       if (session.defaultSession) {
-        session.defaultSession.clearCache().catch(() => {})
-        session.defaultSession.clearCodeCaches({}).catch(() => {})
+        session.defaultSession.clearCache().catch(() => { })
+        session.defaultSession.clearCodeCaches({}).catch(() => { })
       }
       trimPhysicalMemory()
     } catch (err) {
@@ -241,7 +242,7 @@ async function startScreenshot(): Promise<void> {
   }
 
   const displays = screen.getAllDisplays()
-  
+
   try {
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
@@ -290,13 +291,13 @@ async function startScreenshot(): Promise<void> {
       })
 
       win.setMenu(null)
-      
+
       const screenshotUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
         ? `${process.env['ELECTRON_RENDERER_URL']}/#/screenshot?displayId=${display.id}&scaleFactor=${display.scaleFactor}&width=${display.bounds.width}&height=${display.bounds.height}`
         : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/screenshot?displayId=${display.id}&scaleFactor=${display.scaleFactor}&width=${display.bounds.width}&height=${display.bounds.height}`
 
       win.loadURL(screenshotUrl)
-      
+
       win.on('ready-to-show', () => {
         win.show()
         win.focus()
@@ -640,201 +641,201 @@ function createWindow(): void {
 
   // IPC 监听只注册一次，防止窗口重建时重复注册导致崩溃
   if (!ipcWindowHandlersRegistered) {
-  ipcWindowHandlersRegistered = true
+    ipcWindowHandlersRegistered = true
 
-  // 注册窗口拖动 IPC 监听
-  ipcMain.on('start-drag', () => {
-    // 拖拽开始，无需特殊处理
-  })
+    // 注册窗口拖动 IPC 监听
+    ipcMain.on('start-drag', () => {
+      // 拖拽开始，无需特殊处理
+    })
 
-  ipcMain.on('move-window', (event, dx: number, dy: number) => {
-    const targetWin = BrowserWindow.fromWebContents(event.sender)
-    if (targetWin) {
-      const [x, y] = targetWin.getPosition()
-      targetWin.setPosition(x + dx, y + dy)
-    }
-  })
+    ipcMain.on('move-window', (event, dx: number, dy: number) => {
+      const targetWin = BrowserWindow.fromWebContents(event.sender)
+      if (targetWin) {
+        const [x, y] = targetWin.getPosition()
+        targetWin.setPosition(x + dx, y + dy)
+      }
+    })
 
-  ipcMain.on('end-drag', () => {
-    // 拖拽结束，无需边缘贴合半隐藏逻辑
-  })
-  ipcMain.on('set-ignore-mouse-events', (_, ignore: boolean, options?: { forward: boolean }) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setIgnoreMouseEvents(ignore, options)
-    }
-  })
+    ipcMain.on('end-drag', () => {
+      // 拖拽结束，无需边缘贴合半隐藏逻辑
+    })
+    ipcMain.on('set-ignore-mouse-events', (_, ignore: boolean, options?: { forward: boolean }) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIgnoreMouseEvents(ignore, options)
+      }
+    })
 
-  ipcMain.on('set-window-size', (event, width: number, height: number, anchor?: 'bottom' | 'top') => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (win) {
-      const [oldW, oldH] = win.getSize()
-      const [oldX, oldY] = win.getPosition()
-      const newW = Math.round(width)
-      const newH = Math.round(height)
+    ipcMain.on('set-window-size', (event, width: number, height: number, anchor?: 'bottom' | 'top') => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win) {
+        const [oldW, oldH] = win.getSize()
+        const [oldX, oldY] = win.getPosition()
+        const newW = Math.round(width)
+        const newH = Math.round(height)
 
-      let newX = oldX
-      let newY = oldY
+        let newX = oldX
+        let newY = oldY
 
-      if (anchor === 'top') {
-        // 保持顶部中心点不变
-        newX = Math.round((oldX + oldW / 2) - newW / 2)
-        newY = oldY
+        if (anchor === 'top') {
+          // 保持顶部中心点不变
+          newX = Math.round((oldX + oldW / 2) - newW / 2)
+          newY = oldY
+        } else {
+          // 默认保持底部中心点不变 (适合桌宠)
+          newX = Math.round((oldX + oldW / 2) - newW / 2)
+          newY = Math.round((oldY + oldH) - newH)
+        }
+
+        win.setBounds({
+          x: newX,
+          y: newY,
+          width: newW,
+          height: newH
+        })
+      }
+    })
+
+    ipcMain.on('open-agent-window', () => {
+      createAgentWindow()
+    })
+
+    // 转发快捷聊天窗口发出的会话更新通知到 Agent 窗口
+    ipcMain.on('api:wechat-session-updated', (_, sessionId?: string) => {
+      if (agentWindow && !agentWindow.isDestroyed()) {
+        agentWindow.webContents.send('api:wechat-session-updated', sessionId)
+      }
+    })
+
+    ipcMain.on('hide-window', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.close()
+      }
+      if (inputWindow && !inputWindow.isDestroyed()) {
+        inputWindow.close()
+      }
+    })
+
+    ipcMain.on('open-input-window', () => {
+      createInputWindow()
+    })
+
+    ipcMain.on('close-input-window', () => {
+      if (inputWindow && !inputWindow.isDestroyed()) {
+        inputWindow.close()
+      }
+    })
+
+    ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean, imagePath?: string) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('chat-to-pet', text, isNewSession, imagePath)
+      }
+    })
+
+    // 截图相关 IPC 通信注册
+    ipcMain.on('api:start-screenshot', () => {
+      startScreenshot()
+    })
+
+    ipcMain.handle('api:get-screenshot-by-display-id', (_, displayId: string) => {
+      return screenshotMap.get(displayId) || ''
+    })
+
+    ipcMain.on('api:cancel-screenshot', () => {
+      closeScreenshotWindows()
+      // 取消截图时重新显示快捷输入窗口
+      if (inputWindow && !inputWindow.isDestroyed()) {
+        inputWindow.show()
+        inputWindow.focus()
+      }
+    })
+
+    ipcMain.on('api:complete-screenshot', async (_, croppedBase64: string, bounds: { x: number; y: number; width: number; height: number }) => {
+      closeScreenshotWindows()
+
+      let imagePath = ''
+      try {
+        const result = await saveBase64ImageInternal(croppedBase64)
+        if (result) {
+          imagePath = result.path
+        }
+      } catch (err) {
+        console.error('Failed to save screenshot image:', err)
+      }
+
+      if (!imagePath) return
+
+      // 计算快捷窗口的最佳显示坐标 (400x90 规格，贴合屏幕安全距离)
+      const inputWidth = 400
+      const inputHeight = 90
+      let targetX = bounds.x + (bounds.width - inputWidth) / 2
+      let targetY = bounds.y + bounds.height + 10
+
+      const activeDisplay = screen.getDisplayMatching(bounds)
+      const workArea = activeDisplay.workArea
+
+      if (targetX < workArea.x) {
+        targetX = workArea.x + 10
+      } else if (targetX + inputWidth > workArea.x + workArea.width) {
+        targetX = workArea.x + workArea.width - inputWidth - 10
+      }
+
+      if (targetY + inputHeight > workArea.y + workArea.height) {
+        // 空间不足以放在下方，则放在上方
+        targetY = bounds.y - inputHeight - 10
+      }
+      if (targetY < workArea.y) {
+        targetY = workArea.y + 10
+      }
+
+      const payload = {
+        path: imagePath,
+        base64: croppedBase64,
+        width: bounds.width,
+        height: bounds.height
+      }
+
+      if (inputWindow && !inputWindow.isDestroyed()) {
+        inputWindow.setBounds({
+          x: Math.round(targetX),
+          y: Math.round(targetY),
+          width: inputWidth,
+          height: inputHeight
+        })
+        inputWindow.show()
+        inputWindow.focus()
+        inputWindow.webContents.send('api:set-screenshot-image', payload)
       } else {
-        // 默认保持底部中心点不变 (适合桌宠)
-        newX = Math.round((oldX + oldW / 2) - newW / 2)
-        newY = Math.round((oldY + oldH) - newH)
+        createInputWindow(Math.round(targetX), Math.round(targetY), payload)
       }
+    })
 
-      win.setBounds({
-        x: newX,
-        y: newY,
-        width: newW,
-        height: newH
-      })
-    }
-  })
-
-  ipcMain.on('open-agent-window', () => {
-    createAgentWindow()
-  })
-
-  // 转发快捷聊天窗口发出的会话更新通知到 Agent 窗口
-  ipcMain.on('api:wechat-session-updated', (_, sessionId?: string) => {
-    if (agentWindow && !agentWindow.isDestroyed()) {
-      agentWindow.webContents.send('api:wechat-session-updated', sessionId)
-    }
-  })
-
-  ipcMain.on('hide-window', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.close()
-    }
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.close()
-    }
-  })
-
-  ipcMain.on('open-input-window', () => {
-    createInputWindow()
-  })
-
-  ipcMain.on('close-input-window', () => {
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.close()
-    }
-  })
-
-  ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean, imagePath?: string) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('chat-to-pet', text, isNewSession, imagePath)
-    }
-  })
-
-  // 截图相关 IPC 通信注册
-  ipcMain.on('api:start-screenshot', () => {
-    startScreenshot()
-  })
-
-  ipcMain.handle('api:get-screenshot-by-display-id', (_, displayId: string) => {
-    return screenshotMap.get(displayId) || ''
-  })
-
-  ipcMain.on('api:cancel-screenshot', () => {
-    closeScreenshotWindows()
-    // 取消截图时重新显示快捷输入窗口
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.show()
-      inputWindow.focus()
-    }
-  })
-
-  ipcMain.on('api:complete-screenshot', async (_, croppedBase64: string, bounds: { x: number; y: number; width: number; height: number }) => {
-    closeScreenshotWindows()
-
-    let imagePath = ''
-    try {
-      const result = await saveBase64ImageInternal(croppedBase64)
-      if (result) {
-        imagePath = result.path
+    // 转发桌宠生成的 LLM 回复到快捷输入框，并通知 Agent 窗口刷新会话
+    ipcMain.on('api:send-pet-reply-to-input', (_, responseText: string) => {
+      if (inputWindow && !inputWindow.isDestroyed()) {
+        inputWindow.webContents.send('pet-reply-response', responseText)
       }
-    } catch (err) {
-      console.error('Failed to save screenshot image:', err)
-    }
+      // 同步通知 Agent 窗口刷新会话（回复已写入数据库）
+      if (agentWindow && !agentWindow.isDestroyed()) {
+        agentWindow.webContents.send('api:wechat-session-updated')
+      }
+    })
 
-    if (!imagePath) return
+    // 从快捷输入框向完整对话窗口传递待发送文本的通知（数据在 localStorage 中）
+    ipcMain.on('api:send-pending-input', () => {
+      if (agentWindow && !agentWindow.isDestroyed()) {
+        agentWindow.webContents.send('pending-input')
+      } else {
+        // 窗口尚未创建，标记有待投递通知
+        pendingAgentInput = '__pending__'
+      }
+    })
 
-    // 计算快捷窗口的最佳显示坐标 (400x90 规格，贴合屏幕安全距离)
-    const inputWidth = 400
-    const inputHeight = 90
-    let targetX = bounds.x + (bounds.width - inputWidth) / 2
-    let targetY = bounds.y + bounds.height + 10
-
-    const activeDisplay = screen.getDisplayMatching(bounds)
-    const workArea = activeDisplay.workArea
-
-    if (targetX < workArea.x) {
-      targetX = workArea.x + 10
-    } else if (targetX + inputWidth > workArea.x + workArea.width) {
-      targetX = workArea.x + workArea.width - inputWidth - 10
-    }
-
-    if (targetY + inputHeight > workArea.y + workArea.height) {
-      // 空间不足以放在下方，则放在上方
-      targetY = bounds.y - inputHeight - 10
-    }
-    if (targetY < workArea.y) {
-      targetY = workArea.y + 10
-    }
-
-    const payload = {
-      path: imagePath,
-      base64: croppedBase64,
-      width: bounds.width,
-      height: bounds.height
-    }
-
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.setBounds({
-        x: Math.round(targetX),
-        y: Math.round(targetY),
-        width: inputWidth,
-        height: inputHeight
-      })
-      inputWindow.show()
-      inputWindow.focus()
-      inputWindow.webContents.send('api:set-screenshot-image', payload)
-    } else {
-      createInputWindow(Math.round(targetX), Math.round(targetY), payload)
-    }
-  })
-
-  // 转发桌宠生成的 LLM 回复到快捷输入框，并通知 Agent 窗口刷新会话
-  ipcMain.on('api:send-pet-reply-to-input', (_, responseText: string) => {
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.webContents.send('pet-reply-response', responseText)
-    }
-    // 同步通知 Agent 窗口刷新会话（回复已写入数据库）
-    if (agentWindow && !agentWindow.isDestroyed()) {
-      agentWindow.webContents.send('api:wechat-session-updated')
-    }
-  })
-
-  // 从快捷输入框向完整对话窗口传递待发送文本的通知（数据在 localStorage 中）
-  ipcMain.on('api:send-pending-input', () => {
-    if (agentWindow && !agentWindow.isDestroyed()) {
-      agentWindow.webContents.send('pending-input')
-    } else {
-      // 窗口尚未创建，标记有待投递通知
-      pendingAgentInput = '__pending__'
-    }
-  })
-
-  // Agent 窗口初始化时检查是否有待投递的通知
-  ipcMain.handle('api:get-pending-input', () => {
-    const hasPending = !!pendingAgentInput
-    pendingAgentInput = ''
-    return hasPending ? '__pending__' : ''
-  })
+    // Agent 窗口初始化时检查是否有待投递的通知
+    ipcMain.handle('api:get-pending-input', () => {
+      const hasPending = !!pendingAgentInput
+      pendingAgentInput = ''
+      return hasPending ? '__pending__' : ''
+    })
 
   } // end of ipcWindowHandlersRegistered guard
 }
@@ -1171,7 +1172,7 @@ app.whenReady().then(() => {
     const idleDiff = endCpu.totalIdle - lastCpuStats.totalIdle
     const tickDiff = endCpu.totalTick - lastCpuStats.totalTick
     lastCpuStats = endCpu
-    
+
     let cpuUsage = 0
     if (tickDiff > 0) {
       cpuUsage = Math.round((1 - idleDiff / tickDiff) * 100)
@@ -1288,11 +1289,11 @@ app.whenReady().then(() => {
       if (!fs.existsSync(sessionDir)) {
         fs.mkdirSync(sessionDir, { recursive: true })
       }
-      
+
       const safeFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')
       const uniqueFileName = `${Date.now()}_${safeFileName}`
       const targetPath = join(sessionDir, uniqueFileName)
-      
+
       const buffer = Buffer.from(arrayBuffer)
       fs.writeFileSync(targetPath, buffer)
       // 跟踪 xlsx 文件，用于 generate_file 时自动复制数据验证
@@ -1929,7 +1930,7 @@ app.whenReady().then(() => {
       customModelDir = dir
       customModelFile = configFile
       writeConfig({ customModelDir, customModelFile })
-      
+
       // 通知挂件刷新
       mainWindow?.webContents.send('model-updated')
       return { customModelDir, customModelFile }
@@ -1974,7 +1975,7 @@ app.whenReady().then(() => {
   // 动态获取大模型服务商的模型列表
   ipcMain.handle('api:get-models', async (_, config: { provider: string; apiKey: string; baseUrl: string }) => {
     const { provider, apiKey, baseUrl } = config
-    
+
     // 如果是 ollama，优先用原有的 api/tags 获取方式
     if (provider === 'ollama') {
       try {
@@ -2072,7 +2073,8 @@ app.whenReady().then(() => {
           name TEXT,
           time TEXT,
           pinned INTEGER DEFAULT 0,
-          user_id TEXT DEFAULT 'system'
+          user_id TEXT DEFAULT 'system',
+          context_summary TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS messages (
           id TEXT PRIMARY KEY,
@@ -2098,7 +2100,8 @@ app.whenReady().then(() => {
           created_at INTEGER,
           category TEXT DEFAULT 'profile',
           keywords TEXT,
-          embedding TEXT
+          embedding TEXT,
+          link TEXT
         );
         CREATE TABLE IF NOT EXISTS memory_entity_links (
           memory_id TEXT,
@@ -2174,6 +2177,17 @@ app.whenReady().then(() => {
           console.error("升级 messages 表结构添加 prompt_info 失败", alterErr)
         }
       }
+      // 动态升级：为老数据库 sessions 表添加 context_summary 列（用于上下文摘要回注）
+      try {
+        await db.get("SELECT context_summary FROM sessions LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE sessions ADD COLUMN context_summary TEXT DEFAULT ''")
+          console.log("成功升级 SQLite sessions 表结构，加入 context_summary 列")
+        } catch (alterErr) {
+          console.error("升级 sessions 表结构添加 context_summary 失败", alterErr)
+        }
+      }
       // 动态升级：为 persona_memories 添加 category, keywords, embedding 字段
       try {
         await db.get("SELECT category FROM persona_memories LIMIT 1")
@@ -2203,6 +2217,16 @@ app.whenReady().then(() => {
           console.log("成功升级 SQLite persona_memories 表结构，加入 embedding 列")
         } catch (alterErr) {
           console.error("升级 persona_memories 表结构添加 embedding 失败", alterErr)
+        }
+      }
+      try {
+        await db.get("SELECT link FROM persona_memories LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE persona_memories ADD COLUMN link TEXT")
+          console.log("成功升级 SQLite persona_memories 表结构，加入 link 列")
+        } catch (alterErr) {
+          console.error("升级 persona_memories 表结构添加 link 失败", alterErr)
         }
       }
     }
@@ -2339,6 +2363,7 @@ app.whenReady().then(() => {
           time: s.time,
           pinned: s.pinned === 1,
           userId: s.user_id || 'system',
+          contextSummary: s.context_summary || '',
           messages
         })
       }
@@ -2392,6 +2417,7 @@ app.whenReady().then(() => {
       for (const key of keys) {
         let dbKey = key
         if (key === 'userId') dbKey = 'user_id'
+        if (key === 'contextSummary') dbKey = 'context_summary'
         let val = updates[key]
         if (key === 'pinned') val = val ? 1 : 0
         sets.push(`${dbKey} = ?`)
@@ -2413,14 +2439,14 @@ app.whenReady().then(() => {
     try {
       const database = await getDB()
       await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
-      
+
       const chatDir = getActiveChatDir()
       const safe1 = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
       const safe2 = sessionId.replace(/[<>:"/\\|?*]/g, '_')
-      
+
       const path1 = join(chatDir, safe1)
       const path2 = join(chatDir, safe2)
-      
+
       try {
         if (fs.existsSync(path1)) {
           await shell.trashItem(path1)
@@ -2431,7 +2457,7 @@ app.whenReady().then(() => {
       } catch (err) {
         console.error(`删除会话附件目录失败 (${sessionId}):`, err)
       }
-      
+
       broadcastSessionsUpdated()
       return true
     } catch (e) {
@@ -2475,7 +2501,7 @@ app.whenReady().then(() => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo)
       }
-      
+
       broadcastSessionsUpdated()
       return true
     } catch (e) {
@@ -2549,7 +2575,7 @@ app.whenReady().then(() => {
       filters: [{ name: 'Zip Files', extensions: ['zip'] }],
       properties: ['openFile', 'multiSelections']
     })
-    
+
     if (result.canceled || result.filePaths.length === 0) {
       return await readSkillsFolder()
     }
@@ -2923,30 +2949,138 @@ app.whenReady().then(() => {
 
 
   // 5. 通用大模型内部核心请求处理器 (解决 CORS 跨域问题，支持 Tool Calling 循环)
+  async function handleLongTaskAutoMemory(
+    sessionId: string,
+    chatHistory: any[],
+    config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number }
+  ) {
+    try {
+      if (!sessionId) return
+      console.log('[Memory] 开始为长任务会话生成自动总结:', sessionId)
+
+      let chatLogs = ''
+      for (const msg of chatHistory) {
+        if (msg.role === 'system') continue
+        const contentStr = Array.isArray(msg.content)
+          ? msg.content.map((b: any) => b.text || '').join('')
+          : (msg.content || '')
+        chatLogs += `${msg.role === 'user' ? '用户' : '助手'}: ${contentStr}\n`
+      }
+
+      const summarySystemPrompt = `你是一个经验丰富的 AI 对话与开发任务总结助手。
+请你仔细阅读以下【一轮包含了用户提问、助手回答及本地系统工具调用的对话日志】，并为他们生成一段精炼、实用的 Markdown 摘要与知识沉淀。
+
+你必须输出以下两个部分：
+1. 【主题】：为本次长任务起一个清晰的主题名称（如：“Electron SQLite 数据库新增 link 字段升级”、“使用 ripgrep 实现多路混合记忆召回”等，禁止带日期，只要主题名，不超过 20 字）。
+2. 【总结内容】：详细梳理出：
+   - 核心任务与解决过程。
+   - 成功经验与关键代码。
+   - 纠错避坑（若有报错，为什么报错，怎么解决的）。
+3. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
+{
+  "title": "主题名",
+  "content": "### 💡 核心知识与经验沉淀\\n..."
+}
+请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 本身。`
+
+      const messages = [
+        { role: 'system', content: summarySystemPrompt },
+        { role: 'user', content: `【对话日志】\\n${chatLogs}\\n\\n请进行总结。` }
+      ]
+
+      let cleanBaseUrl = (config.baseUrl || '').trim().replace(/\/+$/, '')
+      if (cleanBaseUrl.toLowerCase().endsWith('/chat/completions')) {
+        cleanBaseUrl = cleanBaseUrl.slice(0, -'/chat/completions'.length)
+      }
+
+      let url = ''
+      const headers = { 'Content-Type': 'application/json' }
+      const body = {
+        model: config.model,
+        temperature: 0.3,
+        messages
+      }
+
+      if (config.provider === 'gemini') {
+        url = `${cleanBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'}/chat/completions`
+        headers['Authorization'] = `Bearer ${config.apiKey}`
+        body.model = config.model || 'gemini-1.5-flash'
+      } else if (config.provider === 'openai') {
+        url = `${cleanBaseUrl || 'https://api.openai.com/v1'}/chat/completions`
+        headers['Authorization'] = `Bearer ${config.apiKey}`
+        body.model = config.model || 'gpt-4o-mini'
+      } else if (config.provider === 'deepseek') {
+        url = `${cleanBaseUrl || 'https://api.deepseek.com/v1'}/chat/completions`
+        headers['Authorization'] = `Bearer ${config.apiKey}`
+        body.model = config.model || 'deepseek-chat'
+      } else if (config.provider === 'ollama') {
+        url = `${cleanBaseUrl || 'http://localhost:11434/v1'}/chat/completions`
+        body.model = config.model || 'llama3'
+      } else {
+        url = `${cleanBaseUrl}/chat/completions`
+        if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+      }
+
+      const response = await net.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        throw new Error(`总结接口返回异常: ${response.status}`)
+      }
+
+      const data = await response.json()
+      let rawText = data.choices?.[0]?.message?.content || ''
+      rawText = rawText.trim()
+      if (rawText.startsWith('```')) {
+        rawText = rawText.replace(/^```(json)?/, '').replace(/```$/, '').trim()
+      }
+
+      const result = JSON.parse(rawText)
+      if (result.title && result.content) {
+        await appendMemorySummaryInternal(sessionId, result.title, result.content)
+        console.log(`[Memory] 长任务自动沉淀成功: [${result.title}]`)
+      } else {
+        throw new Error('返回的 JSON 格式不包含 title 或 content')
+      }
+    } catch (err) {
+      console.error('[Memory] 长任务自动经验沉淀失败:', err)
+    }
+  }
+
   async function callLlmInternal(
-    config: { 
-      provider: string; 
-      apiKey: string; 
-      baseUrl: string; 
-      model: string; 
-      temperature: number; 
-      maxTokens?: number; 
-      sessionId?: string; 
-      messageId?: number 
-    }, 
-    messages: any[], 
+    config: {
+      provider: string;
+      apiKey: string;
+      baseUrl: string;
+      model: string;
+      temperature: number;
+      maxTokens?: number;
+      sessionId?: string;
+      messageId?: number
+    },
+    messages: any[],
     workspacePath?: string,
     event?: Electron.IpcMainInvokeEvent,
     onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string }) => void
 
   ): Promise<string> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, messageId } = config
-    // 清理上一次可能残留的 abort controller
-    if (currentLlmAbortController) {
-      try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
+    
+    let thisController: AbortController
+    // 只有在明确传入了 IPC 调用 event（来自前端真实用户的对话），且未标记为 isBackground 时，才控制全局的 abort 中断
+    if (event && !(config as any).isBackground) {
+      if (currentLlmAbortController) {
+        try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
+      }
+      currentLlmAbortController = new AbortController()
+      thisController = currentLlmAbortController
+    } else {
+      // 微信机器人、后台提炼管道等其他调用，使用隔离的 AbortController，互不相干
+      thisController = new AbortController()
     }
-    currentLlmAbortController = new AbortController()
-    const thisController = currentLlmAbortController
 
     let url = ''
     const headers: any = {
@@ -2998,6 +3132,46 @@ app.whenReady().then(() => {
     }
 
     let chatHistory = JSON.parse(JSON.stringify(messages)) // 深拷贝避免污染
+
+    if (sessionId) {
+      const chatDir = getActiveChatDir()
+      const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
+      const cacheDir = join(chatDir, safeSessionId, '.agentpet_cache')
+      let cacheContext = ''
+      
+      if (fs.existsSync(cacheDir)) {
+        try {
+          const cacheFiles = await fs.promises.readdir(cacheDir)
+          const mdCaches = cacheFiles.filter(f => f.toLowerCase().endsWith('.md'))
+          if (mdCaches.length > 0) {
+            cacheContext = `\n\n📂 【本地已缓存的离线网页/文档】\n当前会话下已为您抓取并缓存了以下本地网页文件：\n`
+            for (const file of mdCaches) {
+              const relPath = `.agentpet_cache/${file}`
+              cacheContext += `- 离线网页缓存: \`${relPath}\` (文件名: \`${file}\`)\n`
+            }
+            cacheContext += `\n⚠️ 【网页抓取与阅读硬约束原则】：
+1. 当主人的问题与上述已缓存的离线网页文件相关时，你【必须且只能】优先使用 \`read_file\` 工具读取，或使用 \`grep_content\` 检索对应的本地缓存文件。
+2. 当你调用 \`web_fetch\` 抓取新网页后，若因为网页过长被系统截断（提示被截断或预览不足），你【必须且立即】使用 \`read_file\` 工具传入刚才抓取生成的本地缓存相对路径来读取全文。
+3. 非必要【严禁】重复调用 \`web_fetch\` 或 \`web_search\` 去重复联网下载相同的网址或检索相同内容！\n`
+          }
+        } catch (err) {
+          console.error('[callLlmInternal] 扫描离线网页缓存失败:', err)
+        }
+      }
+
+      if (cacheContext) {
+        const systemMsg = chatHistory.find((m: any) => m.role === 'system')
+        if (systemMsg) {
+          if (typeof systemMsg.content === 'string') {
+            systemMsg.content += cacheContext
+          } else if (Array.isArray(systemMsg.content)) {
+            systemMsg.content.push({ type: 'text', text: cacheContext })
+          }
+        } else {
+          chatHistory.unshift({ role: 'system', content: cacheContext })
+        }
+      }
+    }
 
     let totalPromptTokens = 0
     let totalCompletionTokens = 0
@@ -3072,12 +3246,15 @@ app.whenReady().then(() => {
     const maxLoops = 40
     // 工具调用中断阈值：超过此次数后强制暂停工具链，引导用户补全关键信息
     let TOOL_INTERRUPT_THRESHOLD = 10
+    // 计入工具实际物理调用次数（排除 extend_task_loop 等伪工具）
+    let totalToolCallsCount = 0
     // 标记当前是否为主动扩展的长任务
     let isLongTask = false
 
+
     while (loopCount < maxLoops) {
       loopCount++
-      
+
       try {
         const response = await net.fetch(url, {
           method: 'POST',
@@ -3096,7 +3273,7 @@ app.whenReady().then(() => {
             loopCount = 0
             continue
           }
-          
+
           let displayError = errorText
           if (displayError.trim().toLowerCase().startsWith('<!doctype html') || displayError.toLowerCase().includes('<html')) {
             displayError = '服务端返回了 HTML 页面而非有效的 API 响应（通常是因为 Base URL 配置错误，例如填入了网页地址而非 API 接口地址）。请检查设置中的大模型 Base URL。'
@@ -3114,7 +3291,7 @@ app.whenReady().then(() => {
               displayError = displayError.substring(0, 500) + '... (省略过多内容)'
             }
           }
-          
+
           // 针对常见的 HTTP 错误状态提供人性化的中文翻译与排查建议
           if (response.status >= 500) {
             throw new Error(`[大模型服务端故障] 服务器遇到内部错误 (HTTP ${response.status})。可能是中转节点宕机或模型过载，请稍后重试。详情: ${displayError}`)
@@ -3123,7 +3300,7 @@ app.whenReady().then(() => {
           } else if (response.status === 429) {
             throw new Error(`[请求限流] 您的请求过于频繁或额度已耗尽 (HTTP 429)。详情: ${displayError}`)
           }
-          
+
           throw new Error(`HTTP ${response.status}: ${displayError}`)
         }
 
@@ -3191,7 +3368,7 @@ app.whenReady().then(() => {
 
             // 将 assistant 消息（含 tool_calls）加入历史，保持对话连贯性
             chatHistory.push(message)
-            
+
             // 为每个未执行的 tool_call 补充拦截提示，避免 API 因缺少 tool 结果而报错
             for (const tc of toolCalls) {
               chatHistory.push({
@@ -3201,7 +3378,7 @@ app.whenReady().then(() => {
                 content: `[系统拦截] 调用次数已达上限(${TOOL_INTERRUPT_THRESHOLD})，本次工具被拦截未执行。\n如果你确信这是一个需要更多步骤的长任务，请立即调用 \`extend_task_loop\` 工具申请延长。\n否则，说明你可能陷入了死循环或找不到目标，请直接输出一段话向用户提问求助，不要再调用其他工具。`
               })
             }
-            
+
             // 使用 continue 跳过当前轮次的 executeTool，直接进入下一轮的 LLM API 思考
             continue
           }
@@ -3211,7 +3388,7 @@ app.whenReady().then(() => {
             const toolCall = toolCalls[i]
             const toolName = toolCall.function.name
             const fullTool = getFullToolDefinitionByName(toolName, !!event)
-            
+
             const isMcpTool = mcpManager.hasTool(toolName)
             if (isMcpTool && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
               console.log(`[Two-Stage] 检测到简化工具调用: ${toolName}，正在启动第二阶段参数填充...`)
@@ -3226,7 +3403,7 @@ app.whenReady().then(() => {
                     content: `【系统提示】此工具需要输入参数。请根据以下 JSON Schema 定义重新生成此工具调用，并提供正确的 arguments 参数字段：\n${JSON.stringify(fullTool.function.parameters)}`
                   }
                 ]
-                
+
                 const fillBody: any = {
                   model: body.model,
                   temperature: 0.1, // 降低随机性确保参数填充精度
@@ -3251,7 +3428,7 @@ app.whenReady().then(() => {
                 }
 
                 const fillData: any = await fillResponse.json()
-                
+
                 if (fillData.usage) {
                   const apiPromptTokens = fillData.usage.prompt_tokens || 0
                   const apiCompletionTokens = fillData.usage.completion_tokens || 0
@@ -3263,7 +3440,7 @@ app.whenReady().then(() => {
                 const fillMessage = fillData.choices?.[0]?.message
                 const fillToolCalls = fillMessage?.tool_calls
                 const matchedCall = fillToolCalls?.find((tc: any) => tc.function.name === toolName)
-                
+
                 if (matchedCall && matchedCall.function.arguments) {
                   console.log(`[Two-Stage] 成功获取参数:`, matchedCall.function.arguments)
                   toolCall.function.arguments = matchedCall.function.arguments
@@ -3286,6 +3463,10 @@ app.whenReady().then(() => {
             }
 
             const toolName = toolCall.function.name
+            // 计入工具实际物理调用次数（排除 extend_task_loop 等伪工具）
+            if (toolName !== 'extend_task_loop' && toolName !== 'trigger_memory_purify') {
+              totalToolCallsCount++
+            }
             let toolArgs: any = {}
             try {
               toolArgs = JSON.parse(toolCall.function.arguments || '{}')
@@ -3293,16 +3474,39 @@ app.whenReady().then(() => {
               console.error('解析工具参数失败', pe)
             }
 
+            let safeToolArgs: any = {}
+            try {
+              safeToolArgs = JSON.parse(JSON.stringify(toolArgs))
+              const truncateArgs = (obj: any): any => {
+                if (typeof obj === 'string' && obj.length > 1000) {
+                  return obj.substring(0, 1000) + '... (内容过长，为保持UI流畅前端已隐藏，后台已完整保存)'
+                }
+                if (Array.isArray(obj)) {
+                  return obj.map(val => truncateArgs(val))
+                } else if (obj !== null && typeof obj === 'object') {
+                  const newObj: any = {}
+                  for (const k in obj) {
+                    newObj[k] = truncateArgs(obj[k])
+                  }
+                  return newObj
+                }
+                return obj
+              }
+              safeToolArgs = truncateArgs(safeToolArgs)
+            } catch (e) {
+              safeToolArgs = toolArgs
+            }
+
             if (event) {
               event.sender.send('api:llm-tool-event', {
                 type: 'tool_call',
                 name: toolName,
-                args: toolArgs,
+                args: safeToolArgs,
                 sessionId
               })
             }
             if (onToolEvent) {
-              onToolEvent({ type: 'tool_call', name: toolName, args: toolArgs })
+              onToolEvent({ type: 'tool_call', name: toolName, args: safeToolArgs })
             }
 
             let toolResult: string
@@ -3313,7 +3517,7 @@ app.whenReady().then(() => {
               toolResult = `[系统提示] 任务链执行轮数上限已扩展至 ${TOOL_INTERRUPT_THRESHOLD} 次。请继续安心执行您的长任务，不要中断。`
             } else if (toolName === 'trigger_memory_purify') {
               // 异步触发，不阻塞大模型的主流程
-              runPurifyMemoryPipeline().catch(err => console.error('后台经验沉淀执行失败', err))
+              runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
               toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
             } else {
               toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event, sessionId)
@@ -3343,13 +3547,21 @@ app.whenReady().then(() => {
               onToolEvent({ type: 'tool_result', name: toolName, result: displayResult })
             }
 
+            let contextToolResult = toolResult
+            const MAX_CONTEXT_TOOL_RESULT = 12000
+            if (typeof contextToolResult === 'string' && contextToolResult.length > MAX_CONTEXT_TOOL_RESULT) {
+              contextToolResult = contextToolResult.substring(0, MAX_CONTEXT_TOOL_RESULT) +
+                `\n\n[系统保护警告]: 数据量过大，已被系统强制截断（仅保留前 ${MAX_CONTEXT_TOOL_RESULT} 字符）。\n🚫 严禁使用相同的参数再次无脑读取整个文件或网页！\n💡 解决方案：如果你需要后续内容，请务必在工具参数中使用 start_line 和 end_line 进行精确的分页读取，或使用 grep_content 检索精准内容。`
+            }
+
             chatHistory.push({
               role: 'tool',
               tool_call_id: toolCall.id,
               name: toolName,
-              content: toolResult
+              content: contextToolResult
             })
           }
+
           continue
         } else {
           sendTokenEvent()
@@ -3360,9 +3572,9 @@ app.whenReady().then(() => {
             finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'
           }
 
-          if (isLongTask) {
-            console.log('[System] 长任务正常结束，自动触发后台经验沉淀...')
-            runPurifyMemoryPipeline().catch(e => console.error('[System] 自动经验沉淀失败:', e))
+          if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
+            console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
+            handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
           }
 
           return finalResponse
@@ -3385,9 +3597,9 @@ app.whenReady().then(() => {
     sendTokenEvent()
     if (currentLlmAbortController === thisController) currentLlmAbortController = null
 
-    if (isLongTask) {
-      console.log('[System] 长任务因达到最大轮数上限退出，自动触发后台经验沉淀...')
-      runPurifyMemoryPipeline().catch(e => console.error('[System] 自动经验沉淀失败:', e))
+    if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
+      console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
+      handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
     }
 
     return '智能代理执行工具链已达到最大轮数上限。'
@@ -3535,13 +3747,13 @@ app.whenReady().then(() => {
     callLlm: async (config, messages, sessionId, onToolEvent) => {
       const effectiveConfig = config.useSystemConfig
         ? {
-            ...systemLlmConfig,
-            ...config,
-            apiKey: config.apiKey || systemLlmConfig.apiKey,
-            baseUrl: config.baseUrl || systemLlmConfig.baseUrl,
-            provider: config.provider || systemLlmConfig.provider,
-            model: config.model || systemLlmConfig.model
-          }
+          ...systemLlmConfig,
+          ...config,
+          apiKey: config.apiKey || systemLlmConfig.apiKey,
+          baseUrl: config.baseUrl || systemLlmConfig.baseUrl,
+          provider: config.provider || systemLlmConfig.provider,
+          model: config.model || systemLlmConfig.model
+        }
         : config
 
       if (effectiveConfig.provider !== 'ollama' && !effectiveConfig.apiKey) {
@@ -3588,11 +3800,11 @@ app.whenReady().then(() => {
 
 
     // 3. 断开所有 MCP 服务连接
-    mcpManager.disconnectAll().catch(() => {})
+    mcpManager.disconnectAll().catch(() => { })
 
     // 4. 断开微信 Bot
     if (wechatBotManager) {
-      wechatBotManager.logout().catch(() => {})
+      wechatBotManager.logout().catch(() => { })
     }
   })
 
@@ -3608,13 +3820,13 @@ app.whenReady().then(() => {
       }
       // 2. 清理全局 session 缓存与 Code Cache，避免 Chromium 网络/代码缓存无限增加
       if (session.defaultSession) {
-        session.defaultSession.clearCache().catch(() => {})
-        session.defaultSession.clearCodeCaches({}).catch(() => {})
+        session.defaultSession.clearCache().catch(() => { })
+        session.defaultSession.clearCodeCaches({}).catch(() => { })
       }
       // 3. 遍历所有活动窗口，在其对应的渲染进程中强行触发 GC
       BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed() && win.webContents) {
-          win.webContents.executeJavaScript('window.gc && window.gc()').catch(() => {})
+          win.webContents.executeJavaScript('window.gc && window.gc()').catch(() => { })
         }
       })
       // 4. 强制修剪物理工作集内存，将不活跃物理内存压降回虚拟内存

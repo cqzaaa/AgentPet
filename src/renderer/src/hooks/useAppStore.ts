@@ -27,6 +27,7 @@ export interface Session {
   time: string
   messages: any[]
   pinned?: boolean
+  contextSummary?: string
 }
 
 export interface TokenLog {
@@ -137,9 +138,15 @@ export function useAppStore() {
   const [llmConfig, setLlmConfig] = useState(() => {
     const saved = localStorage.getItem('agentself_llm_config') || localStorage.getItem('agentpet_llm_config')
     if (saved) {
-      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+      try { 
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.maxTokens === 2048) {
+          delete parsed.maxTokens
+        }
+        return parsed
+      } catch (e) { console.error(e) }
     }
-    return { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: 2048 }
+    return { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: undefined }
   })
 
   const saveLlmConfig = (newConfig: any) => {
@@ -1286,7 +1293,7 @@ export function useAppStore() {
 
       const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` + 
         (relevantExperiences.length > 0 
-          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}`).join('\n')}`
+          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}${e.absolutePath ? `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${e.absolutePath}` : ''}`).join('\n')}`
           : '')
 
       // 动态拼装系统人设与技能感知上下文
@@ -1333,10 +1340,30 @@ ${skillsContext}
 <output_rules>
 - 对话风格：语气需保持人设风格（${currentAvatarStyle === 'cute' ? '可爱、萌系、活泼' : '专业、友好、自然'}）。
 - 错误处理：遇到工具执行报错或空结果时，请以萌宠的语气告知主人，并尝试提供替代的解决方法。
+- 主动澄清与消歧准则（Disambiguation Rules）：
+  1. 识别模糊与多义性：当用户的提问存在多种合理的解释，或者你无法确定具体指向（例如“记忆api”可能指代码文件，也可能指持久化数据，或外部项目）时，禁止擅自做假设或发散脑补。
+  2. 停止并提问：此时你必须立刻暂停长篇大论的回答，转而向用户提出一个简明、有针对性的澄清问题。
+  3. 提问模板：明确罗列出你怀疑的几种可能性，友好地请用户进行选择或补充。
 </output_rules>`
 
       // 将 system prompt 注入为上下文的首条消息
       chatMessages.unshift({ role: 'system', content: systemPrompt })
+
+      // 如果当前会话有累积摘要，将其作为一条 user 消息注入到 system 之后、最近消息之前
+      // 让大模型在不展开完整旧消息的前提下，仍能了解旧对话要点
+      const rawContextSummary = activeSessObj?.contextSummary || ''
+      if (rawContextSummary.trim()) {
+        // 限制摘要单条消息长度：超出 8000 字符时从头部截断（保留最新内容）
+        const MAX_SUMMARY_CHARS = 8000
+        const trimmedSummary = rawContextSummary.length > MAX_SUMMARY_CHARS
+          ? '...(旧摘要已裁剪)...\n' + rawContextSummary.slice(-MAX_SUMMARY_CHARS)
+          : rawContextSummary
+        chatMessages.splice(1, 0, {
+          role: 'user',
+          content: `📝 [历史对话摘要]（以下是当前会话中超出上下文窗口的旧对话的精炼总结，请以此为参考背景）：\n${trimmedSummary}`
+        })
+        console.log(`[Context] 已将历史摘要回注到上下文 (长度: ${trimmedSummary.length} 字符)`)
+      }
 
       // 获取工具定义
       let toolsDefinition: any[] = []
@@ -1520,8 +1547,10 @@ ${chatLogStr}
       if (appendSuccess) {
         console.log('[Summary] 成功追加到本地 Markdown 记忆日志文件。')
 
+        // 将本次摘要文本累积到 session.contextSummary 中，下次发送时回注到 LLM 上下文
         const batchIds = summaryBatch.map(m => m.id)
         let savedMsgs: any[] = []
+        let newContextSummary = ''
         setSessions(prev => {
           const updated = prev.map(s => {
             if (s.id === sessionId) {
@@ -1533,17 +1562,32 @@ ${chatLogStr}
                 }
                 return m
               })
-              return { ...s, messages }
+              // 将本次摘要文本追加到历史摘要中
+              const prevSummary = s.contextSummary || ''
+              newContextSummary = prevSummary
+                ? `${prevSummary}
+
+${finalMarkdownText}`
+                : finalMarkdownText
+              return { ...s, messages, contextSummary: newContextSummary }
             }
             return s
           })
-          
+
           savedMsgs.forEach(m => {
             window.api.saveMessage({ ...m, sessionId })
           })
 
           return updated
         })
+
+        // 将累积摘要持久化到 SQLite sessions 表
+        if (newContextSummary) {
+          window.api.updateSession(sessionId, { contextSummary: newContextSummary }).catch(e =>
+            console.error('[Summary] 持久化 contextSummary 到 DB 失败:', e)
+          )
+          console.log(`[Summary] contextSummary 已更新 (总长度: ${newContextSummary.length} 字符)`)
+        }
       }
     } catch (err) {
       console.error('[Summary] 生成对话总结失败:', err)

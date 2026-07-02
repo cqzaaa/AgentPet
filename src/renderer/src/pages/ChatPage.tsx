@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { ChatMessageItem } from '../components/ChatMessageItem'
@@ -45,6 +45,51 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
+
+  // 计算最后一条消息的特征，用于触发滚动
+  const lastMessageStatus = useMemo(() => {
+    if (!activeSessMessages || activeSessMessages.length === 0) return ''
+    const lastMsg = activeSessMessages[activeSessMessages.length - 1]
+    return `${lastMsg.id}-${lastMsg.text?.length || 0}-${lastMsg.toolSteps?.length || 0}-${lastMsg.isThinking}`
+  }, [activeSessMessages])
+
+  // 上下文安全额度环机制
+  const [showContextTooltip, setShowContextTooltip] = useState(false)
+  const contextLimit = 168000
+
+  const currentContextTokens = useMemo(() => {
+    let total = 0
+    if (activeSessMessages) {
+      for (const msg of activeSessMessages) {
+        if (msg.sender === 'user' || msg.sender === 'agent') {
+          let text = msg.text || ''
+          if (msg.fileInfo && msg.fileInfo.content) {
+            text += '\n' + msg.fileInfo.content
+          } else if (msg.fileInfos) {
+            for (const f of msg.fileInfos) {
+              if (f.content) text += '\n' + f.content
+            }
+          }
+          total += Math.max(1, Math.round(text.length * 0.5))
+        }
+      }
+    }
+    // 加入人设及系统开销预估
+    total += 1500
+    return total
+  }, [activeSessMessages])
+
+  const contextPercent = useMemo(() => {
+    return Math.min(100, (currentContextTokens / contextLimit) * 100)
+  }, [currentContextTokens])
+
+  const handleSendIntercept = () => {
+    if (currentContextTokens >= contextLimit) {
+      showToast('⚠️ 上下文额度已用满，请创建新会话以继续对话！', 'error')
+      return
+    }
+    handleSendChat()
+  }
 
   // SSH 弹窗控制本地状态
   const [showSshModal, setShowSshModal] = useState(false)
@@ -128,15 +173,20 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     requestAnimationFrame(() => checkScrollPosition())
   }, [activeSessionId, checkScrollPosition])
 
-  // 新消息到来时，如果已在底部则保持在底部
+  // 新消息到来或最后一条消息（如工具调用、文字流）更新时，如果在底部则保持在底部
   useEffect(() => {
     if (!showScrollToBottom) {
       const el = messagesBoxRef.current
       if (el) {
-        el.scrollTop = el.scrollHeight
+        // 使用 setTimeout 确保 React 已经把最新 DOM 渲染完成，scrollHeight 已经更新
+        const timer = setTimeout(() => {
+          el.scrollTop = el.scrollHeight
+        }, 50)
+        return () => clearTimeout(timer)
       }
     }
-  }, [activeSessMessages.length, showScrollToBottom])
+    return undefined
+  }, [activeSessMessages.length, lastMessageStatus, showScrollToBottom])
 
   const scrollToBottom = () => {
     const el = messagesBoxRef.current
@@ -445,9 +495,15 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           <textarea
             className="chat-textarea-field"
             rows={2}
-            placeholder={isSending ? `${currentAvatarName} 正在思考中...` : `输入指令并发送给 ${currentAvatarName} ...`}
+            placeholder={
+              currentContextTokens >= contextLimit
+                ? '⚠️ 上下文额度已用满，请创建新会话以继续对话！'
+                : isSending
+                ? `${currentAvatarName} 正在思考中...`
+                : `输入指令并发送给 ${currentAvatarName} ...`
+            }
             value={inputValue}
-            disabled={isSending}
+            disabled={isSending || currentContextTokens >= contextLimit}
             onChange={e => setInputValue(e.target.value)}
             onPaste={async e => {
               // 优先检查内部剪贴板（从消息复制的文件+文本）
@@ -496,7 +552,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                handleSendChat()
+                handleSendIntercept()
               }
             }}
           />
@@ -677,12 +733,72 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
             </div>
 
             {/* 右侧：文件上传与发送按钮 */}
-            <div className="toolbar-group-right">
+            <div className="toolbar-group-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* SVG 额度环 */}
+              <div
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  width: '22px',
+                  height: '22px'
+                }}
+                onMouseEnter={() => setShowContextTooltip(true)}
+                onMouseLeave={() => setShowContextTooltip(false)}
+              >
+                <svg width="22" height="22" viewBox="0 0 36 36">
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.9155"
+                    fill="none"
+                    stroke="var(--bg-menu-hover, rgba(128,128,128,0.12))"
+                    strokeWidth="3.5"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.9155"
+                    fill="none"
+                    stroke={contextPercent >= 100 ? '#ef4444' : contextPercent > 75 ? '#f59e0b' : '#3b82f6'}
+                    strokeWidth="3.5"
+                    strokeDasharray={`${contextPercent} ${100 - contextPercent}`}
+                    strokeDashoffset="25"
+                    strokeLinecap="round"
+                    style={{ transition: 'stroke-dasharray 0.35s ease' }}
+                  />
+                </svg>
+                
+                {showContextTooltip && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 'calc(100% + 10px)',
+                      right: '-30px',
+                      backgroundColor: 'var(--bg-card, #ffffff)',
+                      border: '1.5px solid var(--border-color, rgba(128,128,128,0.25))',
+                      borderRadius: '8px',
+                      padding: '6px 12px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: 'var(--text-color, #1e293b)',
+                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                      whiteSpace: 'nowrap',
+                      zIndex: 1000,
+                      animation: 'slideUpMenu 0.15s ease-out'
+                    }}
+                  >
+                    {`${contextPercent.toFixed(1)}% · ${(currentContextTokens / 1000).toFixed(1)}K / ${(contextLimit / 1000).toFixed(0)}K 上下文已使用`}
+                  </div>
+                )}
+              </div>
+
               <button
                 className="toolbar-action-btn upload"
                 onClick={handleUploadFile}
-                disabled={isSending}
-                title="上传文本文件以分析"
+                disabled={isSending || currentContextTokens >= contextLimit}
+                title={currentContextTokens >= contextLimit ? '上下文额度已用满' : '上传文本文件以分析'}
               >
                 ➕ 上传文件
               </button>
@@ -699,8 +815,8 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               ) : (
                 <button
                   className="toolbar-send-btn"
-                  onClick={handleSendChat}
-                  disabled={!inputValue.trim() && attachedFiles.length === 0}
+                  onClick={handleSendIntercept}
+                  disabled={(!inputValue.trim() && attachedFiles.length === 0) || currentContextTokens >= contextLimit}
                 >
                   发送
                 </button>

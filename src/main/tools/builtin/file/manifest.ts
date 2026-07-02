@@ -11,13 +11,21 @@ export const fileManifest: ToolManifest = {
   api: [
     {
       name: 'read_file',
-      description: '读取任意文件内容。支持 PDF、Word、Excel、CSV 及文本文件。对大文件只读取前 30000 字符。',
+      description: '读取任意文件内容。支持 PDF、Word、Excel、CSV 及文本文件。支持使用 start_line 和 end_line 进行精确分页按行读取（对于文本和长网页 markdown 非常有用）。默认对大文件只读取前 30000 字符。',
       parameters: {
         type: 'object',
         properties: {
           file_path: {
             type: 'string',
             description: '文件绝对路径'
+          },
+          start_line: {
+            type: 'number',
+            description: '起始行号 (1-indexed)，可选'
+          },
+          end_line: {
+            type: 'number',
+            description: '结束行号 (1-indexed)，可选'
           }
         },
         required: ['file_path']

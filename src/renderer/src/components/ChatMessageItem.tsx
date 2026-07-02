@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import iconSvg from '../assets/icon_from_image.svg'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github-dark.css'
 
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
@@ -15,9 +17,25 @@ function formatTokens(tokens: number): string {
   return `${(tokens / 1000000).toFixed(2)}M tokens`
 }
 
+// ── 语法高亮渲染器 ─────────────────────────────────
+function highlightCode(code: string, lang: string): string {
+  if (!code) return ''
+  const l = (lang || '').toLowerCase()
+  try {
+    if (l && hljs.getLanguage(l)) {
+      return hljs.highlight(code, { language: l }).value
+    }
+    return hljs.highlightAuto(code).value
+  } catch (e) {
+    return escapeHtml(code)
+  }
+}
+
 // ── 复制代码块的高级代码面板组件 ─────────────────────────────────
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
   const handleCopy = () => {
     if (window.api && typeof window.api.copyText === 'function') {
       window.api.copyText(code)
@@ -27,16 +45,161 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  const htmlContent = useMemo(() => {
+    return highlightCode(code, lang)
+  }, [code, lang])
+
   return (
-    <div className="modern-code-container">
-      <div className="code-header">
-        <span className="code-lang">{lang || 'code'}</span>
-        <button className="code-copy-btn" onClick={handleCopy}>
-          {copied ? '✓ 已复制' : '📋 复制'}
-        </button>
+    <div 
+      className="modern-code-container" 
+      style={{
+        border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        margin: '12px 0',
+        backgroundColor: 'var(--bg-card, #ffffff)',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+      }}
+    >
+      <div 
+        className="code-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 16px',
+          background: 'var(--bg-card-sub, #f8fafc)',
+          borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color, rgba(128,128,128,0.12))',
+          userSelect: 'none'
+        }}
+      >
+        <span 
+          className="code-lang"
+          style={{
+            fontSize: '12px',
+            fontWeight: 600,
+            color: 'var(--text-muted, #64748b)',
+            fontFamily: 'monospace',
+            textTransform: 'lowercase'
+          }}
+        >
+          {lang || 'code'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button 
+            className="code-copy-btn" 
+            onClick={handleCopy}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, #64748b)',
+              fontSize: '12px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              padding: '4px 6px',
+              borderRadius: '4px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--text-primary, #0f172a)'
+              e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--text-muted, #64748b)'
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
+          >
+            {copied ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span style={{ color: '#10b981' }}>已复制</span>
+              </>
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>复制</span>
+              </>
+            )}
+          </button>
+          
+          <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--border-color, rgba(128,128,128,0.18))' }} />
+          
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, #64748b)',
+              cursor: 'pointer',
+              padding: '4px',
+              borderRadius: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--text-primary, #0f172a)'
+              e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--text-muted, #64748b)'
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
+            title={isCollapsed ? '展开代码' : '折叠代码'}
+          >
+            <svg 
+              width="12" 
+              height="12" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="2.5" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              style={{ 
+                transition: 'transform 0.2s ease', 
+                transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' 
+              }}
+            >
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </div>
       </div>
-      <pre className="code-body">
-        <code>{code}</code>
+      <pre 
+        className="code-body"
+        style={{
+          maxHeight: isCollapsed ? '0' : '2000px',
+          padding: isCollapsed ? '0' : '14px 16px',
+          margin: 0,
+          overflow: 'auto',
+          transition: 'all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1)',
+          background: 'var(--bg-code, #fdfdfd)',
+          borderTop: 'none'
+        }}
+      >
+        <code 
+          style={{
+            fontFamily: "Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace",
+            fontSize: '12.5px',
+            lineHeight: '1.6',
+            color: 'var(--text-secondary, #334155)',
+            display: 'block',
+            whiteSpace: 'pre',
+            wordBreak: 'normal',
+            tabSize: 2
+          }}
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
       </pre>
     </div>
   )
@@ -50,6 +213,7 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
 }
+
 
 function parseInlineMarkdown(text: string): string {
   let html = escapeHtml(text)
@@ -254,7 +418,7 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 
 // 渲染包含图片和链接的普通文本部分
 export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
-  const linkOrImgRegex = /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/)[^\s\])<>"'`*，。！？；：（）]+)|([a-zA-Z]:[\\\/](?:[^<>:"|?*\n\u4e00-\u9fa5，。！？；：、\[\]]*[^<>:"|?*\n\u4e00-\u9fa5，。！？；：、\[\]\s.,!?;'"`])?)/g
+  const linkOrImgRegex = /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/)[^\s\])<>"'`*，。！？；：（）]+)|([a-zA-Z]:[\\\/](?:[^<>:"|?*\s，。！？；：、\[\]()]*[^<>:"|?*\s，。！？；：、\[\]().,!?;'"`])?)/g
   let match
   let lastIndex = 0
 
@@ -959,6 +1123,14 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
   const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
 
   const toolSteps = msg.toolSteps || []
+  const toolStepsScrollRef = useRef<HTMLDivElement>(null)
+
+  // 当工具调用步骤改变时，自动将步骤框滚动到底部
+  useEffect(() => {
+    if (toolStepsScrollRef.current) {
+      toolStepsScrollRef.current.scrollTop = toolStepsScrollRef.current.scrollHeight
+    }
+  }, [toolSteps.length])
   const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
   const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || (s.type === 'think' && s.detail?.trim()))
 
@@ -1131,6 +1303,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                   </div>
                 )}
                 <div
+                  ref={toolStepsScrollRef}
                   className="tool-steps-scroll-area"
                   style={{
                     display: 'flex',

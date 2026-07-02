@@ -6,8 +6,9 @@ import { join } from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { getActiveStorageDir, getGeneratedFilesDir } from '../../utils/paths'
+import { getActiveStorageDir } from '../../utils/paths'
 import { permissionManager } from '../../security/permission-manager'
+import { appendMemorySummaryInternal } from '../../../api/memory'
 
 const execAsync = promisify(exec)
 
@@ -235,7 +236,8 @@ if (-not $task.Wait(15000)) {
 
       // 7. append_memory_summary
       if (api === 'append_memory_summary') {
-        const { content } = args
+        const { title, content } = args
+        const actualTitle = title || '未命名主题'
         if (!content) {
           return { content: '错误：缺少必要参数 content', success: false }
         }
@@ -243,25 +245,18 @@ if (-not $task.Wait(15000)) {
           return { content: '错误：无法获取当前会话 ID (sessionId为空)', success: false }
         }
 
-        const safeSessionId = context.sessionId.replace(/[<>:"/\\|?*]/g, '_')
-        const sessionMemoryDir = join(getActiveStorageDir(), 'chat', safeSessionId, 'memory')
-        
         try {
-          if (!fs.existsSync(sessionMemoryDir)) {
-            await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
-          }
-
-          const now = new Date()
-          const year = now.getFullYear()
-          const month = String(now.getMonth() + 1).padStart(2, '0')
-          const day = String(now.getDate()).padStart(2, '0')
-          const fileName = `${year}-${month}-${day}.md`
-          const filePath = join(sessionMemoryDir, fileName)
-
-          await fs.promises.appendFile(filePath, content + '\n\n', 'utf-8')
-          return {
-            content: `成功：已将摘要追加写入今日记忆文件 ${fileName}。绝对物理路径: ${filePath}`,
-            success: true
+          const success = await appendMemorySummaryInternal(context.sessionId, actualTitle, content)
+          if (success) {
+            return {
+              content: `成功：已将摘要追加写入主题记忆 "${actualTitle}"。并且系统已触发后台 Pipeline 即时提纯入库。`,
+              success: true
+            }
+          } else {
+            return {
+              content: `追加记忆失败，请检查日志。`,
+              success: false
+            }
           }
         } catch (err: any) {
           return {

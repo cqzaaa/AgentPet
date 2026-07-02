@@ -1,6 +1,7 @@
-import { ipcMain, net } from 'electron'
+import { ipcMain } from 'electron'
 import * as fs from 'fs'
-import { join } from 'path'
+import { join, relative } from 'path'
+import { getLocalEmbedding } from './localEmbedding'
 
 export interface MemoryDependencies {
   getDB: () => Promise<any>
@@ -12,34 +13,127 @@ export interface MemoryDependencies {
 
 let memoryDeps: MemoryDependencies | null = null
 
+export async function appendMemorySummaryInternal(sessionId: string, title: string, content: string): Promise<boolean> {
+  if (!memoryDeps) {
+    console.error('[Memory] memoryDeps 尚未初始化')
+    return false
+  }
+  try {
+    if (!sessionId || !title || !content) return false
+    const chatDir = memoryDeps.getActiveChatDir()
+    const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
+    const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
+    
+    if (!fs.existsSync(sessionMemoryDir)) {
+      await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
+    }
+
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const hour = String(now.getHours()).padStart(2, '0')
+    const minute = String(now.getMinutes()).padStart(2, '0')
+    const second = String(now.getSeconds()).padStart(2, '0')
+    const ms = String(now.getMilliseconds()).padStart(3, '0')
+    
+    // 生成带具体时间戳的唯一文件名，避免任务同名累加
+    const timeSuffix = `${year}${month}${day}_${hour}${minute}${second}_${ms}`
+    const safeTitle = title.replace(/[<>:"/\\|?*]/g, '_')
+    const fileName = `${safeTitle}_${timeSuffix}.md`
+    const filePath = join(sessionMemoryDir, fileName)
+
+    // 扫描关联缓存 .agentpet_cache
+    const cacheDir = join(chatDir, safeSessionId, '.agentpet_cache')
+    const relatedCaches: string[] = []
+    if (fs.existsSync(cacheDir)) {
+      try {
+        const cacheFiles = await fs.promises.readdir(cacheDir)
+        const nowTime = Date.now()
+        for (const file of cacheFiles) {
+          const cacheFilePath = join(cacheDir, file)
+          const stat = await fs.promises.stat(cacheFilePath)
+          const isMentioned = content.includes(file)
+          const isRecent = (nowTime - stat.mtimeMs) < 30 * 60 * 1000 // 30分钟内
+          
+          if (isMentioned || isRecent) {
+            const relPath = relative(chatDir, cacheFilePath).replace(/\\/g, '/')
+            relatedCaches.push(relPath)
+          }
+        }
+      } catch (err) {
+        console.error('[Memory] 扫描 .agentpet_cache 失败:', err)
+      }
+    }
+
+    const timeStr = now.toLocaleString('zh-CN', { hour12: false })
+    const metaHeader = `<!-- 元数据\n记录时间: ${timeStr}\n会话ID: ${sessionId}\n-->\n\n`
+    
+    let linkSection = ''
+    if (relatedCaches.length > 0) {
+      linkSection += '\n\n---\n### 🔗 关联缓存引用\n'
+      
+      const mentionedList: string[] = []
+      const recentList: string[] = []
+      
+      // 简单的分句，支持换行、句号、感叹号、问号、分号
+      const sentences = content
+        .split(/[\n\r。？！]/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+
+      for (const relPath of relatedCaches) {
+        const fileName = relPath.split('/').pop() || relPath
+        const matchedSentences = sentences.filter(s => s.includes(fileName))
+        const absPath = join(chatDir, relPath).replace(/\\/g, '/')
+        
+        if (matchedSentences.length > 0) {
+          for (const sentence of matchedSentences) {
+            const shortSentence = sentence.length > 80 ? sentence.substring(0, 80) + '...' : sentence
+            mentionedList.push(`* 在正文 “*...${shortSentence}...*” 中，关联了缓存：[\`${relPath}\`](file:///${absPath})`)
+          }
+        } else {
+          recentList.push(`* 关联了最近修改的缓存：[\`${relPath}\`](file:///${absPath})`)
+        }
+      }
+      
+      if (mentionedList.length > 0) {
+        linkSection += '#### 句内引用：\n' + mentionedList.join('\n') + '\n'
+      }
+      if (recentList.length > 0) {
+        linkSection += '#### 最近修改关联（未在正文显式提及）：\n' + recentList.join('\n') + '\n'
+      }
+      
+      // 插入向后兼容提取管道的 HTML 注释，务必换行单独成行，防止 --> 被正则捕获
+      linkSection += `\n<!--\n关联缓存: ${relatedCaches.join(', ')}\n-->\n`
+    }
+
+    // 直接新建独立文件写入，不再累加旧文件
+    await fs.promises.writeFile(filePath, metaHeader + content + linkSection + '\n\n', 'utf-8')
+    console.log(`[Memory] 成功创建独立主题记忆文件: ${filePath}`)
+
+    // 自动在后台异步触发 Pipeline 进行提纯整理，使新生成的记忆即时生效入库
+    runPurifyMemoryPipeline(sessionId).catch(err => console.error('[Memory] 后台经验提纯失败:', err))
+    
+    return true
+  } catch (e) {
+    console.error('[Memory] 写入独立主题记忆失败', e)
+    return false
+  }
+}
+
 export function registerMemoryAPIs(deps: MemoryDependencies) {
   memoryDeps = deps
 
   // 追加写入每日 Markdown 摘要（用会话文件夹进行隔离）
-  ipcMain.handle('api:append-memory-summary', async (_, sessionId: string, text: string) => {
-    try {
-      if (!sessionId) return false
-      const chatDir = deps.getActiveChatDir()
-      const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
-      const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
-      
-      if (!fs.existsSync(sessionMemoryDir)) {
-        await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
-      }
-
-      const now = new Date()
-      const year = now.getFullYear()
-      const month = String(now.getMonth() + 1).padStart(2, '0')
-      const day = String(now.getDate()).padStart(2, '0')
-      const fileName = `${year}-${month}-${day}.md`
-      const filePath = join(sessionMemoryDir, fileName)
-
-      await fs.promises.appendFile(filePath, text + '\n\n', 'utf-8')
-      return true
-    } catch (e) {
-      console.error('追加写入每日摘要失败', e)
-      return false
+  ipcMain.handle('api:append-memory-summary', async (_, sessionId: string, titleOrContent: string, maybeContent?: string) => {
+    let title = '未命名主题'
+    let content = titleOrContent
+    if (maybeContent !== undefined) {
+      title = titleOrContent
+      content = maybeContent
     }
+    return appendMemorySummaryInternal(sessionId, title, content)
   })
 
   // 获取顶级全局画像 profile.md
@@ -72,8 +166,8 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
     }
   })
 
-  ipcMain.handle('api:purify-memory-pipeline', async () => {
-    return runPurifyMemoryPipeline()
+  ipcMain.handle('api:purify-memory-pipeline', async (_, sessionId?: string) => {
+    return runPurifyMemoryPipeline(sessionId)
   })
 
   // 第四层：多路混合检索召回相关避坑经验 (仿 SAG 本地 SQL 动态图关联 RAG 架构)
@@ -301,9 +395,9 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
 }
 
-// 获取文本的 Embedding 向量，支持优雅降级
+// 获取文本的 Embedding 向量，仅通过本地提取（未就绪时返回 null 并自动降级为文本/图谱模糊匹配）
 async function getEmbeddingInternal(
-  config: { 
+  _config: { 
     provider: string; 
     apiKey: string; 
     baseUrl: string; 
@@ -311,97 +405,15 @@ async function getEmbeddingInternal(
   }, 
   text: string
 ): Promise<number[] | null> {
-  // 优先尝试 SiliconFlow 的免费高精度向量嵌入
-  const sfApiKey = process.env.SILICONFLOW_API_KEY
-  if (sfApiKey) {
-    try {
-      console.log('[Embedding] 正在通过 SiliconFlow (BAAI/bge-m3) 获取向量...')
-      const sfResponse = await net.fetch("https://api.siliconflow.cn/v1/embeddings", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${sfApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          input: text,
-          model: "BAAI/bge-m3"
-        }),
-        signal: AbortSignal.timeout(8000)
-      })
-
-      if (sfResponse.ok) {
-        const sfData: any = await sfResponse.json()
-        if (sfData && sfData.data && sfData.data[0] && sfData.data[0].embedding) {
-          console.log('[Embedding] SiliconFlow 向量获取成功')
-          return sfData.data[0].embedding
-        }
-      } else {
-        const sfErr = await sfResponse.text().catch(() => '')
-        console.warn(`[Embedding] SiliconFlow 响应错误 (HTTP ${sfResponse.status}): ${sfErr}，将尝试回退。`)
-      }
-    } catch (err) {
-      console.warn('[Embedding] SiliconFlow 请求异常，将尝试回退至系统配置大模型向量:', err)
-    }
-  }
-
-  // 回退逻辑：使用既有大模型提供商的向量接口
   try {
-    const { provider, apiKey, baseUrl } = config
-    if (!apiKey && provider !== 'ollama') {
-      return null
+    const localEmb = await getLocalEmbedding(text)
+    if (localEmb) {
+      return localEmb
     }
-    let url = ''
-    const headers: any = {
-      'Content-Type': 'application/json'
-    }
-    const body: any = {
-      input: text
-    }
-
-    if (provider === 'gemini') {
-      const effectiveBaseUrl = baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'
-      url = `${effectiveBaseUrl}/embeddings`
-      headers['Authorization'] = `Bearer ${apiKey}`
-      body.model = 'text-embedding-004'
-    } else if (provider === 'openai') {
-      const effectiveBaseUrl = baseUrl || 'https://api.openai.com/v1'
-      url = `${effectiveBaseUrl}/embeddings`
-      headers['Authorization'] = `Bearer ${apiKey}`
-      body.model = 'text-embedding-3-small'
-    } else if (provider === 'deepseek') {
-      return null
-    } else if (provider === 'ollama') {
-      const effectiveBaseUrl = baseUrl || 'http://localhost:11434/v1'
-      url = `${effectiveBaseUrl}/embeddings`
-      body.model = 'nomic-embed-text'
-    } else {
-      url = `${baseUrl}/embeddings`
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`
-      }
-      body.model = 'text-embedding-3-small'
-    }
-
-    const response = await net.fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(8000)
-    })
-
-    if (!response.ok) {
-      return null
-    }
-
-    const data: any = await response.json()
-    if (data && data.data && data.data[0] && data.data[0].embedding) {
-      return data.data[0].embedding
-    }
-    return null
-  } catch (err) {
-    console.warn('[Embedding] 回退向量接口异常，降级为纯文本模糊搜索', err)
-    return null
+  } catch (localErr) {
+    console.warn('[Embedding] 本地向量计算异常:', localErr)
   }
+  return null
 }
 
 // 辅助函数：自动扫描库内向量维度不符的老数据，重新生成向量嵌入并更新
@@ -484,7 +496,7 @@ async function autoMigrateOldEmbeddings(db: any) {
 }
 
 // 第三层：系统内置画像整理与避坑经验沉淀的后台 pipeline
-export async function runPurifyMemoryPipeline() {
+export async function runPurifyMemoryPipeline(targetSessionId?: string) {
   if (!memoryDeps) {
     console.warn('[Purify] memoryDeps 未初始化，跳过后台整理')
     return { success: false, count: 0, insertCount: 0 }
@@ -494,10 +506,19 @@ export async function runPurifyMemoryPipeline() {
   try {
     const chatDir = getActiveChatDir()
     const database = await getDB()
-    const sessions = await database.all('SELECT id, name FROM sessions') as { id: string; name: string }[]
+    
+    let sessions: { id: string; name: string }[] = []
+    if (targetSessionId) {
+      sessions = await database.all('SELECT id, name FROM sessions WHERE id = ?', targetSessionId) as { id: string; name: string }[]
+      console.log(`[Purify] 针对单会话启动增量提纯, 会话ID: ${targetSessionId}`)
+    } else {
+      sessions = await database.all('SELECT id, name FROM sessions') as { id: string; name: string }[]
+      console.log('[Purify] 针对全量会话启动全局提纯')
+    }
     
     let allSummariesCombined = ''
     const processedFiles: string[] = []
+    const sessionCaches = new Set<string>()
     
     // 搜集所有会话下的 memory 文件夹内的 md 摘要，以及会话主目录下的关键字 md 文件
     for (const sess of sessions) {
@@ -514,6 +535,15 @@ export async function runPurifyMemoryPipeline() {
             const stat = await fs.promises.stat(filePath)
             if (stat.isFile()) {
               const content = await fs.promises.readFile(filePath, 'utf-8')
+              
+              // 提取关联缓存路径
+              const cacheMatch = content.match(/关联缓存:\s*([^\n]+)/)
+              if (cacheMatch && cacheMatch[1]) {
+                cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
+                  if (c) sessionCaches.add(c)
+                })
+              }
+
               allSummariesCombined += `\n### 会话: ${sess.name} (日期: ${file.replace(/\.md$/i, '')})\n${content}\n`
               processedFiles.push(filePath)
             }
@@ -534,6 +564,15 @@ export async function runPurifyMemoryPipeline() {
             const stat = await fs.promises.stat(filePath)
             if (stat.isFile()) {
               const content = await fs.promises.readFile(filePath, 'utf-8')
+
+              // 提取关联缓存路径
+              const cacheMatch = content.match(/关联缓存:\s*([^\n]+)/)
+              if (cacheMatch && cacheMatch[1]) {
+                cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
+                  if (c) sessionCaches.add(c)
+                })
+              }
+
               allSummariesCombined += `\n### 会话: ${sess.name} (根文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
               processedFiles.push(filePath)
             }
@@ -584,20 +623,23 @@ export async function runPurifyMemoryPipeline() {
     console.log('[Purify] 人物画像 profile.md 覆盖更新成功。')
 
     // 2. 提取报错与避坑经验，写入 persona_memories
-    const experienceSystemPrompt = `你是一个任务纠错与避坑经验沉淀专家。请分析主人最近的对话摘要（特别是工具执行失败或报错的部分），提取并总结出结构化的“纠错避坑经验”。
+    const experienceSystemPrompt = `你是一个核心技术知识提炼与避坑经验沉淀专家。请分析主人最近的对话摘要，从中提纯并总结出以下两类结构化经验：
+1. 【技术核心与源码要点】：例如源码结构解读要点、业务逻辑核心细节、系统架构设计决策等。
+2. 【避坑纠错与工具经验】：例如工具执行失败/报错原因、排卡调试经验、环境兼容性问题及具体的避坑防线。
+
 对于每一条经验，你必须输出为 JSON 格式的数组。格式如下：
 [
   {
-    "fact": "简明扼要的经验/事实描述，例如：在Windows下用read_file读写Excel时，如果Office软件正在占用，应先提示主人手动关闭。",
-    "keywords": ["read_file", "excel", "permission", "locked"]
+    "fact": "简明扼要的经验/技术事实描述（例如：'React 18 并发渲染的核心是通过 Scheduler 进行时间片调度'，或 '在 Windows 下用 read_file 读写被 Office 占用的 Excel 时会报错，应提示用户先关闭 Office'）",
+    "keywords": ["React", "Scheduler", "调度"]
   }
 ]
-如果你没有发现任何有价值的避坑经验或工具报错，请直接输出空数组 []。
+如果你没有发现任何有价值的技术知识要点或避坑经验，请直接输出空数组 []。
 请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 数组本身。`
 
     const experienceMessages = [
       { role: 'system', content: experienceSystemPrompt },
-      { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取避坑经验并输出为 JSON 数组。` }
+      { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验或技术事实并输出为 JSON 数组。` }
     ]
 
     console.log('[Purify] 正在调用大模型提炼避坑经验...')
@@ -657,21 +699,24 @@ export async function runPurifyMemoryPipeline() {
 
         const now = Date.now()
         const targetId = matchedId || `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
+        
+        const linkPath = processedFiles.map(fp => relative(chatDir, fp).replace(/\\/g, '/')).join(', ')
 
         if (matchedId) {
-          await database.run("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ? WHERE id = ?", now, matchedId)
+          await database.run("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ?, link = ? WHERE id = ?", now, linkPath, matchedId)
           console.log(`[Purify] 强化已有避坑经验 (ID: ${matchedId})`)
         } else {
           await database.run(`
-            INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding)
-            VALUES (?, ?, 1.0, ?, ?, 'experience', ?, ?)
+            INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding, link)
+            VALUES (?, ?, 1.0, ?, ?, 'experience', ?, ?, ?)
           `,
             targetId,
             item.fact,
             now,
             now,
             JSON.stringify(item.keywords || []),
-            emb ? JSON.stringify(emb) : null
+            emb ? JSON.stringify(emb) : null,
+            linkPath
           )
           insertCount++
           console.log(`[Purify] 写入新避坑经验 (ID: ${targetId}): ${item.fact}`)
