@@ -1,4 +1,4 @@
-# 🐾 AgentPet — 智能 3D/Live2D AI 桌面宠物助手
+# 🐾 AgentPet — 智能桌面Agent助手
 
 <div align="center">
 
