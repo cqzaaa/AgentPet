@@ -1442,6 +1442,14 @@ ${skillsContext}
             const messages = s.messages.map(m => {
               if (m.id === replyId) {
                 const currentText = m.text || ''
+                if (isAbort && (currentText.includes('手动终止') || currentText.includes('手动中断'))) {
+                  savedMsg = {
+                    ...m,
+                    isThinking: false,
+                    isError: false
+                  }
+                  return savedMsg
+                }
                 const appendMsg = isAbort 
                   ? '\n\n⚠️ 对话生成已被用户手动中断。'
                   : `\n\n系统错误：调用智能代理接口失败（${e.message || e}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`

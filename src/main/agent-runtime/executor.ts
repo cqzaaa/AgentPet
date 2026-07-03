@@ -376,7 +376,20 @@ export class AgentExecutor {
                 signal: abortSignal
               }
 
-              const fillResponse = await modelProvider.chat(tempHistory, fillOptions)
+              let fillResponse: ChatMessage
+              try {
+                fillResponse = await modelProvider.chat(tempHistory, fillOptions)
+              } catch (e: any) {
+                console.warn(`[Two-Stage] 首次强绑定参数填充失败，尝试将 tool_choice 降级为 "auto" 重试... 错误详情:`, e.message || e)
+                const fallbackOptions: ChatOptions = {
+                  model,
+                  temperature: 0.1,
+                  tools: [fullTool],
+                  tool_choice: 'auto',
+                  signal: abortSignal
+                }
+                fillResponse = await modelProvider.chat(tempHistory, fallbackOptions)
+              }
 
               if (fillResponse.usage) {
                 yield {

@@ -170,14 +170,14 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
     return runPurifyMemoryPipeline(sessionId)
   })
 
-  // 第四层：多路混合检索召回相关避坑经验 (仿 SAG 本地 SQL 动态图关联 RAG 架构)
+  // 第四层：多路混合检索召回相关避坑经验与个人偏好 (仿 SAG 本地 SQL 动态图关联 RAG 架构)
   ipcMain.handle('api:recall-experiences', async (_, queryText: string) => {
     try {
       if (!queryText || !queryText.trim()) return []
       const database = await deps.getDB()
       
-      // 1. 获取库中所有避坑经验记录及实体映射
-      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding FROM persona_memories WHERE category = 'experience'") as any[]
+      // 1. 获取库中所有关联记录及实体映射（支持经验、习惯和偏好）
+      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding, category FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
 
       const linkRows = await database.all("SELECT memory_id, entity_name FROM memory_entity_links") as { memory_id: string, entity_name: string }[]
@@ -420,7 +420,7 @@ async function getEmbeddingInternal(
 async function autoMigrateOldEmbeddings(db: any) {
   if (!memoryDeps) return
   try {
-    const rows = await db.all("SELECT id, fact, keywords, embedding FROM persona_memories WHERE category = 'experience'") as any[]
+    const rows = await db.all("SELECT id, fact, keywords, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
     if (rows.length === 0) return
 
     // 1. 增量自动扫描并补建实体多对多关联图谱
@@ -597,12 +597,15 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     }
 
     const profileSystemPrompt = `你是一个高级人物画像整理专家。你的任务是分析主人（用户）最近的对话摘要，提纯、合并并更新主人的全局长期人物画像。
-人物画像必须严格按照以下五个维度进行整理：
-1. 工作背景
-2. 个人背景
-3. 当前关注
-4. 近期动态
-5. 避坑重点与习惯
+人物画像必须严格按照以下四个维度进行整理：
+1. 工作背景（职业，工作内容，擅长的领域等）
+2. 个人背景（名字称呼、沟通语气偏好等）
+3. 当前关注与动态（当前重点攻克的任务、项目阶段性目标及近期最新进度）
+4. 工作偏好与习惯（主人特有的沟通与开发操作偏好，例如“喜欢直奔主题看完整代码，不需要冗长的解释说明”）
+
+⚠️ 绝对约束：在第四点“工作偏好与习惯”中，只能记录宏观的沟通和操作偏好，严禁记录任何具体的代码实现细节、特定报错修复方式或特定终端指令。这些微观技术事实均由底层的向量经验库独立维护，无需记录在全局画像中。
+
+⚠️ 历史冗余清洗指令：在合并更新时，你必须对【当前的全局人物画像】进行“降噪与清洗”。如果你发现已有的全局画像里混入了任何具体的微观技术事实（例如具体的 LobeHub 目录结构、LobeHub 源码实现原理、TEI 推理容器的部署具体步骤、特定的终端查找命令流程等），请**务必直接将它们从画像中彻底删除**！只保留与主人工作偏好、宏观背景相关的纯净内容。
 
 请合并新摘要中体现的信息，如果与过去的信息有冲突，以新的为准。
 请以 Markdown 格式输出最新的全局人物画像（不要包含任何思考过程、JSON、多余的分析或客套话，直接输出画像的 Markdown 文本内容）。`
@@ -622,27 +625,29 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     await fs.promises.writeFile(join(globalMemoryDir, 'profile.md'), updatedProfile.trim(), 'utf-8')
     console.log('[Purify] 人物画像 profile.md 覆盖更新成功。')
 
-    // 2. 提取报错与避坑经验，写入 persona_memories
-    const experienceSystemPrompt = `你是一个核心技术知识提炼与避坑经验沉淀专家。请分析主人最近的对话摘要，从中提纯并总结出以下两类结构化经验：
-1. 【技术核心与源码要点】：例如源码结构解读要点、业务逻辑核心细节、系统架构设计决策等。
-2. 【避坑纠错与工具经验】：例如工具执行失败/报错原因、排卡调试经验、环境兼容性问题及具体的避坑防线。
+    // 2. 提取技术事实、报错经验与生活习惯偏好，写入 persona_memories
+    const experienceSystemPrompt = `你是一个核心知识提炼与个人习惯偏好沉淀专家。请分析主人最近的对话摘要，从中提纯并总结出以下三类结构化记忆事实与偏好：
+1. 【技术核心与源码要点】：例如源码结构解读要点、业务逻辑核心细节、系统架构设计决策等（分类 category 归入 "experience"）。
+2. 【避坑纠错与工具经验】：例如工具执行失败/报错原因、排卡调试经验、环境兼容性问题及具体的避坑防线（分类 category 归入 "experience"）。
+3. 【个人喜好与生活习惯】：例如主人平时喜欢什么类型的音乐或运动（喜好）、主人的作息或工作时间安排、特定的沟通偏好（如“喜欢直接看代码而非冗长解释”）（分类 category 归入 "preference" 或 "habit"）。
 
-对于每一条经验，你必须输出为 JSON 格式的数组。格式如下：
+对于每一条沉淀事实，你必须输出为 JSON 格式的数组。格式如下：
 [
   {
-    "fact": "简明扼要的经验/技术事实描述（例如：'React 18 并发渲染的核心是通过 Scheduler 进行时间片调度'，或 '在 Windows 下用 read_file 读写被 Office 占用的 Excel 时会报错，应提示用户先关闭 Office'）",
-    "keywords": ["React", "Scheduler", "调度"]
+    "fact": "简明扼要的事实、习惯或喜好描述（例如：'React 18 并发渲染的核心是...'，或 '主人非常喜欢听民谣和古典音乐'，或 '主人习惯在每天早上 9 点查看服务器运行日志'）",
+    "keywords": ["React", "Scheduler"] 或 ["民谣", "古典音乐", "喜好"] 或 ["服务器日志", "查看习惯"],
+    "category": "experience" 或 "preference" 或 "habit"
   }
 ]
-如果你没有发现任何有价值的技术知识要点或避坑经验，请直接输出空数组 []。
+如果你没有发现任何有价值的事实、习惯或喜好，请直接输出空数组 []。
 请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 数组本身。`
 
     const experienceMessages = [
       { role: 'system', content: experienceSystemPrompt },
-      { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验或技术事实并输出为 JSON 数组。` }
+      { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验、技术事实、生活喜好或习惯并输出为 JSON 数组。` }
     ]
 
-    console.log('[Purify] 正在调用大模型提炼避坑经验...')
+    console.log('[Purify] 正在调用大模型提炼避坑经验与个人偏好...')
     const experienceRawJson = await callLlmInternal(getSystemLlmConfig(), experienceMessages, getActiveStorageDir())
     
     let jsonText = experienceRawJson.trim()
@@ -669,8 +674,8 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
           console.error('[Purify] 获取向量失败', ee)
         }
 
-        // 查询是否有相似的已有经验
-        const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category = 'experience'") as any[]
+        // 查询是否有相似的已有经验/喜好事实（不限分类）
+        const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
         
         let matchedId: string | null = null
         if (emb && rows.length > 0) {
@@ -702,24 +707,27 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
         
         const linkPath = processedFiles.map(fp => relative(chatDir, fp).replace(/\\/g, '/')).join(', ')
 
+        const categoryVal = (item.category === 'habit' || item.category === 'preference') ? item.category : 'experience'
+
         if (matchedId) {
           await database.run("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ?, link = ? WHERE id = ?", now, linkPath, matchedId)
-          console.log(`[Purify] 强化已有避坑经验 (ID: ${matchedId})`)
+          console.log(`[Purify] 强化已有记忆事实 (ID: ${matchedId}, 分类: ${categoryVal})`)
         } else {
           await database.run(`
             INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding, link)
-            VALUES (?, ?, 1.0, ?, ?, 'experience', ?, ?, ?)
+            VALUES (?, ?, 1.0, ?, ?, ?, ?, ?, ?)
           `,
             targetId,
             item.fact,
             now,
             now,
+            categoryVal,
             JSON.stringify(item.keywords || []),
             emb ? JSON.stringify(emb) : null,
             linkPath
           )
           insertCount++
-          console.log(`[Purify] 写入新避坑经验 (ID: ${targetId}): ${item.fact}`)
+          console.log(`[Purify] 写入新记忆事实 (ID: ${targetId}, 分类: ${categoryVal}): ${item.fact}`)
         }
 
         // 仿 SAG 机制：写入实体多对多关联关系图谱
