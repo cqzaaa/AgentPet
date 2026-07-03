@@ -20,7 +20,7 @@
 
 ## 🌟 简介
 
-**AgentPet** 是一款基于 Electron + React + TypeScript 打造的桌面智能 AI 宠物助手。它不仅拥有精致、生动的 **Live2D 动态拟人化外观**，更拥有一个聪明的 **自主决策 Agent 引擎**。
+**AgentPet** 是一款基于 Electron + React + TypeScript 打造的桌面智能 AI 宠物助手。它不仅拥有精致、生动的 **Live2D 动态拟人化外观** 与**高仿真 TTS 语音合成支持**，更拥有一个聪明的 **自主决策 Agent 引擎**，同时支持**远程安全连接与管理**。
 
 借助内置的 **工具箱 (Built-in Toolset)** 和 **MCP (Model Context Protocol)** 协议，AgentPet 可以自主拆解并执行你交代的复杂任务（如网页搜索、终端操作、Office 文档解析与生成等）。无论是无聊时与你闲聊，还是在工作时作为你的生产力助手，它都能完美胜任。
 
