@@ -101,7 +101,7 @@ export class UnifiedToolExecutor {
         }
         const abortPromise = new Promise<never>((_, reject) => {
           onAbort = () => reject(new Error('UserAborted'))
-          context.abortSignal.addEventListener('abort', onAbort)
+          context.abortSignal!.addEventListener('abort', onAbort)
         })
         promises.push(abortPromise)
       }

@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { app } from 'electron'
 import * as fs from 'fs'
 import { join } from 'path'
+import { McpNameMapper } from './mcp-name-mapper.js'
 
 export interface McpServerConfig {
   id: string
@@ -22,6 +23,8 @@ export class McpManager {
   private connections: Map<string, { client: Client; transport: SSEClientTransport | StreamableHTTPClientTransport; tools: any[]; config: McpServerConfig }> = new Map()
   private pendingConfigs: McpServerConfig[] = []
   public systemMcpConfig: { servers: McpServerConfig[] } = { servers: [] }
+  private toolsCache: Record<string, any[]> = {}
+
 
   private constructor() {
     this.loadSystemMcpConfig()
@@ -36,7 +39,15 @@ export class McpManager {
 
   // 设置配置但不立即连接（懒加载模式）
   public setConfigs(configs: McpServerConfig[]) {
-    this.pendingConfigs = configs.filter(c => c.enabled && c.url)
+    // 1. 同步将缓存的 tools 还原到新配置的内存对象中，防 tools 缓存丢失
+    this.systemMcpConfig.servers = configs.map(s => {
+      if (this.toolsCache[s.id]) {
+        return { ...s, tools: this.toolsCache[s.id] }
+      }
+      return s
+    })
+
+    this.pendingConfigs = this.systemMcpConfig.servers.filter(c => c.enabled && c.url)
     console.log(`[MCP] 已加载 ${this.pendingConfigs.length} 个 MCP 服务配置（懒加载模式，将在首次使用时连接）`)
 
     // 同时断开已不再启用的旧连接
@@ -210,25 +221,34 @@ export class McpManager {
     }
   }
 
-  // 更新工具缓存并持久化写入磁盘配置文件
+  // 更新工具缓存并持久化写入磁盘缓存文件
   private updateServerToolsCache(serverId: string, tools: any[]) {
     let changed = false
+    const oldTools = this.toolsCache[serverId] || []
+    if (JSON.stringify(oldTools) !== JSON.stringify(tools)) {
+      this.toolsCache[serverId] = tools
+      changed = true
+    }
+
+    // 同时也要更新内存中 systemMcpConfig 的内容，保证后续 getTools 等在内存中可用
     this.systemMcpConfig.servers = this.systemMcpConfig.servers.map(s => {
       if (s.id === serverId) {
-        const oldTools = s.tools || []
-        if (JSON.stringify(oldTools) !== JSON.stringify(tools)) {
-          changed = true
-          return { ...s, tools }
-        }
+        return { ...s, tools }
       }
       return s
     })
 
     if (changed) {
-      this.saveSystemMcpConfig(this.systemMcpConfig)
-      console.log(`[MCP] 已将服务 ${serverId} 的工具描述列表成功写入本地缓存磁盘文件`)
+      try {
+        const cachePath = join(app.getPath('userData'), 'mcp_tools_cache.json')
+        fs.writeFileSync(cachePath, JSON.stringify(this.toolsCache, null, 2), 'utf8')
+        console.log(`[MCP] 已将服务 ${serverId} 的工具描述列表成功写入本地缓存磁盘文件`)
+      } catch (e) {
+        console.error('[MCP] 写入本地工具缓存文件失败:', e)
+      }
     }
   }
+
 
   private async reconnectServer(id: string): Promise<boolean> {
     const conn = this.connections.get(id)
@@ -311,10 +331,19 @@ export class McpManager {
       if (!server.enabled) continue
       
       const conn = this.connections.get(server.id)
+      let serverTools: any[] = []
       if (conn) {
-        allTools.push(...conn.tools)
+        serverTools = conn.tools
       } else if (server.tools && Array.isArray(server.tools)) {
-        allTools.push(...server.tools)
+        serverTools = server.tools
+      }
+
+      // 将每一个工具名称转化为安全的模型端 API 名字
+      for (const t of serverTools) {
+        allTools.push({
+          ...t,
+          name: McpNameMapper.toSafeModelName(t.name)
+        })
       }
     }
     return allTools
@@ -335,31 +364,32 @@ export class McpManager {
   }
 
   public hasTool(name: string): boolean {
+    const realName = McpNameMapper.toOriginalName(name)
     for (const server of this.systemMcpConfig.servers) {
       if (!server.enabled) continue
       
       const conn = this.connections.get(server.id)
-      if (conn && conn.tools.some((t: any) => t.name === name)) {
+      if (conn && conn.tools.some((t: any) => t.name === realName)) {
         return true
       }
-      if (server.tools && Array.isArray(server.tools) && server.tools.some((t: any) => t.name === name)) {
+      if (server.tools && Array.isArray(server.tools) && server.tools.some((t: any) => t.name === realName)) {
         return true
       }
     }
     return false
   }
-
   public async executeTool(name: string, args: any, abortSignal?: AbortSignal, isRetry = false): Promise<string> {
+    const realName = McpNameMapper.toOriginalName(name)
     let targetServer: McpServerConfig | null = null
     for (const server of this.systemMcpConfig.servers) {
       if (!server.enabled) continue
       
       const conn = this.connections.get(server.id)
-      if (conn && conn.tools.some((t: any) => t.name === name)) {
+      if (conn && conn.tools.some((t: any) => t.name === realName)) {
         targetServer = server
         break
       }
-      if (server.tools && Array.isArray(server.tools) && server.tools.some((t: any) => t.name === name)) {
+      if (server.tools && Array.isArray(server.tools) && server.tools.some((t: any) => t.name === realName)) {
         targetServer = server
         break
       }
@@ -371,16 +401,16 @@ export class McpManager {
 
     let targetConn = this.connections.get(targetServer.id)
     if (!targetConn) {
-      console.log(`[MCP] 工具 ${name} 被调用，触发对服务 ${targetServer.name} 的按需握手连接...`)
+      console.log(`[MCP] 工具 ${realName} 被调用，触发对服务 ${targetServer.name} 的按需握手连接...`)
       const success = await this.connectSingleServer(targetServer)
       if (!success) {
-        return `错误：工具 ${name} 被调用，但建立服务连接 ${targetServer.name} 失败`
+        return `错误：工具 ${realName} 被调用，但建立服务连接 ${targetServer.name} 失败`
       }
       targetConn = this.connections.get(targetServer.id)
     }
 
     if (!targetConn) {
-      return `错误：未在任何已连接的 MCP 服务中找到工具: ${name}`
+      return `错误：未在任何已连接的 MCP 服务中找到工具: ${realName}`
     }
 
     const targetConnId = targetServer.id
@@ -399,7 +429,7 @@ export class McpManager {
       const promises: Promise<any>[] = []
 
       // 1. 启动工具调用
-      const callPromise = targetConn.client.callTool({ name, arguments: args })
+      const callPromise = targetConn.client.callTool({ name: realName, arguments: args })
       promises.push(callPromise)
 
       // 2. 注入超时限制
@@ -432,7 +462,7 @@ export class McpManager {
       }
       return 'MCP 工具执行完毕，但未返回可读文本。'
     } catch (err: any) {
-      console.error(`[MCP] 调用外部工具 ${name} 失败`, err)
+      console.error(`[MCP] 调用外部工具 ${realName} 失败`, err)
 
       if (err.message === 'UserAborted') {
         throw err
@@ -456,9 +486,11 @@ export class McpManager {
     }
   }
 
+
   public loadSystemMcpConfig() {
     try {
       const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
+      const cachePath = join(app.getPath('userData'), 'mcp_tools_cache.json')
       let parsed: any = null
       if (fs.existsSync(configPath)) {
         const data = fs.readFileSync(configPath, 'utf8')
@@ -473,7 +505,23 @@ export class McpManager {
         this.systemMcpConfig = { servers: [] }
       }
 
+      // 尝试加载工具定义缓存
+      if (fs.existsSync(cachePath)) {
+        try {
+          const cacheData = fs.readFileSync(cachePath, 'utf8')
+          this.toolsCache = JSON.parse(cacheData)
+        } catch {
+          this.toolsCache = {}
+        }
+      }
 
+      // 将缓存的 tools 还原到内存中的 servers 对象中，供系统运行时调用
+      this.systemMcpConfig.servers = this.systemMcpConfig.servers.map(s => {
+        if (this.toolsCache[s.id]) {
+          return { ...s, tools: this.toolsCache[s.id] }
+        }
+        return s
+      })
 
       this.setConfigs(this.systemMcpConfig.servers)
     } catch (e) {
@@ -484,11 +532,20 @@ export class McpManager {
   public saveSystemMcpConfig(config: any) {
     try {
       const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+      // 过滤掉大体积的 tools 缓存字段，使主配置文件保持精炼
+      const cleanedConfig = {
+        ...config,
+        servers: (config.servers || []).map((s: any) => {
+          const { tools: _t, ...rest } = s
+          return rest
+        })
+      }
+      fs.writeFileSync(configPath, JSON.stringify(cleanedConfig, null, 2), 'utf8')
     } catch (e) {
       console.error('保存全局 MCP 配置文件失败:', e)
     }
   }
+
 }
 
 export const mcpManager = McpManager.getInstance()

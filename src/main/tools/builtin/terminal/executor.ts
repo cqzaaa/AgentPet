@@ -37,7 +37,7 @@ export class TerminalExecutor implements IToolExecutor {
           cwd: execCwd, 
           timeout: cmdTimeout,
           signal: context.abortSignal
-        })
+        } as any)
         return {
           content: `[命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
           success: true

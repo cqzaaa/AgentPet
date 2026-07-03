@@ -194,6 +194,19 @@ export class AgentExecutor {
   3. 执行任务前，建议您先运行一次 \`uname -a\` 或 \`cat /etc/os-release\` 以探测并明确服务器的具体 OS 发行版和基础配置信息。`
       }
 
+      // 3. 注入已启用的外部 MCP 工具提示
+      const mcpTools = mcpManager.getTools()
+      if (mcpTools.length > 0) {
+        extraContext += `\n\n[系统状态：当前已挂载外部扩展工具 (MCP)]
+- 你的系统已通过 Model Context Protocol (MCP) 扩展协议接入了以下外部工具。
+- 用户可以直接要求你使用它们，大模型在遇到相关需求时也应主动调用。
+- 已挂载扩展工具列表：
+`
+        for (const t of mcpTools) {
+          extraContext += `- 工具名称: \`${t.name}\` | 功能描述: ${t.description || '暂无描述'}\n`
+        }
+      }
+
       if (extraContext) {
         const systemMsg = chatHistory.find((m: any) => m.role === 'system')
         if (systemMsg) {
