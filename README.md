@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🐾 AgentPet — 智能桌面Agent助手
+<img src="resources/icon.png" width="160" alt="AgentPet Logo" />
+
+# AgentPet — 智能桌面Agent助手
 
 [![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-v39.2-47848F?logo=electron)](https://www.electronjs.org/)
@@ -53,8 +55,9 @@
   - 支持 `.xlsx` / `.csv`（Excel）的读取、深度处理与表格生成，并带有内置的 Electron 高性能电子表格在线视口。
   - 支持 PDF 解析与 PDF 报告的动态生成。
   - 支持 PPT 幻灯片自动排版与输出。
-- **系统与终端交互**：
-  - **终端工具**：内置安全终端，支持本地命令行执行及 SSH 远程服务器安全连接。
+- **系统与终端交互 (SSH & Shell)**：
+  - **SSH 远程连接服务器**：内置安全的 SSH 客户端协议，支持 Agent 依据您的指令直接建立与您远程服务器的安全连接，自主执行部署命令、日志读取及日常系统运维。
+  - **本地命令行工具**：集成系统 Shell 终端，支持安全受控的本地命令执行。
   - **文件系统**：支持本地文件的高效检索、读写与深度文本解析（基于 `ripgrep` 等高性能引擎）。
 - **网页与搜索**：
   - 支持互联网搜索引擎检索、网页 HTML 内容抓取及自适应正文抽取。
