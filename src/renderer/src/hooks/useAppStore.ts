@@ -1434,28 +1434,36 @@ ${skillsContext}
     } catch (e: any) {
       console.error(e)
       const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
-      const errMsg = isAbort 
-        ? '⚠️ 对话生成已被用户手动中断。'
-        : `系统错误：调用智能代理接口失败（${e.message || e}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
-      setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
-          return {
-            ...s,
-            messages: s.messages.map(m => m.id === replyId ? { ...m, text: errMsg, isThinking: false, isError: !isAbort } : m)
+      
+      let savedMsg: any = null
+      setSessions(prev => {
+        const next = prev.map(s => {
+          if (s.id === activeSessionId) {
+            const messages = s.messages.map(m => {
+              if (m.id === replyId) {
+                const currentText = m.text || ''
+                const appendMsg = isAbort 
+                  ? '\n\n⚠️ 对话生成已被用户手动中断。'
+                  : `\n\n系统错误：调用智能代理接口失败（${e.message || e}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
+                savedMsg = {
+                  ...m,
+                  text: currentText + appendMsg,
+                  isThinking: false,
+                  isError: !isAbort
+                }
+                return savedMsg
+              }
+              return m
+            })
+            return { ...s, messages }
           }
+          return s
+        })
+        if (savedMsg) {
+          window.api.saveMessage({ ...savedMsg, sessionId: activeSessionId }).catch(console.error)
         }
-        return s
-      }))
-      // 同步报错状态到数据库，防止刷新后假死
-      window.api.saveMessage({
-        id: replyId,
-        sessionId: activeSessionId,
-        sender: 'agent',
-        text: errMsg,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isThinking: false,
-        isError: !isAbort
-      }).catch(console.error)
+        return next
+      })
     } finally {
       if (!typingStarted) {
         setIsSending(false)

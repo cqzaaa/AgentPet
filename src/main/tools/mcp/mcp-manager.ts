@@ -14,6 +14,7 @@ export interface McpServerConfig {
   enabled: boolean
   description?: string
   tools?: any[] // 工具定义缓存字段
+  timeout?: number // 超时时间（秒），可选
 }
 
 export class McpManager {
@@ -348,7 +349,7 @@ export class McpManager {
     return false
   }
 
-  public async executeTool(name: string, args: any, isRetry = false): Promise<string> {
+  public async executeTool(name: string, args: any, abortSignal?: AbortSignal, isRetry = false): Promise<string> {
     let targetServer: McpServerConfig | null = null
     for (const server of this.systemMcpConfig.servers) {
       if (!server.enabled) continue
@@ -384,13 +385,44 @@ export class McpManager {
 
     const targetConnId = targetServer.id
 
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('MCP 工具调用超时 (22秒限制)')), 22000)
-      )
+    let timeoutMs = 60000 // 默认放宽到 60 秒
+    if (args && typeof args.timeout_seconds === 'number') {
+      timeoutMs = args.timeout_seconds * 1000
+    } else if (targetServer.timeout && typeof targetServer.timeout === 'number') {
+      timeoutMs = targetServer.timeout * 1000
+    }
 
+    let timer: NodeJS.Timeout | null = null
+    let onAbort: (() => void) | null = null
+
+    try {
+      const promises: Promise<any>[] = []
+
+      // 1. 启动工具调用
       const callPromise = targetConn.client.callTool({ name, arguments: args })
-      const response = await Promise.race([callPromise, timeoutPromise])
+      promises.push(callPromise)
+
+      // 2. 注入超时限制
+      if (timeoutMs > 0) {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`MCP 工具调用超时（限制 ${timeoutMs / 1000} 秒）`)), timeoutMs)
+        })
+        promises.push(timeoutPromise)
+      }
+
+      // 3. 注入中止信号
+      if (abortSignal) {
+        if (abortSignal.aborted) {
+          throw new Error('UserAborted')
+        }
+        const abortPromise = new Promise<never>((_, reject) => {
+          onAbort = () => reject(new Error('UserAborted'))
+          abortSignal.addEventListener('abort', onAbort)
+        })
+        promises.push(abortPromise)
+      }
+
+      const response = await Promise.race(promises)
 
       if (response && response.content) {
         return (response.content as any[])
@@ -402,16 +434,25 @@ export class McpManager {
     } catch (err: any) {
       console.error(`[MCP] 调用外部工具 ${name} 失败`, err)
 
+      if (err.message === 'UserAborted') {
+        throw err
+      }
+
       if (!isRetry) {
         console.log(`[MCP] 检测到服务 ${targetConn.config.name} 的连接可能已失效/报错，正在尝试自动重连...`)
         const success = await this.reconnectServer(targetConnId)
         if (success) {
           console.log(`[MCP] 服务 ${targetConn.config.name} 重连成功，正在重新执行工具 ${name}...`)
-          return this.executeTool(name, args, true)
+          return this.executeTool(name, args, abortSignal, true)
         }
       }
 
       return `错误：调用外部 MCP 工具失败: ${err.message || err}`
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (abortSignal && onAbort) {
+        abortSignal.removeEventListener('abort', onAbort)
+      }
     }
   }
 

@@ -32,6 +32,10 @@ export const webManifest: ToolManifest = {
           url: {
             type: 'string',
             description: '要抓取的网页 URL'
+          },
+          timeout_seconds: {
+            type: 'number',
+            description: '可选。网络抓取的最长超时秒数（遇到连接较慢或复杂网页渲染时可设置，默认为 30 秒）。'
           }
         },
         required: ['url']

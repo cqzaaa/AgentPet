@@ -35,6 +35,10 @@ export const searchManifest: ToolManifest = {
           case_insensitive: {
             type: 'boolean',
             description: '是否忽略大小写（可选）'
+          },
+          timeout_seconds: {
+            type: 'number',
+            description: '可选。检索的最长超时秒数（在超大工程大范围搜索时可设置，默认为 30 秒）。'
           }
         },
         required: ['pattern']

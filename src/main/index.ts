@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
 import { join, basename, dirname } from 'path'
-import { registerMemoryAPIs, runPurifyMemoryPipeline, appendMemorySummaryInternal } from './api/memory'
+import { registerMemoryAPIs } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -12,10 +12,11 @@ import { EdgeTTS } from 'node-edge-tts'
 
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
-import { unifiedToolExecutor } from './tools/core/tool-executor'
 import { mcpManager } from './tools/mcp/mcp-manager'
 import { permissionManager } from './tools/security/permission-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
+import { AgentExecutor } from './agent-runtime'
+
 
 
 
@@ -2923,154 +2924,18 @@ app.whenReady().then(() => {
     return list
   }
 
-  function getFullToolDefinitionByName(name: string, isFrontend: boolean): any | null {
-    const fullTools = getFormattedTools(isFrontend, false)
-    return fullTools.find((t: any) => t.function.name === name) || null
-  }
 
-  // 执行本地系统及 MCP 工具的统一分发入口
-  async function executeTool(
-    name: string,
-    args: any,
-    workspacePath: string,
-    event?: Electron.IpcMainInvokeEvent,
-    sessionId?: string
-  ): Promise<string> {
-    const ctx = {
-      workspacePath,
-      sessionId,
-      isFrontend: !!event,
-      event,
-      sandboxMode: sandboxMode
-    }
-    const result = await unifiedToolExecutor.execute(name, args, ctx)
-    return result.content
-  }
-
-
-  // 5. 通用大模型内部核心请求处理器 (解决 CORS 跨域问题，支持 Tool Calling 循环)
-  async function handleLongTaskAutoMemory(
-    sessionId: string,
-    chatHistory: any[],
-    config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number }
-  ) {
-    try {
-      if (!sessionId) return
-      console.log('[Memory] 开始为长任务会话生成自动总结:', sessionId)
-
-      let chatLogs = ''
-      for (const msg of chatHistory) {
-        if (msg.role === 'system') continue
-        const contentStr = Array.isArray(msg.content)
-          ? msg.content.map((b: any) => b.text || '').join('')
-          : (msg.content || '')
-        chatLogs += `${msg.role === 'user' ? '用户' : '助手'}: ${contentStr}\n`
-      }
-
-      const summarySystemPrompt = `你是一个经验丰富的 AI 对话与开发任务总结助手。
-请你仔细阅读以下【一轮包含了用户提问、助手回答及本地系统工具调用的对话日志】，并为他们生成一段精炼、实用的 Markdown 摘要与知识沉淀。
-
-你必须输出以下两个部分：
-1. 【主题】：为本次长任务起一个清晰的主题名称（如：“Electron SQLite 数据库新增 link 字段升级”、“使用 ripgrep 实现多路混合记忆召回”等，禁止带日期，只要主题名，不超过 20 字）。
-2. 【总结内容】：详细梳理出：
-   - 核心任务与解决过程。
-   - 成功经验与关键代码。
-   - 纠错避坑（若有报错，为什么报错，怎么解决的）。
-3. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
-{
-  "title": "主题名",
-  "content": "### 💡 核心知识与经验沉淀\\n..."
-}
-请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 本身。`
-
-      const messages = [
-        { role: 'system', content: summarySystemPrompt },
-        { role: 'user', content: `【对话日志】\\n${chatLogs}\\n\\n请进行总结。` }
-      ]
-
-      let cleanBaseUrl = (config.baseUrl || '').trim().replace(/\/+$/, '')
-      if (cleanBaseUrl.toLowerCase().endsWith('/chat/completions')) {
-        cleanBaseUrl = cleanBaseUrl.slice(0, -'/chat/completions'.length)
-      }
-
-      let url = ''
-      const headers = { 'Content-Type': 'application/json' }
-      const body = {
-        model: config.model,
-        temperature: 0.3,
-        messages
-      }
-
-      if (config.provider === 'gemini') {
-        url = `${cleanBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'}/chat/completions`
-        headers['Authorization'] = `Bearer ${config.apiKey}`
-        body.model = config.model || 'gemini-1.5-flash'
-      } else if (config.provider === 'openai') {
-        url = `${cleanBaseUrl || 'https://api.openai.com/v1'}/chat/completions`
-        headers['Authorization'] = `Bearer ${config.apiKey}`
-        body.model = config.model || 'gpt-4o-mini'
-      } else if (config.provider === 'deepseek') {
-        url = `${cleanBaseUrl || 'https://api.deepseek.com/v1'}/chat/completions`
-        headers['Authorization'] = `Bearer ${config.apiKey}`
-        body.model = config.model || 'deepseek-chat'
-      } else if (config.provider === 'ollama') {
-        url = `${cleanBaseUrl || 'http://localhost:11434/v1'}/chat/completions`
-        body.model = config.model || 'llama3'
-      } else {
-        url = `${cleanBaseUrl}/chat/completions`
-        if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
-      }
-
-      const response = await net.fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body)
-      })
-
-      if (!response.ok) {
-        throw new Error(`总结接口返回异常: ${response.status}`)
-      }
-
-      const data = await response.json()
-      let rawText = data.choices?.[0]?.message?.content || ''
-      rawText = rawText.trim()
-      if (rawText.startsWith('```')) {
-        rawText = rawText.replace(/^```(json)?/, '').replace(/```$/, '').trim()
-      }
-
-      const result = JSON.parse(rawText)
-      if (result.title && result.content) {
-        await appendMemorySummaryInternal(sessionId, result.title, result.content)
-        console.log(`[Memory] 长任务自动沉淀成功: [${result.title}]`)
-      } else {
-        throw new Error('返回的 JSON 格式不包含 title 或 content')
-      }
-    } catch (err) {
-      console.error('[Memory] 长任务自动经验沉淀失败:', err)
-    }
-  }
+  // handleLongTaskAutoMemory has been relocated to AgentExecutor
 
   async function callLlmInternal(
-    config: {
-      provider: string;
-      apiKey: string;
-      baseUrl: string;
-      model: string;
-      temperature: number;
-      maxTokens?: number;
-      sessionId?: string;
-      messageId?: number
-    },
+    config: any,
     messages: any[],
     workspacePath?: string,
     event?: Electron.IpcMainInvokeEvent,
     onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string }) => void
-
   ): Promise<string> {
-    const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, messageId } = config
-    
+    const executor = new AgentExecutor()
     let thisController: AbortController
-    // 只有在明确传入了 IPC 调用 event（来自前端真实用户的对话），且未标记为 isBackground 时，才控制全局的 abort 中断
     if (event && !(config as any).isBackground) {
       if (currentLlmAbortController) {
         try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
@@ -3078,154 +2943,67 @@ app.whenReady().then(() => {
       currentLlmAbortController = new AbortController()
       thisController = currentLlmAbortController
     } else {
-      // 微信机器人、后台提炼管道等其他调用，使用隔离的 AbortController，互不相干
       thisController = new AbortController()
     }
 
-    let url = ''
-    const headers: any = {
-      'Content-Type': 'application/json'
-    }
-    const body: any = {}
+    try {
+      const stepStream = executor.run(
+        {
+          ...config,
+          sandboxMode: sandboxMode
+        },
+        messages,
+        workspacePath,
+        thisController.signal
+      )
 
-    // 对 Base URL 进行健壮性与防呆化过滤（去掉末尾多余斜杠）
-    let cleanBaseUrl = (baseUrl || '').trim().replace(/\/+$/, '')
-    // 鲁棒性防呆：如果用户填写的 baseUrl 已经包含了 /chat/completions，则将其自动截断，防止下方拼接重复路径导致 404
-    if (cleanBaseUrl.toLowerCase().endsWith('/chat/completions')) {
-      cleanBaseUrl = cleanBaseUrl.slice(0, -'/chat/completions'.length)
-    }
-
-    if (provider === 'gemini') {
-      const effectiveBaseUrl = cleanBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'
-      url = `${effectiveBaseUrl}/chat/completions`
-      headers['Authorization'] = `Bearer ${apiKey}`
-      body.model = model || 'gemini-1.5-flash'
-      body.temperature = temperature ?? 0.7
-    } else if (provider === 'openai') {
-      const effectiveBaseUrl = cleanBaseUrl || 'https://api.openai.com/v1'
-      url = `${effectiveBaseUrl}/chat/completions`
-      headers['Authorization'] = `Bearer ${apiKey}`
-      body.model = model || 'gpt-4o-mini'
-      body.temperature = temperature ?? 0.7
-    } else if (provider === 'deepseek') {
-      const effectiveBaseUrl = cleanBaseUrl || 'https://api.deepseek.com/v1'
-      url = `${effectiveBaseUrl}/chat/completions`
-      headers['Authorization'] = `Bearer ${apiKey}`
-      body.model = model || 'deepseek-chat'
-      body.temperature = temperature ?? 0.7
-    } else if (provider === 'ollama') {
-      const effectiveBaseUrl = cleanBaseUrl || 'http://localhost:11434/v1'
-      url = `${effectiveBaseUrl}/chat/completions`
-      body.model = model || 'llama3'
-      body.temperature = temperature ?? 0.7
-    } else {
-      url = `${cleanBaseUrl}/chat/completions`
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`
-      }
-      body.model = model
-      body.temperature = temperature ?? 0.7
-    }
-
-    if (maxTokens) {
-      body.max_tokens = maxTokens
-    }
-
-    let chatHistory = JSON.parse(JSON.stringify(messages)) // 深拷贝避免污染
-
-    if (sessionId) {
-      const chatDir = getActiveChatDir()
-      const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
-      const cacheDir = join(chatDir, safeSessionId, '.agentpet_cache')
-      let cacheContext = ''
-      
-      if (fs.existsSync(cacheDir)) {
-        try {
-          const cacheFiles = await fs.promises.readdir(cacheDir)
-          const mdCaches = cacheFiles.filter(f => f.toLowerCase().endsWith('.md'))
-          if (mdCaches.length > 0) {
-            cacheContext = `\n\n📂 【本地已缓存的离线网页/文档】\n当前会话下已为您抓取并缓存了以下本地网页文件：\n`
-            for (const file of mdCaches) {
-              const relPath = `.agentpet_cache/${file}`
-              cacheContext += `- 离线网页缓存: \`${relPath}\` (文件名: \`${file}\`)\n`
-            }
-            cacheContext += `\n⚠️ 【网页抓取与阅读硬约束原则】：
-1. 当主人的问题与上述已缓存的离线网页文件相关时，你【必须且只能】优先使用 \`read_file\` 工具读取，或使用 \`grep_content\` 检索对应的本地缓存文件。
-2. 当你调用 \`web_fetch\` 抓取新网页后，若因为网页过长被系统截断（提示被截断或预览不足），你【必须且立即】使用 \`read_file\` 工具传入刚才抓取生成的本地缓存相对路径来读取全文。
-3. 非必要【严禁】重复调用 \`web_fetch\` 或 \`web_search\` 去重复联网下载相同的网址或检索相同内容！\n`
+      let finalResponse = ''
+      for await (const step of stepStream) {
+        if (step.type === 'think') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'think',
+              name: '深度思考过程',
+              detail: step.detail,
+              sessionId: config.sessionId
+            })
           }
-        } catch (err) {
-          console.error('[callLlmInternal] 扫描离线网页缓存失败:', err)
-        }
-      }
-
-      if (cacheContext) {
-        const systemMsg = chatHistory.find((m: any) => m.role === 'system')
-        if (systemMsg) {
-          if (typeof systemMsg.content === 'string') {
-            systemMsg.content += cacheContext
-          } else if (Array.isArray(systemMsg.content)) {
-            systemMsg.content.push({ type: 'text', text: cacheContext })
+          if (onToolEvent) {
+            onToolEvent({ type: 'think', name: '深度思考过程', detail: step.detail })
           }
-        } else {
-          chatHistory.unshift({ role: 'system', content: cacheContext })
-        }
-      }
-    }
-
-    let totalPromptTokens = 0
-    let totalCompletionTokens = 0
-
-    // 直接加载简化版工具列表进行第一阶段路由（本地 + MCP，减少首轮 Token 消耗）
-    const effectiveTools = getFormattedTools(!!event, true)
-
-    if (effectiveTools.length > 0) {
-      body.tools = effectiveTools
-      body.tool_choice = 'auto'
-    }
-
-    // 在发送前解析本地图片路径为 base64 多模态格式
-    for (const msg of chatHistory) {
-      if (Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block.type === 'image_url' && block.image_url && block.image_url.url && block.image_url.url.startsWith('local-file://')) {
-            // 解析 local-file:///C:/path 格式（三斜杠），去掉 Windows 路径前导斜杠
-            let localPath = ''
-            try {
-              const parsedUrl = new URL(block.image_url.url)
-              localPath = decodeURIComponent(parsedUrl.pathname)
-              if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
-            } catch {
-              localPath = block.image_url.url.replace('local-file://', '')
-            }
-            try {
-              if (fs.existsSync(localPath)) {
-                const buffer = fs.readFileSync(localPath)
-                let ext = localPath.split('.').pop()?.toLowerCase() || 'jpeg'
-                if (ext === 'jpg') ext = 'jpeg'
-                const mimeType = `image/${ext}`
-                block.image_url.url = `data:${mimeType};base64,${buffer.toString('base64')}`
-              }
-            } catch (err) {
-              console.error('读取本地图片转换 Base64 给大模型时失败:', err)
-            }
+        } else if (step.type === 'tool_call') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'tool_call',
+              name: step.name,
+              args: step.args,
+              sessionId: config.sessionId
+            })
           }
-        }
-      }
-    }
-
-    const sendTokenEvent = () => {
-      try {
-        if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
-          console.log(`[Token] Total - prompt: ${totalPromptTokens}, completion: ${totalCompletionTokens}, total: ${totalPromptTokens + totalCompletionTokens}`)
+          if (onToolEvent) {
+            onToolEvent({ type: 'tool_call', name: step.name, args: step.args })
+          }
+        } else if (step.type === 'tool_result') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'tool_result',
+              name: step.name,
+              result: step.result,
+              sessionId: config.sessionId
+            })
+          }
+          if (onToolEvent) {
+            onToolEvent({ type: 'tool_result', name: step.name, result: step.result })
+          }
+        } else if (step.type === 'token') {
           const payload = {
-            model: body.model || model,
-            provider,
-            promptTokens: totalPromptTokens,
-            completionTokens: totalCompletionTokens,
+            model: config.model,
+            provider: config.provider,
+            promptTokens: step.promptTokens,
+            completionTokens: step.completionTokens,
             timestamp: Date.now(),
-            sessionId,
-            messageId
+            sessionId: config.sessionId,
+            messageId: config.messageId
           }
           if (event) {
             event.sender.send('api:llm-token-usage', payload)
@@ -3236,373 +3014,22 @@ app.whenReady().then(() => {
               mainWindow.webContents.send('api:llm-token-usage', payload)
             }
           }
+        } else if (step.type === 'text') {
+          finalResponse = step.content
+        } else if (step.type === 'error') {
+          throw new Error(step.message)
         }
-      } catch (se) {
-        console.error('send token usage event failed', se)
       }
-    }
 
-    let loopCount = 0
-    const maxLoops = 40
-    // 工具调用中断阈值：超过此次数后强制暂停工具链，引导用户补全关键信息
-    let TOOL_INTERRUPT_THRESHOLD = 10
-    // 计入工具实际物理调用次数（排除 extend_task_loop 等伪工具）
-    let totalToolCallsCount = 0
-    // 标记当前是否为主动扩展的长任务
-    let isLongTask = false
-
-
-    while (loopCount < maxLoops) {
-      loopCount++
-
-      try {
-        const response = await net.fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ ...body, messages: chatHistory }),
-          signal: thisController.signal
-        })
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删除降级
-          if (loopCount === 1 && body.tools && (response.status === 400 || errorText.includes('tools') || errorText.includes('tool_choice') || errorText.includes('parameter') || errorText.includes('unsupported'))) {
-            console.warn('API 不支持工具参数，已优雅降级为纯对话模式', errorText)
-            delete body.tools
-            delete body.tool_choice
-            loopCount = 0
-            continue
-          }
-
-          let displayError = errorText
-          if (displayError.trim().toLowerCase().startsWith('<!doctype html') || displayError.toLowerCase().includes('<html')) {
-            displayError = '服务端返回了 HTML 页面而非有效的 API 响应（通常是因为 Base URL 配置错误，例如填入了网页地址而非 API 接口地址）。请检查设置中的大模型 Base URL。'
-          } else {
-            // 尝试解析 JSON 错误以提取更有用的信息
-            try {
-              const errObj = JSON.parse(errorText)
-              if (errObj.error && errObj.error.message) {
-                displayError = errObj.error.message
-              }
-            } catch (e) {
-              // 忽略 JSON 解析错误，继续使用原始文本
-            }
-            if (displayError.length > 500) {
-              displayError = displayError.substring(0, 500) + '... (省略过多内容)'
-            }
-          }
-
-          // 针对常见的 HTTP 错误状态提供人性化的中文翻译与排查建议
-          if (response.status >= 500) {
-            throw new Error(`[大模型服务端故障] 服务器遇到内部错误 (HTTP ${response.status})。可能是中转节点宕机或模型过载，请稍后重试。详情: ${displayError}`)
-          } else if (response.status === 401 || response.status === 403) {
-            throw new Error(`[鉴权失败] API Key 可能无效、未授权或已欠费 (HTTP ${response.status})。详情: ${displayError}`)
-          } else if (response.status === 429) {
-            throw new Error(`[请求限流] 您的请求过于频繁或额度已耗尽 (HTTP 429)。详情: ${displayError}`)
-          }
-
-          throw new Error(`HTTP ${response.status}: ${displayError}`)
-        }
-
-        const data: any = await response.json()
-
-        // 累加 token 消耗
-        if (data.usage) {
-          const apiPromptTokens = data.usage.prompt_tokens || 0
-          const apiCompletionTokens = data.usage.completion_tokens || 0
-          totalPromptTokens += apiPromptTokens
-          totalCompletionTokens += apiCompletionTokens
-          console.log(`[Token] API usage - prompt: ${apiPromptTokens}, completion: ${apiCompletionTokens}`)
-        } else if (data.choices?.[0]?.message?.content) {
-          const textOut = data.choices[0].message.content || ''
-          const textIn = chatHistory.map((m: any) => {
-            if (Array.isArray(m.content)) {
-              return m.content.map((b: any) => b.text || '').join('')
-            }
-            return m.content || ''
-          }).join('')
-          const estimatedPrompt = Math.max(1, Math.round(textIn.length * 0.5))
-          const estimatedCompletion = Math.max(1, Math.round(textOut.length * 0.8))
-          totalPromptTokens += estimatedPrompt
-          totalCompletionTokens += estimatedCompletion
-          console.log(`[Token] Estimated - prompt: ${estimatedPrompt} (chars: ${textIn.length}), completion: ${estimatedCompletion} (chars: ${textOut.length})`)
-        } else {
-          console.log(`[Token] No usage data - hasUsage: ${!!data.usage}, hasContent: ${!!data.choices?.[0]?.message?.content}`)
-        }
-
-        const message = data.choices?.[0]?.message
-        if (!message) {
-          throw new Error('未获取到有效的模型答复结构')
-        }
-
-        let thinkContent = message.reasoning_content || ''
-        if (!thinkContent && message.content) {
-          const thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/i)
-          if (thinkMatch) {
-            thinkContent = thinkMatch[1].trim()
-          }
-        }
-
-        if (thinkContent) {
-          if (event) {
-            event.sender.send('api:llm-tool-event', {
-              type: 'think',
-              name: '深度思考过程',
-              detail: thinkContent,
-              sessionId
-            })
-          }
-          if (onToolEvent) {
-            onToolEvent({ type: 'think', name: '深度思考过程', detail: thinkContent })
-          }
-        }
-
-        const toolCalls = message.tool_calls
-        if (toolCalls && toolCalls.length > 0) {
-          // 检查是否在这一轮调用了 extend_task_loop
-          const hasExtend = toolCalls.some((tc: any) => tc.function.name === 'extend_task_loop')
-
-          // ⭐ 工具调用超阈值：强制软中断工具链，引导大模型调用 extend_task_loop 或停止
-          if (loopCount >= TOOL_INTERRUPT_THRESHOLD && !hasExtend) {
-            console.warn(`[callLlm] 工具调用已达 ${loopCount} 次，触发软中断...`)
-
-            // 将 assistant 消息（含 tool_calls）加入历史，保持对话连贯性
-            chatHistory.push(message)
-
-            // 为每个未执行的 tool_call 补充拦截提示，避免 API 因缺少 tool 结果而报错
-            for (const tc of toolCalls) {
-              chatHistory.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                name: tc.function.name,
-                content: `[系统拦截] 调用次数已达上限(${TOOL_INTERRUPT_THRESHOLD})，本次工具被拦截未执行。\n如果你确信这是一个需要更多步骤的长任务，请立即调用 \`extend_task_loop\` 工具申请延长。\n否则，说明你可能陷入了死循环或找不到目标，请直接输出一段话向用户提问求助，不要再调用其他工具。`
-              })
-            }
-
-            // 使用 continue 跳过当前轮次的 executeTool，直接进入下一轮的 LLM API 思考
-            continue
-          }
-
-          // 第二阶段参数填充逻辑：对于每个被调用的工具，若其包含非空 properties 参数定义，则按需填充
-          for (let i = 0; i < toolCalls.length; i++) {
-            const toolCall = toolCalls[i]
-            const toolName = toolCall.function.name
-            const fullTool = getFullToolDefinitionByName(toolName, !!event)
-
-            const isMcpTool = mcpManager.hasTool(toolName)
-            if (isMcpTool && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
-              console.log(`[Two-Stage] 检测到简化工具调用: ${toolName}，正在启动第二阶段参数填充...`)
-              try {
-                const tempHistory = [
-                  ...chatHistory,
-                  message,
-                  {
-                    role: 'tool',
-                    tool_call_id: toolCall.id,
-                    name: toolName,
-                    content: `【系统提示】此工具需要输入参数。请根据以下 JSON Schema 定义重新生成此工具调用，并提供正确的 arguments 参数字段：\n${JSON.stringify(fullTool.function.parameters)}`
-                  }
-                ]
-
-                const fillBody: any = {
-                  model: body.model,
-                  temperature: 0.1, // 降低随机性确保参数填充精度
-                  messages: tempHistory,
-                  tools: [fullTool],
-                  tool_choice: { type: 'function', function: { name: toolName } }
-                }
-                if (body.max_tokens) {
-                  fillBody.max_tokens = body.max_tokens
-                }
-
-                const fillResponse = await net.fetch(url, {
-                  method: 'POST',
-                  headers,
-                  body: JSON.stringify(fillBody),
-                  signal: thisController.signal
-                })
-
-                if (!fillResponse.ok) {
-                  const errorText = await fillResponse.text()
-                  throw new Error(`参数填充请求失败 HTTP ${fillResponse.status}: ${errorText}`)
-                }
-
-                const fillData: any = await fillResponse.json()
-
-                if (fillData.usage) {
-                  const apiPromptTokens = fillData.usage.prompt_tokens || 0
-                  const apiCompletionTokens = fillData.usage.completion_tokens || 0
-                  totalPromptTokens += apiPromptTokens
-                  totalCompletionTokens += apiCompletionTokens
-                  console.log(`[Two-Stage Token] API usage - prompt: ${apiPromptTokens}, completion: ${apiCompletionTokens}`)
-                }
-
-                const fillMessage = fillData.choices?.[0]?.message
-                const fillToolCalls = fillMessage?.tool_calls
-                const matchedCall = fillToolCalls?.find((tc: any) => tc.function.name === toolName)
-
-                if (matchedCall && matchedCall.function.arguments) {
-                  console.log(`[Two-Stage] 成功获取参数:`, matchedCall.function.arguments)
-                  toolCall.function.arguments = matchedCall.function.arguments
-                } else {
-                  console.warn(`[Two-Stage] 未能从模型返回中获取到匹配的参数`)
-                }
-              } catch (fillErr) {
-                console.error(`[Two-Stage] 参数填充出错:`, fillErr)
-              }
-            }
-          }
-
-          chatHistory.push(message)
-
-          for (const toolCall of toolCalls) {
-            // 检查是否已中止，如果是则立即停止工具执行
-            if (thisController.signal.aborted) {
-              currentLlmAbortController = null
-              throw new Error('UserAborted')
-            }
-
-            const toolName = toolCall.function.name
-            // 计入工具实际物理调用次数（排除 extend_task_loop 等伪工具）
-            if (toolName !== 'extend_task_loop' && toolName !== 'trigger_memory_purify') {
-              totalToolCallsCount++
-            }
-            let toolArgs: any = {}
-            try {
-              toolArgs = JSON.parse(toolCall.function.arguments || '{}')
-            } catch (pe) {
-              console.error('解析工具参数失败', pe)
-            }
-
-            let safeToolArgs: any = {}
-            try {
-              safeToolArgs = JSON.parse(JSON.stringify(toolArgs))
-              const truncateArgs = (obj: any): any => {
-                if (typeof obj === 'string' && obj.length > 1000) {
-                  return obj.substring(0, 1000) + '... (内容过长，为保持UI流畅前端已隐藏，后台已完整保存)'
-                }
-                if (Array.isArray(obj)) {
-                  return obj.map(val => truncateArgs(val))
-                } else if (obj !== null && typeof obj === 'object') {
-                  const newObj: any = {}
-                  for (const k in obj) {
-                    newObj[k] = truncateArgs(obj[k])
-                  }
-                  return newObj
-                }
-                return obj
-              }
-              safeToolArgs = truncateArgs(safeToolArgs)
-            } catch (e) {
-              safeToolArgs = toolArgs
-            }
-
-            if (event) {
-              event.sender.send('api:llm-tool-event', {
-                type: 'tool_call',
-                name: toolName,
-                args: safeToolArgs,
-                sessionId
-              })
-            }
-            if (onToolEvent) {
-              onToolEvent({ type: 'tool_call', name: toolName, args: safeToolArgs })
-            }
-
-            let toolResult: string
-            if (toolName === 'extend_task_loop') {
-              isLongTask = true
-              const extraLoops = typeof toolArgs.extra_loops === 'number' ? toolArgs.extra_loops : 20
-              TOOL_INTERRUPT_THRESHOLD += extraLoops
-              toolResult = `[系统提示] 任务链执行轮数上限已扩展至 ${TOOL_INTERRUPT_THRESHOLD} 次。请继续安心执行您的长任务，不要中断。`
-            } else if (toolName === 'trigger_memory_purify') {
-              // 异步触发，不阻塞大模型的主流程
-              runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
-              toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
-            } else {
-              toolResult = await executeTool(toolName, toolArgs, workspacePath || '', event, sessionId)
-            }
-
-
-            // 工具执行完成后再次检查是否已中止
-            if (thisController.signal.aborted) {
-              if (currentLlmAbortController === thisController) currentLlmAbortController = null
-              throw new Error('UserAborted')
-            }
-
-            let displayResult = toolResult
-            if (typeof displayResult === 'string' && displayResult.length > 1000) {
-              displayResult = displayResult.substring(0, 1000) + `\n\n... [工具输出内容过长(${displayResult.length}字符)，为了保持UI流畅已截断展示。大模型后台已读取完整内容。]`
-            }
-
-            if (event) {
-              event.sender.send('api:llm-tool-event', {
-                type: 'tool_result',
-                name: toolName,
-                result: displayResult,
-                sessionId
-              })
-            }
-            if (onToolEvent) {
-              onToolEvent({ type: 'tool_result', name: toolName, result: displayResult })
-            }
-
-            let contextToolResult = toolResult
-            const MAX_CONTEXT_TOOL_RESULT = 12000
-            if (typeof contextToolResult === 'string' && contextToolResult.length > MAX_CONTEXT_TOOL_RESULT) {
-              contextToolResult = contextToolResult.substring(0, MAX_CONTEXT_TOOL_RESULT) +
-                `\n\n[系统保护警告]: 数据量过大，已被系统强制截断（仅保留前 ${MAX_CONTEXT_TOOL_RESULT} 字符）。\n🚫 严禁使用相同的参数再次无脑读取整个文件或网页！\n💡 解决方案：如果你需要后续内容，请务必在工具参数中使用 start_line 和 end_line 进行精确的分页读取，或使用 grep_content 检索精准内容。`
-            }
-
-            chatHistory.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              name: toolName,
-              content: contextToolResult
-            })
-          }
-
-          continue
-        } else {
-          sendTokenEvent()
-          if (currentLlmAbortController === thisController) currentLlmAbortController = null
-          let finalResponse = message.content || ''
-          finalResponse = finalResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-          if (!finalResponse.trim() && loopCount > 1) {
-            finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'
-          }
-
-          if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
-            console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-            handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
-          }
-
-          return finalResponse
-        }
-
-      } catch (e: any) {
-        console.error('[call-llm loop error]', e)
-        sendTokenEvent()
-        // 只有当前请求的 controller 被中止才抛 UserAborted，避免被后续请求误清理
-        if (thisController.signal.aborted) {
-          if (currentLlmAbortController === thisController) currentLlmAbortController = null
-          throw new Error('UserAborted')
-        }
-        // 非中止错误，清理 controller 并抛出原始错误
-        if (currentLlmAbortController === thisController) currentLlmAbortController = null
-        throw new Error(e.message || 'LLM 请求代理失败')
+      if (currentLlmAbortController === thisController) currentLlmAbortController = null
+      return finalResponse
+    } catch (e: any) {
+      if (currentLlmAbortController === thisController) currentLlmAbortController = null
+      if (thisController.signal.aborted) {
+        throw new Error('UserAborted')
       }
+      throw e
     }
-
-    sendTokenEvent()
-    if (currentLlmAbortController === thisController) currentLlmAbortController = null
-
-    if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
-      console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-      handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
-    }
-
-    return '智能代理执行工具链已达到最大轮数上限。'
   }
 
   // 大模型对外代理调用

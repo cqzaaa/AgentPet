@@ -16,6 +16,12 @@ export class TerminalExecutor implements IToolExecutor {
       if (api === 'run_terminal_command') {
         const { command } = args
 
+        // 动态覆盖超时时间，若模型传入了 timeout_seconds 则换算为毫秒，否则默认 120 秒
+        let cmdTimeout = 120000
+        if (typeof args.timeout_seconds === 'number') {
+          cmdTimeout = args.timeout_seconds * 1000
+        }
+
         if (context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh') {
           // SSH 模式下不传递本地物理盘符的路径作为 cwd
           const { stdout, stderr } = await sshManager.executeCommand(context.sessionId, command, undefined)
@@ -26,8 +32,12 @@ export class TerminalExecutor implements IToolExecutor {
         }
 
         const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
-        // run_terminal_command 同步执行，限制最长 2 分钟，防止命令挂起
-        const { stdout, stderr } = await shellManager.execWithBash(command, { cwd: execCwd, timeout: 120000 })
+        // run_terminal_command 同步执行，传入动态超时与中止信号
+        const { stdout, stderr } = await shellManager.execWithBash(command, { 
+          cwd: execCwd, 
+          timeout: cmdTimeout,
+          signal: context.abortSignal
+        })
         return {
           content: `[命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
           success: true

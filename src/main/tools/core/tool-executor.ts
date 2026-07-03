@@ -27,9 +27,12 @@ export class UnifiedToolExecutor {
     if (!manifest || !executor) {
       if (mcpManager.hasTool(name)) {
         try {
-          const content = await mcpManager.executeTool(name, args)
+          const content = await mcpManager.executeTool(name, args, context.abortSignal)
           return { content, success: true }
         } catch (err: any) {
+          if (err.message === 'UserAborted') {
+            throw err
+          }
           return {
             content: `MCP 外部工具执行失败: ${err.message || err}`,
             success: false,
@@ -71,20 +74,52 @@ export class UnifiedToolExecutor {
 
     // 2. 执行工具（带超时控制）
     const api = manifest.api.find(a => a.name === name)
-    const timeoutMs = api?.timeout || 30000
+    let timeoutMs = api?.timeout || 30000
+    if (args && typeof args.timeout_seconds === 'number') {
+      timeoutMs = args.timeout_seconds * 1000
+    }
+
+    let timer: NodeJS.Timeout | null = null
+    let onAbort: (() => void) | null = null
 
     try {
+      const promises: Promise<any>[] = []
+      
       const execPromise = executor.execute(name, args, context)
-      const timeoutPromise = new Promise<ToolResult>((_, reject) =>
-        setTimeout(() => reject(new Error(`工具执行超时（限制 ${timeoutMs / 1000} 秒）`)), timeoutMs)
-      )
+      promises.push(execPromise)
 
-      return await Promise.race([execPromise, timeoutPromise])
+      if (timeoutMs > 0) {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`工具执行超时（限制 ${timeoutMs / 1000} 秒）`)), timeoutMs)
+        })
+        promises.push(timeoutPromise)
+      }
+
+      if (context.abortSignal) {
+        if (context.abortSignal.aborted) {
+          throw new Error('UserAborted')
+        }
+        const abortPromise = new Promise<never>((_, reject) => {
+          onAbort = () => reject(new Error('UserAborted'))
+          context.abortSignal.addEventListener('abort', onAbort)
+        })
+        promises.push(abortPromise)
+      }
+
+      return await Promise.race(promises)
     } catch (err: any) {
+      if (err.message === 'UserAborted') {
+        throw err
+      }
       return {
         content: `执行工具 ${name} 失败: ${err.message || err}`,
         success: false,
         error: { message: err.message || String(err) }
+      }
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (context.abortSignal && onAbort) {
+        context.abortSignal.removeEventListener('abort', onAbort)
       }
     }
   }

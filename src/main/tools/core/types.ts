@@ -39,6 +39,7 @@ export interface ToolContext {
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean
+  abortSignal?: AbortSignal
 }
 
 export interface IToolExecutor {

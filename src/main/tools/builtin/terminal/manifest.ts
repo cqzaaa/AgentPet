@@ -73,6 +73,10 @@ export const terminalManifest: ToolManifest = {
           command: {
             type: 'string',
             description: '要执行的终端命令'
+          },
+          timeout_seconds: {
+            type: 'number',
+            description: '可选。命令执行的超时秒数。如果是如拉取镜像、编译打包等长耗时操作，请传入合适的值（例如 600 代表10分钟，或传入 0 代表无超时限制）。默认 120。'
           }
         },
         required: ['command']
