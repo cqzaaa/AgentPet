@@ -1,6 +1,6 @@
-# 🐾 AgentPet — 智能桌面Agent助手
-
 <div align="center">
+
+# 🐾 AgentPet — 智能桌面Agent助手
 
 [![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-v39.2-47848F?logo=electron)](https://www.electronjs.org/)
@@ -10,7 +10,7 @@
 
 **一款集灵动交互、大模型自主规划与强大办公工具箱于一体的下一代智能桌面虚拟伴侣。**
 
-[🏠 项目主页](http://cheer472.cloud:3031/) · [🐛 报告问题](http://cheer472.cloud:3031/) · [💡 贡献代码](http://cheer472.cloud:3031/)
+[🏠 项目主页](http://cheer472.cloud:3031/)
 
 </div>
 
