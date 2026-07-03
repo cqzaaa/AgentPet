@@ -39,7 +39,7 @@ interface ControlPageProps {
 }
 
 export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
-  const { showToast, setActiveTab, setActiveSessionId } = store
+  const { showToast, setActiveTab, setActiveSessionId, refreshSessions } = store
 
   // 微信/飞书/QQ/Telegram 多渠道选择状态
   const [activeChannel, setActiveChannel] = useState<'wechat' | 'feishu' | 'qq' | 'telegram'>('wechat')
@@ -610,8 +610,14 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                   key={chat.userId}
                   onClick={() => {
                     const sessionId = `wechat:${chat.userId}`
-                    setActiveSessionId(sessionId)
-                    setActiveTab('chat')
+                    window.api.ensureWechatSession(sessionId, chat.nickname).then(() => {
+                      refreshSessions().then(() => {
+                        setActiveSessionId(sessionId)
+                        setActiveTab('chat')
+                      })
+                    }).catch(err => {
+                      showToast(`确保微信会话失败: ${err.message || err}`, 'error')
+                    })
                   }}
                   style={{
                     display: 'flex',

@@ -286,7 +286,9 @@ export class AgentExecutor {
       } catch (err: any) {
         const errorText = err.message || String(err)
         // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删除降级
-        if (loopCount === 1 && chatOptions.tools && (errorText.includes('400') || errorText.includes('tools') || errorText.includes('tool_choice') || errorText.includes('parameter') || errorText.includes('unsupported'))) {
+        // 排除因 API 密钥无效（如 400 Please pass a valid API key）引发的错误，防止误判
+        const isApiKeyError = errorText.includes('API key') || errorText.includes('api_key') || errorText.includes('api-key') || errorText.includes('API Key') || errorText.includes('valid API key') || errorText.includes('INVALID_ARGUMENT')
+        if (loopCount === 1 && chatOptions.tools && !isApiKeyError && (errorText.includes('400') || errorText.includes('tools') || errorText.includes('tool_choice') || errorText.includes('parameter') || errorText.includes('unsupported'))) {
           console.warn('API 不支持工具参数，已优雅降级为纯对话模式', errorText)
           effectiveTools.length = 0
           loopCount = 0

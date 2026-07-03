@@ -499,6 +499,16 @@ export class WechatBotManager {
     this.saveActiveChats()
   }
 
+  // 从活跃聊天窗口列表中移除某个好友（用于用户删除会话时同步）
+  public removeActiveChat(userId: string) {
+    const idx = this.state.activeChats.findIndex(c => c.userId === userId)
+    if (idx >= 0) {
+      this.state.activeChats.splice(idx, 1)
+      this.saveActiveChats()
+      this.options.onStatusUpdated()
+    }
+  }
+
   // 持久化活跃聊天窗口列表
   private saveActiveChats() {
     try {
@@ -843,7 +853,7 @@ export class WechatBotManager {
           this.addLog('in', `[${nickname}]: ${logText}`)
 
           // 1. 在 SQLite 中保存用户的消息
-          this.saveMessageToDB({
+          await this.saveMessageToDB({
             sessionId: `wechat:${fromUserId}`,
             sessionName: nickname,
             messageId: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -857,7 +867,7 @@ export class WechatBotManager {
             const agentMsgId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
 
             // 写入思考占位符
-            this.saveMessageToDB({
+            await this.saveMessageToDB({
               sessionId: `wechat:${fromUserId}`,
               sessionName: nickname,
               messageId: agentMsgId,
@@ -870,7 +880,7 @@ export class WechatBotManager {
             // 工具调用步骤收集器
             const toolSteps: any[] = []
             let toolStepCounter = 0
-            const onToolEvent = (evt: { type: string; name: string; args?: any; result?: string }) => {
+            const onToolEvent = async (evt: { type: string; name: string; args?: any; result?: string }) => {
               toolStepCounter++
               toolSteps.push({
                 id: `wxtool-${toolStepCounter}`,
@@ -879,7 +889,7 @@ export class WechatBotManager {
                 detail: evt.type === 'tool_call' ? (evt.args || {}) : (evt.result || '')
               })
               // 实时更新 DB 中的 tool_steps，让渲染进程可以刷新
-              this.saveMessageToDB({
+              await this.saveMessageToDB({
                 sessionId: `wechat:${fromUserId}`,
                 sessionName: nickname,
                 messageId: agentMsgId,
@@ -946,7 +956,7 @@ export class WechatBotManager {
             
             if (!token) {
               this.addLog('info', `回复失败：未找到好友 [${nickname}] 的会话 context_token`)
-              this.saveMessageToDB({
+              await this.saveMessageToDB({
                 sessionId: `wechat:${fromUserId}`,
                 sessionName: nickname,
                 messageId: agentMsgId,
@@ -962,7 +972,7 @@ export class WechatBotManager {
             // 发送消息到微信
             try {
               if (isError) {
-                this.saveMessageToDB({
+                await this.saveMessageToDB({
                   sessionId: `wechat:${fromUserId}`,
                   sessionName: nickname,
                   messageId: agentMsgId,
@@ -1091,7 +1101,7 @@ export class WechatBotManager {
                 this.addLog('out', `[回复 ${nickname}]: ${replyText}`)
 
                 // 3. 在 SQLite 中保存机器人的回复（将思考占位符更新为真实回复）
-                this.saveMessageToDB({
+                await this.saveMessageToDB({
                   sessionId: `wechat:${fromUserId}`,
                   sessionName: nickname,
                   messageId: agentMsgId,
@@ -1104,7 +1114,7 @@ export class WechatBotManager {
               }
             } catch (pushErr: any) {
               this.addLog('info', `向微信好友 [${nickname}] 发送回复失败: ${pushErr.message || pushErr}`)
-              this.saveMessageToDB({
+              await this.saveMessageToDB({
                 sessionId: `wechat:${fromUserId}`,
                 sessionName: nickname,
                 messageId: agentMsgId,
@@ -1212,7 +1222,7 @@ ${skillsContext}${mcpContext}${filePrompt}
   }
 
   // 将会话与消息物理持久化到 SQLite 数据库中
-  private saveMessageToDB(params: {
+  private async saveMessageToDB(params: {
     sessionId: string
     sessionName: string
     messageId: string
@@ -1224,25 +1234,35 @@ ${skillsContext}${mcpContext}${filePrompt}
     toolSteps?: any[]
   }) {
     try {
-      const database = this.options.getDB()
+      const database = await this.options.getDB()
       if (!database) return
 
       const timeStr = new Date().toLocaleString('zh-CN', { hour12: false })
 
-      // 1. 确保 Session 存在
-      database.prepare('INSERT OR IGNORE INTO sessions (id, name, time, user_id) VALUES (?, ?, ?, ?)')
-        .run(params.sessionId, params.sessionName, timeStr, params.userId)
+      // 1. 确保 Session 存在，并更新最后活跃时间以使其在最近会话列表中排序正确，默认设为置顶 (pinned = 1)
+      await database.run(
+        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, 1, ?)',
+        params.sessionId,
+        params.sessionName,
+        timeStr,
+        params.userId
+      )
+      await database.run(
+        'UPDATE sessions SET time = ? WHERE id = ?',
+        timeStr,
+        params.sessionId
+      )
 
       const isThinkingVal = params.isThinking ? 1 : 0
       const isErrorVal = params.isError ? 1 : 0
       const toolStepsJson = params.toolSteps ? JSON.stringify(params.toolSteps) : null
 
       // 2. 插入或更新消息
-      database.prepare(`
+      await database.run(`
         INSERT OR REPLACE INTO messages 
         (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, is_error, user_id) 
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-      `).run(
+      `,
         params.messageId,
         params.sessionId,
         params.sender,

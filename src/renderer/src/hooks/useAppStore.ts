@@ -722,8 +722,8 @@ export function useAppStore() {
       const prevStatus = prevWechatStatusRef.current
       prevWechatStatusRef.current = status
 
-      // 仅当微信连接状态从非 connected 变更为 connected 时，才把当前会话置顶
-      if (status === 'connected' && prevStatus !== null && prevStatus !== 'connected') {
+      // 仅当微信连接状态从非 connected 变更为 connected，且当前会话是微信会话时，才把当前会话置顶
+      if (status === 'connected' && prevStatus !== null && prevStatus !== 'connected' && activeSessionId.startsWith('wechat:')) {
         setSessions(prev => {
           const target = prev.find(s => s.id === activeSessionId)
           if (!target || target.pinned) return prev
@@ -2053,6 +2053,7 @@ ${skillsContext}`
     selectedCronLogDetails, setSelectedCronLogDetails,
     // sessions
     sessions, setSessions,
+    refreshSessions,
     activeSessionId, setActiveSessionId,
     activeSession, activeSessMessages,
     inputValue, setInputValue,

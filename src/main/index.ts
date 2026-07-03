@@ -108,6 +108,8 @@ function loadSystemLlmConfig() {
     console.error('加载全局大模型配置文件失败:', e)
   }
 }
+loadSystemLlmConfig()
+
 
 function saveSystemLlmConfig(config: any) {
   try {
@@ -2435,11 +2437,37 @@ app.whenReady().then(() => {
     }
   })
 
+  // 确保微信会话存在（使用 INSERT OR IGNORE 避开级联删除，并且默认置顶）
+  ipcMain.handle('api:ensure-wechat-session', async (_, sessionId: string, nickname: string) => {
+    try {
+      const database = await getDB()
+      const timeStr = new Date().toLocaleString('zh-CN', { hour12: false })
+      await database.run(
+        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, 1, ?)',
+        sessionId,
+        nickname,
+        timeStr,
+        sessionId.replace('wechat:', '')
+      )
+      broadcastSessionsUpdated()
+      return true
+    } catch (e) {
+      console.error('确保微信会话存在失败', e)
+      return false
+    }
+  })
+
   // 删除会话
   ipcMain.handle('api:delete-session', async (_, sessionId: string) => {
     try {
       const database = await getDB()
       await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
+
+      // 如果删除的是微信会话，同步从微信活跃好友列表中清除该记录
+      if (sessionId.startsWith('wechat:') && wechatBotManager) {
+        const userId = sessionId.replace('wechat:', '')
+        wechatBotManager.removeActiveChat(userId)
+      }
 
       const chatDir = getActiveChatDir()
       const safe1 = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -2502,6 +2530,9 @@ app.whenReady().then(() => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo)
       }
+
+      // 每次保存消息时，同步更新会话的最后活跃时间以维持正确的最近会话列表排序
+      await database.run('UPDATE sessions SET time = ? WHERE id = ?', time, m.sessionId)
 
       broadcastSessionsUpdated()
       return true
@@ -3174,12 +3205,12 @@ app.whenReady().then(() => {
     callLlm: async (config, messages, sessionId, onToolEvent) => {
       const effectiveConfig = config.useSystemConfig
         ? {
-          ...systemLlmConfig,
           ...config,
-          apiKey: config.apiKey || systemLlmConfig.apiKey,
-          baseUrl: config.baseUrl || systemLlmConfig.baseUrl,
-          provider: config.provider || systemLlmConfig.provider,
-          model: config.model || systemLlmConfig.model
+          provider: systemLlmConfig.provider,
+          apiKey: systemLlmConfig.apiKey,
+          baseUrl: systemLlmConfig.baseUrl,
+          model: systemLlmConfig.model,
+          temperature: config.temperature !== undefined ? config.temperature : systemLlmConfig.temperature
         }
         : config
 

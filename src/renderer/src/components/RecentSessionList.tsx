@@ -221,7 +221,25 @@ export function RecentSessionList(props: Props): React.JSX.Element {
             />
           ) : (
             <>
-              <span className="recent-title" title={s.name}>{s.name}</span>
+              <span className="recent-title" title={s.name}>
+                {s.id.startsWith('wechat:') && (
+                  <span style={{
+                    display: 'inline-block',
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10b981',
+                    marginRight: '6px',
+                    fontWeight: 600,
+                    verticalAlign: 'middle',
+                    lineHeight: '1.2'
+                  }}>
+                    微信
+                  </span>
+                )}
+                {s.name}
+              </span>
               <span className="recent-preview" title={preview}>{preview || '暂无消息'}</span>
             </>
           )}

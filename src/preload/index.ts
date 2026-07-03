@@ -329,6 +329,8 @@ const api = {
   },
   isAgentWindowMaximized: (): Promise<boolean> =>
     ipcRenderer.invoke('api:is-agent-window-maximized'),
+  ensureWechatSession: (sessionId: string, nickname: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:ensure-wechat-session', sessionId, nickname),
 
   // 工具管理 API
   getToolsSummary: (): Promise<string> =>
