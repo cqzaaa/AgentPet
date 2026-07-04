@@ -82,13 +82,15 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   }, [])
 
   const formatInterval = (totalSeconds: number) => {
-    const h = Math.floor(totalSeconds / 3600)
+    const d = Math.floor(totalSeconds / (3600 * 24))
+    const h = Math.floor((totalSeconds % (3600 * 24)) / 3600)
     const m = Math.floor((totalSeconds % 3600) / 60)
     const s = totalSeconds % 60
     let res = ''
+    if (d > 0) res += `${d}天 `
     if (h > 0) res += `${h}小时 `
     if (m > 0) res += `${m}分钟 `
-    if (s > 0 || (h === 0 && m === 0)) res += `${s}秒`
+    if (s > 0 || (d === 0 && h === 0 && m === 0)) res += `${s}秒`
     return res.trim()
   }
 
@@ -348,17 +350,19 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         >
                           📋 日志
                         </button>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ padding: '4px 8px', fontSize: '11px' }}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setOpenDropdownId(openDropdownId === task.id ? null : task.id)
-                          }}
-                        >
-                          ⚙️ 操作 ▾
-                        </button>
+                        {!task.isSystem && (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOpenDropdownId(openDropdownId === task.id ? null : task.id)
+                            }}
+                          >
+                            ⚙️ 操作 ▾
+                          </button>
+                        )}
 
                         {openDropdownId === task.id && (
                           <div
@@ -546,7 +550,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           setSelectedCronLogDetails(null)
                         }
                       }}
-                      disabled={!selectedTaskForLog.logs || selectedTaskForLog.logs.length === 0}
+                      disabled={!selectedTaskForLog.logs || selectedTaskForLog.logs.length === 0 || selectedTaskForLog.isSystem}
                     >
                       🗑 清空日志
                     </button>

@@ -64,7 +64,8 @@ export class AgentExecutor {
   private async handleLongTaskAutoMemory(
     sessionId: string,
     chatHistory: ChatMessage[],
-    config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number }
+    config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number },
+    finalResponse?: string
   ) {
     try {
       if (!sessionId) return
@@ -88,7 +89,8 @@ export class AgentExecutor {
    - 核心任务与解决过程。
    - 成功经验与关键代码。
    - 纠错避坑（若有报错，为什么报错，怎么解决的）。
-3. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
+3. **字数严格限制**：【总结内容】的字数必须控制在 800 字以内，简明扼要，直击重点，剔除任何修饰性词汇。
+4. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
 {
   "title": "主题名",
   "content": "### 💡 核心知识与经验沉淀\\n..."
@@ -122,7 +124,20 @@ export class AgentExecutor {
 
       const summaryData = JSON.parse(jsonStr)
       if (summaryData.title && summaryData.content) {
-        await appendMemorySummaryInternal(sessionId, summaryData.title, summaryData.content)
+        // 提取用户最开始的提问内容
+        const firstUserMsg = chatHistory.find(m => m.role === 'user')
+        const firstUserText = firstUserMsg
+          ? (Array.isArray(firstUserMsg.content)
+              ? firstUserMsg.content.map((b: any) => b.text || '').join('')
+              : (firstUserMsg.content || ''))
+          : ''
+
+        let backupDialogStr = '\n\n---\n<details>\n<summary>展开查看本次对话原始备份</summary>\n\n'
+        backupDialogStr += `**用户 (User)**:\n${firstUserText}\n\n`
+        backupDialogStr += `**助手 (Agent)**:\n${finalResponse || ''}\n\n`
+        backupDialogStr += '</details>'
+
+        await appendMemorySummaryInternal(sessionId, summaryData.title, summaryData.content + backupDialogStr)
         console.log('[Memory] 长任务自动经验总结完成并已保存。主题:', summaryData.title)
       } else {
         console.warn('[Memory] 长任务自动经验沉淀返回的 JSON 结构不正确:', responseText)
@@ -555,7 +570,7 @@ export class AgentExecutor {
 
         if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
           console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-          this.handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+          this.handleLongTaskAutoMemory(sessionId, chatHistory, config, finalResponse).catch(e => console.error('[System] 自动经验沉淀失败:', e))
         }
 
         return finalResponse
@@ -564,7 +579,7 @@ export class AgentExecutor {
 
     if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
       console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-      this.handleLongTaskAutoMemory(sessionId, chatHistory, config).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+      this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。').catch(e => console.error('[System] 自动经验沉淀失败:', e))
     }
 
     return '智能代理执行工具链已达到最大轮数上限。'

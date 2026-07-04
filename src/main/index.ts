@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
 import { join, basename, dirname } from 'path'
-import { registerMemoryAPIs } from './api/memory'
+import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -1711,11 +1711,37 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:get-cron-tasks', async () => {
     try {
+      let tasks: any[] = []
       const cronPath = join(getActiveStorageDir(), 'cron_tasks.json')
       if (fs.existsSync(cronPath)) {
         const data = await fs.promises.readFile(cronPath, 'utf-8')
-        return JSON.parse(data)
+        tasks = JSON.parse(data)
       }
+
+      // 混入系统内置只读定时任务
+      const lastCleanup = getLastCleanupTime()
+      const lastTriggeredStr = lastCleanup ? new Date(lastCleanup).toLocaleString('zh-CN', { hour12: false }) : '从未执行'
+      
+      tasks.push({
+        id: 'system:memory-cleanup',
+        name: '记忆定时清理',
+        interval: 15 * 24 * 60 * 60, // 15天以秒为单位
+        isActive: true,
+        isSystem: true, // 只读标识，禁用操作按钮
+        action: '计算所有记忆的实时衰减强度，物理删除 sNow < 0.2 的深度遗忘记忆。',
+        lastTriggered: lastTriggeredStr,
+        triggerCount: lastCleanup ? 1 : 0, // 简单记录执行次数
+        logs: [
+          {
+            id: 'system-log',
+            time: lastTriggeredStr,
+            status: lastCleanup ? 'success' : 'idle',
+            message: lastCleanup ? `记忆清理任务于 ${lastTriggeredStr} 成功执行。` : '等待首次运行触发。'
+          }
+        ]
+      })
+
+      return tasks
     } catch (e) {
       console.error('读取 cron_tasks.json 失败', e)
     }

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+﻿import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import { join, relative } from 'path'
 import { getLocalEmbedding } from './localEmbedding'
@@ -85,24 +85,20 @@ export async function appendMemorySummaryInternal(sessionId: string, title: stri
 
       for (const relPath of relatedCaches) {
         const fileName = relPath.split('/').pop() || relPath
-        const matchedSentences = sentences.filter(s => s.includes(fileName))
         const absPath = join(chatDir, relPath).replace(/\\/g, '/')
         
-        if (matchedSentences.length > 0) {
-          for (const sentence of matchedSentences) {
-            const shortSentence = sentence.length > 80 ? sentence.substring(0, 80) + '...' : sentence
-            mentionedList.push(`* 在正文 “*...${shortSentence}...*” 中，关联了缓存：[\`${relPath}\`](file:///${absPath})`)
-          }
+        if (content.includes(fileName) || content.includes(relPath)) {
+          mentionedList.push(`* 显式引用了本地缓存文档：[\`${relPath}\`](file:///${absPath})`)
         } else {
-          recentList.push(`* 关联了最近修改的缓存：[\`${relPath}\`](file:///${absPath})`)
+          recentList.push(`* 关联了最近修改的缓存（未在正文显式引用）：[\`${relPath}\`](file:///${absPath})`)
         }
       }
       
       if (mentionedList.length > 0) {
-        linkSection += '#### 句内引用：\n' + mentionedList.join('\n') + '\n'
+        linkSection += '#### 显式引用的缓存文档：\n' + mentionedList.join('\n') + '\n\n'
       }
       if (recentList.length > 0) {
-        linkSection += '#### 最近修改关联（未在正文显式提及）：\n' + recentList.join('\n') + '\n'
+        linkSection += '#### 最近修改关联（未在正文显式提及）：\n' + recentList.join('\n') + '\n\n'
       }
       
       // 插入向后兼容提取管道的 HTML 注释，务必换行单独成行，防止 --> 被正则捕获
@@ -326,8 +322,8 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         }
       })
 
-      // 过滤低相关分（最终得分必须大于 0.4），并按得分从高到低排序
-      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.4)
+      // 过滤低相关分（最终得分必须大于 0.5），并按得分从高到低排序
+      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.5)
       activeResults.sort((a, b) => b.score - a.score)
       const top3 = activeResults.slice(0, 3)
 
@@ -568,117 +564,41 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     let allSummariesCombined = ''
     const processedFiles: string[] = []
     const sessionCaches = new Set<string>()
-    
-    // 搜集所有会话下的 memory 文件夹内的 md 摘要，以及会话主目录下的关键字 md 文件
+
     for (const sess of sessions) {
       const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
-      
-      // 1. 扫描会话 memory 文件夹（全部 md 文件）
       const sessionMemoryDir = join(getActiveStorageDir(), 'memory', safeSessionId)
-      if (fs.existsSync(sessionMemoryDir)) {
-        const files = await fs.promises.readdir(sessionMemoryDir)
-        const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
-        for (const file of mdFiles) {
+      if (!fs.existsSync(sessionMemoryDir)) continue
+
+      const files = await fs.promises.readdir(sessionMemoryDir)
+      for (const file of files) {
+        if (file.endsWith('.md') && !file.endsWith('_已更新.md') && file !== 'profile.md') {
           const filePath = join(sessionMemoryDir, file)
           try {
-            const stat = await fs.promises.stat(filePath)
-            if (stat.isFile()) {
-              const content = await fs.promises.readFile(filePath, 'utf-8')
-              
-              // 提取关联缓存路径
-              const cacheMatch = content.match(/关联缓存:\s*([^\n]+)/)
-              if (cacheMatch && cacheMatch[1]) {
-                cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
-                  if (c) sessionCaches.add(c)
-                })
-              }
-
-              allSummariesCombined += `\n### 会话: ${sess.name} (日期: ${file.replace(/\.md$/i, '')})\n${content}\n`
-              processedFiles.push(filePath)
+            const content = await fs.promises.readFile(filePath, 'utf-8')
+            const cacheMatch = content.match(/<!--\s*关联缓存:\s*([^\n-->]+)/)
+            if (cacheMatch && cacheMatch[1]) {
+              cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
+                if (c) sessionCaches.add(c)
+              })
             }
+
+            allSummariesCombined += `\n### 会话: ${sess.name} (文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
+            processedFiles.push(filePath)
           } catch (e) {
-            console.error(`读取 memory 目录文件失败: ${filePath}`, e)
-          }
-        }
-      }
-
-      // 2. 扫描会话主目录本身（全部 md 文件，不包括子目录）
-      const sessionRootDir = join(chatDir, safeSessionId)
-      if (fs.existsSync(sessionRootDir)) {
-        const files = await fs.promises.readdir(sessionRootDir)
-        const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
-        for (const file of mdFiles) {
-          const filePath = join(sessionRootDir, file)
-          try {
-            const stat = await fs.promises.stat(filePath)
-            if (stat.isFile()) {
-              const content = await fs.promises.readFile(filePath, 'utf-8')
-
-              // 提取关联缓存路径
-              const cacheMatch = content.match(/关联缓存:\s*([^\n]+)/)
-              if (cacheMatch && cacheMatch[1]) {
-                cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
-                  if (c) sessionCaches.add(c)
-                })
-              }
-
-              allSummariesCombined += `\n### 会话: ${sess.name} (根文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
-              processedFiles.push(filePath)
-            }
-          } catch (e) {
-            console.error(`读取会话根目录文件失败: ${filePath}`, e)
+            console.error(`读取会话主目录文件失败: ${filePath}`, e)
           }
         }
       }
     }
-
-    if (!allSummariesCombined.trim()) {
-      console.log('[Purify] 无摘要历史，跳过大模型合并，只执行数据库状态清理。')
-      await autoMigrateOldEmbeddings(database)
-      return { success: true, count: 0, insertCount: 0 }
-    }
-
-    // 1. 合并更新全局画像 profile.md
-    const currentProfilePath = join(getActiveStorageDir(), 'memory', 'profile.md')
-    let currentProfile = ''
-    if (fs.existsSync(currentProfilePath)) {
-      currentProfile = await fs.promises.readFile(currentProfilePath, 'utf-8')
-    }
-
-    const profileSystemPrompt = `你是一个高级人物画像整理专家。你的任务是分析主人（用户）最近的对话摘要，提纯、合并并更新主人的全局长期人物画像。
-人物画像必须严格按照以下四个维度进行整理：
-1. 工作背景（职业，工作内容，擅长的领域等）
-2. 个人背景（名字称呼、沟通语气偏好等）
-3. 当前关注与动态（当前重点攻克的任务、项目阶段性目标及近期最新进度）
-4. 工作偏好与习惯（主人特有的沟通与开发操作偏好，例如“喜欢直奔主题看完整代码，不需要冗长的解释说明”）
-
-⚠️ 绝对约束：在第四点“工作偏好与习惯”中，只能记录宏观的沟通和操作偏好，严禁记录任何具体的代码实现细节、特定报错修复方式或特定终端指令。这些微观技术事实均由底层的向量经验库独立维护，无需记录在全局画像中。
-
-⚠️ 历史冗余清洗指令：在合并更新时，你必须对【当前的全局人物画像】进行“降噪与清洗”。如果你发现已有的全局画像里混入了任何具体的微观技术事实（例如具体的 LobeHub 目录结构、LobeHub 源码实现原理、TEI 推理容器的部署具体步骤、特定的终端查找命令流程等），请**务必直接将它们从画像中彻底删除**！只保留与主人工作偏好、宏观背景相关的纯净内容。
-
-请合并新摘要中体现的信息，如果与过去的信息有冲突，以新的为准。
-请以 Markdown 格式输出最新的全局人物画像（不要包含任何思考过程、JSON、多余的分析或客套话，直接输出画像的 Markdown 文本内容）。`
-
-    const profileMessages = [
-      { role: 'system', content: profileSystemPrompt },
-      { role: 'user', content: `【当前的全局人物画像】\n${currentProfile || '（暂无）'}\n\n【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请根据上面的对话摘要，对当前的全局人物画像进行提纯、增量合并和覆盖更新，输出最新版本的画像。` }
-    ]
-
-    console.log('[Purify] 正在调用大模型更新人物画像...')
-    const updatedProfile = await callLlmInternal(getSystemLlmConfig(), profileMessages, getActiveStorageDir())
-    
-    const globalMemoryDir = join(getActiveStorageDir(), 'memory')
-    if (!fs.existsSync(globalMemoryDir)) {
-      await fs.promises.mkdir(globalMemoryDir, { recursive: true })
-    }
-    await fs.promises.writeFile(join(globalMemoryDir, 'profile.md'), updatedProfile.trim(), 'utf-8')
-    console.log('[Purify] 人物画像 profile.md 覆盖更新成功。')
 
     // 2. 提取技术事实、报错经验与生活习惯偏好，写入 persona_memories
-    const experienceSystemPrompt = `你是一个核心知识提炼与个人习惯偏好沉淀专家。请分析主人最近的对话摘要，从中提纯并总结出以下三类结构化记忆事实与偏好：
+    let insertCount = 0
+    if (!targetSessionId) {
+      const experienceSystemPrompt = `你是一个核心知识提炼与个人习惯偏好沉淀专家。请分析主人最近的对话摘要，从中提纯并总结出以下三类结构化记忆事实与偏好：
 1. 【技术核心与源码要点】：例如源码结构解读要点、业务逻辑核心细节、系统架构设计决策等（分类 category 归入 "experience"）。
 2. 【避坑纠错与工具经验】：例如工具执行失败/报错原因、排卡调试经验、环境兼容性问题及具体的避坑防线（分类 category 归入 "experience"）。
-3. 【个人喜好与生活习惯】：例如主人平时喜欢什么类型的音乐或运动（喜好）、主人的作息或工作时间安排、特定的沟通偏好（如“喜欢直接看代码而非冗长解释”）（分类 category 归入 "preference" 或 "habit"）。
+3. 【个人喜好与生活习惯】：例如主人平时喜欢什么类型的音乐或运动（喜好）、主人的作息或工作时间安排、特定的沟通偏好（如"喜欢直接看代码而非冗长解释"）（分类 category 归入 "preference" 或 "habit"）。
 
 对于每一条沉淀事实，你必须输出为 JSON 格式的数组。格式如下：
 [
@@ -691,121 +611,123 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
 如果你没有发现任何有价值的事实、习惯或喜好，请直接输出空数组 []。
 请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 数组本身。`
 
-    const experienceMessages = [
-      { role: 'system', content: experienceSystemPrompt },
-      { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验、技术事实、生活喜好或习惯并输出为 JSON 数组。` }
-    ]
+      const experienceMessages = [
+        { role: 'system', content: experienceSystemPrompt },
+        { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验、技术事实、生活喜好或习惯并输出为 JSON 数组。` }
+      ]
 
-    console.log('[Purify] 正在调用大模型提炼避坑经验与个人偏好...')
-    const experienceRawJson = await callLlmInternal(getSystemLlmConfig(), experienceMessages, getActiveStorageDir())
-    
-    let jsonText = experienceRawJson.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(json)?/, '').replace(/```$/, '').trim()
-    }
-    
-    let experiences: any[] = []
-    try {
-      experiences = JSON.parse(jsonText)
-    } catch (je) {
-      console.error('[Purify] 解析避坑经验 JSON 失败, raw response:', experienceRawJson, je)
-    }
+      console.log('[Purify] 正在调用大模型提炼避坑经验与个人偏好...')
+      const experienceRawJson = await callLlmInternal(getSystemLlmConfig(), experienceMessages, getActiveStorageDir())
+      
+      let jsonText = experienceRawJson.trim()
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(json)?/, '').replace(/```$/, '').trim()
+      }
+      
+      let experiences: any[] = []
+      try {
+        experiences = JSON.parse(jsonText)
+      } catch (je) {
+        console.error('[Purify] 解析避坑经验 JSON 失败, raw response:', experienceRawJson, je)
+      }
 
-    let insertCount = 0
-    if (Array.isArray(experiences) && experiences.length > 0) {
-      for (const item of experiences) {
-        if (!item.fact) continue
-        
-        let emb: number[] | null = null
-        try {
-          emb = await getEmbeddingInternal(getSystemLlmConfig(), item.fact)
-        } catch (ee) {
-          console.error('[Purify] 获取向量失败', ee)
-        }
+      if (Array.isArray(experiences) && experiences.length > 0) {
+        for (const item of experiences) {
+          if (!item.fact) continue
+          
+          let emb: number[] | null = null
+          try {
+            emb = await getEmbeddingInternal(getSystemLlmConfig(), item.fact)
+          } catch (ee) {
+            console.error('[Purify] 获取向量失败', ee)
+          }
 
-        // 查询是否有相似的已有经验/喜好事实（不限分类）
-        const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
-        
-        let matchedId: string | null = null
-        if (emb && rows.length > 0) {
-          for (const row of rows) {
-            if (row.embedding) {
-              try {
-                const dbEmb = JSON.parse(row.embedding)
-                if (Array.isArray(dbEmb)) {
-                  const sim = cosineSimilarity(emb, dbEmb)
-                  if (sim > 0.85) {
-                    matchedId = row.id
-                    break
+          // 查询是否有相似的已有经验/喜好事实（不限分类）
+          const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+          
+          let matchedId: string | null = null
+          if (emb && rows.length > 0) {
+            for (const row of rows) {
+              if (row.embedding) {
+                try {
+                  const dbEmb = JSON.parse(row.embedding)
+                  if (Array.isArray(dbEmb)) {
+                    const sim = cosineSimilarity(emb, dbEmb)
+                    if (sim > 0.85) {
+                      matchedId = row.id
+                      break
+                    }
                   }
-                }
-              } catch {}
-            }
-          }
-        }
-
-        if (!matchedId) {
-          const exactMatch = rows.find(r => r.fact.trim() === item.fact.trim())
-          if (exactMatch) {
-            matchedId = exactMatch.id
-          }
-        }
-
-        const now = Date.now()
-        const targetId = matchedId || `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
-        
-        const linkPath = processedFiles.map(fp => fp.replace(/\\/g, '/')).join(', ')
-
-        const categoryVal = (item.category === 'habit' || item.category === 'preference') ? item.category : 'experience'
-
-        if (matchedId) {
-          await database.run("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ?, link = ? WHERE id = ?", now, linkPath, matchedId)
-          console.log(`[Purify] 强化已有记忆事实 (ID: ${matchedId}, 分类: ${categoryVal})`)
-        } else {
-          await database.run(`
-            INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding, link)
-            VALUES (?, ?, 1.0, ?, ?, ?, ?, ?, ?)
-          `,
-            targetId,
-            item.fact,
-            now,
-            now,
-            categoryVal,
-            JSON.stringify(item.keywords || []),
-            emb ? JSON.stringify(emb) : null,
-            linkPath
-          )
-          insertCount++
-          console.log(`[Purify] 写入新记忆事实 (ID: ${targetId}, 分类: ${categoryVal}): ${item.fact}`)
-        }
-
-        // 仿 SAG 机制：写入实体多对多关联关系图谱
-        try {
-          // 先清理旧有的实体绑定，以防大模型更新时实体关键词发生变更
-          await database.run("DELETE FROM memory_entity_links WHERE memory_id = ?", targetId)
-
-          const keywordsList = Array.isArray(item.keywords) ? item.keywords : []
-          if (keywordsList.length > 0) {
-            for (const kw of keywordsList) {
-              if (kw && typeof kw === 'string' && kw.trim()) {
-                await database.run("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)", targetId, kw.trim(), now)
+                } catch {}
               }
             }
           }
-        } catch (linkErr) {
-          console.error(`[Purify] 写入实体关联图谱失败 (ID: ${targetId})`, linkErr)
+
+          if (!matchedId) {
+            const exactMatch = rows.find(r => r.fact.trim() === item.fact.trim())
+            if (exactMatch) {
+              matchedId = exactMatch.id
+            }
+          }
+
+          const now = Date.now()
+          const targetId = matchedId || `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
+          
+          const linkPath = processedFiles.map(fp => fp.replace(/\\/g, '/')).join(', ')
+
+          const categoryVal = (item.category === 'habit' || item.category === 'preference') ? item.category : 'experience'
+
+          if (matchedId) {
+            await database.run("UPDATE persona_memories SET strength = MIN(1.0, strength + 0.3), last_accessed_at = ?, link = ? WHERE id = ?", now, linkPath, matchedId)
+            console.log(`[Purify] 强化已有记忆事实 (ID: ${matchedId}, 分类: ${categoryVal})`)
+          } else {
+            await database.run(`
+              INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding, link)
+              VALUES (?, ?, 1.0, ?, ?, ?, ?, ?, ?)
+            `,
+              targetId,
+              item.fact,
+              now,
+              now,
+              categoryVal,
+              JSON.stringify(item.keywords || []),
+              emb ? JSON.stringify(emb) : null,
+              linkPath
+            )
+            insertCount++
+            console.log(`[Purify] 写入新记忆事实 (ID: ${targetId}, 分类: ${categoryVal}): ${item.fact}`)
+          }
+
+          // 仿 SAG 机制：写入实体多对多关联关系图谱
+          try {
+            // 先清理旧有的实体绑定，以防大模型更新时实体关键词发生变更
+            await database.run("DELETE FROM memory_entity_links WHERE memory_id = ?", targetId)
+
+            const keywordsList = Array.isArray(item.keywords) ? item.keywords : []
+            if (keywordsList.length > 0) {
+              for (const kw of keywordsList) {
+                if (kw && typeof kw === 'string' && kw.trim()) {
+                  await database.run("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)", targetId, kw.trim(), now)
+                }
+              }
+            }
+          } catch (linkErr) {
+            console.error(`[Purify] 写入实体关联图谱失败 (ID: ${targetId})`, linkErr)
+          }
         }
       }
-    }
 
-    // 全部提纯并抽取完成，标记已处理文件
-    for (const filePath of processedFiles) {
-      try {
-        const newFilePath = filePath.replace(/\.md$/i, '_已更新.md')
-        await fs.promises.rename(filePath, newFilePath)
-      } catch (renameErr) {
-        console.error(`[Purify] 标记文件为已更新失败: ${filePath}`, renameErr)
+      // 全部提纯并抽取完成，标记已处理文件
+      for (const filePath of processedFiles) {
+        try {
+          const newFilePath = filePath.replace(/\.md$/i, '_已更新.md')
+          await fs.promises.rename(filePath, newFilePath)
+        } catch (renameErr) {
+          console.error(`[Purify] 标记文件为已更新失败: ${filePath}`, renameErr)
+        }
       }
+    } else {
+      console.log('[Purify] 增量单会话提纯，跳过避坑经验与个人偏好大模型提炼 (第三次调用)')
     }
 
     await autoMigrateOldEmbeddings(database)
@@ -813,6 +735,47 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
   } catch (e: any) {
     console.error('画像整理 pipeline 失败', e)
     throw new Error(`画像整理 Pipeline 失败: ${e.message || e}`)
+  }
+}
+
+let lastCleanupTimeCache: number | null = null
+
+export function getLastCleanupTime(): number | null {
+  if (lastCleanupTimeCache !== null) {
+    return lastCleanupTimeCache
+  }
+  if (!memoryDeps) return null
+  try {
+    const storageDir = memoryDeps.getActiveStorageDir()
+    const filePath = join(storageDir, 'memory', '.last_cleanup')
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8').trim()
+      const time = parseInt(content, 10)
+      if (!isNaN(time)) {
+        lastCleanupTimeCache = time
+        return time
+      }
+    }
+  } catch (e) {
+    console.error('[Memory] 读取 last_cleanup 时间失败', e)
+  }
+  return null
+}
+
+export function updateLastCleanupTime(): void {
+  if (!memoryDeps) return
+  try {
+    const now = Date.now()
+    const storageDir = memoryDeps.getActiveStorageDir()
+    const dirPath = join(storageDir, 'memory')
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true })
+    }
+    const filePath = join(dirPath, '.last_cleanup')
+    fs.writeFileSync(filePath, String(now), 'utf-8')
+    lastCleanupTimeCache = now
+  } catch (e) {
+    console.error('[Memory] 写入 last_cleanup 时间失败', e)
   }
 }
 

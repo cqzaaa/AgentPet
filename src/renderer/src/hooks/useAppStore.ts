@@ -19,6 +19,7 @@ export interface CronTask {
   isActive: boolean
   action?: string
   logs?: CronLog[]
+  isSystem?: boolean
 }
 
 export interface Session {
@@ -1426,6 +1427,14 @@ ${skillsContext}
       if (response !== undefined) {
         typingStarted = true
         startTypingEffect(replyId, response, activeSessionId)
+
+        // 成功回复后，若有命中的避坑经验/习惯记忆，则进行渐进式强化
+        if (relevantExperiences && relevantExperiences.length > 0) {
+          const ids = relevantExperiences.map((e: any) => e.id)
+          window.api.strengthenExperiences(ids).catch((err: any) => {
+            console.error('[Memory] 强化复习记忆失败:', err)
+          })
+        }
       }
 
       // TTS 语音合成：LLM 回复后自动朗读
@@ -1545,6 +1554,7 @@ ${skillsContext}
    - 将这部分写在特定的“### 🛠 任务执行与避坑经验沉淀”标题下。
 4. 如果没有报错，则不需要写避坑经验小节。
 5. 不要包含过多的寒暄，直接输出 Markdown 总结内容。
+6. **字数严格限制**：生成的摘要与避坑经验沉淀总字数必须严格控制在 300 字以内，简明扼要，直击重点，剔除任何修饰性词汇。
 
 以下是对话日志：
 ----------------------
@@ -1565,7 +1575,14 @@ ${chatLogStr}
       )
 
       const timeStr = formatDateTime()
-      const finalMarkdownText = `## [${timeStr}] 记忆摘要与纠错沉淀\n${summaryResult.trim()}`
+      let backupDialogStr = '\n\n---\n<details>\n<summary>展开查看本次对话原始备份</summary>\n\n'
+      summaryBatch.forEach((m) => {
+        const roleName = m.sender === 'user' ? '用户 (User)' : '助手 (Agent)'
+        backupDialogStr += `**${roleName}**:\n${m.text || ''}\n\n`
+      })
+      backupDialogStr += '</details>'
+
+      const finalMarkdownText = `## [${timeStr}] 记忆摘要与纠错沉淀\n${summaryResult.trim()}${backupDialogStr}`
 
       const appendSuccess = await window.api.appendMemorySummary(sessionId, finalMarkdownText)
       if (appendSuccess) {

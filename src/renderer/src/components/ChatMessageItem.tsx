@@ -230,6 +230,8 @@ function parseInlineMarkdown(text: string): string {
 
 function parseMarkdownToHtml(markdown: string): string {
   if (!markdown) return ''
+  // 移除 HTML 注释（包括多行），防止被 escapeHtml 转义后作为纯文本显示
+  markdown = markdown.replace(/<!--[\s\S]*?-->/g, '')
   const lines = markdown.split('\n')
   let html = ''
 
