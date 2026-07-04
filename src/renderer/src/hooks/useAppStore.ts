@@ -1293,7 +1293,15 @@ export function useAppStore() {
 
       const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` + 
         (relevantExperiences.length > 0 
-          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => `${i + 1}. ${e.fact}${e.absolutePath ? `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${e.absolutePath}` : ''}`).join('\n')}`
+          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e, i) => {
+              let itemText = `${i + 1}. ${e.fact}`
+              if (e.relatedContent) {
+                itemText += `\n   [关联的原始总结上下文]:\n   """\n   ${e.relatedContent.replace(/\n/g, '\n   ')}\n   """`
+              } else if (e.absolutePath) {
+                itemText += `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${e.absolutePath}`
+              }
+              return itemText
+            }).join('\n')}`
           : '')
 
       // 动态拼装系统人设与技能感知上下文

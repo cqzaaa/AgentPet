@@ -21,8 +21,9 @@ export async function appendMemorySummaryInternal(sessionId: string, title: stri
   try {
     if (!sessionId || !title || !content) return false
     const chatDir = memoryDeps.getActiveChatDir()
+    const storageDir = memoryDeps.getActiveStorageDir()
     const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
-    const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
+    const sessionMemoryDir = join(storageDir, 'memory', safeSessionId)
     
     if (!fs.existsSync(sessionMemoryDir)) {
       await fs.promises.mkdir(sessionMemoryDir, { recursive: true })
@@ -177,7 +178,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const database = await deps.getDB()
       
       // 1. 获取库中所有关联记录及实体映射（支持经验、习惯和偏好）
-      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding, category FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding, category, link FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
 
       const linkRows = await database.all("SELECT memory_id, entity_name FROM memory_entity_links") as { memory_id: string, entity_name: string }[]
@@ -316,6 +317,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         return {
           id: row.id,
           fact: row.fact,
+          link: row.link,
           sNow,
           vectorScore,
           graphScore,
@@ -324,14 +326,61 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         }
       })
 
-      // 过滤低相关分，并按得分从高到低排序
-      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.05)
+      // 过滤低相关分（最终得分必须大于 0.4），并按得分从高到低排序
+      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.4)
       activeResults.sort((a, b) => b.score - a.score)
       const top3 = activeResults.slice(0, 3)
 
-      console.log(`[Recall] 仿 SAG 多跳召回了 ${top3.length} 条相关经验:`, top3.map(t => `${t.fact.substring(0, 30)}... (score: ${t.score.toFixed(3)})`))
+      // 异步读取关联的总结 markdown 文件内容
+      const chatDir = deps.getActiveChatDir()
+      const finalTop3 = await Promise.all(top3.map(async (item) => {
+        let relatedContent = ''
+        let absolutePath = ''
+        
+        if (item.link) {
+          const paths = item.link.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
+          
+          for (const rawPath of paths) {
+            let targetPath = rawPath
+            // 兼容相对路径：如果是相对路径，则使用 chatDir 定位
+            if (!targetPath.includes(':') && !targetPath.startsWith('/') && !targetPath.startsWith('\\')) {
+              targetPath = join(chatDir, targetPath)
+            }
+            
+            let fileToRead = targetPath
+            let exists = fs.existsSync(fileToRead)
+            
+            if (!exists && fileToRead.toLowerCase().endsWith('.md')) {
+              const updatedPath = fileToRead.replace(/\.md$/i, '_已更新.md')
+              if (fs.existsSync(updatedPath)) {
+                fileToRead = updatedPath
+                exists = true
+              }
+            }
+            
+            if (exists) {
+              try {
+                const text = await fs.promises.readFile(fileToRead, 'utf-8')
+                const sliceText = text.length > 8000 ? text.slice(0, 8000) + '\n...(内容过长已截断)...' : text
+                relatedContent += (relatedContent ? '\n\n' : '') + sliceText
+                absolutePath = fileToRead.replace(/\\/g, '/')
+              } catch (readErr) {
+                console.error(`[Recall] 读取关联记忆文件失败: ${fileToRead}`, readErr)
+              }
+            }
+          }
+        }
+        
+        return {
+          ...item,
+          relatedContent: relatedContent || undefined,
+          absolutePath: absolutePath || undefined
+        }
+      }))
+
+      console.log(`[Recall] 仿 SAG 多跳召回了 ${finalTop3.length} 条相关经验:`, finalTop3.map(t => `${t.fact.substring(0, 30)}... (score: ${t.score.toFixed(3)})`))
       return {
-        results: top3,
+        results: finalTop3,
         debug: {
           firstOrderActive: Array.from(firstOrderActive),
           secondOrderActive: Array.from(secondOrderActive),
@@ -525,7 +574,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
       const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
       
       // 1. 扫描会话 memory 文件夹（全部 md 文件）
-      const sessionMemoryDir = join(chatDir, safeSessionId, 'memory')
+      const sessionMemoryDir = join(getActiveStorageDir(), 'memory', safeSessionId)
       if (fs.existsSync(sessionMemoryDir)) {
         const files = await fs.promises.readdir(sessionMemoryDir)
         const mdFiles = files.filter(f => f.toLowerCase().endsWith('.md') && !f.toLowerCase().endsWith('_已更新.md'))
@@ -705,7 +754,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
         const now = Date.now()
         const targetId = matchedId || `exp_${now}_${Math.random().toString(36).substring(2, 7)}`
         
-        const linkPath = processedFiles.map(fp => relative(chatDir, fp).replace(/\\/g, '/')).join(', ')
+        const linkPath = processedFiles.map(fp => fp.replace(/\\/g, '/')).join(', ')
 
         const categoryVal = (item.category === 'habit' || item.category === 'preference') ? item.category : 'experience'
 

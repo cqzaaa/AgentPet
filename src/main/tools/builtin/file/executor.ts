@@ -1,21 +1,41 @@
 import * as fs from 'fs'
-import { dirname, basename } from 'path'
+import { dirname, basename, join, isAbsolute } from 'path'
 import { shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath } from '../../utils/paths'
+import { resolveLocalPath, getActiveStorageDir } from '../../utils/paths'
+
+function resolveFilePath(filePath: string, context: ToolContext): string {
+  let resolved = resolveLocalPath(filePath)
+  if (!resolved || typeof resolved !== 'string') return resolved
+
+  // 1. 处理 web_fetch 生成的相对缓存路径
+  if (resolved.startsWith('.agentpet_cache/') || resolved.startsWith('.agentpet_cache\\')) {
+    const safeSessionId = context.sessionId ? context.sessionId.replace(/[^a-zA-Z0-9_-]/g, '_') : 'default_session'
+    const cacheDir = join(getActiveStorageDir(), 'chat', safeSessionId, '.agentpet_cache')
+    const fileName = basename(resolved)
+    return join(cacheDir, fileName)
+  }
+
+  // 2. 兼容普通相对路径：如果非绝对路径，且不含盘符，则拼接当前工作空间路径
+  if (!isAbsolute(resolved) && !resolved.includes(':')) {
+    resolved = join(context.workspacePath || process.cwd(), resolved)
+  }
+
+  return resolved
+}
 
 export class FileExecutor implements IToolExecutor {
   public async execute(
     api: string,
     args: Record<string, any>,
-    _context: ToolContext
+    context: ToolContext
   ): Promise<ToolResult> {
     try {
       // 1. read_file
       if (api === 'read_file') {
         let { file_path } = args
         if (!file_path) return { content: '错误：缺少必要参数 file_path', success: false }
-        file_path = resolveLocalPath(file_path)
+        file_path = resolveFilePath(file_path, context)
 
         // 兼容记忆提纯重命名：如果原 md 文件不存在，检查是否存在带 '_已更新.md' 后缀的同名文件
         if (!fs.existsSync(file_path)) {
@@ -118,7 +138,7 @@ export class FileExecutor implements IToolExecutor {
         if (!file_path || content === undefined) {
           return { content: '错误：缺少必要参数 file_path 或 content', success: false }
         }
-        file_path = resolveLocalPath(file_path)
+        file_path = resolveFilePath(file_path, context)
         const parentDir = dirname(file_path)
         if (!fs.existsSync(parentDir)) {
           await fs.promises.mkdir(parentDir, { recursive: true })
@@ -137,7 +157,7 @@ export class FileExecutor implements IToolExecutor {
         if (!file_path || old_string === undefined || new_string === undefined) {
           return { content: '错误：缺少参数 file_path, old_string 或 new_string', success: false }
         }
-        file_path = resolveLocalPath(file_path)
+        file_path = resolveFilePath(file_path, context)
         if (!fs.existsSync(file_path)) return { content: `错误：文件不存在：${file_path}`, success: false }
         
         let fileContent = await fs.promises.readFile(file_path, 'utf-8')
@@ -161,8 +181,8 @@ export class FileExecutor implements IToolExecutor {
         if (!source_path || !destination_path) {
           return { content: '错误：缺少参数 source_path 或 destination_path', success: false }
         }
-        source_path = resolveLocalPath(source_path)
-        destination_path = resolveLocalPath(destination_path)
+        source_path = resolveFilePath(source_path, context)
+        destination_path = resolveFilePath(destination_path, context)
         if (!fs.existsSync(source_path)) {
           return { content: `错误：源文件不存在: ${source_path}`, success: false }
         }
@@ -178,7 +198,7 @@ export class FileExecutor implements IToolExecutor {
       if (api === 'delete_file') {
         let { file_path } = args
         if (!file_path) return { content: '错误：缺少参数 file_path', success: false }
-        file_path = resolveLocalPath(file_path)
+        file_path = resolveFilePath(file_path, context)
         if (!fs.existsSync(file_path)) {
           return { content: `错误：文件或目录不存在: ${file_path}`, success: false }
         }
