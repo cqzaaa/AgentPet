@@ -295,14 +295,17 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           {(() => {
             const target = sessions.find(s => s.id === contextMenu.sessionId)
             if (!target) return null
+            const isWechat = target.id.startsWith('wechat:')
             return (
               <>
-                <div
-                  className="recent-context-item"
-                  onClick={() => { onTogglePin(target.id); setContextMenu(null) }}
-                >
-                  {target.pinned ? '取消置顶' : '置顶'}
-                </div>
+                {!isWechat && (
+                  <div
+                    className="recent-context-item"
+                    onClick={() => { onTogglePin(target.id); setContextMenu(null) }}
+                  >
+                    {target.pinned ? '取消置顶' : '置顶'}
+                  </div>
+                )}
                 <div
                   className="recent-context-item"
                   onClick={() => startRename(target)}

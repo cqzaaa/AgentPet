@@ -2364,7 +2364,7 @@ app.whenReady().then(() => {
           id: s.id,
           name: s.name,
           time: s.time,
-          pinned: s.pinned === 1,
+          pinned: s.id.startsWith('wechat:') ? true : (s.pinned === 1),
           userId: s.user_id || 'system',
           contextSummary: s.context_summary || '',
           messages
@@ -2393,12 +2393,13 @@ app.whenReady().then(() => {
   ipcMain.handle('api:create-session', async (_, session: any) => {
     try {
       const database = await getDB()
+      const isWechat = session.id?.startsWith('wechat:')
       await database.run(
         'INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, ?, ?)',
         session.id,
         session.name || '(未命名)',
         session.time,
-        session.pinned ? 1 : 0,
+        (session.pinned || isWechat) ? 1 : 0,
         session.userId || 'system'
       )
       broadcastSessionsUpdated()
@@ -2422,7 +2423,9 @@ app.whenReady().then(() => {
         if (key === 'userId') dbKey = 'user_id'
         if (key === 'contextSummary') dbKey = 'context_summary'
         let val = updates[key]
-        if (key === 'pinned') val = val ? 1 : 0
+        if (key === 'pinned') {
+          val = (val || sessionId.startsWith('wechat:')) ? 1 : 0
+        }
         sets.push(`${dbKey} = ?`)
         values.push(val)
       }
@@ -2448,6 +2451,11 @@ app.whenReady().then(() => {
         nickname,
         timeStr,
         sessionId.replace('wechat:', '')
+      )
+      // 如果已存在但未置顶，强制置顶
+      await database.run(
+        'UPDATE sessions SET pinned = 1 WHERE id = ?',
+        sessionId
       )
       broadcastSessionsUpdated()
       return true

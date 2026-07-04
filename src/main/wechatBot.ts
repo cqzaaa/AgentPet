@@ -1248,7 +1248,7 @@ ${skillsContext}${mcpContext}${filePrompt}
         params.userId
       )
       await database.run(
-        'UPDATE sessions SET time = ? WHERE id = ?',
+        'UPDATE sessions SET time = ?, pinned = 1 WHERE id = ?',
         timeStr,
         params.sessionId
       )
