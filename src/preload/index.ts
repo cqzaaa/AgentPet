@@ -45,6 +45,8 @@ const api = {
   uploadSkillPack: (): Promise<any[]> => ipcRenderer.invoke('api:upload-skill-pack'),
   getSkillsList: (): Promise<any[]> => ipcRenderer.invoke('api:get-skills-list'),
   deleteSkill: (name: string): Promise<any[]> => ipcRenderer.invoke('api:delete-skill', name),
+  getActiveSkillsPrompt: (enabledSkillNames: string[]): Promise<string> =>
+    ipcRenderer.invoke('api:get-active-skills-prompt', enabledSkillNames),
   callLLM: (config: any, messages: any[], workspacePath?: string): Promise<string> =>
     ipcRenderer.invoke('api:call-llm', config, messages, workspacePath),
   selectFile: (): Promise<{ name: string; path: string; content: string } | null> =>
@@ -172,8 +174,8 @@ const api = {
   respondPermission: (requestId: number, approved: boolean): void => {
     ipcRenderer.send('api:permission-response', { requestId, approved })
   },
-  abortLlm: (): Promise<boolean> =>
-    ipcRenderer.invoke('api:abort-llm'),
+  abortLlm: (sessionId?: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:abort-llm', sessionId),
   getCronTasks: (): Promise<any[] | null> =>
     ipcRenderer.invoke('api:get-cron-tasks'),
   saveCronTasks: (tasks: any[]): Promise<boolean> =>

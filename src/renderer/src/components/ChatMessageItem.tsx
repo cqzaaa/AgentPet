@@ -51,8 +51,8 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   }, [code, lang])
 
   return (
-    <div 
-      className="modern-code-container" 
+    <div
+      className="modern-code-container"
       style={{
         border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
         borderRadius: '8px',
@@ -62,7 +62,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
       }}
     >
-      <div 
+      <div
         className="code-header"
         style={{
           display: 'flex',
@@ -74,7 +74,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           userSelect: 'none'
         }}
       >
-        <span 
+        <span
           className="code-lang"
           style={{
             fontSize: '12px',
@@ -87,8 +87,8 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           {lang || 'code'}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button 
-            className="code-copy-btn" 
+          <button
+            className="code-copy-btn"
             onClick={handleCopy}
             style={{
               display: 'flex',
@@ -129,9 +129,9 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
               </>
             )}
           </button>
-          
+
           <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--border-color, rgba(128,128,128,0.18))' }} />
-          
+
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             style={{
@@ -156,18 +156,18 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
             }}
             title={isCollapsed ? '展开代码' : '折叠代码'}
           >
-            <svg 
-              width="12" 
-              height="12" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2.5" 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              style={{ 
-                transition: 'transform 0.2s ease', 
-                transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' 
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                transition: 'transform 0.2s ease',
+                transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)'
               }}
             >
               <polyline points="6 9 12 15 18 9"></polyline>
@@ -175,7 +175,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           </button>
         </div>
       </div>
-      <pre 
+      <pre
         className="code-body"
         style={{
           maxHeight: isCollapsed ? '0' : '2000px',
@@ -187,7 +187,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           borderTop: 'none'
         }}
       >
-        <code 
+        <code
           style={{
             fontFamily: "Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace",
             fontSize: '12.5px',

@@ -9,6 +9,7 @@ import * as os from 'os'
 import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
 import { EdgeTTS } from 'node-edge-tts'
+import JSZip from 'jszip'
 
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
@@ -145,7 +146,7 @@ app.commandLine.appendSwitch('prune-gpu-command-buffer')
 app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
 
 // 限制老生代堆内存，强制更激进和频繁的垃圾回收，并暴露 gc 接口
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --expose-gc')
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=1024 --expose-gc')
 // 限制 HTTP 缓存和媒体缓存的大小，防止内存长期驻留过大缓存
 app.commandLine.appendSwitch('disk-cache-size', '1048576')
 app.commandLine.appendSwitch('media-cache-size', '1048576')
@@ -342,7 +343,7 @@ async function saveBase64ImageInternal(dataUrl: string): Promise<{ path: string;
     return null
   }
 }
-let currentLlmAbortController: AbortController | null = null
+const activeLlmAbortControllers = new Map<string, AbortController>()
 // 跟踪每个会话最近上传的 xlsx 文件，用于 generate_file 时自动复制数据验证
 const sessionLastXlsxMap: Map<string, string> = new Map()
 
@@ -1628,10 +1629,18 @@ app.whenReady().then(() => {
     menu.popup()
   })
 
-  ipcMain.handle('api:abort-llm', () => {
-    if (currentLlmAbortController) {
-      currentLlmAbortController.abort()
-      currentLlmAbortController = null
+  ipcMain.handle('api:abort-llm', (_, sessionId?: string) => {
+    if (sessionId) {
+      const controller = activeLlmAbortControllers.get(sessionId)
+      if (controller) {
+        try { controller.abort() } catch (_) { /* ignore */ }
+        activeLlmAbortControllers.delete(sessionId)
+      }
+    } else {
+      for (const controller of activeLlmAbortControllers.values()) {
+        try { controller.abort() } catch (_) { /* ignore */ }
+      }
+      activeLlmAbortControllers.clear()
     }
     permissionManager.clearPendingPermissions()
 
@@ -2605,6 +2614,29 @@ app.whenReady().then(() => {
     await shell.openPath(getActiveSkillsDir())
   })
 
+  const unzipSkillPack = async (zipPath: string, destDir: string): Promise<void> => {
+    try {
+      const data = await fs.promises.readFile(zipPath)
+      const zip = await JSZip.loadAsync(data)
+      if (!fs.existsSync(destDir)) {
+        await fs.promises.mkdir(destDir, { recursive: true })
+      }
+      for (const [filename, file] of Object.entries(zip.files)) {
+        if (file.dir) {
+          await fs.promises.mkdir(join(destDir, filename), { recursive: true })
+        } else {
+          const fileData = await file.async('nodebuffer')
+          const filePath = join(destDir, filename)
+          await fs.promises.mkdir(dirname(filePath), { recursive: true })
+          await fs.promises.writeFile(filePath, fileData)
+        }
+      }
+      console.log(`[Skills] 成功解压技能包: ${basename(zipPath)} 到 ${destDir}`)
+    } catch (e) {
+      console.error(`[Skills] 解压技能包失败: ${zipPath}`, e)
+    }
+  }
+
   const readSkillsFolder = async (): Promise<any[]> => {
     try {
       const skillsPath = getActiveSkillsDir()
@@ -2614,6 +2646,26 @@ app.whenReady().then(() => {
         if (file.toLowerCase().endsWith('.zip')) {
           const filePath = join(skillsPath, file)
           const stat = await fs.promises.stat(filePath)
+          
+          // 自动解压处理
+          const folderName = file.substring(0, file.length - 4)
+          const folderPath = join(skillsPath, folderName)
+          let needsUnzip = false
+          
+          if (!fs.existsSync(folderPath)) {
+            needsUnzip = true
+          } else {
+            const folderStat = await fs.promises.stat(folderPath)
+            if (folderStat.mtime.getTime() < stat.mtime.getTime()) {
+              needsUnzip = true
+            }
+          }
+          
+          if (needsUnzip) {
+            console.log(`[Skills] 检测到技能包 ${file} 未解压或有更新，正在进行解压...`)
+            await unzipSkillPack(filePath, folderPath)
+          }
+
           list.push({
             name: file,
             size: stat.size,
@@ -2662,10 +2714,70 @@ app.whenReady().then(() => {
       if (fs.existsSync(filePath)) {
         await shell.trashItem(filePath)
       }
+      // 同时清理对应的解包文件夹
+      if (name.toLowerCase().endsWith('.zip')) {
+        const folderName = name.substring(0, name.length - 4)
+        const folderPath = join(skillsPath, folderName)
+        if (fs.existsSync(folderPath)) {
+          await shell.trashItem(folderPath)
+        }
+      }
     } catch (e) {
       console.error(e)
     }
     return await readSkillsFolder()
+  })
+
+  // 辅助递归寻找 skill.md (限制深度，防止超大目录卡死)
+  async function findSkillMds(dirPath: string, maxDepth = 4, currentDepth = 0): Promise<string[]> {
+    if (currentDepth > maxDepth) return []
+    let results: string[] = []
+    try {
+      const items = await fs.promises.readdir(dirPath, { withFileTypes: true })
+      for (const item of items) {
+        if (item.isDirectory()) {
+          const subResults = await findSkillMds(join(dirPath, item.name), maxDepth, currentDepth + 1)
+          results = results.concat(subResults)
+        } else if (item.isFile() && item.name.toLowerCase() === 'skill.md') {
+          results.push(join(dirPath, item.name))
+        }
+      }
+    } catch (e) {
+      // 忽略无法读取的目录
+    }
+    return results
+  }
+
+  // 获取已启用的技能中的 SKILL.md 内容作为 System Prompt
+  ipcMain.handle('api:get-active-skills-prompt', async (_, enabledSkillNames: string[]) => {
+    try {
+      if (!enabledSkillNames || enabledSkillNames.length === 0) return ''
+      const skillsPath = getActiveSkillsDir()
+      const prompts: string[] = []
+      
+      for (const zipName of enabledSkillNames) {
+        const folderName = zipName.toLowerCase().endsWith('.zip') 
+          ? zipName.substring(0, zipName.length - 4)
+          : zipName
+        const folderPath = join(skillsPath, folderName)
+        
+        if (fs.existsSync(folderPath)) {
+          const mdPaths = await findSkillMds(folderPath)
+          for (const mdPath of mdPaths) {
+            const content = await fs.promises.readFile(mdPath, 'utf-8')
+            if (content.trim()) {
+              let relativeName = mdPath.replace(folderPath, '').replace(/^[\\/]/, '')
+              prompts.push(`### 技能规约: ${folderName} [${relativeName}]\n${content.trim()}`)
+            }
+          }
+        }
+      }
+      
+      return prompts.join('\n\n---\n\n')
+    } catch (e) {
+      console.error('[Skills] 获取已启用技能提示词失败:', e)
+      return ''
+    }
   })
 
   // 4.5. 文本文件选择与加载接口（支持 PDF/Word/Excel/CSV 等格式）
@@ -3001,12 +3113,14 @@ app.whenReady().then(() => {
   ): Promise<string> {
     const executor = new AgentExecutor()
     let thisController: AbortController
+    const sessionId = config.sessionId || 'default'
     if (event && !(config as any).isBackground) {
-      if (currentLlmAbortController) {
-        try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
+      const oldController = activeLlmAbortControllers.get(sessionId)
+      if (oldController) {
+        try { oldController.abort() } catch (_) { /* ignore */ }
       }
-      currentLlmAbortController = new AbortController()
-      thisController = currentLlmAbortController
+      thisController = new AbortController()
+      activeLlmAbortControllers.set(sessionId, thisController)
     } else {
       thisController = new AbortController()
     }
@@ -3086,10 +3200,14 @@ app.whenReady().then(() => {
         }
       }
 
-      if (currentLlmAbortController === thisController) currentLlmAbortController = null
+      if (activeLlmAbortControllers.get(sessionId) === thisController) {
+        activeLlmAbortControllers.delete(sessionId)
+      }
       return finalResponse
     } catch (e: any) {
-      if (currentLlmAbortController === thisController) currentLlmAbortController = null
+      if (activeLlmAbortControllers.get(sessionId) === thisController) {
+        activeLlmAbortControllers.delete(sessionId)
+      }
       if (thisController.signal.aborted) {
         throw new Error('UserAborted')
       }
@@ -3281,11 +3399,11 @@ app.whenReady().then(() => {
   app.on('before-quit', () => {
     console.log('[App] 正在清理进行中的请求和连接...')
 
-    // 1. 中止正在进行的 LLM 请求
-    if (currentLlmAbortController) {
-      try { currentLlmAbortController.abort() } catch (_) { /* ignore */ }
-      currentLlmAbortController = null
+    // 1. 中止所有正在进行的 LLM 请求
+    for (const controller of activeLlmAbortControllers.values()) {
+      try { controller.abort() } catch (_) { /* ignore */ }
     }
+    activeLlmAbortControllers.clear()
 
     // 2. 解除所有等待授权的阻塞，避免 loading 挂起
     permissionManager.clearPendingPermissions()

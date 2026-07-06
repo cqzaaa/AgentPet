@@ -530,10 +530,9 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     console.warn('[Purify] memoryDeps 未初始化，跳过后台整理')
     return { success: false, count: 0, insertCount: 0 }
   }
-  const { getActiveChatDir, getDB, getActiveStorageDir, getSystemLlmConfig, callLlmInternal } = memoryDeps
+  const { getDB, getActiveStorageDir, getSystemLlmConfig, callLlmInternal } = memoryDeps
 
   try {
-    const chatDir = getActiveChatDir()
     const database = await getDB()
     
     let sessions: { id: string; name: string }[] = []

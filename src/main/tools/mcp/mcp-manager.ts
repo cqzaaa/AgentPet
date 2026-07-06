@@ -351,13 +351,28 @@ export class McpManager {
 
   public getActiveServers(): any[] {
     const list: any[] = []
-    for (const conn of this.connections.values()) {
+    for (const server of this.systemMcpConfig.servers) {
+      if (!server.enabled || !server.url) continue
+      
+      const conn = this.connections.get(server.id)
+      let toolsCount = 0
+      let status = 'disconnected'
+      
+      if (conn) {
+        toolsCount = conn.tools.length
+        status = 'connected'
+      } else if (server.tools && Array.isArray(server.tools)) {
+        toolsCount = server.tools.length
+        status = 'loaded'
+      }
+
       list.push({
-        id: conn.config.id,
-        name: conn.config.name,
-        url: conn.config.url,
-        description: conn.config.description || '',
-        toolsCount: conn.tools.length
+        id: server.id,
+        name: server.name,
+        url: server.url,
+        description: server.description || '',
+        toolsCount,
+        status
       })
     }
     return list

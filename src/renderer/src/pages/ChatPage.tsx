@@ -39,19 +39,385 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     showToast,
     // sandbox/permission
     activePermissionRequest,
-    handleRespondPermission
+    handleRespondPermission,
+    // skills & mcp
+    skillsList,
+    disabledSkillNames,
+    toggleSkillEnable,
+    setActiveTab,
+    setAgentSubTab,
+    refreshSkillsAndStorage,
+    refreshMcpServers,
+    mcpConfig,
+    saveMcpConfig
   } = store
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
 
-  // 计算最后一条消息的特征，用于触发滚动
-  const lastMessageStatus = useMemo(() => {
-    if (!activeSessMessages || activeSessMessages.length === 0) return ''
-    const lastMsg = activeSessMessages[activeSessMessages.length - 1]
-    return `${lastMsg.id}-${lastMsg.text?.length || 0}-${lastMsg.toolSteps?.length || 0}-${lastMsg.isThinking}`
-  }, [activeSessMessages])
+  // 技能与 MCP Popover 状态与 Refs
+  const [showSkillsPopover, setShowSkillsPopover] = useState(false)
+  const [showMcpPopover, setShowMcpPopover] = useState(false)
+  const skillsPopoverRef = useRef<HTMLDivElement>(null)
+  const mcpPopoverRef = useRef<HTMLDivElement>(null)
+
+  // 搜索过滤
+  const [skillsSearchKey, setSkillsSearchKey] = useState('')
+  const [mcpSearchKey, setMcpSearchKey] = useState('')
+
+  // 列表溢出检测（仅溢出时显示搜索框）
+  const skillsListRef = useRef<HTMLDivElement>(null)
+  const mcpListRef = useRef<HTMLDivElement>(null)
+  const [skillsOverflow, setSkillsOverflow] = useState(false)
+  const [mcpOverflow, setMcpOverflow] = useState(false)
+
+  // 检测列表是否溢出
+  useEffect(() => {
+    if (showSkillsPopover && skillsListRef.current) {
+      const el = skillsListRef.current
+      setSkillsOverflow(el.scrollHeight > el.clientHeight)
+    } else {
+      setSkillsSearchKey('')
+    }
+  }, [showSkillsPopover, skillsList])
+
+  useEffect(() => {
+    if (showMcpPopover && mcpListRef.current) {
+      const el = mcpListRef.current
+      setMcpOverflow(el.scrollHeight > el.clientHeight)
+    } else {
+      setMcpSearchKey('')
+    }
+  }, [showMcpPopover, mcpConfig])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showSkillsPopover && skillsPopoverRef.current && !skillsPopoverRef.current.contains(event.target as Node)) {
+        // 只有在点击非按钮（或者非 popover 内部）时才关闭，为了保证按钮点击切换正常，我们仅检查 popover 外部
+        // 因为点击按钮时如果直接在 handleClickOutside 触发关闭，会和按钮本身的 onClick 冲突（按钮点击 -> handleClickOutside(由于非popover内) -> 关闭 -> 按钮onClick -> 打开。结果又打开了）
+        // 实际上, 我们只要判断如果点击的 target 在 Popover 之外，且不在对应的 Button 内部，就将其关闭
+        // 更好的办法是：如果点击了 Popover 以外的任何元素，关闭它
+        const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-skills')
+        if (!isClickOnBtn) {
+          setShowSkillsPopover(false)
+        }
+      }
+      if (showMcpPopover && mcpPopoverRef.current && !mcpPopoverRef.current.contains(event.target as Node)) {
+        const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-mcp')
+        if (!isClickOnBtn) {
+          setShowMcpPopover(false)
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showSkillsPopover, showMcpPopover])
+
+  // 挂载时刷新技能与 MCP 状态
+  useEffect(() => {
+    refreshSkillsAndStorage()
+    refreshMcpServers()
+  }, [])
+
+  // 搜索输入框公共样式
+  const searchInputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '5px 8px',
+    fontSize: '11.5px',
+    border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+    borderRadius: '6px',
+    background: 'var(--bg-input, rgba(128,128,128,0.04))',
+    color: 'var(--text-color)',
+    outline: 'none',
+    boxSizing: 'border-box'
+  }
+
+  // MCP 服务开关切换
+  const toggleMcpServerEnable = useCallback((serverId: string) => {
+    const newConfig = {
+      ...mcpConfig,
+      servers: mcpConfig.servers.map((s: any) =>
+        s.id === serverId ? { ...s, enabled: !s.enabled } : s
+      )
+    }
+    saveMcpConfig(newConfig)
+  }, [mcpConfig, saveMcpConfig])
+
+  // 全部 MCP 服务列表（用于 popover 展示，含未启用的）
+  const allMcpServers: any[] = mcpConfig?.servers || []
+
+  const renderSkillsPopover = () => {
+    const filtered = skillsSearchKey
+      ? skillsList.filter(s => s.name.toLowerCase().includes(skillsSearchKey.toLowerCase()))
+      : skillsList
+    return (
+      <div
+        ref={skillsPopoverRef}
+        className="chat-popover-card"
+        style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 8px)',
+          right: 0,
+          width: '260px',
+          background: 'var(--bg-card, #ffffff)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+          borderRadius: '10px',
+          boxShadow: '0 6px 20px rgba(0, 0, 0, 0.12)',
+          zIndex: 1000,
+          padding: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          animation: 'slideUpMenu 0.15s ease-out'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🧩 已装载的技能包</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>勾选在会话中启用</span>
+        </div>
+        {/* 搜索框：仅在列表溢出时显示 */}
+        {skillsOverflow && (
+          <input
+            style={searchInputStyle}
+            placeholder="搜索技能..."
+            value={skillsSearchKey}
+            onChange={e => setSkillsSearchKey(e.target.value)}
+            autoFocus
+          />
+        )}
+        <div
+          ref={skillsListRef}
+          style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', padding: '2px 0' }}
+        >
+          {filtered.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+              {skillsList.length === 0 ? '暂未安装任何技能扩展包' : '无匹配的技能'}
+            </div>
+          ) : (
+            filtered.map(skill => {
+              const isEnabled = !disabledSkillNames.includes(skill.name)
+              return (
+                <label
+                  key={skill.name}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    fontSize: '12.5px',
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                    borderRadius: '4px',
+                    transition: 'background 0.15s ease',
+                    userSelect: 'none'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: isEnabled ? 'var(--text-color)' : 'var(--text-muted)',
+                      fontWeight: isEnabled ? 500 : 400,
+                      flex: 1
+                    }}
+                    title={skill.name}
+                  >
+                    {skill.name.replace(/\.zip$/i, '')}
+                  </span>
+                  {/* CSS Toggle Switch */}
+                  <div style={{ position: 'relative', width: '28px', height: '16px', borderRadius: '8px', backgroundColor: isEnabled ? 'var(--accent-color, #4f8cff)' : 'var(--border-color, rgba(128,128,128,0.3))', transition: 'background-color 0.2s ease', flexShrink: 0 }}>
+                    <div style={{
+                      position: 'absolute',
+                      top: '2px',
+                      left: isEnabled ? '14px' : '2px',
+                      width: '12px',
+                      height: '12px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '50%',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={() => toggleSkillEnable(skill.name)}
+                      style={{ opacity: 0, width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, margin: 0, cursor: 'pointer' }}
+                    />
+                  </div>
+                </label>
+              )
+            })
+          )}
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingTop: '6px', marginTop: '4px' }}>
+          <button
+            style={{
+              width: '100%',
+              padding: '6px 0',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              color: 'var(--accent-color, #4f8cff)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px'
+            }}
+            onClick={() => {
+              setShowSkillsPopover(false)
+              setActiveTab('agent')
+              setAgentSubTab('skills')
+            }}
+          >
+            ⚙️ 前往管理技能包
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const renderMcpPopover = () => {
+    const filtered = mcpSearchKey
+      ? allMcpServers.filter((s: any) => s.name.toLowerCase().includes(mcpSearchKey.toLowerCase()))
+      : allMcpServers
+    return (
+      <div
+        ref={mcpPopoverRef}
+        className="chat-popover-card"
+        style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 8px)',
+          right: 0,
+          width: '260px',
+          background: 'var(--bg-card, #ffffff)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+          borderRadius: '10px',
+          boxShadow: '0 6px 20px rgba(0, 0, 0, 0.12)',
+          zIndex: 1000,
+          padding: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          animation: 'slideUpMenu 0.15s ease-out'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🔗 MCP 服务</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>勾选启用服务</span>
+        </div>
+        {/* 搜索框：仅在列表溢出时显示 */}
+        {mcpOverflow && (
+          <input
+            style={searchInputStyle}
+            placeholder="搜索 MCP 服务..."
+            value={mcpSearchKey}
+            onChange={e => setMcpSearchKey(e.target.value)}
+            autoFocus
+          />
+        )}
+        <div
+          ref={mcpListRef}
+          style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', padding: '2px 0' }}
+        >
+          {filtered.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+              {allMcpServers.length === 0 ? '暂未配置任何 MCP 服务' : '无匹配的 MCP 服务'}
+            </div>
+          ) : (
+            filtered.map((server: any) => (
+              <label
+                key={server.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  borderRadius: '4px',
+                  transition: 'background 0.15s ease',
+                  userSelect: 'none'
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: server.enabled ? 'var(--text-color)' : 'var(--text-muted)',
+                    fontWeight: server.enabled ? 500 : 400,
+                    flex: 1
+                  }}
+                  title={server.name}
+                >
+                  {server.name}
+                </span>
+                {/* CSS Toggle Switch */}
+                <div style={{ position: 'relative', width: '28px', height: '16px', borderRadius: '8px', backgroundColor: server.enabled ? 'var(--accent-color, #4f8cff)' : 'var(--border-color, rgba(128,128,128,0.3))', transition: 'background-color 0.2s ease', flexShrink: 0 }}>
+                  <div style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: server.enabled ? '14px' : '2px',
+                    width: '12px',
+                    height: '12px',
+                    backgroundColor: '#ffffff',
+                    borderRadius: '50%',
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                  }} />
+                  <input
+                    type="checkbox"
+                    checked={!!server.enabled}
+                    onChange={() => toggleMcpServerEnable(server.id)}
+                    style={{ opacity: 0, width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, margin: 0, cursor: 'pointer' }}
+                  />
+                </div>
+              </label>
+            ))
+          )}
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingTop: '6px', marginTop: '4px' }}>
+          <button
+            style={{
+              width: '100%',
+              padding: '6px 0',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              color: 'var(--accent-color, #4f8cff)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px'
+            }}
+            onClick={() => {
+              setShowMcpPopover(false)
+              setActiveTab('agent')
+              setAgentSubTab('mcp')
+            }}
+          >
+            ⚙️ 前往管理 MCP 服务
+          </button>
+        </div>
+      </div>
+    )
+  }
+
 
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
@@ -173,20 +539,18 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     requestAnimationFrame(() => checkScrollPosition())
   }, [activeSessionId, checkScrollPosition])
 
-  // 新消息到来或最后一条消息（如工具调用、文字流）更新时，如果在底部则保持在底部
+  // 仅在新消息条数增加时（用户发送 / agent 新消息出现），滚动到底部
+  // 流式输出、工具步骤、isThinking 变化不触发此逻辑，避免打断用户翻看历史
   useEffect(() => {
-    if (!showScrollToBottom) {
-      const el = messagesBoxRef.current
-      if (el) {
-        // 使用 setTimeout 确保 React 已经把最新 DOM 渲染完成，scrollHeight 已经更新
-        const timer = setTimeout(() => {
-          el.scrollTop = el.scrollHeight
-        }, 50)
-        return () => clearTimeout(timer)
-      }
+    const el = messagesBoxRef.current
+    if (el) {
+      const timer = setTimeout(() => {
+        el.scrollTop = el.scrollHeight
+      }, 50)
+      return () => clearTimeout(timer)
     }
     return undefined
-  }, [activeSessMessages.length, lastMessageStatus, showScrollToBottom])
+  }, [activeSessMessages.length])
 
   const scrollToBottom = () => {
     const el = messagesBoxRef.current
@@ -499,8 +863,8 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               currentContextTokens >= contextLimit
                 ? '⚠️ 上下文额度已用满，请创建新会话以继续对话！'
                 : isSending
-                ? `${currentAvatarName} 正在思考中...`
-                : `输入指令并发送给 ${currentAvatarName} ...`
+                  ? `${currentAvatarName} 正在思考中...`
+                  : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
             disabled={isSending || currentContextTokens >= contextLimit}
@@ -769,7 +1133,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                     style={{ transition: 'stroke-dasharray 0.35s ease' }}
                   />
                 </svg>
-                
+
                 {showContextTooltip && (
                   <div
                     style={{
@@ -792,6 +1156,90 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                     {`${contextPercent.toFixed(1)}% · ${(currentContextTokens / 1000).toFixed(1)}K / ${(contextLimit / 1000).toFixed(0)}K 上下文已使用`}
                   </div>
                 )}
+              </div>
+
+              {/* 🧩 技能快捷开关按钮与 Popover */}
+              <div style={{ position: 'relative' }}>
+                <div
+                  className="toolbar-action-btn-skills"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '0 10px',
+                    height: '30px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    border: '1.5px dashed var(--border-color, rgba(128,128,128,0.25))',
+                    backgroundColor: showSkillsPopover ? 'var(--bg-menu-hover, rgba(128,128,128,0.08))' : 'transparent',
+                    cursor: 'pointer',
+                    color: 'var(--text-color)',
+                    userSelect: 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onClick={() => {
+                    const next = !showSkillsPopover
+                    setShowSkillsPopover(next)
+                    setShowMcpPopover(false)
+                    if (next) {
+                      refreshSkillsAndStorage()
+                    }
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
+                  onMouseLeave={e => {
+                    if (!showSkillsPopover) e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                  title="点击管理与勾选启用技能扩展包"
+                >
+                  <span>🧩</span>
+                  <span>
+                    技能 ({skillsList.filter(s => !disabledSkillNames.includes(s.name)).length}/{skillsList.length})
+                  </span>
+                </div>
+                {showSkillsPopover && renderSkillsPopover()}
+              </div>
+
+              {/* 🔗 MCP 快捷查看按钮与 Popover */}
+              <div style={{ position: 'relative' }}>
+                <div
+                  className="toolbar-action-btn-mcp"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '0 10px',
+                    height: '30px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    border: '1.5px dashed var(--border-color, rgba(128,128,128,0.25))',
+                    backgroundColor: showMcpPopover ? 'var(--bg-menu-hover, rgba(128,128,128,0.08))' : 'transparent',
+                    cursor: 'pointer',
+                    color: 'var(--text-color)',
+                    userSelect: 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onClick={() => {
+                    const next = !showMcpPopover
+                    setShowMcpPopover(next)
+                    setShowSkillsPopover(false)
+                    if (next) {
+                      refreshMcpServers()
+                    }
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
+                  onMouseLeave={e => {
+                    if (!showMcpPopover) e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                  title="点击管理与勾选启用 MCP 服务"
+                >
+                  <span>🔗</span>
+                  <span>
+                    MCP ({allMcpServers.filter((s: any) => s.enabled).length}/{allMcpServers.length})
+                  </span>
+                </div>
+                {showMcpPopover && renderMcpPopover()}
               </div>
 
               <button

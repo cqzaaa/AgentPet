@@ -267,7 +267,7 @@ export class AgentExecutor {
     }
 
     let loopCount = 0
-    const maxLoops = 40
+    const maxLoops = 100
     let TOOL_INTERRUPT_THRESHOLD = 10
     let totalToolCallsCount = 0
     let isLongTask = false
@@ -581,6 +581,11 @@ export class AgentExecutor {
     if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
       console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
       this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。').catch(e => console.error('[System] 自动经验沉淀失败:', e))
+    }
+
+    yield {
+      type: 'text',
+      content: '⚠️ [系统中断] 智能代理执行工具链已达到最大轮数上限(100次)，已强制结束生成。请检查是否陷入死循环。'
     }
 
     return '智能代理执行工具链已达到最大轮数上限。'
