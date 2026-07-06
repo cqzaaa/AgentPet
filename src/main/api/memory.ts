@@ -1,4 +1,4 @@
-﻿import { ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import { join, relative } from 'path'
 import { getLocalEmbedding } from './localEmbedding'
@@ -72,16 +72,7 @@ export async function appendMemorySummaryInternal(sessionId: string, title: stri
     
     let linkSection = ''
     if (relatedCaches.length > 0) {
-      linkSection += '\n\n---\n### 🔗 关联缓存引用\n'
-      
       const mentionedList: string[] = []
-      const recentList: string[] = []
-      
-      // 简单的分句，支持换行、句号、感叹号、问号、分号
-      const sentences = content
-        .split(/[\n\r。？！]/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0)
 
       for (const relPath of relatedCaches) {
         const fileName = relPath.split('/').pop() || relPath
@@ -89,20 +80,13 @@ export async function appendMemorySummaryInternal(sessionId: string, title: stri
         
         if (content.includes(fileName) || content.includes(relPath)) {
           mentionedList.push(`* 显式引用了本地缓存文档：[\`${relPath}\`](file:///${absPath})`)
-        } else {
-          recentList.push(`* 关联了最近修改的缓存（未在正文显式引用）：[\`${relPath}\`](file:///${absPath})`)
         }
       }
       
       if (mentionedList.length > 0) {
-        linkSection += '#### 显式引用的缓存文档：\n' + mentionedList.join('\n') + '\n\n'
+        linkSection += '\n\n---\n### 🔗 关联缓存引用\n'
+        linkSection += mentionedList.join('\n') + '\n\n'
       }
-      if (recentList.length > 0) {
-        linkSection += '#### 最近修改关联（未在正文显式提及）：\n' + recentList.join('\n') + '\n\n'
-      }
-      
-      // 插入向后兼容提取管道的 HTML 注释，务必换行单独成行，防止 --> 被正则捕获
-      linkSection += `\n<!--\n关联缓存: ${relatedCaches.join(', ')}\n-->\n`
     }
 
     // 直接新建独立文件写入，不再累加旧文件
@@ -563,7 +547,6 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     
     let allSummariesCombined = ''
     const processedFiles: string[] = []
-    const sessionCaches = new Set<string>()
 
     for (const sess of sessions) {
       const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
@@ -576,13 +559,6 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
           const filePath = join(sessionMemoryDir, file)
           try {
             const content = await fs.promises.readFile(filePath, 'utf-8')
-            const cacheMatch = content.match(/<!--\s*关联缓存:\s*([^\n-->]+)/)
-            if (cacheMatch && cacheMatch[1]) {
-              cacheMatch[1].split(',').map(s => s.trim()).forEach(c => {
-                if (c) sessionCaches.add(c)
-              })
-            }
-
             allSummariesCombined += `\n### 会话: ${sess.name} (文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
             processedFiles.push(filePath)
           } catch (e) {
