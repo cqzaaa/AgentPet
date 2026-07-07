@@ -138,32 +138,111 @@ export class OfficeExecutor implements IToolExecutor {
           await workbook.xlsx.writeFile(filePath)
         } else if (file_type === 'word') {
           const docx = require('docx')
-          const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx
+          const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } = docx
           const lines = content.split('\n')
-          const children = lines.map((line: string) => {
-            if (line.startsWith('# ')) {
-              return new Paragraph({
+
+          // 辅助解析 PNG/JPEG 图片宽高的函数
+          const getImageSize = (buffer: Buffer): { width: number; height: number } | null => {
+            try {
+              if (
+                buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
+                buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a
+              ) {
+                const width = buffer.readUInt32BE(16)
+                const height = buffer.readUInt32BE(20)
+                return { width, height }
+              }
+              if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+                let offset = 2
+                while (offset < buffer.length) {
+                  if (buffer[offset] !== 0xff) break
+                  const marker = buffer[offset + 1]
+                  const isSOF =
+                    (marker >= 0xc0 && marker <= 0xc3) ||
+                    (marker >= 0xc5 && marker <= 0xc7) ||
+                    (marker >= 0xc9 && marker <= 0xcb) ||
+                    (marker >= 0xcd && marker <= 0xcf)
+                  if (isSOF) {
+                    const height = buffer.readUInt16BE(offset + 5)
+                    const width = buffer.readUInt16BE(offset + 7)
+                    return { width, height }
+                  }
+                  const length = buffer.readUInt16BE(offset + 2)
+                  offset += length + 2
+                }
+              }
+            } catch (_) {}
+            return null
+          }
+
+          const children: any[] = []
+          for (const line of lines) {
+            const trimmed = line.trim()
+            const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)/)
+            if (imgMatch) {
+              const imgPath = resolveLocalPath(imgMatch[2].trim())
+              if (fs.existsSync(imgPath)) {
+                try {
+                  const imgBuffer = fs.readFileSync(imgPath)
+                  let width = 450
+                  let height = 300
+                  const dimensions = getImageSize(imgBuffer)
+                  if (dimensions && dimensions.width && dimensions.height) {
+                    const maxWidth = 480
+                    if (dimensions.width > maxWidth) {
+                      width = maxWidth
+                      height = Math.round((dimensions.height * maxWidth) / dimensions.width)
+                    } else {
+                      width = dimensions.width
+                      height = dimensions.height
+                    }
+                  }
+                  children.push(new Paragraph({
+                    children: [
+                      new ImageRun({
+                        data: imgBuffer,
+                        transformation: {
+                          width,
+                          height
+                        }
+                      })
+                    ]
+                  }))
+                } catch (readErr) {
+                  console.error('[docx-generation] 读取图片失败:', imgPath, readErr)
+                  children.push(new Paragraph({
+                    children: [new TextRun({ text: `[读取图片失败: ${imgMatch[2]}]`, size: 24, color: 'FF0000' })]
+                  }))
+                }
+              } else {
+                children.push(new Paragraph({
+                  children: [new TextRun({ text: `[图片文件未找到: ${imgMatch[2]}]`, size: 24, color: 'FF0000' })]
+                }))
+              }
+            } else if (line.startsWith('# ')) {
+              children.push(new Paragraph({
                 heading: HeadingLevel.HEADING_1,
                 children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 32 })]
-              })
+              }))
             } else if (line.startsWith('## ')) {
-              return new Paragraph({
+              children.push(new Paragraph({
                 heading: HeadingLevel.HEADING_2,
                 children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 28 })]
-              })
+              }))
             } else if (line.startsWith('### ')) {
-              return new Paragraph({
+              children.push(new Paragraph({
                 heading: HeadingLevel.HEADING_3,
                 children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 24 })]
-              })
+              }))
             } else if (line.trim() === '') {
-              return new Paragraph({ children: [] })
+              children.push(new Paragraph({ children: [] }))
             } else {
-              return new Paragraph({
+              children.push(new Paragraph({
                 children: [new TextRun({ text: line, size: 24 })]
-              })
+              }))
             }
-          })
+          }
+
           const doc = new Document({ sections: [{ children }] })
           const buffer = await Packer.toBuffer(doc)
           await fs.promises.writeFile(filePath, buffer)
@@ -278,8 +357,14 @@ export class OfficeExecutor implements IToolExecutor {
 
         const JSZip = require('jszip')
         const path = require('path')
-        const buffer = await fs.promises.readFile(source_path)
-        const zip = await JSZip.loadAsync(buffer)
+        
+        let zip
+        try {
+          const buffer = await fs.promises.readFile(source_path)
+          zip = await JSZip.loadAsync(buffer)
+        } catch (e: any) {
+          return { content: `错误：读取或解析源 Docx 文件失败：${e.message}`, success: false }
+        }
 
         const docXmlFile = zip.file('word/document.xml')
         if (!docXmlFile) {
@@ -516,11 +601,19 @@ export class OfficeExecutor implements IToolExecutor {
 
           for (const img of images) {
             if (!img.search_text || !img.image_path) continue
-            img.image_path = resolveLocalPath(img.image_path)
-            if (!fs.existsSync(img.image_path)) continue
+            const resolvedPath = resolveLocalPath(img.image_path)
+            if (!fs.existsSync(resolvedPath)) {
+              return { content: `错误：图片文件未找到，路径：${img.image_path}`, success: false }
+            }
 
-            const imgBuffer = await fs.promises.readFile(img.image_path)
-            const imgExt = path.extname(img.image_path).toLowerCase().replace('.', '') || 'png'
+            let imgBuffer
+            try {
+              imgBuffer = await fs.promises.readFile(resolvedPath)
+            } catch (e: any) {
+              return { content: `错误：读取图片失败，路径：${img.image_path}，详情：${e.message}`, success: false }
+            }
+            
+            const imgExt = path.extname(resolvedPath).toLowerCase().replace('.', '') || 'png'
             const contentTypeMap: Record<string, string> = {
               png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
               gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp'
@@ -569,12 +662,23 @@ export class OfficeExecutor implements IToolExecutor {
         }
 
         zip.file('word/document.xml', xml)
-        const outputBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+        
+        let outputBuffer
+        try {
+          outputBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+        } catch (e: any) {
+          return { content: `错误：打包 Docx 文件失败：${e.message}`, success: false }
+        }
 
         const genDir = getGeneratedFilesDir(context.sessionId)
         const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
         const filePath = join(genDir, safeName)
-        await fs.promises.writeFile(filePath, outputBuffer)
+        
+        try {
+          await fs.promises.writeFile(filePath, outputBuffer)
+        } catch (e: any) {
+          return { content: `错误：写入修改后的文件失败：${e.message}`, success: false }
+        }
 
         const activeWin = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
         if (activeWin) {

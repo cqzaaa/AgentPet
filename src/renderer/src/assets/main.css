@@ -4956,3 +4956,81 @@ body {
 .msg-prompt-btn:active {
   transform: scale(0.92);
 }
+
+/* ── @open-file-viewer/core 精准样式覆盖 ────────────────────────────
+   根据库真实 class 名（ofv-root / ofv-toolbar / ofv-viewport /
+   ofv-msdoc-document）精确修复：
+   1. 去掉 ofv-toolbar 的 42px 占位（白色框）
+   2. 去掉 ofv-root 的外边框
+   3. 覆盖 ofv-viewport / ofv-msdoc-document 的蓝灰色背景
+   ──────────────────────────────────────────────────────────────────── */
+
+/* 1. 去掉根容器的外边框和默认背景 */
+.file-preview-viewer-container .ofv-root {
+  border: none !important;
+  background: transparent !important;
+  height: 100% !important;
+}
+
+/* 2. 完全隐藏 toolbar 占位区域（min-height: 42px → 0） */
+.file-preview-viewer-container .ofv-toolbar {
+  display: none !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
+/* 3. 消除 ofv-host 的最小高度限制，让它随容器自适应 */
+.file-preview-viewer-container .ofv-host {
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+/* 4. ofv-viewport 是内容滚动区，覆盖蓝灰色背景 */
+.file-preview-viewer-container .ofv-viewport {
+  background: var(--bg-card, #ffffff) !important;
+}
+
+/* 5. Word/Office 文档容器（ofv-msdoc-document）—— 去掉蓝灰色衬底 */
+.file-preview-viewer-container .ofv-msdoc-document {
+  background: var(--bg-card, #f8fafc) !important;
+  padding: 16px !important;
+  gap: 16px !important;
+}
+
+/* 6. 图片查看器：隐藏内置 ofv-image-controls（min-height:40px 白色控制条） */
+.file-preview-viewer-container .ofv-image-controls {
+  display: none !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
+.file-preview-viewer-container .ofv-image-viewer {
+  background: var(--bg-card, #ffffff) !important;
+}
+
+/* 7. PDF 容器（灰色 → 与主题匹配） */
+.file-preview-viewer-container .ofv-pdf-viewer,
+.file-preview-viewer-container .ofv-pdf {
+  background: var(--bg-content, #f1f5f9) !important;
+}
+
+/* 8. 文本预览背景 */
+.file-preview-viewer-container .ofv-text {
+  background: var(--bg-card, #ffffff) !important;
+}
+
+/* 9. 确保 iframe 无白边撑满 */
+.file-preview-viewer-container iframe {
+  border: none !important;
+  display: block !important;
+}
+
+.file-preview-viewer-container canvas {
+  display: block !important;
+}

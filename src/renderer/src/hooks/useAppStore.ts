@@ -309,6 +309,58 @@ export function useAppStore() {
   // ── Highlighted Message ──────────────────────────────────────
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null)
 
+  // ── 已生成文件 & 预览面板状态 ─────────────────────────────────
+  const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
+  const [showFilePanel, setShowFilePanel] = useState(false)
+  const [openTabs, setOpenTabs] = useState<{ name: string; path: string; size: number; time: string }[]>([])
+  const [previewFile, setPreviewFile] = useState<{ name: string; path: string; size: number } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  const loadGeneratedFiles = useCallback(async () => {
+    if (window.api?.getGeneratedFiles) {
+      const files = await window.api.getGeneratedFiles(activeSessionId)
+      setGeneratedFiles(files)
+    }
+  }, [activeSessionId])
+
+  useEffect(() => {
+    loadGeneratedFiles()
+    setOpenTabs([])
+    setPreviewFile(null)
+    if (window.api?.onGeneratedFileUpdated) {
+      const unsub = window.api.onGeneratedFileUpdated(() => {
+        loadGeneratedFiles()
+        setShowFilePanel(true)
+      })
+      return unsub
+    }
+    return undefined
+  }, [activeSessionId, loadGeneratedFiles])
+
+  const handlePreviewFile = useCallback(async (f: { name: string; path: string; size: number }) => {
+    setPreviewFile(f)
+    setOpenTabs(prev => {
+      if (prev.some(t => t.path === f.path)) return prev
+      const fullFile = generatedFiles.find(g => g.path === f.path)
+      return [...prev, fullFile || { ...f, time: '' }]
+    })
+  }, [generatedFiles])
+
+  const handleDeleteFile = useCallback(async (f: { path: string }) => {
+    await window.api.deleteGeneratedFile(f.path, activeSessionId)
+    loadGeneratedFiles()
+    const remaining = openTabs.filter(t => t.path !== f.path)
+    setOpenTabs(remaining)
+    if (previewFile?.path === f.path) {
+      if (remaining.length === 0) {
+        setPreviewFile(null)
+      } else {
+        const next = remaining[remaining.length - 1]
+        handlePreviewFile(next)
+      }
+    }
+  }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile])
+
   // ── Skills ───────────────────────────────────────────────────
   const [skillsList, setSkillsList] = useState<any[]>([])
   const [skillsPath, setSkillsPath] = useState<string>('')
@@ -2180,6 +2232,15 @@ ${skillsContext}`
     // workspace & attached file
     workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
     attachedFiles, setAttachedFiles, handlePasteFiles, handleUploadFile,
+    // generated files & preview
+    generatedFiles, setGeneratedFiles,
+    showFilePanel, setShowFilePanel,
+    openTabs, setOpenTabs,
+    previewFile, setPreviewFile,
+    previewLoading, setPreviewLoading,
+    loadGeneratedFiles,
+    handlePreviewFile,
+    handleDeleteFile,
     // system
     systemInfo,
     // skills

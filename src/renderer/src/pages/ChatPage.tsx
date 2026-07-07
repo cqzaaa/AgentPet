@@ -661,6 +661,10 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                   msg={msg}
                   currentAvatarName={currentAvatarName}
                   highlightedMessageId={highlightedMessageId}
+                  onPreviewFile={(f) => {
+                    store.handlePreviewFile(f)
+                    store.setShowFilePanel(true)
+                  }}
                 />
               ))}
               <div ref={chatEndRef} />

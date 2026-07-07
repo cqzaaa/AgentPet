@@ -969,13 +969,19 @@ app.whenReady().then(() => {
     try {
       // local-file 协议注册了 standard:true，Chromium 会将 local-file://C:/path 中的 C: 当 hostname 解析
       // 渲染层统一使用 local-file:///C:/path（三斜杠），此时 pathname=/C:/path
-      // 需要去掉 Windows 盘符路径前多余的前导斜杠
+      // 部分第三方组件解析时可能将 URL 自动缩减变形为双斜杠形式，导致盘符冒号丢失（例如 local-file://c/Users/...)
       const parsedUrl = new URL(request.url)
       let filePath = decodeURIComponent(parsedUrl.pathname)
-      // Windows 绝对路径：/C:/path → C:/path
-      if (/^\/[A-Za-z]:\//.test(filePath)) {
+      
+      if (parsedUrl.host && /^[A-Za-z]$/.test(parsedUrl.host)) {
+        // 兼容第三方库篡改 URL：提取被误当作 hostname 的单字盘符，并拼回盘符冒号
+        filePath = `${parsedUrl.host}:${filePath}`
+      } else if (/^\/[A-Za-z]:\//.test(filePath)) {
+        // Windows 绝对路径：/C:/path → C:/path
         filePath = filePath.slice(1)
       }
+      
+      console.log('[local-file protocol debug] request.url:', request.url, 'parsed pathname:', parsedUrl.pathname, 'filePath:', filePath)
       const fileUrl = pathToFileURL(filePath).toString()
       const response = await net.fetch(fileUrl)
       const headers = new Headers(response.headers)

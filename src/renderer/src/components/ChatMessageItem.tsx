@@ -1033,9 +1033,10 @@ interface MessageItemProps {
   msg: any
   currentAvatarName: string
   highlightedMessageId?: number | null
+  onPreviewFile?: (file: { name: string; path: string; size: number }) => void
 }
 
-export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null }: MessageItemProps) {
+export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1210,7 +1211,15 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
               />
             </div>
           ) : (
-            <div className="message-file-badge" style={{ marginBottom: '8px' }}>
+            <div
+              className="message-file-badge"
+              style={{ marginBottom: '8px', cursor: f.path ? 'pointer' : 'default' }}
+              onClick={() => {
+                if (f.path && onPreviewFile) {
+                  onPreviewFile({ name: f.name, path: f.path, size: f.size || 0 })
+                }
+              }}
+            >
               <span className="file-badge-icon">📄</span>
               <div className="file-badge-info">
                 <span className="file-badge-name" title={f.name}>{f.name}</span>
@@ -1242,7 +1251,16 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                   }}
                 />
               ) : (
-                <div key={i} className="message-file-badge" style={{ margin: 0, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                <div
+                  key={i}
+                  className="message-file-badge"
+                  style={{ margin: 0, backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', cursor: f.path ? 'pointer' : 'default' }}
+                  onClick={() => {
+                    if (f.path && onPreviewFile) {
+                      onPreviewFile({ name: f.name, path: f.path, size: f.size || 0 })
+                    }
+                  }}
+                >
                   <span className="file-badge-icon">📄</span>
                   <div className="file-badge-info">
                     <span className="file-badge-name" title={f.name}>{f.name}</span>

@@ -616,6 +616,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         key={msg.id}
                         msg={msg}
                         currentAvatarName={currentAvatarName}
+                        onPreviewFile={(f) => {
+                          store.handlePreviewFile(f)
+                          store.setShowFilePanel(true)
+                          store.setActiveTab('chat')
+                          setSelectedCronLogDetails(null)
+                          setSelectedTaskForLog(null)
+                        }}
                       />
                     ))}
                   </div>
