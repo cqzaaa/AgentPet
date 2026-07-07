@@ -2194,32 +2194,37 @@ body {
 .model-dropdown-container {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 5px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 8px;
-  padding: 4px 8px;
-  transition: all 0.2s;
+  padding: 0 8px;
+  height: 32px;
+  box-sizing: border-box;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
 }
 
-.light .model-dropdown-container {
-  background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+.model-dropdown-container:hover {
+  background: var(--bg-menu-hover, rgba(128, 128, 128, 0.08));
 }
 
 .toolbar-lbl-icon {
-  font-size: 13px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
 }
 
 .model-select-inline {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text-secondary);
-  font-size: 11.5px;
+  color: var(--text-color, #1e293b);
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  padding-right: 4px;
+  padding-right: 2px;
+  height: 100%;
 }
 
 .model-select-inline option {
@@ -2293,51 +2298,100 @@ body {
   transform: scale(1.1);
 }
 
-/* 上传按钮 */
-.toolbar-action-btn.upload {
+/* 上传按钮与图标工具通用按钮 */
+.toolbar-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-secondary);
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
+  color: var(--text-secondary, #64748b);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  outline: none;
 }
 
-.light .toolbar-action-btn.upload {
-  border: 1px solid rgba(0, 0, 0, 0.06);
+.toolbar-icon-btn:hover {
+  background: var(--bg-menu-hover, rgba(128, 128, 128, 0.08));
+  color: var(--text-primary, #0f172a);
+  transform: scale(1.08);
 }
 
-.toolbar-action-btn.upload:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
+.toolbar-icon-btn:active {
+  transform: scale(0.92);
 }
 
-.light .toolbar-action-btn.upload:hover {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.12);
+.toolbar-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.toolbar-icon-btn.active {
+  background: var(--bg-menu-hover, rgba(128, 128, 128, 0.12));
+  color: var(--accent-color, #3b82f6);
+}
+
+/* 上传按钮兼容原有类，但样式采用图标风格 */
+.toolbar-action-btn.upload {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+
+.toolbar-action-btn.upload:hover:not(:disabled) {
+  background: var(--bg-menu-hover, rgba(128, 128, 128, 0.08));
+  color: var(--text-primary, #0f172a);
+  transform: scale(1.08);
+}
+
+.toolbar-action-btn.upload:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.toolbar-action-btn.upload:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 发送按钮 */
 .toolbar-send-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
   background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   border: none;
   outline: none;
   color: #ffffff;
-  padding: 5px 16px;
-  border-radius: 8px;
-  font-size: 11.5px;
-  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 8px rgba(96, 165, 250, 0.15);
 }
 
-.toolbar-send-btn:hover {
-  transform: translateY(-0.5px);
+.toolbar-send-btn:hover:not(:disabled) {
+  transform: scale(1.08);
   box-shadow: 0 4px 12px rgba(96, 165, 250, 0.25);
+}
+
+.toolbar-send-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .toolbar-send-btn:disabled {
@@ -2346,6 +2400,16 @@ body {
   transform: none;
   box-shadow: none;
 }
+
+.toolbar-send-btn.stop {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+}
+
+.toolbar-send-btn.stop:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+}
+
 
 
 /* 3. 定时任务 (Cron Panel inside Agent) */
@@ -5033,4 +5097,76 @@ body {
 
 .file-preview-viewer-container canvas {
   display: block !important;
+}
+
+/* ── 全局初始化过渡页面 Splash Screen ── */
+.splash-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 99999;
+  transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1), visibility 0.4s;
+  opacity: 1;
+  visibility: visible;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.splash-container.fade-out {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.dark .splash-container {
+  background-color: #1e1e24;
+}
+
+.splash-title {
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(
+    90deg,
+    #ff6b6b,
+    #ff8e53,
+    #feca57,
+    #1dd1a1,
+    #2e86de,
+    #9b59b6,
+    #ff6b6b
+  );
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shine 4s linear infinite, splash-scale 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes shine {
+  0% {
+    background-position: 0% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+@keyframes splash-scale {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+    filter: blur(4px);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
 }

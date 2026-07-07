@@ -47,6 +47,21 @@ const checkIsThinking = (s: any): boolean => {
 export function AgentWindow(): React.JSX.Element {
   const store = useAppStore()
 
+  const [showSplash, setShowSplash] = useState(true)
+  const [splashFadeOut, setSplashFadeOut] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSplashFadeOut(true)
+      const destroyTimer = setTimeout(() => {
+        setShowSplash(false)
+      }, 400)
+      return () => clearTimeout(destroyTimer)
+    }, 1200)
+
+    return () => clearTimeout(timer)
+  }, [])
+
   const {
     theme, handleThemeToggle,
     isCollapsed, setIsCollapsed,
@@ -600,6 +615,13 @@ export function AgentWindow(): React.JSX.Element {
             {toast.type === 'info' && '💡'}
           </span>
           <span className="toast-message">{toast.message}</span>
+        </div>
+      )}
+
+      {/* 全局初始化过渡页面 */}
+      {showSplash && (
+        <div className={`splash-container ${splashFadeOut ? 'fade-out' : ''}`}>
+          <div className="splash-title">AgentPet</div>
         </div>
       )}
 

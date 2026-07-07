@@ -951,51 +951,21 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               {/* 执行设备选择 */}
               <div className="custom-device-select-container" style={{ position: 'relative' }} ref={deviceMenuRef}>
                 <div
-                  className="custom-device-trigger"
+                  className={`toolbar-icon-btn custom-device-trigger ${showDeviceMenu ? 'active' : ''}`}
                   onClick={() => { if (!isSending) setShowDeviceMenu(!showDeviceMenu) }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    background: 'var(--bg-card-sub, rgba(128,128,128,0.05))',
-                    border: '1px solid var(--border-color, rgba(128,128,128,0.15))',
-                    borderRadius: '6px',
-                    padding: '0 8px',
-                    fontSize: '12.5px',
-                    height: '30px',
-                    boxSizing: 'border-box',
+                    justifyContent: 'center',
                     cursor: isSending ? 'not-allowed' : 'pointer',
                     userSelect: 'none',
-                    color: 'var(--text-color)',
-                    transition: 'all 0.15s ease'
+                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
                   }}
-                  onMouseEnter={e => { if (!isSending) e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))' }}
-                  onMouseLeave={e => { if (!isSending) e.currentTarget.style.backgroundColor = 'transparent' }}
+                  title={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
                 >
-                  <span style={{ fontSize: '13px', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {executionDevice === 'ssh' ? '🌐' : '💻'}
                   </span>
-                  <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
-                    {executionDevice === 'ssh' && sshConnected ? `SSH: ${sshUsername}@${sshHost}` : '本机执行'}
-                  </span>
-                  <svg
-                    width="10"
-                    height="6"
-                    viewBox="0 0 10 6"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      transform: showDeviceMenu ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition: 'transform 0.15s ease',
-                      opacity: 0.7,
-                      marginLeft: '2px'
-                    }}
-                  >
-                    <path d="M1 1l4 4 4-4" />
-                  </svg>
                 </div>
 
                 {showDeviceMenu && (
@@ -1165,23 +1135,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               {/* 🧩 技能快捷开关按钮与 Popover */}
               <div style={{ position: 'relative' }}>
                 <div
-                  className="toolbar-action-btn-skills"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '0 10px',
-                    height: '30px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    borderRadius: '6px',
-                    border: '1.5px dashed var(--border-color, rgba(128,128,128,0.25))',
-                    backgroundColor: showSkillsPopover ? 'var(--bg-menu-hover, rgba(128,128,128,0.08))' : 'transparent',
-                    cursor: 'pointer',
-                    color: 'var(--text-color)',
-                    userSelect: 'none',
-                    transition: 'all 0.15s ease'
-                  }}
+                  className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
                   onClick={() => {
                     const next = !showSkillsPopover
                     setShowSkillsPopover(next)
@@ -1190,16 +1144,15 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                       refreshSkillsAndStorage()
                     }
                   }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
-                  onMouseLeave={e => {
-                    if (!showSkillsPopover) e.currentTarget.style.backgroundColor = 'transparent'
-                  }}
-                  title="点击管理与勾选启用技能扩展包"
+                  title={`管理与启用技能扩展包 (当前启用: ${skillsList.filter(s => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`}
                 >
-                  <span>🧩</span>
-                  <span>
-                    技能 ({skillsList.filter(s => !disabledSkillNames.includes(s.name)).length}/{skillsList.length})
-                  </span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m15 12-8.37 8.37a1 1 0 1 1-1.41-1.41L13.59 10.6" />
+                    <path d="m9 5 3 3-2.69 2.69a.5.5 0 0 1-.7 0L5.31 7.37a.5.5 0 0 1 0-.7L9 5Z" fill="currentColor" fillOpacity="0.15" />
+                    <path d="m14 2 8 8" />
+                    <path d="M19 1.5l.3.9.9.3-.9.3-.3.9-.3-.9-.9-.3.9-.3z" fill="currentColor" stroke="none" />
+                    <path d="M21.5 5.5l.2.6.6.2-.6.2-.2.6-.2-.6-.6-.2.6-.2z" fill="currentColor" stroke="none" />
+                  </svg>
                 </div>
                 {showSkillsPopover && renderSkillsPopover()}
               </div>
@@ -1207,23 +1160,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               {/* 🔗 MCP 快捷查看按钮与 Popover */}
               <div style={{ position: 'relative' }}>
                 <div
-                  className="toolbar-action-btn-mcp"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '0 10px',
-                    height: '30px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    borderRadius: '6px',
-                    border: '1.5px dashed var(--border-color, rgba(128,128,128,0.25))',
-                    backgroundColor: showMcpPopover ? 'var(--bg-menu-hover, rgba(128,128,128,0.08))' : 'transparent',
-                    cursor: 'pointer',
-                    color: 'var(--text-color)',
-                    userSelect: 'none',
-                    transition: 'all 0.15s ease'
-                  }}
+                  className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
                   onClick={() => {
                     const next = !showMcpPopover
                     setShowMcpPopover(next)
@@ -1232,27 +1169,27 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                       refreshMcpServers()
                     }
                   }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
-                  onMouseLeave={e => {
-                    if (!showMcpPopover) e.currentTarget.style.backgroundColor = 'transparent'
-                  }}
-                  title="点击管理与勾选启用 MCP 服务"
+                  title={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`}
                 >
-                  <span>🔗</span>
-                  <span>
-                    MCP ({allMcpServers.filter((s: any) => s.enabled).length}/{allMcpServers.length})
-                  </span>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                  </svg>
                 </div>
                 {showMcpPopover && renderMcpPopover()}
               </div>
 
+              {/* ➕ 上传文件按钮 */}
               <button
-                className="toolbar-action-btn upload"
+                className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}
                 disabled={isSending || currentContextTokens >= contextLimit}
-                title={currentContextTokens >= contextLimit ? '上下文额度已用满' : '上传文本文件以分析'}
+                title={currentContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
               >
-                ➕ 上传文件
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
               </button>
 
               {isSending ? (
@@ -1260,17 +1197,22 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                   className="toolbar-send-btn stop"
                   onClick={handleAbortLlm}
                   title="停止生成"
-                  style={{ background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', boxShadow: '0 2px 8px rgba(239, 68, 68, 0.2)' }}
                 >
-                  停止
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                  </svg>
                 </button>
               ) : (
                 <button
                   className="toolbar-send-btn"
                   onClick={handleSendIntercept}
+                  title="发送消息"
                   disabled={(!inputValue.trim() && attachedFiles.length === 0) || currentContextTokens >= contextLimit}
                 >
-                  发送
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                    <polyline points="5 11 12 4 19 11"></polyline>
+                  </svg>
                 </button>
               )}
             </div>
