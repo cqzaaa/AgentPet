@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { create } from 'zustand'
 import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
 
 // ── 类型定义 ─────────────────────────────────────────────────
@@ -70,76 +71,28 @@ export function getInternalClipboard() {
   return internalClipboard
 }
 
-// ── useAppStore hook ─────────────────────────────────────────
-export function useAppStore() {
-  // ── Navigation ──────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<TabType>('chat')
-  const [agentSubTab, setAgentSubTab] = useState<AgentSubTab>('skills')
-  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('keys')
-
-  // ── UI State ─────────────────────────────────────────────────
-  const [isCollapsed, setIsCollapsed] = useState(false)
-  const [showApiKey, setShowApiKey] = useState(false)
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false)
-  const [showModelDropdown, setShowModelDropdown] = useState(false)
-  const [isLoadingModels, setIsLoadingModels] = useState(false)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
-
-  // ── 打字机流式效果控制 ──────────────────────────────────────────
-  const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const isTypingRef = useRef<boolean>(false)
-
-  // 卸载时清理定时器，防止内存泄漏
-  useEffect(() => {
-    return () => {
-      isTypingRef.current = false
-      if (typingTimerRef.current) {
-        clearTimeout(typingTimerRef.current)
-      }
-    }
-  }, [])
-
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
-
-  // ── Cron Location Details ────────────────────────────────────
-  const [selectedTaskForLog, setSelectedTaskForLog] = useState<any>(null)
-  const [selectedCronLogDetails, setSelectedCronLogDetails] = useState<any>(null)
-  const [pendingOpenTaskId, setPendingOpenTaskId] = useState<string | null>(null)
-  const [pendingOpenLogId, setPendingOpenLogId] = useState<string | null>(null)
-
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setToast({ message, type })
-  }
-
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => setToast(null), 4000)
-      return () => clearTimeout(timer)
-    }
-    return () => {}
-  }, [toast])
-
-  // ── Theme ────────────────────────────────────────────────────
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    return (localStorage.getItem('agentself_theme') as 'dark' | 'light') ||
-      (localStorage.getItem('agentpet_theme') as 'dark' | 'light') || 'light'
-  })
-
-  const handleThemeToggle = (): void => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark'
-    setTheme(nextTheme)
-    localStorage.setItem('agentself_theme', nextTheme)
-  }
-
-  const [sendingSessionIds, setSendingSessionIds] = useState<Record<string, boolean>>({})
-
-  // ── LLM Config ───────────────────────────────────────────────
-  const [llmConfig, setLlmConfig] = useState(() => {
+// ── Zustand Global Store ─────────────────────────────────────
+export const useAppStoreRaw = create<any>((set) => ({
+  activeTab: 'chat',
+  agentSubTab: 'skills',
+  settingsSubTab: 'keys',
+  isCollapsed: false,
+  showApiKey: false,
+  showApiKeyModal: false,
+  showModelDropdown: false,
+  isLoadingModels: false,
+  availableModels: [],
+  toast: null,
+  selectedTaskForLog: null,
+  selectedCronLogDetails: null,
+  pendingOpenTaskId: null,
+  pendingOpenLogId: null,
+  theme: localStorage.getItem('agentself_theme') || localStorage.getItem('agentpet_theme') || 'light',
+  sendingSessionIds: {},
+  llmConfig: (() => {
     const saved = localStorage.getItem('agentself_llm_config') || localStorage.getItem('agentpet_llm_config')
     if (saved) {
-      try { 
+      try {
         const parsed = JSON.parse(saved)
         if (parsed && parsed.maxTokens === 2048) {
           delete parsed.maxTokens
@@ -148,7 +101,219 @@ export function useAppStore() {
       } catch (e) { console.error(e) }
     }
     return { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: undefined }
-  })
+  })(),
+  mcpConfig: (() => {
+    const saved = localStorage.getItem('agentpet_mcp_config')
+    let currentConfig: any = null
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && Array.isArray(parsed.servers)) {
+          currentConfig = parsed
+        } else if (parsed && parsed.url) {
+          currentConfig = {
+            servers: [
+              {
+                id: 'legacy-default',
+                name: parsed.name || '默认外部服务',
+                url: parsed.url,
+                apiKey: parsed.apiKey || '',
+                enabled: parsed.enabled ?? false
+              }
+            ]
+          }
+        }
+      } catch (e) { console.error(e) }
+    }
+    if (!currentConfig || !currentConfig.servers) {
+      currentConfig = { servers: [] }
+    }
+    return currentConfig
+  })(),
+  cronTasks: [],
+  sessions: [],
+  activeSessionId: localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default',
+  inputValue: '',
+  systemInfo: null,
+  tokenLogs: (() => {
+    const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
+    if (saved) {
+      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+    }
+    return []
+  })(),
+  highlightedMessageId: null,
+  generatedFiles: [],
+  showFilePanel: false,
+  openTabs: [],
+  previewFile: null,
+  previewLoading: false,
+  skillsList: [],
+  skillsPath: '',
+  disabledSkillNames: (() => {
+    try {
+      const saved = localStorage.getItem('agentpet_disabled_skills')
+      return saved ? JSON.parse(saved) : []
+    } catch (e) { return [] }
+  })(),
+  activeMcpServers: [],
+  storageInputPath: '',
+  actualStoragePath: '',
+  storageSaveStatus: { type: 'idle', message: '' },
+  sandboxMode: true,
+  activePermissionRequest: null,
+  executionDevice: 'local',
+  sshConnected: false,
+  sshHost: '',
+  sshUsername: '',
+  customModelDir: '',
+  customModelFile: '',
+  avatarList: [],
+  ttsEnabled: localStorage.getItem('agentpet_tts_enabled') === 'true',
+  autoSaveHistory: (() => {
+    const val = localStorage.getItem('agentself_autosave') || localStorage.getItem('agentpet_autosave')
+    return val === null ? true : val === 'true'
+  })(),
+  contextRounds: Number(localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'),
+  testStatus: 'idle',
+  isSessionSwitching: false,
+
+  // Setters
+  setActiveTab: (val: any) => set({ activeTab: val }),
+  setAgentSubTab: (val: any) => set({ agentSubTab: val }),
+  setSettingsSubTab: (val: any) => set({ settingsSubTab: val }),
+  setIsCollapsed: (val: any) => set({ isCollapsed: val }),
+  setShowApiKey: (val: any) => set({ showApiKey: val }),
+  setShowApiKeyModal: (val: any) => set({ showApiKeyModal: val }),
+  setShowModelDropdown: (val: any) => set({ showModelDropdown: val }),
+  setIsLoadingModels: (val: any) => set({ isLoadingModels: val }),
+  setAvailableModels: (val: any) => set({ availableModels: val }),
+  setToast: (val: any) => set({ toast: val }),
+  setSelectedTaskForLog: (val: any) => set({ selectedTaskForLog: val }),
+  setSelectedCronLogDetails: (val: any) => set({ selectedCronLogDetails: val }),
+  setPendingOpenTaskId: (val: any) => set({ pendingOpenTaskId: val }),
+  setPendingOpenLogId: (val: any) => set({ pendingOpenLogId: val }),
+  setTheme: (val: any) => set({ theme: val }),
+  setSendingSessionIds: (val: any) => set((state: any) => ({
+    sendingSessionIds: typeof val === 'function' ? val(state.sendingSessionIds) : val
+  })),
+  setLlmConfig: (val: any) => set({ llmConfig: val }),
+  setMcpConfig: (val: any) => set({ mcpConfig: val }),
+  setCronTasks: (val: any) => set((state: any) => ({
+    cronTasks: typeof val === 'function' ? val(state.cronTasks) : val
+  })),
+  setSessions: (val: any) => set((state: any) => ({
+    sessions: typeof val === 'function' ? val(state.sessions) : val
+  })),
+  setActiveSessionId: (val: any) => set({ activeSessionId: val }),
+  setInputValue: (val: any) => set((state: any) => ({
+    inputValue: typeof val === 'function' ? val(state.inputValue) : val
+  })),
+  setSystemInfo: (val: any) => set({ systemInfo: val }),
+  setTokenLogs: (val: any) => set((state: any) => ({
+    tokenLogs: typeof val === 'function' ? val(state.tokenLogs) : val
+  })),
+  setHighlightedMessageId: (val: any) => set({ highlightedMessageId: val }),
+  setGeneratedFiles: (val: any) => set((state: any) => ({
+    generatedFiles: typeof val === 'function' ? val(state.generatedFiles) : val
+  })),
+  setShowFilePanel: (val: any) => set({ showFilePanel: val }),
+  setOpenTabs: (val: any) => set((state: any) => ({
+    openTabs: typeof val === 'function' ? val(state.openTabs) : val
+  })),
+  setPreviewFile: (val: any) => set({ previewFile: val }),
+  setPreviewLoading: (val: any) => set({ previewLoading: val }),
+  setSkillsList: (val: any) => set({ skillsList: val }),
+  setSkillsPath: (val: any) => set({ skillsPath: val }),
+  setDisabledSkillNames: (val: any) => set((state: any) => ({
+    disabledSkillNames: typeof val === 'function' ? val(state.disabledSkillNames) : val
+  })),
+  setActiveMcpServers: (val: any) => set({ activeMcpServers: val }),
+  setStorageInputPath: (val: any) => set({ storageInputPath: val }),
+  setActualStoragePath: (val: any) => set({ actualStoragePath: val }),
+  setStorageSaveStatus: (val: any) => set({ storageSaveStatus: val }),
+  setSandboxMode: (val: any) => set({ sandboxMode: val }),
+  setActivePermissionRequest: (val: any) => set({ activePermissionRequest: val }),
+  setExecutionDeviceState: (val: any) => set({ executionDevice: val }),
+  setSshConnected: (val: any) => set({ sshConnected: val }),
+  setSshHost: (val: any) => set({ sshHost: val }),
+  setSshUsername: (val: any) => set({ sshUsername: val }),
+  setCustomModelDir: (val: any) => set({ customModelDir: val }),
+  setCustomModelFile: (val: any) => set({ customModelFile: val }),
+  setAvatarList: (val: any) => set({ avatarList: val }),
+  setTtsEnabled: (val: any) => set({ ttsEnabled: val }),
+  setAutoSaveHistory: (val: any) => set({ autoSaveHistory: val }),
+  setContextRounds: (val: any) => set({ contextRounds: val }),
+  setTestStatus: (val: any) => set({ testStatus: val }),
+  setIsSessionSwitching: (val: any) => set({ isSessionSwitching: val }),
+}))
+
+// ── useAppStore hook ─────────────────────────────────────────
+export function useAppStore() {
+  const store = useAppStoreRaw()
+
+  const {
+    activeTab, setActiveTab,
+    agentSubTab, setAgentSubTab,
+    settingsSubTab, setSettingsSubTab,
+    isCollapsed, setIsCollapsed,
+    showApiKey, setShowApiKey,
+    showApiKeyModal, setShowApiKeyModal,
+    showModelDropdown, setShowModelDropdown,
+    isLoadingModels, setIsLoadingModels,
+    availableModels, setAvailableModels,
+    toast, setToast,
+    selectedTaskForLog, setSelectedTaskForLog,
+    selectedCronLogDetails, setSelectedCronLogDetails,
+    pendingOpenTaskId, setPendingOpenTaskId,
+    pendingOpenLogId, setPendingOpenLogId,
+    theme, setTheme,
+    sendingSessionIds, setSendingSessionIds,
+    llmConfig, setLlmConfig,
+    mcpConfig, setMcpConfig,
+    cronTasks, setCronTasks,
+    sessions, setSessions,
+    activeSessionId, setActiveSessionId,
+    inputValue, setInputValue,
+    systemInfo, setSystemInfo,
+    tokenLogs, setTokenLogs,
+    highlightedMessageId, setHighlightedMessageId,
+    generatedFiles, setGeneratedFiles,
+    showFilePanel, setShowFilePanel,
+    openTabs, setOpenTabs,
+    previewFile, setPreviewFile,
+    previewLoading, setPreviewLoading,
+    skillsList, setSkillsList,
+    skillsPath, setSkillsPath,
+    disabledSkillNames, setDisabledSkillNames,
+    activeMcpServers, setActiveMcpServers,
+    storageInputPath, setStorageInputPath,
+    actualStoragePath, setActualStoragePath,
+    storageSaveStatus, setStorageSaveStatus,
+    sandboxMode, setSandboxMode,
+    activePermissionRequest, setActivePermissionRequest,
+    executionDevice, setExecutionDeviceState,
+    sshConnected, setSshConnected,
+    sshHost, setSshHost,
+    sshUsername, setSshUsername,
+    customModelDir, setCustomModelDir,
+    customModelFile, setCustomModelFile,
+    avatarList, setAvatarList,
+    ttsEnabled, setTtsEnabled,
+    autoSaveHistory, setAutoSaveHistory,
+    contextRounds, setContextRounds,
+    testStatus, setTestStatus,
+    isSessionSwitching, setIsSessionSwitching
+  } = store
+
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
+
+  const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
+  const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
+  const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
+  const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
 
   const saveLlmConfig = (newConfig: any) => {
     if (isSending) {
@@ -182,40 +347,6 @@ export function useAppStore() {
     }
   }
 
-  // ── MCP Config ───────────────────────────────────────────────
-  const [mcpConfig, setMcpConfig] = useState(() => {
-    const saved = localStorage.getItem('agentpet_mcp_config')
-    let currentConfig: any = null
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        if (parsed && Array.isArray(parsed.servers)) {
-          currentConfig = parsed
-        }
-        // 向下兼容：如果以前是单个配置格式
-        else if (parsed && parsed.url) {
-          currentConfig = {
-            servers: [
-              {
-                id: 'legacy-default',
-                name: parsed.name || '默认外部服务',
-                url: parsed.url,
-                apiKey: parsed.apiKey || '',
-                enabled: parsed.enabled ?? false
-              }
-            ]
-          }
-        }
-      } catch (e) { console.error(e) }
-    }
-
-    if (!currentConfig || !currentConfig.servers) {
-      currentConfig = { servers: [] }
-      localStorage.setItem('agentpet_mcp_config', JSON.stringify(currentConfig))
-    }
-    return currentConfig
-  })
-
   const saveMcpConfig = (newConfig: any) => {
     setMcpConfig(newConfig)
     localStorage.setItem('agentpet_mcp_config', JSON.stringify(newConfig))
@@ -226,116 +357,12 @@ export function useAppStore() {
       .catch(console.error)
   }
 
-  // ── Cron Tasks ───────────────────────────────────────────────
-  const BUILTIN_MEMORY_TASK: CronTask = {
-    id: 'builtin-memory-purify',
-    name: '系统画像提纯与经验沉淀',
-    interval: 1800,
-    isActive: true,
-    action: '自动收集未处理的对话摘要，合并更新全局人物画像，并提取避坑经验写入长期记忆库。',
-    triggerCount: 0,
-    lastTriggered: '从未执行',
-    logs: []
-  }
-
-  const [cronTasks, setCronTasks] = useState<CronTask[]>(() => {
-    const saved = localStorage.getItem('agentself_cron_tasks') || localStorage.getItem('agentpet_cron_tasks')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        // 确保内置的"系统画像提纯与经验沉淀"任务始终存在（防止被误删或迁移丢失）
-        const hasBuiltin = parsed.some((t: any) => t.name === '系统画像提纯与经验沉淀')
-        if (!hasBuiltin) {
-          return [BUILTIN_MEMORY_TASK, ...parsed]
-        }
-        return parsed
-      } catch (e) { console.error(e) }
-    }
-    return [BUILTIN_MEMORY_TASK]
-  })
-
-
-  // ── Sessions ─────────────────────────────────────────────────
-  const [sessions, setSessions] = useState<Session[]>(() => {
-    const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        if (parsed && parsed.length > 0) {
-          // 清除残留的 is_thinking 状态（应用异常退出时可能遗留在缓存中）
-          return parsed.map((s: any) => ({
-            ...s,
-            pinned: s.pinned === true,
-            messages: (s.messages || []).map((m: any) =>
-              m.isThinking
-                ? { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
-                : m
-            )
-          }))
-        }
-      } catch (e) { console.error(e) }
-    }
-    return [{
-      id: 'agent:main:dashboard:default',
-      name: '(未命名)',
-      time: formatDateTime(),
-      messages: []
-    }]
-  })
-
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    return localStorage.getItem('agentself_active_session_id') ||
-      localStorage.getItem('agentpet_active_session_id') ||
-      'agent:main:dashboard:default'
-  })
-
-  const isSending = !!sendingSessionIds[activeSessionId]
-
-  const [inputValue, setInputValue] = useState('')
-  const chatEndRef = useRef<HTMLDivElement>(null)
-
-  // ── System Info ──────────────────────────────────────────────
-  const [systemInfo, setSystemInfo] = useState<any>(null)
-
-  // ── Token Logs ───────────────────────────────────────────────
-  const [tokenLogs, setTokenLogs] = useState<TokenLog[]>(() => {
-    const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
-    if (saved) {
-      try { return JSON.parse(saved) } catch (e) { console.error(e) }
-    }
-    return []
-  })
-
-  // ── Highlighted Message ──────────────────────────────────────
-  const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null)
-
-  // ── 已生成文件 & 预览面板状态 ─────────────────────────────────
-  const [generatedFiles, setGeneratedFiles] = useState<{ name: string; path: string; size: number; time: string }[]>([])
-  const [showFilePanel, setShowFilePanel] = useState(false)
-  const [openTabs, setOpenTabs] = useState<{ name: string; path: string; size: number; time: string }[]>([])
-  const [previewFile, setPreviewFile] = useState<{ name: string; path: string; size: number } | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-
   const loadGeneratedFiles = useCallback(async () => {
     if (window.api?.getGeneratedFiles) {
       const files = await window.api.getGeneratedFiles(activeSessionId)
       setGeneratedFiles(files)
     }
   }, [activeSessionId])
-
-  useEffect(() => {
-    loadGeneratedFiles()
-    setOpenTabs([])
-    setPreviewFile(null)
-    if (window.api?.onGeneratedFileUpdated) {
-      const unsub = window.api.onGeneratedFileUpdated(() => {
-        loadGeneratedFiles()
-        setShowFilePanel(true)
-      })
-      return unsub
-    }
-    return undefined
-  }, [activeSessionId, loadGeneratedFiles])
 
   const handlePreviewFile = useCallback(async (f: { name: string; path: string; size: number }) => {
     setPreviewFile(f)
@@ -361,59 +388,40 @@ export function useAppStore() {
     }
   }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile])
 
-  // ── Skills ───────────────────────────────────────────────────
-  const [skillsList, setSkillsList] = useState<any[]>([])
-  const [skillsPath, setSkillsPath] = useState<string>('')
-  const [disabledSkillNames, setDisabledSkillNames] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('agentpet_disabled_skills')
-      return saved ? JSON.parse(saved) : []
-    } catch (e) {
-      return []
+  // ── 打字机流式效果控制 ──────────────────────────────────────────
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isTypingRef = useRef<boolean>(false)
+
+  // 卸载时清理定时器，防止内存泄漏
+  useEffect(() => {
+    return () => {
+      isTypingRef.current = false
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+      }
     }
-  })
-  const [activeMcpServers, setActiveMcpServers] = useState<any[]>([])
-  const [storageInputPath, setStorageInputPath] = useState('')
-  const [actualStoragePath, setActualStoragePath] = useState('')
-  const [storageSaveStatus, setStorageSaveStatus] = useState<{ type: 'success' | 'failed' | 'idle'; message: string }>({ type: 'idle', message: '' })
-  const [sandboxMode, setSandboxMode] = useState<boolean>(true)
-  const [activePermissionRequest, setActivePermissionRequest] = useState<{
-    requestId: number
-    command: string
-    execCwd: string
-  } | null>(null)
+  }, [])
 
-  // ── SSH & Execution Device ───────────────────────────────────
-  const [executionDevice, setExecutionDeviceState] = useState<'local' | 'ssh'>('local')
-  const [sshConnected, setSshConnected] = useState<boolean>(false)
-  const [sshHost, setSshHost] = useState<string>('')
-  const [sshUsername, setSshUsername] = useState<string>('')
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type })
+  }
 
-  // ── Avatar ───────────────────────────────────────────────────
-  const [customModelDir, setCustomModelDir] = useState('')
-  const [customModelFile, setCustomModelFile] = useState('')
-  const [avatarList, setAvatarList] = useState<any[]>([])
-  const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
-  const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
-  const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
-  const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000)
+      return () => clearTimeout(timer)
+    }
+    return () => {}
+  }, [toast])
 
-  // ── TTS Settings ─────────────────────────────────────────────
-  const [ttsEnabled, setTtsEnabled] = useState(() => {
-    return localStorage.getItem('agentpet_tts_enabled') === 'true'
-  })
+  const handleThemeToggle = (): void => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(nextTheme)
+    localStorage.setItem('agentself_theme', nextTheme)
+    localStorage.setItem('agentpet_theme', nextTheme)
+  }
 
-  // ── Memory Settings ──────────────────────────────────────────
-  const [autoSaveHistory, setAutoSaveHistory] = useState(() => {
-    const val = localStorage.getItem('agentself_autosave') || localStorage.getItem('agentpet_autosave')
-    return val === null ? true : val === 'true'
-  })
-  const [contextRounds, setContextRounds] = useState(() => {
-    return Number(localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10')
-  })
-
-  // ── Connection Test ──────────────────────────────────────────
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | string>('idle')
+  const isSending = !!sendingSessionIds[activeSessionId]
 
   // ── Effects ──────────────────────────────────────────────────
 
@@ -831,7 +839,6 @@ export function useAppStore() {
     refreshSessions(true)
   }, [])
 
-  const [isSessionSwitching, setIsSessionSwitching] = useState(false)
   const prevSessionIdRef = useRef<string | null>(null)
   const prevActiveTabRef = useRef<string | null>(null)
   const justSwitchedRef = useRef(false)
@@ -2293,7 +2300,10 @@ ${skillsContext}`
     handleDisconnectSsh,
     refreshSshAndDeviceStatus,
     // session switch
-    isSessionSwitching
+    isSessionSwitching,
+    // avatar derived & handlers
+    currentAvatarStyle,
+    currentAvatarVoice
   }
 }
 

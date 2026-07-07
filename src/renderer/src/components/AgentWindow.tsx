@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { FilePreviewPanel } from './FilePreviewPanel'
-import { useAppStore } from '../hooks/useAppStore'
+import { useAppStore, useAppStoreRaw } from '../hooks/useAppStore'
 import { ChatPage } from '../pages/ChatPage'
 import { ControlPage } from '../pages/ControlPage'
 import { AgentPage } from '../pages/AgentPage'
@@ -47,6 +47,25 @@ const checkIsThinking = (s: any): boolean => {
 export function AgentWindow(): React.JSX.Element {
   const store = useAppStore()
 
+  // 使用 Zustand 细粒度选择器订阅状态以阻止全局无用重渲染
+  const theme = useAppStoreRaw(state => state.theme)
+  const isCollapsed = useAppStoreRaw(state => state.isCollapsed)
+  const activeTab = useAppStoreRaw(state => state.activeTab)
+  const showApiKeyModal = useAppStoreRaw(state => state.showApiKeyModal)
+  const sessions = useAppStoreRaw(state => state.sessions)
+  const activeSessionId = useAppStoreRaw(state => state.activeSessionId)
+  const customModelFile = useAppStoreRaw(state => state.customModelFile)
+  const skillsList = useAppStoreRaw(state => state.skillsList)
+  const contextRounds = useAppStoreRaw(state => state.contextRounds)
+  const toast = useAppStoreRaw(state => state.toast)
+  const activePermissionRequest = useAppStoreRaw(state => state.activePermissionRequest)
+  const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
+  const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
+  
+  // 派生状态从 Zustand 中获取
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || { messages: [] }
+  const activeSessMessages = activeSession.messages || []
+
   const [showSplash, setShowSplash] = useState(true)
   const [splashFadeOut, setSplashFadeOut] = useState(false)
 
@@ -63,22 +82,20 @@ export function AgentWindow(): React.JSX.Element {
   }, [])
 
   const {
-    theme, handleThemeToggle,
-    isCollapsed, setIsCollapsed,
-    activeTab, setActiveTab,
+    handleThemeToggle,
+    setIsCollapsed,
+    setActiveTab,
     setSettingsSubTab,
-    showApiKeyModal, setShowApiKeyModal,
-    sessions, activeSessionId, setActiveSessionId,
-    handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession,
-    customModelFile,
-    skillsList, contextRounds,
-    toast,
-    // sandbox
-    activePermissionRequest,
-    activeSessMessages,
+    setShowApiKeyModal,
+    setActiveSessionId,
+    handleCreateNewSession,
+    handleDeleteSession,
+    handleTogglePinSession,
+    handleRenameSession,
     setHighlightedMessageId,
-    // preview
-    generatedFiles, showFilePanel, setShowFilePanel, setPreviewFile, setOpenTabs
+    setShowFilePanel,
+    setPreviewFile,
+    setOpenTabs
   } = store
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
