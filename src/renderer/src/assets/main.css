@@ -2203,6 +2203,8 @@ body {
   box-sizing: border-box;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
+  max-width: 160px;
+  overflow: hidden;
 }
 
 .model-dropdown-container:hover {
@@ -2225,6 +2227,9 @@ body {
   cursor: pointer;
   padding-right: 2px;
   height: 100%;
+  max-width: 125px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-select-inline option {
@@ -5169,4 +5174,9 @@ body {
     opacity: 1;
     filter: blur(0);
   }
+}
+
+/* 覆盖文件预览面板的默认内边距 */
+.file-preview-viewer-container .ofv-panel {
+  padding: 0 !important;
 }

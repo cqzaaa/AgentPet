@@ -18,7 +18,8 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
     previewLoading,
     setPreviewLoading,
     handlePreviewFile,
-    handleDeleteFile
+    handleDeleteFile,
+    isCollapsed
   } = store
 
   const [filePanelWidth, setFilePanelWidth] = useState(320)
@@ -50,12 +51,15 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
     }
   }
 
-  // 拖拽调整面板宽度
+  // 拖拽调整面板宽度，限制左侧聊天框的最小宽度为 500px
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current) return
       const delta = dragStartXRef.current - e.clientX
-      const newWidth = Math.max(240, Math.min(800, dragStartWidthRef.current + delta))
+      const sidebarWidth = isCollapsed ? 68 : 210
+      const contentAreaWidth = window.innerWidth - sidebarWidth
+      const maxPanelWidth = Math.max(240, contentAreaWidth - 500)
+      const newWidth = Math.max(240, Math.min(maxPanelWidth, dragStartWidthRef.current + delta))
       setFilePanelWidth(newWidth)
     }
     const handleMouseUp = () => {
@@ -69,7 +73,20 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [])
+  }, [isCollapsed])
+
+  // 监听窗口大小以及侧边栏展开状态，防止聊天区宽度太窄挤压底栏
+  useEffect(() => {
+    const handleResize = () => {
+      const sidebarWidth = isCollapsed ? 68 : 210
+      const contentAreaWidth = window.innerWidth - sidebarWidth
+      const maxPanelWidth = Math.max(240, contentAreaWidth - 500)
+      setFilePanelWidth(prev => Math.min(prev, maxPanelWidth))
+    }
+    window.addEventListener('resize', handleResize)
+    handleResize()
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isCollapsed])
 
   // 挂载与销毁文件预览器 (open-file-viewer)
   useEffect(() => {
