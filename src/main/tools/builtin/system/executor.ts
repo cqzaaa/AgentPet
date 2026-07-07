@@ -223,11 +223,6 @@ if (-not $task.Wait(15000)) {
         return { content: `未知的操作类型: ${action_type}`, success: false }
       }
 
-      // 4. extend_task_loop (实际逻辑在 callLlmInternal 中拦截处理)
-      if (api === 'extend_task_loop') {
-        return { content: '此工具由系统内部 LLM 循环拦截处理。', success: true }
-      }
-
       // 5. trigger_memory_purify (实际逻辑在 callLlmInternal 中拦截处理)
       if (api === 'trigger_memory_purify') {
         return { content: '此工具由系统内部 LLM 循环拦截处理。', success: true }
@@ -277,7 +272,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['get_system_status', 'get_location', 'manage_cron_task', 'extend_task_loop', 'trigger_memory_purify', 'append_memory_summary']
+    return ['get_system_status', 'get_location', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 }
 

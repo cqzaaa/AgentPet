@@ -373,6 +373,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   if (agentWindow) {
     if (agentWindow.isMinimized()) agentWindow.restore()
+    agentWindow.show()
     agentWindow.focus()
     if (openParams) {
       agentWindow.webContents.send('api:open-cron-log-details', openParams.taskId, openParams.logId)
@@ -446,7 +447,7 @@ ipcMain.on('maximize-agent-window', () => {
 
 ipcMain.on('close-agent-window', () => {
   if (agentWindow && !agentWindow.isDestroyed()) {
-    agentWindow.close()
+    agentWindow.hide()
   }
 })
 

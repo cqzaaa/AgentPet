@@ -268,9 +268,7 @@ export class AgentExecutor {
 
     let loopCount = 0
     const maxLoops = 100
-    let TOOL_INTERRUPT_THRESHOLD = 10
     let totalToolCallsCount = 0
-    let isLongTask = false
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
     const effectiveTools = this.getFormattedTools(isFrontend, true)
@@ -348,22 +346,7 @@ export class AgentExecutor {
 
       const toolCalls = responseMsg.tool_calls
       if (toolCalls && toolCalls.length > 0) {
-        const hasExtend = toolCalls.some((tc: any) => tc.function.name === 'extend_task_loop')
 
-        if (loopCount >= TOOL_INTERRUPT_THRESHOLD && !hasExtend) {
-          console.warn(`[callLlm] 工具调用已达 ${loopCount} 次，触发软中断...`)
-          chatHistory.push(responseMsg)
-
-          for (const tc of toolCalls) {
-            chatHistory.push({
-              role: 'tool' as const,
-              tool_call_id: tc.id,
-              name: tc.function.name,
-              content: `[系统拦截] 调用次数已达上限(${TOOL_INTERRUPT_THRESHOLD})，本次工具被拦截未执行。\n如果你确信这是一个需要更多步骤的长任务，请立即调用 \`extend_task_loop\` 工具申请延长。\n否则，说明你可能陷入了死循环或找不到目标，请直接输出一段话向用户提问求助，不要再调用其他工具。`
-            })
-          }
-          continue
-        }
 
         // 第二阶段参数填充逻辑：对 MCP 等简化工具调用补充 Schema
         for (let i = 0; i < toolCalls.length; i++) {
@@ -480,7 +463,7 @@ export class AgentExecutor {
           }
 
           const toolName = toolCall.function.name
-          if (toolName !== 'extend_task_loop' && toolName !== 'trigger_memory_purify') {
+          if (toolName !== 'trigger_memory_purify') {
             totalToolCallsCount++
           }
 
@@ -492,12 +475,7 @@ export class AgentExecutor {
           }
 
           let toolResult: string
-          if (toolName === 'extend_task_loop') {
-            isLongTask = true
-            const extraLoops = typeof toolArgs.extra_loops === 'number' ? toolArgs.extra_loops : 20
-            TOOL_INTERRUPT_THRESHOLD += extraLoops
-            toolResult = `[系统提示] 任务链执行轮数上限已扩展至 ${TOOL_INTERRUPT_THRESHOLD} 次。请继续安心执行您的长任务，不要中断。`
-          } else if (toolName === 'trigger_memory_purify') {
+          if (toolName === 'trigger_memory_purify') {
             runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
             toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
           } else {
@@ -569,7 +547,7 @@ export class AgentExecutor {
           content: finalResponse
         }
 
-        if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
+        if (totalToolCallsCount >= 5 && sessionId) {
           console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
           this.handleLongTaskAutoMemory(sessionId, chatHistory, config, finalResponse).catch(e => console.error('[System] 自动经验沉淀失败:', e))
         }
@@ -578,7 +556,7 @@ export class AgentExecutor {
       }
     }
 
-    if ((isLongTask || totalToolCallsCount >= 5) && sessionId) {
+    if (totalToolCallsCount >= 5 && sessionId) {
       console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
       this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。').catch(e => console.error('[System] 自动经验沉淀失败:', e))
     }

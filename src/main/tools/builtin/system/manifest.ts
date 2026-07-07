@@ -56,24 +56,7 @@ export const systemManifest: ToolManifest = {
         required: ['action_type']
       }
     },
-    {
-      name: 'extend_task_loop',
-      description: '当执行长任务预感当前工具调用次数不足时，调用此工具申请延长最大执行轮数，避免被系统强制中断。',
-      parameters: {
-        type: 'object',
-        properties: {
-          extra_loops: {
-            type: 'number',
-            description: '希望增加的轮数，例如 20'
-          },
-          reason: {
-            type: 'string',
-            description: '申请延长的原因'
-          }
-        },
-        required: ['extra_loops']
-      }
-    },
+
     {
       name: 'trigger_memory_purify',
       description: '主动触发后台的记忆整理与经验沉淀 Pipeline。适用场景：长任务或重要探索结束后，将学到的知识归档整理为长期记忆。调用后系统会自动收集所有未处理的对话摘要，合并更新全局人物画像，并提取避坑经验写入长期记忆库。',
