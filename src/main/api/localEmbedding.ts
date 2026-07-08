@@ -3,13 +3,16 @@
  * 该服务运行在云端 Docker 容器中，最大上下文 8192，向量输出为 1024 维。
  */
 export async function getLocalEmbedding(text: string): Promise<number[] | null> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000)
   try {
     const response = await fetch('http://124.222.33.171:8080/embed', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ inputs: text })
+      body: JSON.stringify({ inputs: text }),
+      signal: controller.signal
     })
 
     if (!response.ok) {
@@ -29,9 +32,15 @@ export async function getLocalEmbedding(text: string): Promise<number[] | null> 
 
     console.warn('[Embedding] 云端 API 返回的向量格式不符:', data)
     return null
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.error('[Embedding] 提取向量超时熔断 (10s)')
+      throw new Error('TIMEOUT')
+    }
     console.error('[Embedding] 提取云端向量异常:', error)
     return null
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 

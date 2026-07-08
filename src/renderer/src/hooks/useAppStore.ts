@@ -703,6 +703,30 @@ export function useAppStore() {
           cleanedMessagesToSave.forEach(item => {
             window.api.saveMessage({ ...item.msg, sessionId: item.sessionId }).catch(console.error)
           })
+
+          // 重新打开应用时，默认选择最近活跃的非置顶会话（若无非置顶会话，则选择最新的置顶会话）
+          if (cleaned.length > 0) {
+            const unpinned = cleaned.filter((s: any) => !s.pinned && !s.id.startsWith('wechat:'))
+            let latestSess: any = null
+            if (unpinned.length > 0) {
+              latestSess = unpinned[0]
+              for (let i = 1; i < unpinned.length; i++) {
+                if (unpinned[i].time && (!latestSess.time || unpinned[i].time > latestSess.time)) {
+                  latestSess = unpinned[i]
+                }
+              }
+            } else {
+              latestSess = cleaned[0]
+              for (let i = 1; i < cleaned.length; i++) {
+                if (cleaned[i].time && (!latestSess.time || cleaned[i].time > latestSess.time)) {
+                  latestSess = cleaned[i]
+                }
+              }
+            }
+            if (latestSess) {
+              setActiveSessionId(latestSess.id)
+            }
+          }
         } else {
           setSessions(localSess)
         }

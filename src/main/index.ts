@@ -2353,6 +2353,7 @@ app.whenReady().then(() => {
           PRIMARY KEY (memory_id, entity_name),
           FOREIGN KEY (memory_id) REFERENCES persona_memories(id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS idx_persona_memories_category ON persona_memories(category);
       `)
 
       // 动态升级旧数据库表结构，为已创建的表添加 user_id 字段

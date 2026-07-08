@@ -13,6 +13,12 @@ export interface MemoryDependencies {
 
 let memoryDeps: MemoryDependencies | null = null
 
+// 长期记忆向量反序列化缓存，避免在大数量级下频繁解析 JSON
+const parsedEmbeddingCache = new Map<string, number[]>()
+
+// 已更新只读历史 Markdown 文件的内容缓存，避免重复文件 I/O 读取
+const fileContentCache = new Map<string, string>()
+
 export async function appendMemorySummaryInternal(sessionId: string, title: string, content: string): Promise<boolean> {
   if (!memoryDeps) {
     console.error('[Memory] memoryDeps 尚未初始化')
@@ -214,7 +220,11 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       let queryEmb: number[] | null = null
       try {
         queryEmb = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
-      } catch (e) {
+      } catch (e: any) {
+        if (e && e.message === 'TIMEOUT') {
+          console.warn('[Recall] 提取向量请求超时 (10s)，自动熔断，放弃本次长期记忆检索流程')
+          return []
+        }
         console.error('召回计算提问向量失败', e)
       }
 
@@ -272,7 +282,13 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         let vectorScore = 0
         if (queryEmb && row.embedding) {
           try {
-            const dbEmb = JSON.parse(row.embedding)
+            let dbEmb = parsedEmbeddingCache.get(row.id)
+            if (!dbEmb) {
+              dbEmb = JSON.parse(row.embedding)
+              if (Array.isArray(dbEmb)) {
+                parsedEmbeddingCache.set(row.id, dbEmb)
+              }
+            }
             if (Array.isArray(dbEmb)) {
               vectorScore = cosineSimilarity(queryEmb, dbEmb)
               // 归一化 [-1, 1] 到 [0, 1]
@@ -313,25 +329,41 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
 
       // 异步读取关联的总结 markdown 文件内容
       const chatDir = deps.getActiveChatDir()
-      const finalTop3 = await Promise.all(top3.map(async (item) => {
+      const finalTop3 = await Promise.all(top3.map(async (item, index) => {
         let relatedContent = ''
         let absolutePath = ''
         
-        if (item.link) {
-          const paths = item.link.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0)
+        // 性能微调：仅物理读取并提取最相关 Top 1 的关联文件内容
+        // Top 2 与 Top 3 仅保留事实说明 (fact)，但依旧返回 absolutePath，允许模型在需要时调用 read_file 访问
+        if (item.link && index === 0) {
+          // 对关联路径去重，且只读取最近（最后追加）的最多 2 个不同的文件，其余仅作为链接返回
+          const paths: string[] = Array.from(new Set((item.link as string).split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0)))
+          const pathsToRead = paths.slice(-2)
           
-          for (const rawPath of paths) {
-            let targetPath = rawPath
+          for (const rawPath of pathsToRead) {
+            let targetPath: string = rawPath
             // 兼容相对路径：如果是相对路径，则使用 chatDir 定位
             if (!targetPath.includes(':') && !targetPath.startsWith('/') && !targetPath.startsWith('\\')) {
               targetPath = join(chatDir, targetPath)
             }
             
-            let fileToRead = targetPath
-            let exists = fs.existsSync(fileToRead)
+            let fileToRead: string = targetPath
             
+            // 检查缓存
+            if (fileContentCache.has(fileToRead)) {
+              relatedContent += (relatedContent ? '\n\n' : '') + fileContentCache.get(fileToRead)
+              absolutePath = fileToRead.replace(/\\/g, '/')
+              continue
+            }
+            
+            let exists = fs.existsSync(fileToRead)
             if (!exists && fileToRead.toLowerCase().endsWith('.md')) {
               const updatedPath = fileToRead.replace(/\.md$/i, '_已更新.md')
+              if (fileContentCache.has(updatedPath)) {
+                relatedContent += (relatedContent ? '\n\n' : '') + fileContentCache.get(updatedPath)
+                absolutePath = updatedPath.replace(/\\/g, '/')
+                continue
+              }
               if (fs.existsSync(updatedPath)) {
                 fileToRead = updatedPath
                 exists = true
@@ -342,6 +374,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
               try {
                 const text = await fs.promises.readFile(fileToRead, 'utf-8')
                 const sliceText = text.length > 8000 ? text.slice(0, 8000) + '\n...(内容过长已截断)...' : text
+                fileContentCache.set(fileToRead, sliceText)
                 relatedContent += (relatedContent ? '\n\n' : '') + sliceText
                 absolutePath = fileToRead.replace(/\\/g, '/')
               } catch (readErr) {
@@ -439,7 +472,10 @@ async function getEmbeddingInternal(
     if (localEmb) {
       return localEmb
     }
-  } catch (localErr) {
+  } catch (localErr: any) {
+    if (localErr && localErr.message === 'TIMEOUT') {
+      throw localErr
+    }
     console.warn('[Embedding] 本地向量计算异常:', localErr)
   }
   return null
@@ -706,6 +742,8 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     }
 
     await autoMigrateOldEmbeddings(database)
+    parsedEmbeddingCache.clear()
+    fileContentCache.clear()
     return { success: true, count: processedFiles.length, insertCount }
   } catch (e: any) {
     console.error('画像整理 pipeline 失败', e)
