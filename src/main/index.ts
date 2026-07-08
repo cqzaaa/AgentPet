@@ -344,6 +344,7 @@ async function saveBase64ImageInternal(dataUrl: string): Promise<{ path: string;
   }
 }
 const activeLlmAbortControllers = new Map<string, AbortController>()
+const abortedSessionIds = new Set<string>()
 // 跟踪每个会话最近上传的 xlsx 文件，用于 generate_file 时自动复制数据验证
 const sessionLastXlsxMap: Map<string, string> = new Map()
 
@@ -1834,6 +1835,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:abort-llm', (_, sessionId?: string) => {
     if (sessionId) {
+      abortedSessionIds.add(sessionId)
       const controller = activeLlmAbortControllers.get(sessionId)
       if (controller) {
         try { controller.abort() } catch (_) { /* ignore */ }
@@ -3317,6 +3319,13 @@ app.whenReady().then(() => {
     const executor = new AgentExecutor()
     let thisController: AbortController
     const sessionId = config.sessionId || 'default'
+
+    // 检查此 session 在开始前是否已经被主动终止了
+    if (abortedSessionIds.has(sessionId)) {
+      abortedSessionIds.delete(sessionId)
+      throw new Error('UserAborted')
+    }
+
     if (event && !(config as any).isBackground) {
       const oldController = activeLlmAbortControllers.get(sessionId)
       if (oldController) {
@@ -3406,11 +3415,13 @@ app.whenReady().then(() => {
       if (activeLlmAbortControllers.get(sessionId) === thisController) {
         activeLlmAbortControllers.delete(sessionId)
       }
+      abortedSessionIds.delete(sessionId)
       return finalResponse
     } catch (e: any) {
       if (activeLlmAbortControllers.get(sessionId) === thisController) {
         activeLlmAbortControllers.delete(sessionId)
       }
+      abortedSessionIds.delete(sessionId)
       if (thisController.signal.aborted) {
         throw new Error('UserAborted')
       }

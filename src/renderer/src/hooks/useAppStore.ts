@@ -391,6 +391,7 @@ export function useAppStore() {
   // ── 打字机流式效果控制 ──────────────────────────────────────────
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const isTypingRef = useRef<boolean>(false)
+  const abortedReplyIdsRef = useRef<Set<number>>(new Set())
 
   // 卸载时清理定时器，防止内存泄漏
   useEffect(() => {
@@ -1270,29 +1271,47 @@ export function useAppStore() {
   // 打字机流式打印辅助函数 (已优化为瞬间渲染以保证桌宠 Live2D 60FPS 帧率并消除卡顿)
   const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
     let savedMsg: any = null
+    let wasAborted = false
+
     setSessions(prev => {
       const next = prev.map(s => {
         if (s.id === sessionId) {
-          const messages = s.messages.map(m => m.id === replyId ? { ...m, text: fullText, isThinking: false } : m)
+          const messages = s.messages.map(m => {
+            if (m.id === replyId) {
+              // 检查该消息在此前是否已被手动终止
+              if (abortedReplyIdsRef.current.has(replyId) || !m.isThinking || (m.text && (m.text.includes('手动终止') || m.text.includes('手动中断')))) {
+                wasAborted = true
+                return m
+              }
+              return { ...m, text: fullText, isThinking: false }
+            }
+            return m
+          })
           const target = messages.find(m => m.id === replyId)
-          if (target) savedMsg = target
+          if (target && !wasAborted) savedMsg = target
           return { ...s, messages }
         }
         return s
       })
+
       if (savedMsg) {
         window.api.saveMessage({ ...savedMsg, sessionId })
       }
       return next
     })
+
     isTypingRef.current = false
     setSendingSessionIds(prev => ({ ...prev, [sessionId]: false }))
-    setTimeout(() => {
-      setSessions(prev => {
-        triggerSessionSummary(sessionId, prev)
-        return prev
-      })
-    }, 500)
+
+    if (!wasAborted) {
+      setTimeout(() => {
+        setSessions(prev => {
+          triggerSessionSummary(sessionId, prev)
+          return prev
+        })
+      }, 500)
+    }
+    abortedReplyIdsRef.current.delete(replyId)
   }
 
   const handleSendChat = async (): Promise<void> => {
@@ -1562,6 +1581,11 @@ ${skillsContext}
         console.error('获取工具定义失败:', err)
       })
 
+      // 检查在此准备期间是否已被手动终止
+      if (abortedReplyIdsRef.current.has(replyId)) {
+        throw new Error('UserAborted')
+      }
+
       // 调用大模型接口，传入 workspacePath 参数，同时把 sessionId 和 messageId 传进去
       const response = await window.api.callLLM(
         {
@@ -1640,6 +1664,7 @@ ${skillsContext}
         return next
       })
     } finally {
+      abortedReplyIdsRef.current.delete(replyId)
       if (!typingStarted) {
         setSendingSessionIds(prev => ({ ...prev, [activeSessionId]: false }))
       }
@@ -1915,6 +1940,7 @@ ${finalMarkdownText}`
       const currentActiveSess = sessions.find(s => s.id === activeSessionId)
       if (currentActiveSess) {
         currentActiveSess.messages.filter(m => m.isThinking).forEach(m => {
+          abortedReplyIdsRef.current.add(m.id)
           const updatedMsg = { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false }
           window.api.saveMessage({ ...updatedMsg, sessionId: activeSessionId }).catch(console.error)
         })
@@ -1923,7 +1949,13 @@ ${finalMarkdownText}`
         if (s.id === activeSessionId) {
           return {
             ...s,
-            messages: s.messages.map(m => m.isThinking ? { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false } : m)
+            messages: s.messages.map(m => {
+              if (m.isThinking) {
+                abortedReplyIdsRef.current.add(m.id)
+                return { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false }
+              }
+              return m
+            })
           }
         }
         return s
