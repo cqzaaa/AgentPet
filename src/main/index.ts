@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
-import { join, basename, dirname } from 'path'
+import { join, basename, dirname, extname } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -390,7 +390,8 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      plugins: true
     }
   })
 
@@ -601,7 +602,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      plugins: true
     }
   })
 
@@ -966,6 +968,196 @@ app.whenReady().then(() => {
     }
   })
 
+  const mimeTypes: Record<string, string> = {
+    // 图片
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.jfif': 'image/jpeg',
+    '.pjpe': 'image/jpeg',
+    '.pjpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.avif': 'image/avif',
+    '.jxl': 'image/jxl',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.ico': 'image/x-icon',
+    '.cur': 'image/x-icon',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.apng': 'image/apng',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    // 视频
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.ogv': 'video/ogg',
+    '.mov': 'video/quicktime',
+    '.m4v': 'video/x-m4v',
+    '.avi': 'video/x-msvideo',
+    '.mkv': 'video/x-matroska',
+    '.flv': 'video/x-flv',
+    '.wmv': 'video/x-ms-wmv',
+    '.3gp': 'video/3gpp',
+    '.mpg': 'video/mpeg',
+    '.mpeg': 'video/mpeg',
+    '.mpe': 'video/mpeg',
+    '.mpv': 'video/mpeg',
+    // 音频
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.oga': 'audio/ogg',
+    '.aac': 'audio/aac',
+    '.m4a': 'audio/x-m4a',
+    '.flac': 'audio/flac',
+    '.opus': 'audio/opus',
+    '.weba': 'audio/webm',
+    '.amr': 'audio/amr',
+    '.mid': 'audio/midi',
+    '.midi': 'audio/midi',
+    '.aif': 'audio/x-aiff',
+    '.aiff': 'audio/x-aiff',
+    '.aifc': 'audio/x-aiff',
+    // 版式文档
+    '.pdf': 'application/pdf',
+    '.epub': 'application/epub+zip',
+    '.ofd': 'application/ofd',
+    '.xps': 'application/vnd.ms-xpsdocument',
+    '.oxps': 'application/oxps',
+    // Office 文字
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.docm': 'application/vnd.ms-word.document.macroenabled.12',
+    '.doc': 'application/msword',
+    '.dotx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+    '.dotm': 'application/vnd.ms-word.template.macroenabled.12',
+    '.dot': 'application/msword',
+    '.rtf': 'application/rtf',
+    '.odt': 'application/vnd.oasis.opendocument.text',
+    '.fodt': 'application/vnd.oasis.opendocument.text-flat-xml',
+    '.wps': 'application/vnd.ms-works',
+    // Office 表格
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsm': 'application/vnd.ms-excel.sheet.macroenabled.12',
+    '.xlsb': 'application/vnd.ms-excel.sheet.binary.macroenabled.12',
+    '.xlt': 'application/vnd.ms-excel',
+    '.xltx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+    '.xltm': 'application/vnd.ms-excel.template.macroenabled.12',
+    '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+    '.fods': 'application/vnd.oasis.opendocument.spreadsheet-flat-xml',
+    '.numbers': 'application/vnd.apple.numbers',
+    '.et': 'application/vnd.ms-excel',
+    // Office 演示
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.pptm': 'application/vnd.ms-powerpoint.presentation.macroenabled.12',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pps': 'application/vnd.ms-powerpoint',
+    '.ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+    '.ppsm': 'application/vnd.ms-powerpoint.slideshow.macroenabled.12',
+    '.potx': 'application/vnd.openxmlformats-officedocument.presentationml.template',
+    '.potm': 'application/vnd.ms-powerpoint.template.macroenabled.12',
+    '.odp': 'application/vnd.oasis.opendocument.presentation',
+    '.fodp': 'application/vnd.oasis.opendocument.presentation-flat-xml',
+    '.key': 'application/vnd.apple.keynote',
+    '.dps': 'application/vnd.ms-powerpoint',
+    // 文本 / 代码
+    '.txt': 'text/plain; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
+    '.xml': 'application/xml; charset=utf-8',
+    '.yaml': 'text/yaml; charset=utf-8',
+    '.yml': 'text/yaml; charset=utf-8',
+    '.csv': 'text/csv; charset=utf-8',
+    '.tsv': 'text/tab-separated-values; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.ts': 'application/typescript; charset=utf-8',
+    '.tsx': 'text/typescript-jsx; charset=utf-8',
+    '.jsx': 'text/javascript-jsx; charset=utf-8',
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    // 压缩包
+    '.zip': 'application/zip',
+    '.rar': 'application/vnd.rar',
+    '.7z': 'application/x-7z-compressed',
+    '.tar': 'application/x-tar',
+    '.gz': 'application/gzip',
+    '.tgz': 'application/gzip',
+    '.bz2': 'application/x-bzip2',
+    '.xz': 'application/x-xz',
+    // 邮件
+    '.eml': 'message/rfc822',
+    '.msg': 'application/vnd.ms-outlook',
+    '.mbox': 'application/mbox',
+    // 协同绘图
+    '.drawio': 'application/vnd.jgraph.mxfile',
+    '.dio': 'application/vnd.jgraph.mxfile',
+    '.excalidraw': 'application/json; charset=utf-8',
+    '.tldraw': 'application/json; charset=utf-8',
+    // CAD
+    '.dxf': 'image/vnd.dxf',
+    '.dwg': 'image/vnd.dwg',
+    '.dwf': 'model/vnd.dwf',
+    '.step': 'model/step',
+    '.stp': 'model/step',
+    '.iges': 'model/iges',
+    '.igs': 'model/iges',
+    '.ifc': 'model/ifc',
+    '.sat': 'model/sat',
+    '.sab': 'model/sat',
+    '.x_t': 'model/x-parasolid-transmission',
+    '.x_b': 'model/x-parasolid-binary',
+    '.3dm': 'model/3dm',
+    '.skp': 'model/skp',
+    '.sldprt': 'model/sldprt',
+    '.sldasm': 'model/sldasm',
+    '.gds': 'application/x-gdsii',
+    '.oas': 'application/x-oasis',
+    '.oasis': 'application/x-oasis',
+    // 3D
+    '.gltf': 'model/gltf+json',
+    '.glb': 'model/gltf-binary',
+    '.obj': 'model/obj',
+    '.stl': 'model/stl',
+    '.fbx': 'model/fbx',
+    '.dae': 'model/vnd.collada+xml',
+    '.ply': 'model/ply',
+    '.3mf': 'model/3mf',
+    '.3ds': 'model/3ds',
+    '.usd': 'model/usd',
+    '.usda': 'model/usd',
+    '.usdc': 'model/usd',
+    '.usdz': 'model/vnd.usdz+zip',
+    '.wrl': 'model/vrml',
+    '.vrml': 'model/vrml',
+    // GIS
+    '.geojson': 'application/geo+json',
+    '.topojson': 'application/json; charset=utf-8',
+    '.kml': 'application/vnd.google-earth.kml+xml',
+    '.kmz': 'application/vnd.google-earth.kmz',
+    '.gpx': 'application/gpx+xml',
+    '.shp': 'application/octet-stream',
+    // 资产
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.eot': 'application/vnd.ms-fontobject',
+    '.psd': 'image/vnd.adobe.photoshop',
+    '.psb': 'image/vnd.adobe.photoshop',
+    '.ai': 'application/postscript',
+    '.eps': 'application/postscript',
+    '.ps': 'application/postscript',
+    '.webarchive': 'application/x-webarchive',
+    '.sqlite': 'application/x-sqlite3',
+    '.sqlite3': 'application/x-sqlite3',
+    '.db': 'application/x-sqlite3',
+    '.wasm': 'application/wasm',
+    '.parquet': 'application/x-parquet',
+    '.avro': 'application/x-avro',
+  }
+
   protocol.handle('local-file', async (request) => {
     try {
       // local-file 协议注册了 standard:true，Chromium 会将 local-file://C:/path 中的 C: 当 hostname 解析
@@ -982,13 +1174,17 @@ app.whenReady().then(() => {
         filePath = filePath.slice(1)
       }
       
-      console.log('[local-file protocol debug] request.url:', request.url, 'parsed pathname:', parsedUrl.pathname, 'filePath:', filePath)
-      const fileUrl = pathToFileURL(filePath).toString()
-      const response = await net.fetch(fileUrl)
-      const headers = new Headers(response.headers)
+      const ext = extname(filePath).toLowerCase()
+      const contentType = mimeTypes[ext] || 'application/octet-stream'
+      
+      console.log('[local-file protocol debug] request.url:', request.url, 'parsed pathname:', parsedUrl.pathname, 'filePath:', filePath, 'inferred Content-Type:', contentType)
+      const buffer = await fs.promises.readFile(filePath)
+      const headers = new Headers()
       headers.set('Access-Control-Allow-Origin', '*')
       headers.set('Access-Control-Allow-Methods', 'GET, HEAD')
-      return new Response(response.body, { status: response.status, headers })
+      headers.set('Content-Type', contentType)
+      headers.set('Content-Length', buffer.length.toString())
+      return new Response(buffer, { status: 200, headers })
     } catch (e) {
       console.error('[local-file protocol error]', e)
       return new Response('Not Found', { status: 404 })
