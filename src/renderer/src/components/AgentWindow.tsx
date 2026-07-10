@@ -7,6 +7,7 @@ import { AgentPage } from '../pages/AgentPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import { LogsPage } from '../pages/LogsPage'
+import { RpaPage } from '../rpa/RpaPage'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
 
@@ -18,6 +19,18 @@ function LogsIcon(): React.JSX.Element {
       <line x1="16" y1="13" x2="8" y2="13" />
       <line x1="16" y1="17" x2="8" y2="17" />
       <polyline points="10 9 9 9 8 9" />
+    </svg>
+  )
+}
+
+function RpaIcon(): React.JSX.Element {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="9" y="15" width="6" height="6" rx="1" />
+      <path d="M6 9v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9" />
+      <path d="M12 14v1" />
     </svg>
   )
 }
@@ -61,7 +74,7 @@ export function AgentWindow(): React.JSX.Element {
   const activePermissionRequest = useAppStoreRaw(state => state.activePermissionRequest)
   const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
   const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
-  
+
   // 派生状态从 Zustand 中获取
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || { messages: [] }
   const activeSessMessages = activeSession.messages || []
@@ -184,6 +197,7 @@ export function AgentWindow(): React.JSX.Element {
       case 'agent': return <AgentPage store={store} />
       case 'logs': return <LogsPage store={store} />
       case 'settings': return <SettingsPage store={store} />
+      case 'rpa': return <RpaPage />
       default: return <div>Overview</div>
     }
   }
@@ -260,6 +274,10 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
                 <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
+                <span className="menu-item-arrow">&gt;</span>
+              </div>
+              <div className={`menu-item ${activeTab === 'rpa' ? 'active' : ''}`} onClick={() => setActiveTab('rpa')} title="RPA 任务">
+                <div className="menu-item-left"><RpaIcon /><span>RPA 任务</span></div>
                 <span className="menu-item-arrow">&gt;</span>
               </div>
               <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
@@ -375,6 +393,7 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
+              {activeTab === 'rpa' && 'RPA 自动化任务清单'}
             </div>
             {activeTab !== 'chat' && (
               <div className="content-subtitle">
@@ -382,6 +401,7 @@ export function AgentWindow(): React.JSX.Element {
                 {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
                 {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
                 {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
+                {activeTab === 'rpa' && '基于混合 AI 决策与可视化编排的桌面 RPA 流程引擎'}
               </div>
             )}
           </div>
@@ -393,7 +413,7 @@ export function AgentWindow(): React.JSX.Element {
                 {generatedFiles.length > 0 && (
                   <button
                     className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null);  setOpenTabs([]) } }}
+                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setOpenTabs([]) } }}
                     title="查看已生成的文件"
                   >
                     📁 {generatedFiles.length}
@@ -512,10 +532,10 @@ export function AgentWindow(): React.JSX.Element {
 
       {/* API Key 引导配置弹窗 */}
       {showApiKeyModal && (
-        <div 
-          className="mcp-modal-overlay" 
-          style={{ 
-            backdropFilter: 'blur(10px)', 
+        <div
+          className="mcp-modal-overlay"
+          style={{
+            backdropFilter: 'blur(10px)',
             backgroundColor: 'rgba(0, 0, 0, 0.45)',
             zIndex: 99999
           }}
@@ -532,10 +552,10 @@ export function AgentWindow(): React.JSX.Element {
               }
             }
           `}</style>
-          <div 
-            className="mcp-modal-card" 
-            style={{ 
-              maxWidth: '420px', 
+          <div
+            className="mcp-modal-card"
+            style={{
+              maxWidth: '420px',
               width: '90%',
               background: 'var(--bg-card, rgba(255, 255, 255, 0.85))',
               backdropFilter: 'blur(20px)',
@@ -550,9 +570,9 @@ export function AgentWindow(): React.JSX.Element {
               <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
                 <span>🔑 缺少大模型配置</span>
               </div>
-              <button 
-                className="mcp-modal-close-btn" 
-                style={{ fontSize: '20px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} 
+              <button
+                className="mcp-modal-close-btn"
+                style={{ fontSize: '20px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                 onClick={() => setShowApiKeyModal(false)}
               >
                 ×

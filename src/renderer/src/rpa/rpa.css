@@ -1,0 +1,597 @@
+/* ──────── RPA 模块专业化/IDE 主题 (模仿影刀风格) ──────── */
+
+/* 全局与变量定义 */
+:root {
+  --rpa-primary: #1677ff;
+  --rpa-primary-hover: #4096ff;
+  --rpa-bg-layout: #f2f3f5;
+  --rpa-bg-panel: #ffffff;
+  --rpa-border: #e5e6eb;
+  --rpa-text-main: #1d2129;
+  --rpa-text-muted: #86909c;
+  --rpa-danger: #f53f3f;
+  --rpa-success: #00b42a;
+  --rpa-warn: #ff7d00;
+  
+  --rpa-radius-sm: 4px;
+  --rpa-radius-md: 6px;
+  --rpa-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.dark {
+  --rpa-bg-layout: #1e1e1e;
+  --rpa-bg-panel: #252526;
+  --rpa-border: #434343;
+  --rpa-text-main: #e5e6eb;
+  --rpa-text-muted: #86909c;
+}
+
+/* 基础容器 */
+.rpa-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--rpa-bg-layout);
+  color: var(--rpa-text-main);
+  font-family: "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  font-size: 13px; /* 提升信息密度 */
+}
+
+/* 通用面板/卡片取代 glass-panel */
+.glass-panel {
+  background: var(--rpa-bg-panel);
+  border: 1px solid var(--rpa-border);
+  border-radius: var(--rpa-radius-md);
+  box-shadow: var(--rpa-shadow);
+  transition: all 0.2s;
+}
+
+/* ──────── 1. RPA 任务列表视图 ──────── */
+.rpa-list-view {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.rpa-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rpa-list-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--rpa-text-main);
+}
+
+/* 按钮样式重塑为纯色/细框扁平化 */
+.btn-primary {
+  padding: 6px 16px;
+  background: var(--rpa-primary);
+  color: #ffffff;
+  border: 1px solid transparent;
+  border-radius: var(--rpa-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-primary:hover {
+  background: var(--rpa-primary-hover);
+}
+.btn-primary:disabled {
+  background: #94bfff;
+  cursor: not-allowed;
+}
+
+.rpa-task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+/* 任务卡片变更为扁平数据卡片 */
+.rpa-task-card {
+  padding: 16px;
+  cursor: pointer;
+  height: 130px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-radius: var(--rpa-radius-sm);
+}
+
+.rpa-task-card:hover {
+  border-color: var(--rpa-primary);
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.1);
+}
+
+.rpa-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rpa-card-desc {
+  font-size: 12px;
+  color: var(--rpa-text-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+}
+
+.rpa-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--rpa-text-muted);
+}
+
+.status-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--rpa-bg-layout);
+  border: 1px solid var(--rpa-border);
+}
+
+.status-badge.running { color: var(--rpa-primary); border-color: rgba(22,119,255,0.3); background: rgba(22,119,255,0.05); }
+.status-badge.success { color: var(--rpa-success); border-color: rgba(0,180,42,0.3); background: rgba(0,180,42,0.05); }
+.status-badge.failed { color: var(--rpa-danger); border-color: rgba(245,63,63,0.3); background: rgba(245,63,63,0.05); }
+
+/* 卡片操作按钮（改为方形更干练） */
+.rpa-card-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.rpa-task-card:hover .rpa-card-actions {
+  opacity: 1;
+}
+
+.btn-card-action {
+  background: var(--rpa-bg-panel);
+  border: 1px solid var(--rpa-border);
+  color: var(--rpa-text-muted);
+  border-radius: var(--rpa-radius-sm);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-card-action:hover {
+  color: var(--rpa-danger);
+  border-color: var(--rpa-danger);
+}
+
+/* ──────── 2. RPA 任务详情页 ──────── */
+.rpa-detail-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--rpa-bg-panel);
+  border-bottom: 1px solid var(--rpa-border);
+}
+
+.rpa-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-back {
+  background: transparent;
+  border: 1px solid var(--rpa-border);
+  color: var(--rpa-text-main);
+  padding: 4px 10px;
+  border-radius: var(--rpa-radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-back:hover {
+  background: var(--rpa-bg-layout);
+  border-color: var(--rpa-primary);
+  color: var(--rpa-primary);
+}
+
+.rpa-detail-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* 画布与顶部 Toolbar */
+.rpa-canvas-container {
+  flex: 7;
+  position: relative;
+  background: var(--rpa-bg-layout);
+  display: flex;
+  flex-direction: column;
+}
+
+.rpa-canvas-toolbar {
+  height: 40px;
+  background: var(--rpa-bg-panel);
+  border-bottom: 1px solid var(--rpa-border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.rpa-canvas-toolbar .btn-back {
+  border-style: dashed;
+  color: var(--rpa-text-muted);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.rpa-canvas-toolbar .btn-back:hover {
+  border-style: solid;
+}
+
+/* 右侧抽屉 / IDE Sidebar */
+.rpa-panel-container {
+  flex: 3;
+  min-width: 300px;
+  max-width: 400px;
+  border-left: 1px solid var(--rpa-border);
+  background: var(--rpa-bg-panel);
+  display: flex;
+  flex-direction: column;
+}
+
+.rpa-panel-tabs {
+  display: flex;
+  background: var(--rpa-bg-layout);
+  border-bottom: 1px solid var(--rpa-border);
+}
+
+.rpa-panel-tab {
+  flex: 1;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--rpa-text-muted);
+  border-top: 2px solid transparent;
+  background: transparent;
+  transition: all 0.2s;
+}
+
+.rpa-panel-tab.active {
+  color: var(--rpa-primary);
+  border-top-color: var(--rpa-primary);
+  background: var(--rpa-bg-panel);
+  font-weight: 600;
+}
+
+.rpa-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ──────── 3. 运行控制与日志区 ──────── */
+.rpa-control-section {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.btn-ctrl {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: var(--rpa-radius-sm);
+  border: 1px solid transparent;
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-ctrl.run { background: var(--rpa-success); color: white; }
+.btn-ctrl.run:hover { background: #009a22; }
+.btn-ctrl.stop { background: var(--rpa-danger); color: white; }
+.btn-ctrl.stop:hover { background: #d93636; }
+
+.rpa-log-box {
+  background: #1e1e1e; /* 保持黑底绿/白字以维持极客感 */
+  color: #d4d4d4;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  padding: 12px;
+  border-radius: var(--rpa-radius-sm);
+  height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin-top: 8px;
+  border: 1px solid var(--rpa-border);
+}
+
+.log-item { margin-bottom: 4px; line-height: 1.4; word-break: break-all; }
+.log-item.info { color: #d4d4d4; }
+.log-item.warn { color: #d7ba7d; }
+.log-item.error { color: #f14c4c; }
+
+.variable-tag {
+  background: var(--rpa-bg-layout);
+  padding: 4px 8px;
+  border-radius: var(--rpa-radius-sm);
+  font-size: 12px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid var(--rpa-border);
+}
+
+/* ──────── 4. 属性编辑器 (精简表单) ──────── */
+.attr-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--rpa-text-main);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rpa-border);
+}
+
+.attr-group {
+  margin-bottom: 12px;
+}
+
+.attr-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: var(--rpa-text-main);
+}
+
+.attr-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--rpa-radius-sm);
+  border: 1px solid var(--rpa-border);
+  background: transparent;
+  color: var(--rpa-text-main);
+  font-size: 12px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.attr-input:focus {
+  border-color: var(--rpa-primary);
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+}
+
+/* ──────── 5. React Flow 节点 (影刀指令块风格) ──────── */
+.rpa-node-block {
+  background: var(--rpa-bg-panel);
+  border: 1px solid var(--rpa-border);
+  border-radius: var(--rpa-radius-sm);
+  color: var(--rpa-text-main);
+  font-size: 12px;
+  min-width: 180px;
+  box-shadow: var(--rpa-shadow);
+  display: flex;
+  overflow: hidden; /* 为了让左侧边条生效 */
+  transition: all 0.2s;
+}
+
+/* 指令块被选中时的样式 */
+.rpa-node-block:hover, .rpa-node-block.selected {
+  border-color: var(--rpa-primary);
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.15);
+}
+
+/* 左侧颜色状态条 */
+.rpa-node-strip {
+  width: 4px;
+  background: #cbd5e1; /* 默认灰色 */
+  flex-shrink: 0;
+}
+
+/* 按类别定义颜色带 */
+.rpa-node-block[data-kind="web"] .rpa-node-strip { background: var(--rpa-primary); }
+.rpa-node-block[data-kind="mouse"] .rpa-node-strip { background: #13c2c2; }
+.rpa-node-block[data-kind="keyboard"] .rpa-node-strip { background: #722ed1; }
+.rpa-node-block[data-kind="data"] .rpa-node-strip { background: #eb2f96; }
+.rpa-node-block[data-kind="control"] .rpa-node-strip { background: var(--rpa-warn); }
+.rpa-node-block[data-kind="ai"] .rpa-node-strip { background: #2f54eb; }
+
+/* 节点内部内容区 */
+.rpa-node-content {
+  padding: 8px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.rpa-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.rpa-node-icon {
+  font-size: 14px;
+}
+
+.rpa-node-desc {
+  font-size: 11px;
+  color: var(--rpa-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 执行状态的克制动画 (不再发大全屏光，而是边框变化和带脉冲) */
+.node-state-running {
+  border-color: var(--rpa-success) !important;
+}
+.node-state-running .rpa-node-strip {
+  background: var(--rpa-success) !important;
+  animation: pulseBar 1s infinite alternate;
+}
+
+.node-state-paused {
+  border-color: var(--rpa-warn) !important;
+}
+.node-state-paused .rpa-node-strip {
+  background: var(--rpa-warn) !important;
+  animation: pulseBar 1s infinite alternate;
+}
+
+.node-state-success {
+  border-color: rgba(0,180,42,0.4) !important;
+}
+
+.node-state-failed {
+  border-color: var(--rpa-danger) !important;
+}
+.node-state-failed .rpa-node-strip {
+  background: var(--rpa-danger) !important;
+}
+
+@keyframes pulseBar {
+  0% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+/* AI 辅助生成栏 (修改为紧凑表单) */
+.rpa-ai-generator-wrapper {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  width: 320px;
+}
+
+.rpa-ai-input {
+  flex: 1;
+  border-radius: var(--rpa-radius-sm);
+  border: 1px solid var(--rpa-border);
+  padding: 4px 10px;
+  font-size: 12px;
+  outline: none;
+  background: var(--rpa-bg-panel);
+  color: var(--rpa-text-main);
+}
+.rpa-ai-input:focus {
+  border-color: #2f54eb;
+}
+
+/* 放大 React Flow 连线控制点 */
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  background-color: #ffffff;
+  border-color: var(--rpa-primary);
+  transition: all 0.2s;
+  cursor: crosshair;
+}
+
+.react-flow__handle:hover {
+  background-color: var(--rpa-primary);
+  transform: scale(1.3);
+}
+
+/* 缩略图美化 */
+.react-flow__minimap {
+  background-color: var(--rpa-bg-panel) !important;
+  border: 1px solid var(--rpa-border) !important;
+  border-radius: var(--rpa-radius-md) !important;
+  box-shadow: var(--rpa-shadow) !important;
+  transition: all 0.2s;
+}
+
+/* 工具栏切换按钮激活状态 */
+.btn-back.active-toggle {
+  background: rgba(22, 119, 255, 0.08) !important;
+  border-color: var(--rpa-primary) !important;
+  color: var(--rpa-primary) !important;
+  border-style: solid !important;
+}
+
+/* ──────── 6. 右键菜单 ──────── */
+.rpa-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--rpa-bg-panel, #ffffff);
+  border: 1px solid var(--rpa-border, #e5e7eb);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 120px;
+}
+
+.rpa-context-menu-item {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #ef4444;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.2s;
+}
+
+.rpa-context-menu-item:hover {
+  background-color: var(--rpa-bg-layout, #f3f4f6);
+}
+
+@keyframes pulseBadge {
+  0% { transform: scale(0.95); opacity: 0.85; }
+  100% { transform: scale(1.05); opacity: 1; }
+}
+

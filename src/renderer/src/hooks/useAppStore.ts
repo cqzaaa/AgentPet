@@ -44,7 +44,7 @@ export interface TokenLog {
   messageId?: number
 }
 
-export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs'
+export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs' | 'rpa'
 export type AgentSubTab = 'skills' | 'memory' | 'cron' | 'mcp'
 export type SettingsSubTab = 'keys' | 'storage' | 'avatar'
 

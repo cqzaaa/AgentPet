@@ -354,7 +354,33 @@ const api = {
   setExecutionDevice: (sessionId: string, type: 'local' | 'ssh'): Promise<void> =>
     ipcRenderer.invoke('api:set-execution-device', sessionId, type),
   getExecutionDevice: (sessionId: string): Promise<'local' | 'ssh'> =>
-    ipcRenderer.invoke('api:get-execution-device', sessionId)
+    ipcRenderer.invoke('api:get-execution-device', sessionId),
+
+  // RPA 任务可视化 API
+  getRpaManifest: (): Promise<any[]> => ipcRenderer.invoke('api:get-rpa-manifest'),
+  saveRpaManifest: (manifest: any[]): Promise<boolean> => ipcRenderer.invoke('api:save-rpa-manifest', manifest),
+  getRpaTaskFlow: (taskId: string): Promise<any> => ipcRenderer.invoke('api:get-rpa-task-flow', taskId),
+  saveRpaTaskFlow: (taskId: string, flowData: any): Promise<boolean> => ipcRenderer.invoke('api:save-rpa-task-flow', taskId, flowData),
+  runRpaTask: (taskId: string, flowData: any): Promise<boolean> => ipcRenderer.invoke('api:run-rpa-task', taskId, flowData),
+  stopRpaTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('api:stop-rpa-task', taskId),
+  respondRpaManualConfirm: (taskId: string, updates?: any): Promise<boolean> => ipcRenderer.invoke('api:respond-rpa-manual-confirm', taskId, updates),
+  onRpaLog: (callback: (data: { taskId: string; message: string; level: 'info' | 'warn' | 'error' }) => void): (() => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:rpa-log', handler)
+    return () => { ipcRenderer.removeListener('api:rpa-log', handler) }
+  },
+  onRpaStatusEvent: (callback: (data: { taskId: string; status: 'running' | 'success' | 'failed'; errorMsg?: string }) => void): (() => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:rpa-status-event', handler)
+    return () => { ipcRenderer.removeListener('api:rpa-status-event', handler) }
+  },
+  onRpaStepEvent: (callback: (data: { taskId: string; nodeId: string; state: 'idle' | 'running' | 'paused' | 'success' | 'failed'; data?: any; context?: any }) => void): (() => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:rpa-step-event', handler)
+    return () => { ipcRenderer.removeListener('api:rpa-step-event', handler) }
+  },
+  rpaPickElement: (url: string): Promise<string | null> => ipcRenderer.invoke('api:rpa-pick-element', url),
+  rpaRecordActions: (url: string): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', url)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

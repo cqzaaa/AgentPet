@@ -123,6 +123,18 @@ declare global {
       getSshStatus: (sessionId: string) => Promise<{ connected: boolean; host?: string; username?: string }>
       setExecutionDevice: (sessionId: string, type: 'local' | 'ssh') => Promise<void>
       getExecutionDevice: (sessionId: string) => Promise<'local' | 'ssh'>
+      getRpaManifest: () => Promise<any[]>
+      saveRpaManifest: (manifest: any[]) => Promise<boolean>
+      getRpaTaskFlow: (taskId: string) => Promise<any>
+      saveRpaTaskFlow: (taskId: string, flowData: any) => Promise<boolean>
+      runRpaTask: (taskId: string, flowData: any) => Promise<boolean>
+      stopRpaTask: (taskId: string) => Promise<boolean>
+      respondRpaManualConfirm: (taskId: string, updates?: any) => Promise<boolean>
+      rpaPickElement: (url: string) => Promise<string | null>
+      rpaRecordActions: (url: string) => Promise<any[]>
+      onRpaLog: (callback: (data: { taskId: string; message: string; level: 'info' | 'warn' | 'error' }) => void) => () => void
+      onRpaStatusEvent: (callback: (data: { taskId: string; status: 'running' | 'success' | 'failed'; errorMsg?: string }) => void) => () => void
+      onRpaStepEvent: (callback: (data: { taskId: string; nodeId: string; state: 'idle' | 'running' | 'paused' | 'success' | 'failed'; data?: any; context?: any }) => void) => () => void
     }
   }
 }

@@ -195,25 +195,25 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
 
   const panelStyle: React.CSSProperties = isFakeFullscreen
     ? {
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100vw',
-        height: '100vh',
-        zIndex: 99999,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-card)',
-        overflow: 'hidden'
-      }
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100vw',
+      height: '100vh',
+      zIndex: 99999,
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--bg-card)',
+      overflow: 'hidden'
+    }
     : {
-        width: `${filePanelWidth}px`,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-card)',
-        overflow: 'hidden',
-        flexShrink: 0
-      }
+      width: `${filePanelWidth}px`,
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--bg-card)',
+      overflow: 'hidden',
+      flexShrink: 0
+    }
 
   return (
     <>

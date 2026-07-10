@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
 import { join, basename, dirname, extname } from 'path'
+import { execSync, spawn } from 'child_process'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -93,6 +94,10 @@ if (process.env.USER_DATA_PATH) {
 }
 
 import { WechatBotManager } from './wechatBot'
+import * as rpaStorage from './rpa/rpaStorage'
+import { PlaywrightRpaExecutor } from './rpa/playwrightExecutor'
+import { RpaElementPicker } from './rpa/rpaElementPicker'
+import { RpaBrowserRecorder } from './rpa/rpaBrowserRecorder'
 
 let wechatBotManager: WechatBotManager | null = null
 let systemLlmConfig: any = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
@@ -139,14 +144,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 // McpManager and shell session management have been refactored to separate modules.
 
 
-// 消除 GPU Shader Disk Cache 权限警告（不影响渲染性能）
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
-// 优化 GPU 进程显存占用：在空闲时主动修剪 GPU 命令缓冲区并禁用视频帧 GPU 缓冲以释放显存
-app.commandLine.appendSwitch('prune-gpu-command-buffer')
-app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
-
-// 限制老生代堆内存，强制更激进和频繁的垃圾回收，并暴露 gc 接口
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=1024 --expose-gc')
+// 提高 Windows 下透明窗口和 Live2D WebGL 渲染的稳定性，防止 GPU 进程 TDR 崩溃或睡眠后唤醒黑屏
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+app.commandLine.appendSwitch('use-angle', 'd3d11')
+// 已移除 `--expose-gc` 和 `--max-old-space-size`，以防 Electron 渲染进程中 PixiJS 启动时因 GC 启发式算法改变而导致 OOM崩溃。
 // 限制 HTTP 缓存和媒体缓存的大小，防止内存长期驻留过大缓存
 app.commandLine.appendSwitch('disk-cache-size', '1048576')
 app.commandLine.appendSwitch('media-cache-size', '1048576')
@@ -187,31 +188,11 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 function trimPhysicalMemory(): void {
-  if (process.platform !== 'win32') return
-  try {
-    const { exec } = require('child_process')
-    const cmd = `powershell -Command "Get-Process -Name 'agentpet', 'Electron' -ErrorAction SilentlyContinue | ForEach-Object { try { $_.MinWorkingSet = [System.IntPtr]::Zero } catch {} }"`
-    exec(cmd)
-  } catch (err) {
-    console.warn('[Memory] 触发物理内存修剪失败:', err)
-  }
+  // Disabled to prevent native crashes
 }
 
 function runImmediateGarbageCollection(): void {
-  setTimeout(() => {
-    try {
-      if (global.gc) {
-        global.gc()
-      }
-      if (session.defaultSession) {
-        session.defaultSession.clearCache().catch(() => { })
-        session.defaultSession.clearCodeCaches({}).catch(() => { })
-      }
-      trimPhysicalMemory()
-    } catch (err) {
-      console.error('[Memory] 立即回收内存失败:', err)
-    }
-  }, 500)
+  // Disabled to prevent native crashes
 }
 
 // 窗口尺寸
@@ -1193,6 +1174,12 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on('ping', () => console.log('pong'))
+  ipcMain.handle('api:rpa-pick-element', async (_, url: string) => {
+    return await RpaElementPicker.pick(url)
+  })
+  ipcMain.handle('api:rpa-record-actions', async (_, url: string) => {
+    return await RpaBrowserRecorder.record(url)
+  })
 
   // 1. 初始化存储配置与动态目录管理
   const configPath = join(app.getPath('userData'), 'config.json')
@@ -3631,7 +3618,66 @@ app.whenReady().then(() => {
     if (wechatBotManager) {
       wechatBotManager.logout().catch(() => { })
     }
+
+    // 5. 中止所有运行中的 RPA 任务并释放浏览器资源
+    PlaywrightRpaExecutor.cleanAll().catch(() => { })
+
+    // 6. 销毁所有可能遗留的全局快捷键
+    try { globalShortcut.unregisterAll() } catch (_) { }
   })
+
+
+
+
+
+
+
+
+
+
+
+
+  // ── RPA 可视化流程系统 IPC 接口注册 ──────────────────
+  ipcMain.handle('api:get-rpa-manifest', async () => {
+    return await rpaStorage.loadManifest()
+  })
+
+  ipcMain.handle('api:save-rpa-manifest', async (_, manifest: rpaStorage.RpaTaskManifest[]) => {
+    return await rpaStorage.saveManifest(manifest)
+  })
+
+  ipcMain.handle('api:get-rpa-task-flow', async (_, taskId: string) => {
+    return await rpaStorage.loadTaskFlow(taskId)
+  })
+
+  ipcMain.handle('api:save-rpa-task-flow', async (_, taskId: string, flowData: rpaStorage.RpaTaskFlow) => {
+    return await rpaStorage.saveTaskFlow(taskId, flowData)
+  })
+
+  ipcMain.handle('api:run-rpa-task', async (event, taskId: string, flowData: { nodes: any[], edges: any[] }) => {
+    await PlaywrightRpaExecutor.run(taskId, flowData.nodes, flowData.edges, event.sender)
+    return true
+  })
+
+  ipcMain.handle('api:stop-rpa-task', async (_, taskId: string) => {
+    const executor = PlaywrightRpaExecutor.getActive(taskId)
+    if (executor) {
+      await executor.stop()
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle('api:respond-rpa-manual-confirm', async (_, taskId: string, updates?: Record<string, any>) => {
+    const executor = PlaywrightRpaExecutor.getActive(taskId)
+    if (executor) {
+      executor.resume(updates)
+      return true
+    }
+    return false
+  })
+
+
 
   createTray()
   createWindow()
