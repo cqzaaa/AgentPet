@@ -1511,6 +1511,8 @@ body {
 
 .chat-messages-box {
   flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
   padding: 20px;
   display: flex;
   flex-direction: column;

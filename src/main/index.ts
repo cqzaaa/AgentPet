@@ -1,6 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
 import { join, basename, dirname, extname } from 'path'
-import { execSync, spawn } from 'child_process'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -11,7 +10,7 @@ import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
 import { EdgeTTS } from 'node-edge-tts'
 import JSZip from 'jszip'
-import PDFParse from 'pdf-parse'
+import { PDFParse } from 'pdf-parse'
 import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
 import * as Papa from 'papaparse'
@@ -2999,9 +2998,9 @@ app.whenReady().then(() => {
       if (ext === 'pdf') {
         // PDF 文件解析
         const buffer = await fs.promises.readFile(filePath)
-        const parser = new PDFParse()
-        const data = await parser.parseBuffer(buffer)
-        content = data.text || ''
+        const parser = new PDFParse({ data: buffer })
+        const textResult = await parser.getText()
+        content = textResult.text || ''
         if (!content.trim()) {
           content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
         }
@@ -3060,9 +3059,9 @@ app.whenReady().then(() => {
     try {
       if (ext === 'pdf') {
         const buffer = await fs.promises.readFile(filePath)
-        const parser = new PDFParse()
-        const data = await parser.parseBuffer(buffer)
-        return data.text || '[PDF 未能提取到文本内容]'
+        const parser = new PDFParse({ data: buffer })
+        const textResult = await parser.getText()
+        return textResult.text || '[PDF 未能提取到文本内容]'
       } else if (ext === 'docx') {
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.extractRawText({ buffer })

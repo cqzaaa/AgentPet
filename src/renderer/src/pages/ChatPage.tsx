@@ -660,6 +660,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               followOutput="smooth"
               initialTopMostItemIndex={999999}
               atBottomStateChange={handleAtBottomStateChange}
+              components={{ Footer: () => <div style={{ height: '20px' }} /> }}
               itemContent={(index, msg) => (
                 <ChatMessageItem
                   key={msg.id}
