@@ -13,11 +13,49 @@ export interface MemoryDependencies {
 
 let memoryDeps: MemoryDependencies | null = null
 
-// 长期记忆向量反序列化缓存，避免在大数量级下频繁解析 JSON
-const parsedEmbeddingCache = new Map<string, number[]>()
+class LRUCache<K, V> {
+  private map = new Map<K, V>()
+  constructor(private maxSize: number) {}
 
-// 已更新只读历史 Markdown 文件的内容缓存，避免重复文件 I/O 读取
-const fileContentCache = new Map<string, string>()
+  get(key: K): V | undefined {
+    const value = this.map.get(key)
+    if (value === undefined) return undefined
+    this.map.delete(key)
+    this.map.set(key, value)
+    return value
+  }
+
+  set(key: K, value: V): void {
+    if (this.map.has(key)) {
+      this.map.delete(key)
+    } else if (this.map.size >= this.maxSize) {
+      const oldestKey = this.map.keys().next().value
+      if (oldestKey !== undefined) this.map.delete(oldestKey)
+    }
+    this.map.set(key, value)
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key)
+  }
+
+  clear(): void {
+    this.map.clear()
+  }
+}
+
+// 长期记忆向量反序列化缓存，避免在大数量级下频繁解析 JSON（LRU 限定最大 500 条）
+const parsedEmbeddingCache = new LRUCache<string, number[]>(500)
+
+// 已更新只读历史 Markdown 文件的内容缓存，避免重复文件 I/O 读取（LRU 限定最大 200 条）
+const fileContentCache = new LRUCache<string, string>(200)
+
+// 提问向量缓存，避免相同或相似查询重复调用远程 Embedding API（LRU 限定最大 100 条）
+const queryEmbeddingCache = new LRUCache<string, number[]>(100)
+
+function normalizeQueryForCache(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 200)
+}
 
 export async function appendMemorySummaryInternal(sessionId: string, title: string, content: string): Promise<boolean> {
   if (!memoryDeps) {
@@ -216,16 +254,26 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         })
       }
 
-      // 4. 尝试生成提问的 Embedding 向量 (优先 SiliconFlow)
+      // 4. 尝试生成提问的 Embedding 向量 (优先使用缓存)
       let queryEmb: number[] | null = null
-      try {
-        queryEmb = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
-      } catch (e: any) {
-        if (e && e.message === 'TIMEOUT') {
-          console.warn('[Recall] 提取向量请求超时 (10s)，自动熔断，放弃本次长期记忆检索流程')
-          return []
+      const queryCacheKey = normalizeQueryForCache(queryText)
+      const cachedEmb = queryEmbeddingCache.get(queryCacheKey)
+      if (cachedEmb) {
+        queryEmb = cachedEmb
+      } else {
+        try {
+          queryEmb = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
+          if (queryEmb && queryEmb.length > 0) {
+            queryEmbeddingCache.set(queryCacheKey, queryEmb)
+          }
+        } catch (e: any) {
+          if (e && e.message === 'TIMEOUT') {
+            console.warn('[Recall] 提取向量请求超时 (10s)，自动熔断，降级为纯文本+图谱匹配模式')
+            // 不直接 return []，让后续纯文本匹配继续工作
+          } else {
+            console.error('召回计算提问向量失败', e)
+          }
         }
-        console.error('召回计算提问向量失败', e)
       }
 
       // 5. 本地轻量级 Jaccard 相似度辅助算法
@@ -241,9 +289,34 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         return intersection.size / union.size
       }
 
+      // 6. 关键词预过滤：提取 query 关键词，快速排除完全无关的记忆，减少后续向量/图谱计算量
+      const queryKeywords = new Set(
+        (queryText.toLowerCase().match(/[\w\-]+|[一-龥]+/g) || [])
+          .filter(t => t.length >= 2)
+      )
+      const MAX_SCORING_CANDIDATES = 100
+      let candidateRows = rows
+      if (queryKeywords.size > 0) {
+        const withHits = rows.map(row => {
+          const factLower = (row.fact || '').toLowerCase()
+          let hits = 0
+          for (const kw of queryKeywords) {
+            if (factLower.includes(kw)) hits++
+          }
+          return { row, hits }
+        })
+        const filtered = withHits.filter(r => r.hits > 0)
+        if (filtered.length > 0) {
+          filtered.sort((a, b) => b.hits - a.hits)
+          candidateRows = filtered.slice(0, MAX_SCORING_CANDIDATES).map(r => r.row)
+        }
+      } else {
+        candidateRows = [...rows].sort((a, b) => (b.strength || 0) - (a.strength || 0)).slice(0, MAX_SCORING_CANDIDATES)
+      }
+
       const now = Date.now()
-      
-      const scoredResults = rows.map(row => {
+
+      const scoredResults = candidateRows.map(row => {
         // A. 指数时间衰退实际强度 (S_now)
         const lastAccess = row.last_accessed_at || row.created_at || now
         const deltaDays = (now - lastAccess) / (1000 * 60 * 60 * 24)

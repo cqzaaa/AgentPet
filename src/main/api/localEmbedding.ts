@@ -4,7 +4,7 @@
  */
 export async function getLocalEmbedding(text: string): Promise<number[] | null> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000)
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
     const response = await fetch('http://124.222.33.171:8080/embed', {
       method: 'POST',

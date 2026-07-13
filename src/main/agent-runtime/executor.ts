@@ -24,7 +24,13 @@ function getActiveChatDir(): string {
 }
 
 export class AgentExecutor {
+  private toolListCache: { full?: any[], simplified?: any[] } = {}
+
   private getFormattedTools(_isFrontend: boolean, simplify = false): any[] {
+    const cacheKey = simplify ? 'simplified' : 'full' as const
+    const cached = this.toolListCache[cacheKey]
+    if (cached) return cached
+
     const list: any[] = []
 
     // 从 toolRegistry 获取所有内置工具定义
@@ -53,6 +59,7 @@ export class AgentExecutor {
       })
     }
 
+    this.toolListCache[cacheKey] = list
     return list
   }
 

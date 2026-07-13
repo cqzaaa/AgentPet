@@ -1036,7 +1036,7 @@ interface MessageItemProps {
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
 }
 
-export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1329,7 +1329,7 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
-                    maxHeight: '200px',
+                    maxHeight: '60vh',
                     overflowY: 'auto',
                     paddingLeft: '12px',
                     paddingRight: '6px'
@@ -1771,4 +1771,4 @@ export function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId =
       )}
     </div>
   )
-}
+})

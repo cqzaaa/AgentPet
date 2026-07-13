@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import type { AppStore } from '../hooks/useAppStore'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { ChatMessageItem } from '../components/ChatMessageItem'
@@ -55,6 +56,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
+  const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   // 技能与 MCP Popover 状态与 Refs
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
@@ -516,47 +518,43 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   }
 
   // 检测是否在底部附近（阈值 100px）
-  const checkScrollPosition = useCallback(() => {
-    const el = messagesBoxRef.current
-    if (!el) return
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setShowScrollToBottom(distanceToBottom > 100)
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    setShowScrollToBottom(!atBottom)
   }, [])
 
-  // 绑定滚动事件
+  // 追踪 isSending 状态变化，在发送时和回复完成时滚动到底部
+  const prevIsSendingRef = useRef(isSending)
   useEffect(() => {
-    const el = messagesBoxRef.current
-    if (!el) return
-    el.addEventListener('scroll', checkScrollPosition, { passive: true })
-    checkScrollPosition()
-    return () => el.removeEventListener('scroll', checkScrollPosition)
-  }, [checkScrollPosition])
+    const wasSending = prevIsSendingRef.current
+    prevIsSendingRef.current = isSending
 
-  // 切换会话时重置滚动状态，避免"回到最新"按钮残留
+    if (isSending && !wasSending) {
+      // 用户刚发送消息 — 立即滚动到底部
+      setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
+      }, 50)
+    }
+
+    if (!isSending && wasSending) {
+      // AI 回复完成 — 滚动到底部，让用户看到完整回复
+      setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
+      }, 100)
+    }
+  }, [isSending])
+
+  const handlePreviewFile = useCallback((f: { name: string; path: string; size: number }) => {
+    store.handlePreviewFile(f)
+    store.setShowFilePanel(true)
+  }, [store.handlePreviewFile, store.setShowFilePanel])
+
+  // 切换会话时重置滚动状态
   useEffect(() => {
     setShowScrollToBottom(false)
-    // 会话切换后重新检测滚动位置
-    requestAnimationFrame(() => checkScrollPosition())
-  }, [activeSessionId, checkScrollPosition])
-
-  // 仅在新消息条数增加时（用户发送 / agent 新消息出现），滚动到底部
-  // 流式输出、工具步骤、isThinking 变化不触发此逻辑，避免打断用户翻看历史
-  useEffect(() => {
-    const el = messagesBoxRef.current
-    if (el) {
-      const timer = setTimeout(() => {
-        el.scrollTop = el.scrollHeight
-      }, 50)
-      return () => clearTimeout(timer)
-    }
-    return undefined
-  }, [activeSessMessages.length])
+  }, [activeSessionId])
 
   const scrollToBottom = () => {
-    const el = messagesBoxRef.current
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-    }
+    virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
   }
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
@@ -654,21 +652,24 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               </div>
             </div>
           ) : (
-            <>
-              {activeSessMessages.map(msg => (
+            <Virtuoso
+              key={activeSessionId}
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={activeSessMessages}
+              followOutput="smooth"
+              initialTopMostItemIndex={999999}
+              atBottomStateChange={handleAtBottomStateChange}
+              itemContent={(index, msg) => (
                 <ChatMessageItem
                   key={msg.id}
                   msg={msg}
                   currentAvatarName={currentAvatarName}
                   highlightedMessageId={highlightedMessageId}
-                  onPreviewFile={(f) => {
-                    store.handlePreviewFile(f)
-                    store.setShowFilePanel(true)
-                  }}
+                  onPreviewFile={handlePreviewFile}
                 />
-              ))}
-              <div ref={chatEndRef} />
-            </>
+              )}
+            />
           )}
           {showScrollToBottom && (
             <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">

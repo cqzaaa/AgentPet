@@ -1512,10 +1512,10 @@ body {
 .chat-messages-box {
   flex: 1;
   padding: 20px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
 }
 
 .chat-messages-box::-webkit-scrollbar {
@@ -1528,9 +1528,9 @@ body {
 }
 
 .scroll-to-bottom-btn {
-  position: sticky;
+  position: absolute;
   bottom: 12px;
-  align-self: flex-end;
+  right: 20px;
   z-index: 10;
   display: inline-flex;
   align-items: center;

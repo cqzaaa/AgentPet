@@ -11,6 +11,11 @@ import sqlite3 from 'sqlite3'
 import { open, Database } from 'sqlite'
 import { EdgeTTS } from 'node-edge-tts'
 import JSZip from 'jszip'
+import PDFParse from 'pdf-parse'
+import mammoth from 'mammoth'
+import * as XLSX from 'xlsx'
+import * as Papa from 'papaparse'
+import ExcelJS from 'exceljs'
 
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
@@ -114,7 +119,6 @@ function loadSystemLlmConfig() {
     console.error('加载全局大模型配置文件失败:', e)
   }
 }
-loadSystemLlmConfig()
 
 
 function saveSystemLlmConfig(config: any) {
@@ -135,13 +139,6 @@ function saveSystemMcpConfig(config: any) {
   }
 }
 
-
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-
-// McpManager and shell session management have been refactored to separate modules.
 
 
 // 提高 Windows 下透明窗口和 Live2D WebGL 渲染的稳定性，防止 GPU 进程 TDR 崩溃或睡眠后唤醒黑屏
@@ -1691,7 +1688,6 @@ app.whenReady().then(() => {
         return { success: false, error: '没有可复制的文件' }
       }
       // 验证文件存在
-      const fs = require('fs')
       const validPaths = filePaths.filter(p => {
         try { return fs.existsSync(p) } catch { return false }
       })
@@ -2294,8 +2290,10 @@ app.whenReady().then(() => {
         filename: dbPath,
         driver: sqlite3.Database
       })
-      // 开启外键支持
+      // 开启外键支持和 WAL 模式
       await db.exec('PRAGMA foreign_keys = ON')
+      await db.exec('PRAGMA journal_mode = WAL')
+      await db.exec('PRAGMA synchronous = NORMAL')
       // 创建表（默认包含 user_id 列）
       await db.exec(`
         CREATE TABLE IF NOT EXISTS sessions (
@@ -2341,6 +2339,8 @@ app.whenReady().then(() => {
           FOREIGN KEY (memory_id) REFERENCES persona_memories(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_persona_memories_category ON persona_memories(category);
+        CREATE INDEX IF NOT EXISTS idx_persona_memories_category_strength ON persona_memories(category, strength);
+        CREATE INDEX IF NOT EXISTS idx_memory_entity_links_memory_id ON memory_entity_links(memory_id);
       `)
 
       // 动态升级旧数据库表结构，为已创建的表添加 user_id 字段
@@ -2998,7 +2998,6 @@ app.whenReady().then(() => {
 
       if (ext === 'pdf') {
         // PDF 文件解析
-        const { PDFParse } = require('pdf-parse')
         const buffer = await fs.promises.readFile(filePath)
         const parser = new PDFParse()
         const data = await parser.parseBuffer(buffer)
@@ -3008,7 +3007,6 @@ app.whenReady().then(() => {
         }
       } else if (ext === 'docx') {
         // Word 文档解析
-        const mammoth = require('mammoth')
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.extractRawText({ buffer })
         content = result.value || ''
@@ -3017,7 +3015,6 @@ app.whenReady().then(() => {
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
         // Excel 文件解析
-        const XLSX = require('xlsx')
         const workbook = XLSX.readFile(filePath)
         const sheets: string[] = []
         for (const sheetName of workbook.SheetNames) {
@@ -3032,7 +3029,6 @@ app.whenReady().then(() => {
         content = sheets.join('\n\n') || '[Excel 文件已加载，但内容为空]'
       } else if (ext === 'csv') {
         // CSV 文件解析
-        const Papa = require('papaparse')
         const csvContent = await fs.promises.readFile(filePath, 'utf-8')
         const parsed = Papa.parse(csvContent, { header: true })
         if (parsed.data && parsed.data.length > 0) {
@@ -3063,18 +3059,15 @@ app.whenReady().then(() => {
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
     try {
       if (ext === 'pdf') {
-        const { PDFParse } = require('pdf-parse')
         const buffer = await fs.promises.readFile(filePath)
         const parser = new PDFParse()
         const data = await parser.parseBuffer(buffer)
         return data.text || '[PDF 未能提取到文本内容]'
       } else if (ext === 'docx') {
-        const mammoth = require('mammoth')
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.extractRawText({ buffer })
         return result.value || '[Word 文档内容为空]'
       } else if (ext === 'xlsx' || ext === 'xls') {
-        const XLSX = require('xlsx')
         const workbook = XLSX.readFile(filePath)
         const sheets: string[] = []
         for (const sheetName of workbook.SheetNames) {
@@ -3084,7 +3077,6 @@ app.whenReady().then(() => {
         }
         return sheets.join('\n\n') || '[Excel 文件内容为空]'
       } else if (ext === 'csv') {
-        const Papa = require('papaparse')
         const csvContent = await fs.promises.readFile(filePath, 'utf-8')
         const parsed = Papa.parse(csvContent, { header: true })
         if (parsed.data && parsed.data.length > 0) {
@@ -3109,7 +3101,6 @@ app.whenReady().then(() => {
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
     try {
       if (ext === 'docx') {
-        const mammoth = require('mammoth')
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.convertToHtml({ buffer })
         const html = result.value || ''
@@ -3129,7 +3120,6 @@ app.whenReady().then(() => {
           blockquote { border-left: 3px solid #cbd5e1; padding-left: 12px; color: #64748b; margin: 10px 0; }
         </style></head><body>${html}</body></html>`
       } else if (ext === 'xlsx' || ext === 'xls') {
-        const ExcelJS = require('exceljs')
         const workbook = new ExcelJS.Workbook()
         await workbook.xlsx.readFile(filePath)
         let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -3155,7 +3145,6 @@ app.whenReady().then(() => {
         html += '</body></html>'
         return html
       } else if (ext === 'csv') {
-        const Papa = require('papaparse')
         const csvContent = await fs.promises.readFile(filePath, 'utf-8')
         const parsed = Papa.parse(csvContent, { header: true })
         let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -3483,6 +3472,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:test-mcp-server', async (_, config) => {
     try {
+      const [{ Client }, { StreamableHTTPClientTransport }, { SSEClientTransport }] = await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+        import('@modelcontextprotocol/sdk/client/sse.js'),
+      ])
+
       const headers: Record<string, string> = {}
       if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 

@@ -250,6 +250,11 @@ export const useAppStoreRaw = create<any>((set) => ({
   setIsSessionsInitialized: (val: any) => set({ isSessionsInitialized: val }),
 }))
 
+// ── 选择器模式：按需订阅，避免无关状态变更触发重渲染 ──────────
+export function useAppSelector<T>(selector: (state: any) => T): T {
+  return useAppStoreRaw(selector)
+}
+
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
   const store = useAppStoreRaw()
@@ -481,17 +486,31 @@ export function useAppStore() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Poll system info
+  // Poll system info (暂停于页面不可见时)
   useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null
     const fetchInfo = async (): Promise<void> => {
       try {
         const info = await window.api.getSystemInfo()
         setSystemInfo(info)
       } catch (e) { console.error('获取系统资源失败', e) }
     }
-    fetchInfo()
-    const interval = setInterval(fetchInfo, 2000)
-    return () => clearInterval(interval)
+    const startPolling = () => {
+      fetchInfo()
+      interval = setInterval(fetchInfo, 2000)
+    }
+    const stopPolling = () => {
+      if (interval) { clearInterval(interval); interval = null }
+    }
+    const onVisibilityChange = () => {
+      if (document.hidden) { stopPolling() } else { startPolling() }
+    }
+    startPolling()
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      stopPolling()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [])
 
   // Load skills & storage path
