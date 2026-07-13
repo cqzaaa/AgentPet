@@ -1513,7 +1513,7 @@ body {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
-  padding: 20px;
+  padding: 15px 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1583,6 +1583,8 @@ body {
   justify-content: center;
   gap: 24px;
   animation: fadeIn 0.4s ease;
+  padding: 0 20px;
+  box-sizing: border-box;
 }
 
 .chat-empty-title {
@@ -1634,6 +1636,8 @@ body {
   flex-direction: column;
   width: 100%;
   margin-bottom: 20px;
+  padding: 0 20px;
+  box-sizing: border-box;
 }
 
 .message-row.agent {
@@ -5139,16 +5143,14 @@ body {
   font-weight: 800;
   letter-spacing: -1.5px;
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(
-    90deg,
-    #ff6b6b,
-    #ff8e53,
-    #feca57,
-    #1dd1a1,
-    #2e86de,
-    #9b59b6,
-    #ff6b6b
-  );
+  background: linear-gradient(90deg,
+      #ff6b6b,
+      #ff8e53,
+      #feca57,
+      #1dd1a1,
+      #2e86de,
+      #9b59b6,
+      #ff6b6b);
   background-size: 200% auto;
   color: transparent;
   -webkit-background-clip: text;
@@ -5160,6 +5162,7 @@ body {
   0% {
     background-position: 0% center;
   }
+
   100% {
     background-position: -200% center;
   }
@@ -5171,6 +5174,7 @@ body {
     opacity: 0;
     filter: blur(4px);
   }
+
   100% {
     transform: scale(1);
     opacity: 1;
@@ -5181,4 +5185,9 @@ body {
 /* 覆盖文件预览面板的默认内边距 */
 .file-preview-viewer-container .ofv-panel {
   padding: 0 !important;
+}
+
+.chat-skeleton-container {
+  padding: 0 20px;
+  box-sizing: border-box;
 }
