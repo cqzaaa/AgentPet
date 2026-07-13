@@ -3,8 +3,6 @@ import { app } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import { ModelRuntimeFactory } from '../model-runtime'
-import * as os from 'os'
-import { execSync, spawn } from 'child_process'
 
 export interface RpaNode {
   id: string

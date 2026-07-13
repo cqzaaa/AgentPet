@@ -177,6 +177,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   contextRounds: Number(localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'),
   testStatus: 'idle',
   isSessionSwitching: false,
+  isSessionsInitialized: false,
 
   // Setters
   setActiveTab: (val: any) => set({ activeTab: val }),
@@ -246,6 +247,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   setContextRounds: (val: any) => set({ contextRounds: val }),
   setTestStatus: (val: any) => set({ testStatus: val }),
   setIsSessionSwitching: (val: any) => set({ isSessionSwitching: val }),
+  setIsSessionsInitialized: (val: any) => set({ isSessionsInitialized: val }),
 }))
 
 // ── useAppStore hook ─────────────────────────────────────────
@@ -303,7 +305,8 @@ export function useAppStore() {
     autoSaveHistory, setAutoSaveHistory,
     contextRounds, setContextRounds,
     testStatus, setTestStatus,
-    isSessionSwitching, setIsSessionSwitching
+    isSessionSwitching, setIsSessionSwitching,
+    isSessionsInitialized, setIsSessionsInitialized
   } = store
 
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -731,7 +734,11 @@ export function useAppStore() {
           setSessions(localSess)
         }
       }
-    } catch (e) { console.error('从本地文件载入会话记录失败', e) }
+    } catch (e) {
+      console.error('从本地文件载入会话记录失败', e)
+    } finally {
+      setIsSessionsInitialized(true)
+    }
   }
 
   // 同步初始化大模型与 MCP 配置
@@ -2357,6 +2364,7 @@ ${skillsContext}`
     refreshSshAndDeviceStatus,
     // session switch
     isSessionSwitching,
+    isSessionsInitialized,
     // avatar derived & handlers
     currentAvatarStyle,
     currentAvatarVoice

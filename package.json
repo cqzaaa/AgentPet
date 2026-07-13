@@ -24,6 +24,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@nut-tree/nut-js": "^3.1.2",
     "@open-file-viewer/core": "^0.1.17",
     "@openilink/openilink-sdk-node": "^0.6.0",
     "@xyflow/react": "^12.11.2",

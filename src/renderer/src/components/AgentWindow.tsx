@@ -74,6 +74,7 @@ export function AgentWindow(): React.JSX.Element {
   const activePermissionRequest = useAppStoreRaw(state => state.activePermissionRequest)
   const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
   const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
+  const isSessionsInitialized = useAppStoreRaw(state => state.isSessionsInitialized)
 
   // 派生状态从 Zustand 中获取
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || { messages: [] }
@@ -81,18 +82,25 @@ export function AgentWindow(): React.JSX.Element {
 
   const [showSplash, setShowSplash] = useState(true)
   const [splashFadeOut, setSplashFadeOut] = useState(false)
+  const [isMinDelayPassed, setIsMinDelayPassed] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      setIsMinDelayPassed(true)
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (isMinDelayPassed && isSessionsInitialized) {
       setSplashFadeOut(true)
       const destroyTimer = setTimeout(() => {
         setShowSplash(false)
       }, 400)
       return () => clearTimeout(destroyTimer)
-    }, 1200)
-
-    return () => clearTimeout(timer)
-  }, [])
+    }
+    return undefined
+  }, [isMinDelayPassed, isSessionsInitialized])
 
   const {
     handleThemeToggle,

@@ -18,6 +18,9 @@ import { officeExecutor } from './office/executor'
 import { systemManifest } from './system/manifest'
 import { systemExecutor } from './system/executor'
 
+import { computerManifest } from './computer/manifest'
+import { computerExecutor } from './computer/executor'
+
 export function registerBuiltinTools(): void {
   toolRegistry.register(terminalManifest, terminalExecutor)
   toolRegistry.register(fileManifest, fileExecutor)
@@ -25,4 +28,5 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(webManifest, webExecutor)
   toolRegistry.register(officeManifest, officeExecutor)
   toolRegistry.register(systemManifest, systemExecutor)
+  toolRegistry.register(computerManifest, computerExecutor)
 }
