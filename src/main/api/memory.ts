@@ -49,13 +49,6 @@ const parsedEmbeddingCache = new LRUCache<string, number[]>(500)
 // 已更新只读历史 Markdown 文件的内容缓存，避免重复文件 I/O 读取（LRU 限定最大 200 条）
 const fileContentCache = new LRUCache<string, string>(200)
 
-// 提问向量缓存，避免相同或相似查询重复调用远程 Embedding API（LRU 限定最大 100 条）
-const queryEmbeddingCache = new LRUCache<string, number[]>(100)
-
-function normalizeQueryForCache(text: string): string {
-  return text.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 200)
-}
-
 export async function appendMemorySummaryInternal(sessionId: string, title: string, content: string): Promise<boolean> {
   if (!memoryDeps) {
     console.error('[Memory] memoryDeps 尚未初始化')
@@ -201,7 +194,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const database = await deps.getDB()
       
       // 1. 获取库中所有关联记录及实体映射（支持经验、习惯和偏好）
-      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, embedding, category, link FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, category, link FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
 
       const linkRows = await database.all("SELECT memory_id, entity_name FROM memory_entity_links") as { memory_id: string, entity_name: string }[]
@@ -510,8 +503,16 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
 }
 
-// 获取文本的 Embedding 向量，仅通过本地提取（未就绪时返回 null 并自动降级为文本/图谱模糊匹配）
-async function getEmbeddingInternal(): Promise<number[] | null> {
+// 获取文本的 Embedding 向量（已禁用云端 API，始终返回 null，走纯文本+图谱匹配）
+async function getEmbeddingInternal(
+  _config: {
+    provider: string;
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+  },
+  _text: string
+): Promise<number[] | null> {
   return null
 }
 
@@ -519,7 +520,7 @@ async function getEmbeddingInternal(): Promise<number[] | null> {
 async function autoMigrateOldEmbeddings(db: any) {
   if (!memoryDeps) return
   try {
-    const rows = await db.all("SELECT id, fact, keywords, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+    const rows = await db.all("SELECT id, fact, keywords FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
     if (rows.length === 0) return
 
     // 1. 增量自动扫描并补建实体多对多关联图谱
@@ -688,7 +689,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
           }
 
           // 查询是否有相似的已有经验/喜好事实（不限分类）
-          const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+          const rows = await database.all("SELECT id, fact FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
           
           let matchedId: string | null = null
           if (emb && rows.length > 0) {
