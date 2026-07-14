@@ -1,7 +1,6 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import { join, relative } from 'path'
-import { getLocalEmbedding } from './localEmbedding'
 
 export interface MemoryDependencies {
   getDB: () => Promise<any>
@@ -254,27 +253,8 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         })
       }
 
-      // 4. 尝试生成提问的 Embedding 向量 (优先使用缓存)
+      // 4. 跳过云端 Embedding 向量，直接使用纯文本+图谱匹配模式
       let queryEmb: number[] | null = null
-      const queryCacheKey = normalizeQueryForCache(queryText)
-      const cachedEmb = queryEmbeddingCache.get(queryCacheKey)
-      if (cachedEmb) {
-        queryEmb = cachedEmb
-      } else {
-        try {
-          queryEmb = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
-          if (queryEmb && queryEmb.length > 0) {
-            queryEmbeddingCache.set(queryCacheKey, queryEmb)
-          }
-        } catch (e: any) {
-          if (e && e.message === 'TIMEOUT') {
-            console.warn('[Recall] 提取向量请求超时 (10s)，自动熔断，降级为纯文本+图谱匹配模式')
-            // 不直接 return []，让后续纯文本匹配继续工作
-          } else {
-            console.error('召回计算提问向量失败', e)
-          }
-        }
-      }
 
       // 5. 本地轻量级 Jaccard 相似度辅助算法
       const jaccardSimilarity = (strA: string, strB: string): number => {
@@ -531,26 +511,7 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 // 获取文本的 Embedding 向量，仅通过本地提取（未就绪时返回 null 并自动降级为文本/图谱模糊匹配）
-async function getEmbeddingInternal(
-  _config: { 
-    provider: string; 
-    apiKey: string; 
-    baseUrl: string; 
-    model: string; 
-  }, 
-  text: string
-): Promise<number[] | null> {
-  try {
-    const localEmb = await getLocalEmbedding(text)
-    if (localEmb) {
-      return localEmb
-    }
-  } catch (localErr: any) {
-    if (localErr && localErr.message === 'TIMEOUT') {
-      throw localErr
-    }
-    console.warn('[Embedding] 本地向量计算异常:', localErr)
-  }
+async function getEmbeddingInternal(): Promise<number[] | null> {
   return null
 }
 

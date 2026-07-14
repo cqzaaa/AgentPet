@@ -463,65 +463,70 @@ export class AgentExecutor {
           }
         }
 
-        // 2. 利用 Promise.all 并行并发异步执行工具逻辑
-        const toolExecutionPromises = toolCalls.map(async (toolCall) => {
-          if (abortSignal?.aborted) {
-            throw new Error('UserAborted')
-          }
-
-          const toolName = toolCall.function.name
-          if (toolName !== 'trigger_memory_purify') {
-            totalToolCallsCount++
-          }
-
-          let toolArgs: any = {}
-          try {
-            toolArgs = JSON.parse(toolCall.function.arguments || '{}')
-          } catch (pe) {
-            console.error('解析工具参数失败', pe)
-          }
-
-          let toolResult: string
-          if (toolName === 'trigger_memory_purify') {
-            runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
-            toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
-          } else {
-            const ctx = {
-              workspacePath: workspacePath || '',
-              sessionId,
-              isFrontend,
-              sandboxMode: !!sandboxMode,
-              abortSignal
+        // 2. 限制最大 2 个工具并行执行
+        const toolExecutionResults: any[] = []
+        for (let i = 0; i < toolCalls.length; i += 2) {
+          const batch = toolCalls.slice(i, i + 2)
+          const batchResults = await Promise.all(batch.map(async (toolCall) => {
+            if (abortSignal?.aborted) {
+              throw new Error('UserAborted')
             }
-            const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
-            toolResult = res.content
-          }
 
-          if (abortSignal?.aborted) {
-            throw new Error('UserAborted')
-          }
+            const toolName = toolCall.function.name
+            if (toolName !== 'trigger_memory_purify') {
+              totalToolCallsCount++
+            }
 
-          let displayResult = toolResult
-          if (typeof displayResult === 'string' && displayResult.length > 1000) {
-            displayResult = displayResult.substring(0, 1000) + `\n\n... [工具输出内容过长(${displayResult.length}字符)，为了保持UI流畅已截断展示。大模型后台已读取完整内容。]`
-          }
+            let toolArgs: any = {}
+            try {
+              toolArgs = JSON.parse(toolCall.function.arguments || '{}')
+            } catch (pe) {
+              console.error('解析工具参数失败', pe)
+            }
 
-          let contextToolResult = toolResult
-          const MAX_CONTEXT_TOOL_RESULT = 12000
-          if (typeof contextToolResult === 'string' && contextToolResult.length > MAX_CONTEXT_TOOL_RESULT) {
-            contextToolResult = contextToolResult.substring(0, MAX_CONTEXT_TOOL_RESULT) +
-              `\n\n[系统保护警告]: 数据量过大，已被系统强制截断（仅保留前 ${MAX_CONTEXT_TOOL_RESULT} 字符）。\n🚫 严禁使用相同的参数再次无脑读取整个文件或网页！\n💡 解决方案：如果你需要后续内容，请务必在工具参数中使用 start_line 和 end_line 进行精确的分页读取，或使用 grep_content 检索精准内容。`
-          }
+            let toolResult: string
+            if (toolName === 'trigger_memory_purify') {
+              runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
+              toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
+            } else {
+              const ctx = {
+                workspacePath: workspacePath || '',
+                sessionId,
+                isFrontend,
+                sandboxMode: !!sandboxMode,
+                abortSignal
+              }
+              const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
+              toolResult = res.content
+            }
 
-          return {
-            toolCallId: toolCall.id,
-            toolName,
-            displayResult,
-            contextToolResult
-          }
-        })
+            if (abortSignal?.aborted) {
+              throw new Error('UserAborted')
+            }
 
-        const results = await Promise.all(toolExecutionPromises)
+            let displayResult = toolResult
+            if (typeof displayResult === 'string' && displayResult.length > 1000) {
+              displayResult = displayResult.substring(0, 1000) + `\n\n... [工具输出内容过长(${displayResult.length}字符)，为了保持UI流畅已截断展示。大模型后台已读取完整内容。]`
+            }
+
+            let contextToolResult = toolResult
+            const MAX_CONTEXT_TOOL_RESULT = 12000
+            if (typeof contextToolResult === 'string' && contextToolResult.length > MAX_CONTEXT_TOOL_RESULT) {
+              contextToolResult = contextToolResult.substring(0, MAX_CONTEXT_TOOL_RESULT) +
+                `\n\n[系统保护警告]: 数据量过大，已被系统强制截断（仅保留前 ${MAX_CONTEXT_TOOL_RESULT} 字符）。\n🚫 严禁使用相同的参数再次无脑读取整个文件或网页！\n💡 解决方案：如果你需要后续内容，请务必在工具参数中使用 start_line 和 end_line 进行精确的分页读取，或使用 grep_content 检索精准内容。`
+            }
+
+            return {
+              toolCallId: toolCall.id,
+              toolName,
+              displayResult,
+              contextToolResult
+            }
+          }))
+          toolExecutionResults.push(...batchResults)
+        }
+
+        const results = toolExecutionResults
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
