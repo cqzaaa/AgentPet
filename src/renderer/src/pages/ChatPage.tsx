@@ -3,6 +3,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import type { AppStore } from '../hooks/useAppStore'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { ChatMessageItem } from '../components/ChatMessageItem'
+import { getModelIcon } from '../utils/modelIcons'
 
 
 interface ChatPageProps {
@@ -480,7 +481,7 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🤖 选择模型</span>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>选择模型</span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>共 {displayModels.length} 个模型</span>
         </div>
         {/* 搜索框：仅在列表项数量 >= 8 时显示 */}
@@ -542,18 +543,32 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
                     }
                   }}
                 >
-                  <span
-                    style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontWeight: isSelected ? 600 : 400,
-                      flex: 1
-                    }}
-                    title={modelName}
-                  >
-                    {modelName}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                    <img
+                      src={getModelIcon(modelName, llmConfig.provider)}
+                      alt=""
+                      style={{
+                        width: '14px',
+                        height: '14px',
+                        borderRadius: '3px',
+                        flexShrink: 0,
+                        objectFit: 'contain',
+                        filter: isSelected ? 'brightness(1.1) drop-shadow(0 1px 2px rgba(255,255,255,0.25))' : 'none'
+                      }}
+                    />
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: isSelected ? 600 : 400,
+                        flex: 1
+                      }}
+                      title={modelName}
+                    >
+                      {modelName}
+                    </span>
+                  </div>
                   {isSelected && (
                     <span style={{ fontSize: '11px', fontWeight: 'bold' }}>✓</span>
                   )}
@@ -1106,10 +1121,24 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
                   }}
                   style={{
                     opacity: isSending ? 0.6 : 1,
-                    cursor: isSending ? 'not-allowed' : 'pointer'
+                    cursor: isSending ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
                   }}
                 >
-                  <span className="toolbar-lbl-icon">🤖</span>
+                  <img
+                    src={getModelIcon(llmConfig.model || '', llmConfig.provider)}
+                    className="model-select-btn-icon"
+                    alt=""
+                    style={{
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '3px',
+                      flexShrink: 0,
+                      objectFit: 'contain'
+                    }}
+                  />
                   <span className="model-select-inline" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85px' }}>
                       {llmConfig.model || '选择模型'}

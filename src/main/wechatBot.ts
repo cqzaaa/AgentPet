@@ -451,11 +451,13 @@ export class WechatBotManager {
   }
 
   // 获取某个微信好友的专属文件目录：base/chat/wechat_<userId>/wechat_files
-  private getWechatFilesDir(fromUserId: string): string {
+  private async getWechatFilesDir(fromUserId: string): Promise<string> {
     const safeSessionId = this.safeSessionId(fromUserId)
     const dir = join(this.options.getStorageDir(), 'chat', safeSessionId, 'wechat_files')
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
+    try {
+      await fs.promises.access(dir)
+    } catch {
+      await fs.promises.mkdir(dir, { recursive: true })
     }
     return dir
   }
@@ -510,9 +512,9 @@ export class WechatBotManager {
   }
 
   // 持久化活跃聊天窗口列表
-  private saveActiveChats() {
+  private async saveActiveChats() {
     try {
-      fs.writeFileSync(this.activeChatsPath, JSON.stringify(this.state.activeChats, null, 2), 'utf8')
+      await fs.promises.writeFile(this.activeChatsPath, JSON.stringify(this.state.activeChats, null, 2), 'utf8')
     } catch (e) {
       console.error('保存微信活跃聊天窗口失败:', e)
     }
@@ -549,14 +551,14 @@ export class WechatBotManager {
   }
 
   // 保存局部配置到物理文件
-  public saveSettings(settings: { llmConfig: WechatLlmConfig; autoReplyText: string; enableAutoReply: boolean }) {
+  public async saveSettings(settings: { llmConfig: WechatLlmConfig; autoReplyText: string; enableAutoReply: boolean }) {
     const prevEnable = this.state.enableAutoReply
     this.state.llmConfig = settings.llmConfig
     this.state.autoReplyText = settings.autoReplyText
     this.state.enableAutoReply = settings.enableAutoReply
     
     try {
-      fs.writeFileSync(this.configPath, JSON.stringify({
+      await fs.promises.writeFile(this.configPath, JSON.stringify({
         llmConfig: this.state.llmConfig,
         autoReplyText: this.state.autoReplyText,
         enableAutoReply: this.state.enableAutoReply
@@ -656,9 +658,9 @@ export class WechatBotManager {
           this.options.onStatusUpdated()
 
           // 清除旧的同步缓冲区，确保新会话从最新位置开始轮询
-          if (fs.existsSync(this.syncBufPath)) {
-            try { fs.unlinkSync(this.syncBufPath) } catch {}
-          }
+          try {
+            await fs.promises.unlink(this.syncBufPath)
+          } catch {}
 
           // 保存 Token，用于重启自动连线
           this.saveToken(this.client.token, this.client.baseUrl)
@@ -699,9 +701,9 @@ export class WechatBotManager {
     this.chatContexts.clear()
 
     // 清理本地 Token 保存
-    if (fs.existsSync(this.tokenPath)) {
-      try { fs.unlinkSync(this.tokenPath) } catch {}
-    }
+    try {
+      await fs.promises.unlink(this.tokenPath)
+    } catch {}
 
     this.addLog('info', '微信 Bot 连接已完全断开！已恢复未登录状态。')
     this.options.onStatusUpdated()
@@ -725,9 +727,9 @@ export class WechatBotManager {
         this.options.onStatusUpdated()
 
         // 清除旧的同步缓冲区，避免使用过期的游标导致服务器返回错误
-        if (fs.existsSync(this.syncBufPath)) {
-          try { fs.unlinkSync(this.syncBufPath) } catch {}
-        }
+        try {
+          await fs.promises.unlink(this.syncBufPath)
+        } catch {}
 
         this.startMessageLoop()
       }
@@ -739,9 +741,9 @@ export class WechatBotManager {
   }
 
   // 保存 token
-  private saveToken(token: string, baseUrl: string) {
+  private async saveToken(token: string, baseUrl: string) {
     try {
-      fs.writeFileSync(this.tokenPath, JSON.stringify({ token, baseUrl }), 'utf8')
+      await fs.promises.writeFile(this.tokenPath, JSON.stringify({ token, baseUrl }), 'utf8')
     } catch (e) {
       this.addLog('info', `保存微信 token 失败: ${e}`)
     }
@@ -806,7 +808,7 @@ export class WechatBotManager {
         if (resp.get_updates_buf) {
           savedBuf = resp.get_updates_buf
           try {
-            fs.writeFileSync(this.syncBufPath, savedBuf, 'utf8')
+            await fs.promises.writeFile(this.syncBufPath, savedBuf, 'utf8')
           } catch {}
         }
 
@@ -1020,11 +1022,11 @@ export class WechatBotManager {
 
                     const isLocalFile = url.startsWith('local-file://') ||
                                        url.startsWith('wechat-file://') ||
-                                       (localPath && fs.existsSync(localPath))
+                                       (localPath && await fs.promises.access(localPath).then(() => true).catch(() => false))
 
                     if (isLocalFile) {
-                      if (localPath && fs.existsSync(localPath)) {
-                        buffer = fs.readFileSync(localPath)
+                      if (localPath && await fs.promises.access(localPath).then(() => true).catch(() => false)) {
+                        buffer = await fs.promises.readFile(localPath)
                       }
                     } else if (url.startsWith('data:')) {
                       const b64 = url.split(',')[1]
@@ -1192,15 +1194,15 @@ ${skillsContext}${mcpContext}${filePrompt}
 
       const messagesForLlm = [
         { role: 'system', content: systemPrompt },
-        ...history.slice(-30).map(h => {
+        ...await Promise.all(history.slice(-30).map(async (h) => {
           if (h.role === 'user') {
             return {
               role: h.role,
-              content: this.convertWechatFileToBase64(h.content)
+              content: await this.convertWechatFileToBase64(h.content)
             }
           }
           return h
-        })
+        }))
       ]
 
       const response = await this.options.callLlm(llm, messagesForLlm, `wechat:${fromUserId}`, onToolEvent)
@@ -1241,11 +1243,12 @@ ${skillsContext}${mcpContext}${filePrompt}
 
       // 1. 确保 Session 存在，并更新最后活跃时间以使其在最近会话列表中排序正确，默认设为置顶 (pinned = 1)
       await database.run(
-        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id) VALUES (?, ?, ?, 1, ?)',
+        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id, created_at) VALUES (?, ?, ?, 1, ?, ?)',
         params.sessionId,
         params.sessionName,
         timeStr,
-        params.userId
+        params.userId,
+        timeStr
       )
       await database.run(
         'UPDATE sessions SET time = ?, pinned = 1 WHERE id = ?',
@@ -1286,7 +1289,7 @@ ${skillsContext}${mcpContext}${filePrompt}
   // 下载并解密微信媒体文件
   private async downloadAndDecryptMedia(cdnUrl: string, aesKeyStr: string, ext = 'png', fromUserId: string): Promise<string> {
     try {
-      const wechatFilesDir = this.getWechatFilesDir(fromUserId)
+      const wechatFilesDir = await this.getWechatFilesDir(fromUserId)
 
       // 1. 下载加密的 CDN 文件
       const resp = await fetch(cdnUrl)
@@ -1304,7 +1307,7 @@ ${skillsContext}${mcpContext}${filePrompt}
       // 4. 保存为本地文件
       const fileName = `${Date.now()}_${randomBytes(4).toString('hex')}.${ext}`
       const filePath = join(wechatFilesDir, fileName)
-      fs.writeFileSync(filePath, decryptedBuffer)
+      await fs.promises.writeFile(filePath, decryptedBuffer)
 
       // 5. 返回携带会话隔离信息的 wechat-file URL
       const safeSessionId = this.safeSessionId(fromUserId)
@@ -1417,7 +1420,7 @@ ${skillsContext}${mcpContext}${filePrompt}
   }
 
   // 将 wechat-file:// 协议链接转换为大模型需要的 Base64 URL (若有)
-  private convertWechatFileToBase64(text: string): string | any[] {
+  private async convertWechatFileToBase64(text: string): Promise<string | any[]> {
     const imgRegex = /!\[.*?\]\((wechat-file:\/\/local\/.*?)\)/g
     const parts: any[] = []
     let lastIndex = 0
@@ -1442,8 +1445,8 @@ ${skillsContext}${mcpContext}${filePrompt}
       const resolved = this.resolveWechatFilePath(fileUrl)
 
       try {
-        if (resolved && fs.existsSync(resolved.filePath)) {
-          const imageBuffer = fs.readFileSync(resolved.filePath)
+        if (resolved && await fs.promises.access(resolved.filePath).then(() => true).catch(() => false)) {
+          const imageBuffer = await fs.promises.readFile(resolved.filePath)
           const base64 = imageBuffer.toString('base64')
           const ext = resolved.fileName.split('.').pop() || 'png'
           const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`

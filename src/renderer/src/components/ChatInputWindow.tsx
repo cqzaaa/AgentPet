@@ -130,7 +130,12 @@ export function ChatInputWindow(): React.JSX.Element {
     }
     const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
 
-    setSessions([...parsed].reverse())
+    const sorted = [...parsed].sort((a, b) => {
+      const t1 = a.createdAt || a.time || ''
+      const t2 = b.createdAt || b.time || ''
+      return t2.localeCompare(t1)
+    })
+    setSessions(sorted)
     setCurrentSessionId(activeId)
 
     const activeSession = parsed.find(s => s.id === activeId)
@@ -177,7 +182,12 @@ export function ChatInputWindow(): React.JSX.Element {
         if (saved) {
           try {
             const parsed = JSON.parse(saved)
-            setSessions([...parsed].reverse())
+            const sorted = [...parsed].sort((a, b) => {
+              const t1 = a.createdAt || a.time || ''
+              const t2 = b.createdAt || b.time || ''
+              return t2.localeCompare(t1)
+            })
+            setSessions(sorted)
           } catch (e) { }
         }
       }, 150)
@@ -280,7 +290,8 @@ export function ChatInputWindow(): React.JSX.Element {
       const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
       let parsed: any[] = []
       if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
-      const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
+      const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+      const newSession = { id: newId, name: '(未命名)', time: timeStr, createdAt: timeStr, messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
       
@@ -358,7 +369,8 @@ export function ChatInputWindow(): React.JSX.Element {
       const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
       let parsed: any[] = []
       if (saved) { try { parsed = JSON.parse(saved) } catch (e) { } }
-      const newSession = { id: newId, name: '(未命名)', time: new Date().toISOString().replace('T', ' ').substring(0, 19), messages: [] }
+      const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+      const newSession = { id: newId, name: '(未命名)', time: timeStr, createdAt: timeStr, messages: [] }
       const updated = [...parsed, newSession]
       localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
       
@@ -1473,7 +1485,7 @@ export function ChatInputWindow(): React.JSX.Element {
               >
                 <span className="session-title" title={session.name}>{session.name}</span>
                 <span className="session-time">
-                  {session.time ? formatSessionTime(session.time) : ''}
+                  {session.createdAt || session.time ? formatSessionTime(session.createdAt || session.time) : ''}
                 </span>
               </div>
             ))

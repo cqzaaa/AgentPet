@@ -27,6 +27,7 @@ export interface Session {
   id: string
   name: string
   time: string
+  createdAt?: string
   messages: any[]
   pinned?: boolean
   contextSummary?: string
@@ -314,6 +315,9 @@ export function useAppStore() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
+  const latestMsgToSaveRef = useRef<{ msg: any; sessionId: string } | null>(null)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const creatingSessionIdsRef = useRef<Set<string>>(new Set())
 
   const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
   const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
@@ -672,7 +676,10 @@ export function useAppStore() {
 
   const refreshSessions = async (clearThinking = false): Promise<void> => {
     try {
-      const localSess = await window.api.getLocalSessions()
+      const currentActiveId = useAppStoreRaw.getState().activeSessionId
+      const localSess = await window.api.getLocalSessions({
+        activeSessionId: currentActiveId
+      })
       if (localSess && localSess.length > 0) {
         if (clearThinking) {
           // 检查 PetWidget 的 LLM 是否正在工作（30 秒内有活动则不清除）
@@ -692,25 +699,29 @@ export function useAppStore() {
             })
           }))
           setSessions(cleaned)
-          cleanedMessagesToSave.forEach(item => {
-            window.api.saveMessage({ ...item.msg, sessionId: item.sessionId }).catch(console.error)
-          })
+          if (cleanedMessagesToSave.length > 0) {
+            window.api.saveMessages(cleanedMessagesToSave.map(item => ({ ...item.msg, sessionId: item.sessionId }))).catch(console.error)
+          }
 
-          // 重新打开应用时，默认选择最近活跃的非置顶会话（若无非置顶会话，则选择最新的置顶会话）
+          // 重新打开应用时，默认选择最近创建的非置顶会话（若无非置顶会话，则选择最新的置顶会话）
           if (cleaned.length > 0) {
             const unpinned = cleaned.filter((s: any) => !s.pinned && !s.id.startsWith('wechat:'))
             let latestSess: any = null
             if (unpinned.length > 0) {
               latestSess = unpinned[0]
               for (let i = 1; i < unpinned.length; i++) {
-                if (unpinned[i].time && (!latestSess.time || unpinned[i].time > latestSess.time)) {
+                const t1 = unpinned[i].createdAt || unpinned[i].time
+                const t2 = latestSess.createdAt || latestSess.time
+                if (t1 && (!t2 || t1 > t2)) {
                   latestSess = unpinned[i]
                 }
               }
             } else {
               latestSess = cleaned[0]
               for (let i = 1; i < cleaned.length; i++) {
-                if (cleaned[i].time && (!latestSess.time || cleaned[i].time > latestSess.time)) {
+                const t1 = cleaned[i].createdAt || cleaned[i].time
+                const t2 = latestSess.createdAt || latestSess.time
+                if (t1 && (!t2 || t1 > t2)) {
                   latestSess = cleaned[i]
                 }
               }
@@ -720,7 +731,43 @@ export function useAppStore() {
             }
           }
         } else {
-          setSessions(localSess)
+          setSessions(prev => {
+            if (!prev || prev.length === 0) return localSess
+
+            // 找出所有内存中正在创建、但在数据库 localSess 中尚未出现的会话
+            const creatingSessions = prev.filter(ps =>
+              creatingSessionIdsRef.current.has(ps.id) && !localSess.some(ls => ls.id === ps.id)
+            )
+
+            const merged = localSess.map((ls: any) => {
+              const matchedPrev = prev.find(p => p.id === ls.id)
+              if (!matchedPrev) return ls
+              
+              const mergedMessages = (ls.messages || []).map((lm: any) => {
+                const pm = matchedPrev.messages?.find((m: any) => m.id === lm.id)
+                // 竞态保护：如果内存中当前消息已完成生成(isThinking=false)，但 DB 读出来的还是 loading(isThinking=true)
+                // 说明当前正处于保存回复与拉取会话的竞态时序中，应保留内存中的最新生成状态
+                if (pm && lm.isThinking && !pm.isThinking) {
+                  return {
+                    ...lm,
+                    text: pm.text,
+                    isThinking: false,
+                    isError: pm.isError,
+                    toolSteps: pm.toolSteps || lm.toolSteps
+                  }
+                }
+                return lm
+              })
+              
+              return {
+                ...ls,
+                messages: mergedMessages
+              }
+            })
+
+            // 合并并追加处于创建流程中的会话
+            return [...merged, ...creatingSessions]
+          })
         }
       }
     } catch (e) {
@@ -961,10 +1008,16 @@ export function useAppStore() {
         id: 'agent:main:dashboard:default',
         name: '(未命名)',
         time: timeStr,
+        createdAt: timeStr,
         messages: []
       }
       nextSessions = [defaultSess]
-      await window.api.createSession(defaultSess)
+      creatingSessionIdsRef.current.add(defaultSess.id)
+      try {
+        await window.api.createSession(defaultSess)
+      } finally {
+        creatingSessionIdsRef.current.delete(defaultSess.id)
+      }
     }
     setSessions(nextSessions)
     if (activeSessionId === id) setActiveSessionId(nextSessions[0].id)
@@ -1008,19 +1061,26 @@ export function useAppStore() {
     }
     const randNum = Math.floor(1000 + Math.random() * 9000)
     const newId = `agent:main:dashboard:${randNum}`
+    const timeStr = formatDateTime()
     const newSess: Session = {
       id: newId,
       name: '(未命名)',
-      time: formatDateTime(),
+      time: timeStr,
+      createdAt: timeStr,
       messages: [],
       pinned: false
     }
+    creatingSessionIdsRef.current.add(newId)
     setSessions([...sessions, newSess])
     setActiveSessionId(newId)
     setAttachedFiles([])
     setInputValue('')
     setActiveTab('chat')
-    await window.api.createSession(newSess)
+    try {
+      await window.api.createSession(newSess)
+    } finally {
+      creatingSessionIdsRef.current.delete(newId)
+    }
   }
 
   // ── 工作空间与文件上传管理 ────────────────────────────────────
@@ -1111,8 +1171,6 @@ export function useAppStore() {
 
     let pendingEvents: any[] = []
     let throttleTimeout: NodeJS.Timeout | null = null
-    let saveTimeout: NodeJS.Timeout | null = null
-    let latestMsgToSave: { msg: any; sessionId: string } | null = null
 
     const flushEvents = () => {
       if (pendingEvents.length === 0) return
@@ -1182,11 +1240,11 @@ export function useAppStore() {
           })
 
           if (updatedMsg) {
-            latestMsgToSave = updatedMsg
-            if (saveTimeout) clearTimeout(saveTimeout)
-            saveTimeout = setTimeout(() => {
-              if (latestMsgToSave) {
-                window.api.saveMessage(latestMsgToSave).catch(console.error)
+            latestMsgToSaveRef.current = updatedMsg
+            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+            saveTimeoutRef.current = setTimeout(() => {
+              if (latestMsgToSaveRef.current) {
+                window.api.saveMessage(latestMsgToSaveRef.current).catch(console.error)
               }
             }, 500)
           }
@@ -1283,12 +1341,16 @@ export function useAppStore() {
     return () => {
       unsubscribe()
       if (throttleTimeout) clearTimeout(throttleTimeout)
-      if (saveTimeout) clearTimeout(saveTimeout)
       if (pendingEvents.length > 0) {
         flushEvents()
       }
-      if (latestMsgToSave) {
-        window.api.saveMessage(latestMsgToSave).catch(console.error)
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      if (latestMsgToSaveRef.current) {
+        window.api.saveMessage(latestMsgToSaveRef.current).catch(console.error)
+        latestMsgToSaveRef.current = null
       }
     }
   }, [activeSessionId])
@@ -1296,6 +1358,13 @@ export function useAppStore() {
   // 打字机流式打印辅助函数
   // 打字机流式打印辅助函数 (已优化为瞬间渲染以保证桌宠 Live2D 60FPS 帧率并消除卡顿)
   const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
+    // 清理 toolEvent 的保存缓存，防止残留的 toolEvent 脏数据在切换会话或卸载时覆写已完成的消息状态
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    latestMsgToSaveRef.current = null
+
     let savedMsg: any = null
     let wasAborted = false
 
@@ -1652,6 +1721,13 @@ ${skillsContext}
       console.error(e)
       const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
       
+      // 清理 toolEvent 的保存缓存，防止残留的 toolEvent 脏数据在切换会话或卸载时覆写已完成的消息状态
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      latestMsgToSaveRef.current = null
+
       let savedMsg: any = null
       setSessions(prev => {
         const next = prev.map(s => {
@@ -1795,7 +1871,7 @@ ${chatLogStr}
         let savedMsgs: any[] = []
         let newContextSummary = ''
         setSessions(prev => {
-          const updated = prev.map(s => {
+          return prev.map(s => {
             if (s.id === sessionId) {
               const messages = s.messages.map(m => {
                 if (batchIds.includes(m.id)) {
@@ -1816,13 +1892,12 @@ ${finalMarkdownText}`
             }
             return s
           })
-
-          savedMsgs.forEach(m => {
-            window.api.saveMessage({ ...m, sessionId })
-          })
-
-          return updated
         })
+
+        // 批量保存已标记为已总结的消息，合并为单次调用，避免频繁触发 IPC 和 UI 重新渲染
+        if (savedMsgs.length > 0) {
+          window.api.saveMessages(savedMsgs.map(m => ({ ...m, sessionId }))).catch(console.error)
+        }
 
         // 将累积摘要持久化到 SQLite sessions 表
         if (newContextSummary) {
@@ -2259,6 +2334,13 @@ ${skillsContext}`
     return () => clearInterval(timer)
   }, [activeSessionId, autoSaveHistory, skillsList, currentAvatarName, llmConfig, workspacePath])
 
+  const handleSetActiveSessionId = useCallback((id: string) => {
+    setActiveSessionId(id)
+    setTimeout(() => {
+      refreshSessions()
+    }, 0)
+  }, [setActiveSessionId, refreshSessions])
+
   // ── 使用 useMemo 稳定返回引用，配合子组件 React.memo 跳过不必要重渲染 ──
   // 仅依赖数据字段；函数引用通过闭包捕获，数据相同时语义等价
   return useMemo(() => ({
@@ -2290,7 +2372,7 @@ ${skillsContext}`
     // sessions
     sessions, setSessions,
     refreshSessions,
-    activeSessionId, setActiveSessionId,
+    activeSessionId, setActiveSessionId: handleSetActiveSessionId,
     activeSession, activeSessMessages,
     inputValue, setInputValue,
     isSending,

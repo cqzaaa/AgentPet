@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { DEFAULT_MODELS } from '../utils/helpers'
+import { getModelIcon } from '../utils/modelIcons'
 
 // ── 官方标准 SVG 图标组件 ──────────────────────────────────────────────────
 
@@ -527,9 +528,15 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                                   key={m}
                                   className={`dropdown-item ${localLlmConfig.model === m ? 'active' : ''}`}
                                   onClick={() => { setLocalLlmConfig({ ...localLlmConfig, model: m }); setShowWechatModelDropdown(false) }}
-                                  style={{ fontSize: '12px', padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                                  style={{ fontSize: '12px', padding: '6px 8px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
                                 >
-                                  <span>{m}</span>
+                                  <img
+                                    src={getModelIcon(m, localLlmConfig.provider)}
+                                    className="model-item-icon"
+                                    alt=""
+                                    style={{ width: '14px', height: '14px', borderRadius: '3px', flexShrink: 0, objectFit: 'contain' }}
+                                  />
+                                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
                                 </div>
                               ))}
                             </>

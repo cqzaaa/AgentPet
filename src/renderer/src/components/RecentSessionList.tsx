@@ -25,7 +25,7 @@ function parseSessionDate(time: string): Date | null {
 
 function getGroupKey(s: Session): GroupKey {
   if (s.pinned) return 'pinned'
-  const d = parseSessionDate(s.time)
+  const d = parseSessionDate(s.createdAt || s.time)
   if (!d) return 'earlier'
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -79,7 +79,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<GroupKey, boolean>>({
     pinned: false,
     today: false,
-    yesterday: false,
+    yesterday: true,
     thisWeek: true,
     earlier: true
   })

@@ -1,6 +1,7 @@
 import React from 'react'
 import { DEFAULT_MODELS } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
+import { getProviderIcon, getModelIcon } from '../utils/modelIcons'
 
 interface SettingsPageProps {
   store: AppStore
@@ -92,8 +93,15 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                       else if (prov === 'ollama') { defaults.baseUrl = 'http://localhost:11434/v1' }
                       saveLlmConfig(defaults)
                     }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
-                    {prov.toUpperCase()}
+                    <img
+                      src={getProviderIcon(prov)}
+                      className="provider-btn-icon"
+                      alt={prov}
+                      style={{ width: '16px', height: '16px', borderRadius: '3px', objectFit: 'contain' }}
+                    />
+                    <span>{prov.toUpperCase()}</span>
                   </div>
                 ))}
               </div>
@@ -181,9 +189,16 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                           key={m}
                           className={`dropdown-item ${llmConfig.model === m ? 'active' : ''}`}
                           onClick={() => { saveLlmConfig({ ...llmConfig, model: m }); setShowModelDropdown(false) }}
+                          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                         >
-                          <span>{m}</span>
-                          {m === DEFAULT_MODELS[llmConfig.provider] && <span className="default-badge">推荐默认</span>}
+                          <img
+                            src={getModelIcon(m, llmConfig.provider)}
+                            className="model-item-icon"
+                            alt=""
+                            style={{ width: '16px', height: '16px', borderRadius: '3px', flexShrink: 0, objectFit: 'contain' }}
+                          />
+                          <span className="model-name-text" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
+                          {m === DEFAULT_MODELS[llmConfig.provider] && <span className="default-badge" style={{ flexShrink: 0 }}>推荐默认</span>}
                         </div>
                       ))}
                     </>

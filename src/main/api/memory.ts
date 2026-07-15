@@ -402,7 +402,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
               continue
             }
             
-            let exists = fs.existsSync(fileToRead)
+            let exists = await fs.promises.access(fileToRead).then(() => true).catch(() => false)
             if (!exists && fileToRead.toLowerCase().endsWith('.md')) {
               const updatedPath = fileToRead.replace(/\.md$/i, '_已更新.md')
               if (fileContentCache.has(updatedPath)) {
@@ -410,7 +410,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
                 absolutePath = updatedPath.replace(/\\/g, '/')
                 continue
               }
-              if (fs.existsSync(updatedPath)) {
+              if (await fs.promises.access(updatedPath).then(() => true).catch(() => false)) {
                 fileToRead = updatedPath
                 exists = true
               }

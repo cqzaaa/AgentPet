@@ -108,8 +108,8 @@ const api = {
     ipcRenderer.invoke('api:get-ollama-models', baseUrl),
   getModels: (config: any): Promise<string[]> =>
     ipcRenderer.invoke('api:get-models', config),
-  getLocalSessions: (): Promise<any[] | null> =>
-    ipcRenderer.invoke('api:get-local-sessions'),
+  getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string }): Promise<any[] | null> =>
+    ipcRenderer.invoke('api:get-local-sessions', options),
   createSession: (session: any): Promise<boolean> =>
     ipcRenderer.invoke('api:create-session', session),
   updateSession: (sessionId: string, updates: any): Promise<boolean> =>
@@ -118,6 +118,8 @@ const api = {
     ipcRenderer.invoke('api:delete-session', sessionId),
   saveMessage: (message: any): Promise<boolean> =>
     ipcRenderer.invoke('api:save-message', message),
+  saveMessages: (messages: any[]): Promise<boolean> =>
+    ipcRenderer.invoke('api:save-messages', messages),
   deleteMessage: (messageId: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-message', messageId),
   onSessionsUpdated: (callback: () => void): (() => void) => {
