@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
 import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
 
@@ -134,7 +134,6 @@ export const useAppStoreRaw = create<any>((set) => ({
   sessions: [],
   activeSessionId: localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default',
   inputValue: '',
-  systemInfo: null,
   tokenLogs: (() => {
     const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
     if (saved) {
@@ -210,7 +209,6 @@ export const useAppStoreRaw = create<any>((set) => ({
   setInputValue: (val: any) => set((state: any) => ({
     inputValue: typeof val === 'function' ? val(state.inputValue) : val
   })),
-  setSystemInfo: (val: any) => set({ systemInfo: val }),
   setTokenLogs: (val: any) => set((state: any) => ({
     tokenLogs: typeof val === 'function' ? val(state.tokenLogs) : val
   })),
@@ -282,7 +280,6 @@ export function useAppStore() {
     sessions, setSessions,
     activeSessionId, setActiveSessionId,
     inputValue, setInputValue,
-    systemInfo, setSystemInfo,
     tokenLogs, setTokenLogs,
     highlightedMessageId, setHighlightedMessageId,
     generatedFiles, setGeneratedFiles,
@@ -379,7 +376,7 @@ export function useAppStore() {
       const fullFile = generatedFiles.find(g => g.path === f.path)
       return [...prev, fullFile || { ...f, time: '' }]
     })
-  }, [generatedFiles])
+  }, [generatedFiles, setPreviewFile, setOpenTabs])
 
   const handleDeleteFile = useCallback(async (f: { path: string }) => {
     await window.api.deleteGeneratedFile(f.path, activeSessionId)
@@ -394,7 +391,7 @@ export function useAppStore() {
         handlePreviewFile(next)
       }
     }
-  }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile])
+  }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile, setOpenTabs, setPreviewFile])
 
   // ── 打字机流式效果控制 ──────────────────────────────────────────
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -484,33 +481,6 @@ export function useAppStore() {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  // Poll system info (暂停于页面不可见时)
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null
-    const fetchInfo = async (): Promise<void> => {
-      try {
-        const info = await window.api.getSystemInfo()
-        setSystemInfo(info)
-      } catch (e) { console.error('获取系统资源失败', e) }
-    }
-    const startPolling = () => {
-      fetchInfo()
-      interval = setInterval(fetchInfo, 2000)
-    }
-    const stopPolling = () => {
-      if (interval) { clearInterval(interval); interval = null }
-    }
-    const onVisibilityChange = () => {
-      if (document.hidden) { stopPolling() } else { startPolling() }
-    }
-    startPolling()
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => {
-      stopPolling()
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-    }
   }, [])
 
   // Load skills & storage path
@@ -1170,6 +1140,12 @@ export function useAppStore() {
             const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
             if (latestAgentIdx !== -1) {
               const agentMsg = { ...messages[latestAgentIdx] }
+              // [A] 回复已收尾（startTypingEffect 把 isThinking 置 false）后到达的 toolEvent
+              // 属于主进程 agent loop 的尾部迟发，不再往已完成气泡里塞 toolSteps，
+              // 避免对已完成消息的无意义重写与重渲。
+              if (agentMsg.isThinking === false) {
+                return s
+              }
               const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
 
               sessEvents.forEach(evt => {
@@ -1646,7 +1622,7 @@ ${skillsContext}
         chatMessages,
         workspacePath
       )
-      
+
       typingStarted = false
       if (response !== undefined) {
         typingStarted = true
@@ -2283,7 +2259,9 @@ ${skillsContext}`
     return () => clearInterval(timer)
   }, [activeSessionId, autoSaveHistory, skillsList, currentAvatarName, llmConfig, workspacePath])
 
-  return {
+  // ── 使用 useMemo 稳定返回引用，配合子组件 React.memo 跳过不必要重渲染 ──
+  // 仅依赖数据字段；函数引用通过闭包捕获，数据相同时语义等价
+  return useMemo(() => ({
     // navigation
     activeTab, setActiveTab,
     agentSubTab, setAgentSubTab,
@@ -2331,7 +2309,6 @@ ${skillsContext}`
     handlePreviewFile,
     handleDeleteFile,
     // system
-    systemInfo,
     // skills
     skillsList,
     skillsPath,
@@ -2387,7 +2364,29 @@ ${skillsContext}`
     // avatar derived & handlers
     currentAvatarStyle,
     currentAvatarVoice
-  }
+  }), [
+    // ── Zustand 数据字段（仅引用比较，不包含函数引用） ──
+    activeTab, agentSubTab, settingsSubTab,
+    isCollapsed, showApiKey, showApiKeyModal, showModelDropdown,
+    isLoadingModels, availableModels,
+    toast, selectedTaskForLog, selectedCronLogDetails,
+    pendingOpenTaskId, pendingOpenLogId,
+    theme, sendingSessionIds,
+    llmConfig, mcpConfig,
+    cronTasks, sessions, activeSessionId,
+    inputValue, tokenLogs,
+    highlightedMessageId, generatedFiles, showFilePanel,
+    openTabs, previewFile, previewLoading,
+    skillsList, skillsPath, disabledSkillNames,
+    activeMcpServers, storageInputPath, actualStoragePath, storageSaveStatus,
+    sandboxMode, activePermissionRequest,
+    executionDevice, sshConnected, sshHost, sshUsername,
+    customModelDir, customModelFile, avatarList,
+    ttsEnabled, autoSaveHistory, contextRounds,
+    testStatus, isSessionSwitching, isSessionsInitialized,
+    // ── 本地 React 状态 ──
+    workspacePath, attachedFiles
+  ])
 }
 
 export type AppStore = ReturnType<typeof useAppStore>

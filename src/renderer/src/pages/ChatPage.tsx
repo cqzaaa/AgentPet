@@ -9,7 +9,20 @@ interface ChatPageProps {
   store: AppStore
 }
 
-export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
+// ── 模块级样式常量（避免每次渲染分配临时对象） ─────────────
+const SEARCH_INPUT_STYLE: React.CSSProperties = {
+  width: '100%',
+  padding: '5px 8px',
+  fontSize: '11.5px',
+  border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+  borderRadius: '6px',
+  background: 'var(--bg-input, rgba(128,128,128,0.04))',
+  color: 'var(--text-color)',
+  outline: 'none',
+  boxSizing: 'border-box'
+}
+
+function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
   const {
     llmConfig,
     activeSessMessages,
@@ -17,7 +30,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     currentAvatarName,
     isSending,
     inputValue, setInputValue,
-    chatEndRef,
     handleSendChat,
     availableModels,
     saveLlmConfig,
@@ -61,12 +73,15 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   // 技能与 MCP Popover 状态与 Refs
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
   const [showMcpPopover, setShowMcpPopover] = useState(false)
+  const [showModelPopover, setShowModelPopover] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
   const mcpPopoverRef = useRef<HTMLDivElement>(null)
+  const modelPopoverRef = useRef<HTMLDivElement>(null)
 
   // 搜索过滤
   const [skillsSearchKey, setSkillsSearchKey] = useState('')
   const [mcpSearchKey, setMcpSearchKey] = useState('')
+  const [modelSearchKey, setModelSearchKey] = useState('')
 
   // 列表溢出检测（仅溢出时显示搜索框）
   const skillsListRef = useRef<HTMLDivElement>(null)
@@ -94,6 +109,12 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
   }, [showMcpPopover, mcpConfig])
 
   useEffect(() => {
+    if (!showModelPopover) {
+      setModelSearchKey('')
+    }
+  }, [showModelPopover])
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showSkillsPopover && skillsPopoverRef.current && !skillsPopoverRef.current.contains(event.target as Node)) {
         // 只有在点击非按钮（或者非 popover 内部）时才关闭，为了保证按钮点击切换正常，我们仅检查 popover 外部
@@ -111,10 +132,16 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           setShowMcpPopover(false)
         }
       }
+      if (showModelPopover && modelPopoverRef.current && !modelPopoverRef.current.contains(event.target as Node)) {
+        const isClickOnBtn = (event.target as HTMLElement).closest('.model-dropdown-container')
+        if (!isClickOnBtn) {
+          setShowModelPopover(false)
+        }
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showSkillsPopover, showMcpPopover])
+  }, [showSkillsPopover, showMcpPopover, showModelPopover])
 
   // 挂载时刷新技能与 MCP 状态
   useEffect(() => {
@@ -122,18 +149,8 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     refreshMcpServers()
   }, [])
 
-  // 搜索输入框公共样式
-  const searchInputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '5px 8px',
-    fontSize: '11.5px',
-    border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
-    borderRadius: '6px',
-    background: 'var(--bg-input, rgba(128,128,128,0.04))',
-    color: 'var(--text-color)',
-    outline: 'none',
-    boxSizing: 'border-box'
-  }
+  // 搜索输入框公共样式 — 使用模块级常量
+  const searchInputStyle = SEARCH_INPUT_STYLE
 
   // MCP 服务开关切换
   const toggleMcpServerEnable = useCallback((serverId: string) => {
@@ -420,12 +437,155 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     )
   }
 
+  // 整合当前可选的所有模型列表（包含已有的 availableModels，以及当前正选中的自定义模型）
+  const displayModels = useMemo(() => {
+    const list = [...availableModels]
+    if (llmConfig.model && !list.includes(llmConfig.model)) {
+      list.push(llmConfig.model)
+    }
+    return list
+  }, [availableModels, llmConfig.model])
+
+  // 根据 modelSearchKey 过滤模型列表
+  const filteredModels = useMemo(() => {
+    if (!modelSearchKey) return displayModels
+    return displayModels.filter(m => m.toLowerCase().includes(modelSearchKey.toLowerCase()))
+  }, [displayModels, modelSearchKey])
+
+  // 决定是否出现滑动条和搜索框（模型总数 >= 8）
+  const isModelOverflow = displayModels.length >= 8
+
+  const renderModelPopover = () => {
+    return (
+      <div
+        ref={modelPopoverRef}
+        className="chat-popover-card"
+        style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 8px)',
+          left: 0,
+          width: '240px',
+          background: 'var(--bg-card, #ffffff)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+          borderRadius: '10px',
+          boxShadow: '0 6px 20px rgba(0, 0, 0, 0.12)',
+          zIndex: 1000,
+          padding: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          animation: 'slideUpMenu 0.15s ease-out'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🤖 选择模型</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>共 {displayModels.length} 个模型</span>
+        </div>
+        {/* 搜索框：仅在列表项数量 >= 8 时显示 */}
+        {isModelOverflow && (
+          <input
+            style={searchInputStyle}
+            placeholder="搜索模型..."
+            value={modelSearchKey}
+            onChange={e => setModelSearchKey(e.target.value)}
+            autoFocus
+          />
+        )}
+        <div
+          style={{
+            maxHeight: isModelOverflow ? '220px' : 'none',
+            overflowY: isModelOverflow ? 'auto' : 'visible',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '2px 0'
+          }}
+        >
+          {filteredModels.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+              无匹配的模型
+            </div>
+          ) : (
+            filteredModels.map(modelName => {
+              const isSelected = llmConfig.model === modelName
+              return (
+                <div
+                  key={modelName}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    fontSize: '12.5px',
+                    cursor: 'pointer',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    transition: 'background 0.15s ease, color 0.15s ease',
+                    userSelect: 'none',
+                    backgroundColor: isSelected ? 'var(--accent-color, #4f8cff)' : 'transparent',
+                    color: isSelected ? '#ffffff' : 'var(--text-color)'
+                  }}
+                  onClick={() => {
+                    saveLlmConfig({ ...llmConfig, model: modelName })
+                    setShowModelPopover(false)
+                  }}
+                  onMouseEnter={e => {
+                    if (!isSelected) {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isSelected) {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }
+                  }}
+                >
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontWeight: isSelected ? 600 : 400,
+                      flex: 1
+                    }}
+                    title={modelName}
+                  >
+                    {modelName}
+                  </span>
+                  {isSelected && (
+                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>✓</span>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+    )
+  }
+
+
 
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
   const contextLimit = 168000
 
+  // ── 优化：用 ref 跟踪消息数量和最后消息文本长度，避免 toolSteps 变更触发 O(n) 遍历 ──
+  const lastTokenCalcSigRef = useRef<string>('')
+  const cachedTokensRef = useRef<number>(0)
+
   const currentContextTokens = useMemo(() => {
+    // 计算签名：消息数量 + 最后一条消息的前 500 字符（捕获流式文本变化，忽略 toolStep 变化）
+    const msgCount = activeSessMessages?.length ?? 0
+    const lastMsg = msgCount > 0 ? activeSessMessages[msgCount - 1] : null
+    const sig = `${msgCount}|${typeof lastMsg?.text === 'string' ? lastMsg.text.slice(0, 500) : ''}|${typeof lastMsg?.isThinking === 'boolean' ? lastMsg.isThinking : ''}`
+
+    if (sig === lastTokenCalcSigRef.current) {
+      return cachedTokensRef.current
+    }
+
     let total = 0
     if (activeSessMessages) {
       for (const msg of activeSessMessages) {
@@ -444,6 +604,9 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     }
     // 加入人设及系统开销预估
     total += 1500
+
+    lastTokenCalcSigRef.current = sig
+    cachedTokensRef.current = total
     return total
   }, [activeSessMessages])
 
@@ -593,6 +756,17 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     }
   }, [])
 
+  // 稳定 Virtuoso itemContent 回调，避免每次渲染重新创建
+  const itemContent = useCallback((_index: number, msg: any) => (
+    <ChatMessageItem
+      key={msg.id}
+      msg={msg}
+      currentAvatarName={currentAvatarName}
+      highlightedMessageId={highlightedMessageId}
+      onPreviewFile={handlePreviewFile}
+    />
+  ), [currentAvatarName, highlightedMessageId, handlePreviewFile])
+
   return (
     <div className="chat-split-container">
       <div
@@ -660,15 +834,7 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               followOutput="smooth"
               initialTopMostItemIndex={999999}
               atBottomStateChange={handleAtBottomStateChange}
-              itemContent={(index, msg) => (
-                <ChatMessageItem
-                  key={msg.id}
-                  msg={msg}
-                  currentAvatarName={currentAvatarName}
-                  highlightedMessageId={highlightedMessageId}
-                  onPreviewFile={handlePreviewFile}
-                />
-              )}
+              itemContent={itemContent}
             />
           )}
           {showScrollToBottom && (
@@ -880,8 +1046,12 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
               if (internalClip && internalClip.files.length > 0) {
                 e.preventDefault()
                 setInternalClipboard(null)
-                // 将内部剪贴板文件转为附件（复制到当前会话目录确保路径有效）
-                const newAttachments = await Promise.all(internalClip.files.map(async f => {
+                // 先同步插入文本，避免等待文件复制/解析 IPC 期间输入框看不到粘贴内容
+                if (internalClip.text) {
+                  setInputValue(prev => prev ? prev + internalClip.text : internalClip.text)
+                }
+                // 异步将内部剪贴板文件转为附件（复制到当前会话目录确保路径有效），完成后追加到附件列表
+                Promise.all(internalClip.files.map(async f => {
                   const ext = f.name.split('.').pop()?.toLowerCase() || ''
                   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
                   const isImage = imageExts.includes(ext)
@@ -904,12 +1074,9 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
                     content,
                     objectUrl: isImage ? `local-file:///${filePath.replace(/\\/g, '/')}` : undefined
                   }
-                }))
-                setAttachedFiles(prev => [...prev, ...newAttachments])
-                // 同时插入文本到输入框
-                if (internalClip.text) {
-                  setInputValue(prev => prev ? prev + internalClip.text : internalClip.text)
-                }
+                })).then(newAttachments => {
+                  setAttachedFiles(prev => [...prev, ...newAttachments])
+                })
                 return
               }
               // 系统剪贴板文件（图片等）
@@ -929,24 +1096,28 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
           <div className="chat-control-toolbar">
             {/* 左侧：模型切换 */}
             <div className="toolbar-group-left" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <div className="model-dropdown-container">
-                <span className="toolbar-lbl-icon">🤖</span>
-                <select
-                  className="model-select-inline"
-                  value={llmConfig.model}
-                  onChange={e => saveLlmConfig({ ...llmConfig, model: e.target.value })}
-                  disabled={isSending}
+              <div className="custom-model-select-container" style={{ position: 'relative' }} ref={modelPopoverRef}>
+                <div
+                  className="model-dropdown-container"
+                  onClick={() => {
+                    if (!isSending) {
+                      setShowModelPopover(!showModelPopover)
+                    }
+                  }}
+                  style={{
+                    opacity: isSending ? 0.6 : 1,
+                    cursor: isSending ? 'not-allowed' : 'pointer'
+                  }}
                 >
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                  {!availableModels.includes(llmConfig.model) && llmConfig.model && (
-                    <option value={llmConfig.model}>{llmConfig.model} (自定义)</option>
-                  )}
-                  {availableModels.length === 0 && !llmConfig.model && (
-                    <option value="">未加载模型</option>
-                  )}
-                </select>
+                  <span className="toolbar-lbl-icon">🤖</span>
+                  <span className="model-select-inline" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85px' }}>
+                      {llmConfig.model || '选择模型'}
+                    </span>
+                    <span style={{ fontSize: '9px', transform: 'scale(0.8)', opacity: 0.7 }}>▼</span>
+                  </span>
+                </div>
+                {showModelPopover && renderModelPopover()}
               </div>
 
               {/* 执行设备选择 */}
@@ -1387,3 +1558,6 @@ export function ChatPage({ store }: ChatPageProps): React.JSX.Element {
     </div>
   )
 }
+
+// 使用 React.memo 配合 useAppStore 的 useMemo 返回值，在 store 引用不变时跳过重渲染
+export const ChatPage = React.memo(ChatPageImpl)
