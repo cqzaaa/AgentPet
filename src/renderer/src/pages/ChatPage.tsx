@@ -709,14 +709,14 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
     if (isSending && !wasSending) {
       // 用户刚发送消息 — 立即滚动到底部
       setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
+        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
       }, 50)
     }
 
     if (!isSending && wasSending) {
       // AI 回复完成 — 滚动到底部，让用户看到完整回复
       setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
+        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
       }, 100)
     }
   }, [isSending])
@@ -732,7 +732,7 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
   }, [activeSessionId])
 
   const scrollToBottom = () => {
-    virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, behavior: 'smooth' })
+    virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
   }
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
@@ -846,7 +846,7 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
               ref={virtuosoRef}
               style={{ height: '100%' }}
               data={activeSessMessages}
-              followOutput="smooth"
+              followOutput={(isAtBottom) => isAtBottom || isSending ? 'smooth' : false}
               initialTopMostItemIndex={999999}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}

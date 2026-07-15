@@ -1635,8 +1635,9 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  margin-bottom: 20px;
-  padding: 0 20px;
+  padding-bottom: 20px;
+  padding-left: 20px;
+  padding-right: 20px;
   box-sizing: border-box;
 }
 

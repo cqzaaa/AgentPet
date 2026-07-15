@@ -743,6 +743,10 @@ export function useAppStore() {
               const matchedPrev = prev.find(p => p.id === ls.id)
               if (!matchedPrev) return ls
               
+              const dbMessageIds = new Set((ls.messages || []).map((m: any) => m.id))
+              // 找出在内存中但还没来得及落库的消息（竞态保护）
+              const memoryOnlyMessages = (matchedPrev.messages || []).filter((m: any) => !dbMessageIds.has(m.id))
+
               const mergedMessages = (ls.messages || []).map((lm: any) => {
                 const pm = matchedPrev.messages?.find((m: any) => m.id === lm.id)
                 // 竞态保护：如果内存中当前消息已完成生成(isThinking=false)，但 DB 读出来的还是 loading(isThinking=true)
@@ -759,9 +763,11 @@ export function useAppStore() {
                 return lm
               })
               
+              const finalMessages = [...mergedMessages, ...memoryOnlyMessages].sort((a, b) => a.id - b.id)
+              
               return {
                 ...ls,
-                messages: mergedMessages
+                messages: finalMessages
               }
             })
 
