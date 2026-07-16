@@ -181,6 +181,9 @@ const api = {
   respondPermission: (requestId: number, approved: boolean): void => {
     ipcRenderer.send('api:permission-response', { requestId, approved })
   },
+  respondClarification: (requestId: number, answers: Record<string, string>, cancelled = false): void => {
+    ipcRenderer.send('api:clarification-response', { requestId, answers, cancelled })
+  },
   abortLlm: (sessionId?: string): Promise<boolean> =>
     ipcRenderer.invoke('api:abort-llm', sessionId),
   getCronTasks: (): Promise<any[] | null> =>

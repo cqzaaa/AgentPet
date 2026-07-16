@@ -26,6 +26,34 @@ export const systemManifest: ToolManifest = {
       }
     },
     {
+      name: 'request_user_clarification',
+      description: '当任务因信息不足、范围模糊或需要用户选择时，弹出补充信息窗口并暂停当前任务。用户提交后会把答案返回，必须据此继续当前任务；一次最多提出 3 个简短问题。',
+      parameters: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            description: '1 到 3 个需要用户补充的问题',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: '问题的稳定标识，例如 search_scope' },
+                question: { type: 'string', description: '展示给用户的简短问题' },
+                options: {
+                  type: 'array',
+                  description: '可选的快捷选项；用户始终可自定义输入',
+                  items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' }, description: { type: 'string', description: '选项的简短补充说明' } }, required: ['label', 'value'] }
+                },
+                placeholder: { type: 'string', description: '自定义输入的提示文字' }
+              },
+              required: ['id', 'question']
+            }
+          }
+        },
+        required: ['questions']
+      }
+    },
+    {
       name: 'manage_cron_task',
       description: '创建或删除后台自动触发的定时任务。',
       parameters: {

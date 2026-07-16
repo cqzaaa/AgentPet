@@ -9,6 +9,11 @@ import { unifiedToolExecutor } from '../tools/core/tool-executor'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 
+type WebMemorySource = {
+  id: string
+  title: string
+  url: string
+}
 
 function getActiveChatDir(): string {
   const base = getActiveStorageDir()
@@ -25,6 +30,48 @@ function getActiveChatDir(): string {
 
 export class AgentExecutor {
   private toolListCache: { full?: any[], simplified?: any[] } = {}
+
+  /**
+   * Web citations are transient during an agent run. Before persisting a memory,
+   * turn its stable source ids into links and retain a small source index so the
+   * markdown remains auditable after the chat UI has gone away.
+   */
+  private attachWebSourcesToMemory(content: string, sources: WebMemorySource[]): {
+    content: string
+    sourceIndex: string
+  } {
+    const sourceById = new Map(
+      sources
+        .filter(source => /^https?:\/\//i.test(source.url))
+        .map(source => [source.id, source])
+    )
+
+    const referencedIds = new Set<string>()
+    for (const match of content.matchAll(/\bS(\d+)\b/g)) {
+      const id = `S${match[1]}`
+      if (sourceById.has(id)) referencedIds.add(id)
+    }
+
+    const linkedContent = content.replace(/\[S(\d+)\](?!\()/g, (citation, number) => {
+      const source = sourceById.get(`S${number}`)
+      return source ? `[${citation}](<${source.url}>)` : citation
+    })
+
+    if (referencedIds.size === 0) return { content: linkedContent, sourceIndex: '' }
+
+    const sourceIndex = [...referencedIds]
+      .map(id => {
+        const source = sourceById.get(id)!
+        const title = (source.title || id).replace(/[\[\]]/g, '')
+        return `- [${id} · ${title}](<${source.url}>)`
+      })
+      .join('\n')
+
+    return {
+      content: linkedContent,
+      sourceIndex: `\n\n---\n### 网络来源（可验证）\n${sourceIndex}`
+    }
+  }
 
   private getFormattedTools(_isFrontend: boolean, simplify = false): any[] {
     const cacheKey = simplify ? 'simplified' : 'full' as const
@@ -128,7 +175,8 @@ export class AgentExecutor {
     sessionId: string,
     chatHistory: ChatMessage[],
     config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number },
-    finalResponse?: string
+    finalResponse?: string,
+    webSources: WebMemorySource[] = []
   ) {
     try {
       if (!sessionId) return
@@ -154,7 +202,8 @@ export class AgentExecutor {
    - 纠错避坑（若有报错，为什么报错，怎么解决的）。
 3. **字数严格限制**：【总结内容】的字数必须控制在 800 字以内，简明扼要，直击重点，剔除任何修饰性词汇。
 4. **精准 Wiki 溯源**：如果对话日志中助手参考了特定的本地文件或缓存文档路径（日志中可能已有 \`<!-- 关联文件: ... -->\` 注释），在总结对应要点时，请务必在这句话的末尾**原样保留或加上**该 HTML 注释文件引用，以实现知识到文件的精准溯源。
-5. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
+5. **网页来源**：引用网页事实时，只能使用对话日志中出现过的 \`[S数字]\` 标识，不得编造来源名或编号。系统会在保存时将有效标识转为可点击链接并附上来源索引。
+6. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
 {
   "title": "主题名",
   "content": "### 💡 核心知识与经验沉淀\\n...（在具体总结的句尾保留 <!-- 关联文件: xxx --> 注释）"
@@ -188,6 +237,8 @@ export class AgentExecutor {
 
       const summaryData = JSON.parse(jsonStr)
       if (summaryData.title && summaryData.content) {
+        const summaryWithSources = this.attachWebSourcesToMemory(String(summaryData.content), webSources)
+        const backupWithSources = this.attachWebSourcesToMemory(finalResponse || '', webSources)
         // 提取用户最开始的提问内容
         const firstUserMsg = chatHistory.find(m => m.role === 'user')
         const firstUserText = firstUserMsg
@@ -198,10 +249,14 @@ export class AgentExecutor {
 
         let backupDialogStr = '\n\n---\n<details>\n<summary>展开查看本次对话原始备份</summary>\n\n'
         backupDialogStr += `**用户 (User)**:\n${firstUserText}\n\n`
-        backupDialogStr += `**助手 (Agent)**:\n${finalResponse || ''}\n\n`
+        backupDialogStr += `**助手 (Agent)**:\n${backupWithSources.content}\n\n`
         backupDialogStr += '</details>'
 
-        await appendMemorySummaryInternal(sessionId, summaryData.title, summaryData.content + backupDialogStr)
+        const sourceIndex = this.attachWebSourcesToMemory(
+          `${summaryData.content}\n${finalResponse || ''}`,
+          webSources
+        ).sourceIndex
+        await appendMemorySummaryInternal(sessionId, summaryData.title, summaryWithSources.content + backupDialogStr + sourceIndex)
         console.log('[Memory] 长任务自动经验总结完成并已保存。主题:', summaryData.title)
       } else {
         console.warn('[Memory] 长任务自动经验沉淀返回的 JSON 结构不正确:', responseText)
@@ -223,24 +278,32 @@ export class AgentExecutor {
       messageId?: number
       isBackground?: boolean
       sandboxMode?: boolean
+      event?: Electron.IpcMainInvokeEvent
     },
     messages: ChatMessage[],
     workspacePath?: string,
     abortSignal?: AbortSignal
   ): AsyncGenerator<AgentStepEvent, string, unknown> {
-    const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, sandboxMode } = config
+    const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, sandboxMode, event } = config
     const isFrontend = !config.isBackground
 
     let chatHistory: ChatMessage[] = JSON.parse(JSON.stringify(messages))
     let webSourceCounter = 0
     const availableWebSourceIds = new Set<string>()
+    const webSourcesForMemory: WebMemorySource[] = []
     const executedWebSearchQueries = new Set<string>()
 
     if (sessionId) {
       const chatDir = getActiveChatDir()
       const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
       const cacheDir = join(chatDir, safeSessionId, '.agentpet_cache')
-      let extraContext = ''
+      let extraContext = `
+
+[本地文件定位规则]
+1. 用户只提供文件名（例如“帮我找 erro.txt”）而没有说明目录时，不要猜测文件在其他磁盘，也不要在磁盘间自动切换。
+2. 先检查当前会话附件目录和用户已明确授权的目录。若信息不足，必须调用 request_user_clarification。问题、选项和输入提示必须由当前任务及已有上下文决定，不得使用固定问题或固定选项。
+3. 搜索超时只表示范围过大，绝不表示文件不存在。必须留在同一范围内缩小搜索；仍无法缩小范围时，调用 request_user_clarification 请求最有帮助的线索，而不是改搜其他磁盘。
+4. 找文件名优先调用 find_files；找到候选后再用 get_file_metadata 或 read_file 验证。`
 
       // 1. 扫描离线网页/文档缓存
       if (fs.existsSync(cacheDir)) {
@@ -617,6 +680,7 @@ export class AgentExecutor {
                     sessionId,
                     isFrontend,
                     sandboxMode: !!sandboxMode,
+                    event,
                     abortSignal
                   }
                   const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
@@ -630,6 +694,7 @@ export class AgentExecutor {
                 sessionId,
                 isFrontend,
                 sandboxMode: !!sandboxMode,
+                event,
                 abortSignal
               }
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
@@ -639,6 +704,10 @@ export class AgentExecutor {
 
             if (abortSignal?.aborted) {
               throw new Error('UserAborted')
+            }
+
+            if ((toolName === 'run_terminal_command' || toolName === 'run_command') && /超时|timeout/i.test(toolResult)) {
+              toolResult += '\n\n[文件定位策略] 此超时不代表文件不存在。禁止改搜其他磁盘；请在同一磁盘缩小范围，或向用户询问可能的上级目录。'
             }
 
             let displayResult = toolResult
@@ -685,6 +754,7 @@ export class AgentExecutor {
             result: res.displayResult
           }
           if (normalizedSources.length) {
+            webSourcesForMemory.push(...normalizedSources)
             yield { type: 'web_sources', sources: normalizedSources }
           }
 
@@ -717,7 +787,7 @@ export class AgentExecutor {
 
         if (totalToolCallsCount >= 5 && sessionId) {
           console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-          this.handleLongTaskAutoMemory(sessionId, chatHistory, config, finalResponse).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+          this.handleLongTaskAutoMemory(sessionId, chatHistory, config, finalResponse, webSourcesForMemory).catch(e => console.error('[System] 自动经验沉淀失败:', e))
         }
 
         return finalResponse
@@ -726,7 +796,7 @@ export class AgentExecutor {
 
     if (totalToolCallsCount >= 5 && sessionId) {
       console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-      this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。').catch(e => console.error('[System] 自动经验沉淀失败:', e))
+      this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。', webSourcesForMemory).catch(e => console.error('[System] 自动经验沉淀失败:', e))
     }
 
     yield {

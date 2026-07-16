@@ -9,6 +9,7 @@ import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { getActiveStorageDir } from '../../utils/paths'
 import { permissionManager } from '../../security/permission-manager'
 import { appendMemorySummaryInternal } from '../../../api/memory'
+import { clarificationManager } from '../../interaction/clarification-manager'
 
 const execAsync = promisify(exec)
 
@@ -171,6 +172,34 @@ if (-not $task.Wait(15000)) {
         return { content: locationResult, success: true }
       }
 
+      if (api === 'request_user_clarification') {
+        const rawQuestions = Array.isArray(args.questions) ? args.questions.slice(0, 3) : []
+        const questions = rawQuestions
+          .filter(question => question && typeof question.id === 'string' && typeof question.question === 'string')
+          .map(question => ({
+            id: question.id.slice(0, 80),
+            question: question.question.slice(0, 300),
+            placeholder: typeof question.placeholder === 'string' ? question.placeholder.slice(0, 160) : '',
+            allowCustom: true,
+            options: Array.isArray(question.options)
+              ? question.options.slice(0, 6).filter((option: any) => option && typeof option.label === 'string' && typeof option.value === 'string').map((option: any) => ({
+                label: option.label.slice(0, 80),
+                value: option.value.slice(0, 200),
+                description: typeof option.description === 'string' ? option.description.slice(0, 120) : ''
+              }))
+              : []
+          }))
+        if (questions.length === 0) return { content: '错误：至少需要一个有效的澄清问题。', success: false }
+
+        const response = await clarificationManager.request(questions, context.sessionId, context.event?.sender)
+        return {
+          content: response.cancelled
+            ? '[用户取消了补充信息。请说明无法继续的原因，不要猜测或扩大范围。]'
+            : `[用户补充的信息]\n${JSON.stringify(response.answers, null, 2)}\n请基于这些答案继续当前任务。`,
+          success: !response.cancelled
+        }
+      }
+
       // 3. manage_cron_task
       if (api === 'manage_cron_task') {
         const { action_type, name: taskName, interval, action, taskId } = args
@@ -272,7 +301,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['get_system_status', 'get_location', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 }
 

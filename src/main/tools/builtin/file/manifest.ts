@@ -26,9 +26,60 @@ export const fileManifest: ToolManifest = {
           end_line: {
             type: 'number',
             description: '结束行号 (1-indexed)，可选'
+          },
+          sheet_name: {
+            type: 'string',
+            description: 'Excel 工作表名称（可选；未填时读取全部工作表）'
+          },
+          cell_range: {
+            type: 'string',
+            description: 'Excel 单元格范围，例如 A1:F50（可选）'
+          },
+          max_rows: {
+            type: 'number',
+            description: 'CSV 或 Excel 最多读取行数（默认 500，上限 2000）'
           }
         },
         required: ['file_path']
+      }
+    },
+    {
+      name: 'list_directory',
+      description: '列出当前会话已授权目录内的文件和子目录；支持分页，不读取文件内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          directory_path: { type: 'string', description: '目录绝对路径；省略时列出当前会话附件目录' },
+          recursive: { type: 'boolean', description: '是否递归列出子目录，默认 false' },
+          limit: { type: 'number', description: '最多返回条目数，默认 100，上限 500' },
+          cursor: { type: 'number', description: '分页起始偏移量，默认 0' }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'get_file_metadata',
+      description: '获取已授权文件的大小、修改时间和类型，不读取文件正文。',
+      parameters: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: '文件绝对路径' }
+        },
+        required: ['file_path']
+      }
+    },
+    {
+      name: 'find_files',
+      description: '在当前会话已授权目录内按文件名查找文件。用于“帮我找 xxx.txt”这类请求；搜索被限制在同一授权目录，不会自动切换磁盘。',
+      parameters: {
+        type: 'object',
+        properties: {
+          file_name: { type: 'string', description: '待查找的完整文件名，例如 erro.txt' },
+          directory_path: { type: 'string', description: '已授权的起始目录；省略时使用当前会话附件目录' },
+          max_depth: { type: 'number', description: '最大递归层级，默认 4，上限 8' },
+          max_results: { type: 'number', description: '最多返回结果数，默认 20，上限 100' }
+        },
+        required: ['file_name']
       }
     },
     {

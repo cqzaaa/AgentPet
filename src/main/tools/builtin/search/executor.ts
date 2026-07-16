@@ -1,7 +1,7 @@
-import * as os from 'os'
+import * as fs from 'fs'
 import { execFile } from 'child_process'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath } from '../../utils/paths'
+import { resolveLocalPath, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 const { rgPath } = require('vscode-ripgrep')
 
 export class SearchExecutor implements IToolExecutor {
@@ -17,7 +17,14 @@ export class SearchExecutor implements IToolExecutor {
 
         // 解析可能的相对路径
         const resolvedScope = scope ? resolveLocalPath(scope) : undefined
-        const searchDir = resolvedScope || context.workspacePath || os.homedir()
+        const searchDir = resolvedScope || (context.workspacePath || getSessionFilesDir(context.sessionId))
+        if (!isPathWithinRoots(searchDir, getAllowedFileRoots(context))) {
+          return { content: '错误：搜索范围不在当前会话已授权的文件夹内。请先上传文件，或在设置中选择允许访问的文件夹。', success: false }
+        }
+        const realSearchDir = await fs.promises.realpath(searchDir)
+        if (!isPathWithinRoots(realSearchDir, getAllowedFileRoots(context))) {
+          return { content: '错误：搜索范围经真实路径解析后不在已授权文件夹内。', success: false }
+        }
 
         const execArgs: string[] = []
         execArgs.push('-n') // Line numbers
@@ -31,10 +38,11 @@ export class SearchExecutor implements IToolExecutor {
         }
         execArgs.push('-m', '200') // Max 200 matches per file to avoid huge output per file
         execArgs.push('-e', pattern)
-        execArgs.push(searchDir)
+        execArgs.push(realSearchDir)
 
+        const timeout = Math.min(Math.max(Number(args.timeout_seconds) || 30, 1), 120) * 1000
         return new Promise<ToolResult>((resolve) => {
-          execFile(rgPath, execArgs, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+          execFile(rgPath, execArgs, { maxBuffer: 10 * 1024 * 1024, timeout, signal: context.abortSignal }, (error, stdout, stderr) => {
             // ripgrep exits with 1 if no matches found, 2 if error
             if (error && error.code === 2) {
               resolve({
@@ -56,7 +64,7 @@ export class SearchExecutor implements IToolExecutor {
 
             if (output_mode === 'count') {
               resolve({ content: `[搜索结果] 找到 ${lines.length} 处匹配`, success: true })
-            } else if (output_mode === 'files_with_matches') {
+            } else if ((output_mode || 'files_with_matches') === 'files_with_matches') {
               const files = new Set<string>()
               lines.forEach(line => {
                 // ripgrep outputs FilePath:LineNumber:Content

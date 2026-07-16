@@ -36,6 +36,13 @@ export class AuditPipeline {
     // 处理命令行工具安全审计 (例如 run_terminal_command 或 run_command)
     if (toolName === 'run_terminal_command' || toolName === 'run_command') {
       const command = args.command || ''
+      if (/\b(cat|type|head|tail|more|less|grep|rg|get-content|select-string)\b/i.test(command)) {
+        return {
+          blocked: false,
+          requireApproval: true,
+          warning: '检测到终端直接读取或搜索文件。请确认该路径已获授权；常规文件读取应使用 read_file 或 grep_content。'
+        }
+      }
       
       // 1. 只读或无害查询命令自动放行 (不需弹窗)
       if (isReadOnlyCommand(command)) {

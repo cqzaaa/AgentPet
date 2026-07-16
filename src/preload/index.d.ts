@@ -75,6 +75,7 @@ declare global {
       setSandboxMode: (enabled: boolean) => Promise<boolean>
       onRequestPermission: (callback: (data: any) => void) => () => void
       respondPermission: (requestId: number, approved: boolean) => void
+      respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
       abortLlm: (sessionId?: string) => Promise<boolean>
       getCronTasks: () => Promise<any[] | null>
       saveCronTasks: (tasks: any[]) => Promise<boolean>

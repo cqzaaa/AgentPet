@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import * as fs from 'fs'
-import { join } from 'path'
+import { join, relative, resolve } from 'path'
+import type { ToolContext } from '../core/types'
 
 export function readConfig(): any {
   try {
@@ -76,6 +77,28 @@ export function getGeneratedFilesDir(sessionId?: string): string {
     }
   }
   return dir
+}
+
+export function getSessionFilesDir(sessionId?: string): string {
+  const safeSessionId = (sessionId || 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const dir = join(getActiveStorageDir(), 'chat', safeSessionId)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** Paths the user has explicitly placed in scope for this conversation. */
+export function getAllowedFileRoots(context: ToolContext): string[] {
+  const roots = [getSessionFilesDir(context.sessionId), getGeneratedFilesDir(context.sessionId)]
+  if (context.workspacePath && fs.existsSync(context.workspacePath)) roots.push(context.workspacePath)
+  return [...new Set(roots.map(path => resolve(path)))]
+}
+
+export function isPathWithinRoots(targetPath: string, roots: string[]): boolean {
+  const target = resolve(targetPath).toLowerCase()
+  return roots.some(root => {
+    const rel = relative(resolve(root).toLowerCase(), target)
+    return rel === '' || (!rel.startsWith('..') && !rel.includes(':'))
+  })
 }
 
 export const sessionLastXlsxMap = new Map<string, string>()

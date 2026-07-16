@@ -1,8 +1,33 @@
 import * as fs from 'fs'
-import { dirname, basename, join, isAbsolute } from 'path'
+import { dirname, basename, join, isAbsolute, extname, relative } from 'path'
 import { shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath, getActiveStorageDir } from '../../utils/paths'
+import { resolveLocalPath, getActiveStorageDir, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
+
+const MAX_FILE_BYTES = 25 * 1024 * 1024
+const MAX_ROWS = 2000
+
+async function assertAllowedPath(filePath: string, context: ToolContext, allowMissing = false): Promise<string> {
+  const absolutePath = resolveFilePath(filePath, context)
+  const targetExists = fs.existsSync(absolutePath)
+  const checkPath = allowMissing && !targetExists ? dirname(absolutePath) : absolutePath
+  if (!isPathWithinRoots(checkPath, getAllowedFileRoots(context))) {
+    throw new Error('该路径不在当前会话已授权的文件夹内。请先上传文件，或在设置中选择允许访问的文件夹。')
+  }
+  if (targetExists) return fs.promises.realpath(absolutePath)
+
+  // Creating a nested path must not follow a pre-existing directory symlink out
+  // of an approved root. Validate the nearest existing ancestor's real path.
+  let existingAncestor = checkPath
+  while (!fs.existsSync(existingAncestor) && dirname(existingAncestor) !== existingAncestor) {
+    existingAncestor = dirname(existingAncestor)
+  }
+  const realAncestor = await fs.promises.realpath(existingAncestor)
+  if (!isPathWithinRoots(realAncestor, getAllowedFileRoots(context))) {
+    throw new Error('该路径的实际父目录不在当前会话已授权的文件夹内。')
+  }
+  return absolutePath
+}
 
 function resolveFilePath(filePath: string, context: ToolContext): string {
   let resolved = resolveLocalPath(filePath)
@@ -48,6 +73,13 @@ export class FileExecutor implements IToolExecutor {
         }
 
         if (!fs.existsSync(file_path)) return { content: `错误：文件不存在：${file_path}`, success: false }
+        file_path = await assertAllowedPath(file_path, context)
+
+        const stat = await fs.promises.stat(file_path)
+        if (!stat.isFile()) return { content: `错误：该路径不是文件：${file_path}`, success: false }
+        if (stat.size > MAX_FILE_BYTES) {
+          return { content: `错误：文件过大（${(stat.size / 1024 / 1024).toFixed(1)} MB），单次读取上限为 ${MAX_FILE_BYTES / 1024 / 1024} MB。请缩小文件或使用 grep_content 定位内容。`, success: false }
+        }
 
         const ext = file_path.split('.').pop()?.toLowerCase() || ''
         let content = ''
@@ -68,11 +100,14 @@ export class FileExecutor implements IToolExecutor {
           const XLSX = require('xlsx')
           const workbook = XLSX.readFile(file_path)
           const sheets: string[] = []
-          for (const sheetName of workbook.SheetNames) {
+          const requestedSheets = args.sheet_name ? [args.sheet_name] : workbook.SheetNames
+          const rowLimit = Math.min(Math.max(Number(args.max_rows) || 500, 1), MAX_ROWS)
+          for (const sheetName of requestedSheets) {
             const sheet = workbook.Sheets[sheetName]
-            const csv = XLSX.utils.sheet_to_csv(sheet)
+            if (!sheet) return { content: `错误：未找到工作表 ${sheetName}`, success: false }
+            const csv = XLSX.utils.sheet_to_csv(sheet, args.cell_range ? { range: args.cell_range } : undefined)
             if (csv.trim()) {
-              const cleaned = csv.replace(/\$\{[^}]*\}/g, '').replace(/,{2,}/g, ',').replace(/^,+|,+$/gm, '')
+              const cleaned = csv.split(/\r?\n/).slice(0, rowLimit).join('\n').replace(/\$\{[^}]*\}/g, '').replace(/,{2,}/g, ',').replace(/^,+|,+$/gm, '')
               sheets.push(`[工作表: ${sheetName}]\n${cleaned}`)
             }
           }
@@ -83,10 +118,11 @@ export class FileExecutor implements IToolExecutor {
           const parsed = Papa.parse(csvContent, { header: true })
           if (parsed.data && parsed.data.length > 0) {
             const headers = parsed.meta.fields || []
-            const rows = parsed.data.slice(0, 500) as any[]
+            const rowLimit = Math.min(Math.max(Number(args.max_rows) || 500, 1), MAX_ROWS)
+            const rows = parsed.data.slice(0, rowLimit) as any[]
             content = `列名: ${headers.join(', ')}\n\n`
             content += rows.map((row, i) => `第${i + 1}行: ${headers.map(h => `${h}=${row[h] ?? ''}`).join(', ')}`).join('\n')
-            if ((parsed.data as any[]).length > 500) content += `\n\n... 共 ${parsed.data.length} 行，已截取前 500 行`
+            if ((parsed.data as any[]).length > rowLimit) content += `\n\n... 共 ${parsed.data.length} 行，已截取前 ${rowLimit} 行`
           } else {
             content = '[CSV 文件已加载，但内容为空]'
           }
@@ -101,8 +137,8 @@ export class FileExecutor implements IToolExecutor {
 
         const DEFAULT_LIMIT_LINES = 800
         const lines = content.split(/\r?\n/)
-        let s = start_line
-        let e = end_line
+        let s = Number.isInteger(start_line) ? start_line : undefined
+        let e = Number.isInteger(end_line) ? end_line : undefined
 
         // 如果是 md 文件，且未指定行范围，默认全量读取；其它类型文件依然保持 800 行安全保护
         if (s === undefined && e === undefined) {
@@ -115,6 +151,8 @@ export class FileExecutor implements IToolExecutor {
 
         if (s > lines.length) {
           finalContent = `[提示] 起始行号 ${s} 超出文件总行数 ${lines.length}`
+        } else if (e < s) {
+          finalContent = '[错误] end_line 必须大于或等于 start_line'
         } else {
           const sliced = lines.slice(s - 1, e)
           finalContent = `[读取文件 ${basename(file_path)}，第 ${s} 行 到 第 ${e} 行，总行数: ${lines.length}]\n` +
@@ -132,13 +170,80 @@ export class FileExecutor implements IToolExecutor {
         return { content: finalContent, success: true }
       }
 
+      if (api === 'get_file_metadata') {
+        if (!args.file_path) return { content: '错误：缺少必要参数 file_path', success: false }
+        const filePath = await assertAllowedPath(args.file_path, context)
+        const stat = await fs.promises.stat(filePath)
+        return {
+          content: JSON.stringify({ path: filePath, name: basename(filePath), extension: extname(filePath).toLowerCase(), sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString(), isFile: stat.isFile(), isDirectory: stat.isDirectory() }, null, 2),
+          success: true
+        }
+      }
+
+      if (api === 'list_directory') {
+        const directoryPath = args.directory_path ? await assertAllowedPath(args.directory_path, context) : getSessionFilesDir(context.sessionId)
+        const stat = await fs.promises.stat(directoryPath)
+        if (!stat.isDirectory()) return { content: `错误：该路径不是目录：${directoryPath}`, success: false }
+        const recursive = Boolean(args.recursive)
+        const allEntries: string[] = []
+        const walk = async (directory: string): Promise<void> => {
+          for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+            const fullPath = join(directory, entry.name)
+            allEntries.push(`${entry.isDirectory() ? '[目录]' : '[文件]'} ${relative(directoryPath, fullPath) || entry.name}`)
+            if (recursive && entry.isDirectory() && allEntries.length < 2000) await walk(fullPath)
+          }
+        }
+        await walk(directoryPath)
+        const cursor = Math.max(0, Number(args.cursor) || 0)
+        const limit = Math.min(Math.max(Number(args.limit) || 100, 1), 500)
+        const page = allEntries.slice(cursor, cursor + limit)
+        const nextCursor = cursor + page.length < allEntries.length ? cursor + page.length : null
+        return { content: `[目录列表] 共 ${allEntries.length} 项\n${page.join('\n')}${nextCursor === null ? '' : `\n\n下一页 cursor: ${nextCursor}`}`, success: true }
+      }
+
+      if (api === 'find_files') {
+        if (!args.file_name || typeof args.file_name !== 'string') return { content: '错误：缺少必要参数 file_name', success: false }
+        const directoryPath = args.directory_path ? await assertAllowedPath(args.directory_path, context) : getSessionFilesDir(context.sessionId)
+        const stat = await fs.promises.stat(directoryPath)
+        if (!stat.isDirectory()) return { content: `错误：该路径不是目录：${directoryPath}`, success: false }
+
+        const targetName = args.file_name.trim().toLocaleLowerCase()
+        const maxDepth = Math.min(Math.max(Number(args.max_depth) || 4, 0), 8)
+        const maxResults = Math.min(Math.max(Number(args.max_results) || 20, 1), 100)
+        const maxVisited = 10000
+        const matches: string[] = []
+        let visited = 0
+        let wasLimited = false
+
+        const walk = async (directory: string, depth: number): Promise<void> => {
+          if (depth > maxDepth || matches.length >= maxResults || visited >= maxVisited) {
+            if (visited >= maxVisited) wasLimited = true
+            return
+          }
+          for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+            if (matches.length >= maxResults || visited >= maxVisited) {
+              wasLimited = true
+              return
+            }
+            visited++
+            const fullPath = join(directory, entry.name)
+            if (entry.isFile() && entry.name.toLocaleLowerCase() === targetName) matches.push(fullPath)
+            if (entry.isDirectory()) await walk(fullPath, depth + 1)
+          }
+        }
+
+        await walk(directoryPath, 0)
+        const limitHint = wasLimited ? '\n\n[提示] 搜索达到安全上限，结果不完整。请缩小到更具体的上级目录后重试；不要自动切换到其他磁盘。' : ''
+        return { content: matches.length ? `[文件查找] 找到 ${matches.length} 个候选：\n${matches.join('\n')}${limitHint}` : `[文件查找] 在已授权目录中未找到 ${args.file_name}。${limitHint || '请确认文件名，或提供更可能的上级目录。'}`, success: true }
+      }
+
       // 2. write_file
       if (api === 'write_file') {
         let { file_path, content, append } = args
         if (!file_path || content === undefined) {
           return { content: '错误：缺少必要参数 file_path 或 content', success: false }
         }
-        file_path = resolveFilePath(file_path, context)
+        file_path = await assertAllowedPath(file_path, context, true)
         const parentDir = dirname(file_path)
         if (!fs.existsSync(parentDir)) {
           await fs.promises.mkdir(parentDir, { recursive: true })
@@ -157,7 +262,7 @@ export class FileExecutor implements IToolExecutor {
         if (!file_path || old_string === undefined || new_string === undefined) {
           return { content: '错误：缺少参数 file_path, old_string 或 new_string', success: false }
         }
-        file_path = resolveFilePath(file_path, context)
+        file_path = await assertAllowedPath(file_path, context)
         if (!fs.existsSync(file_path)) return { content: `错误：文件不存在：${file_path}`, success: false }
         
         let fileContent = await fs.promises.readFile(file_path, 'utf-8')
@@ -181,8 +286,8 @@ export class FileExecutor implements IToolExecutor {
         if (!source_path || !destination_path) {
           return { content: '错误：缺少参数 source_path 或 destination_path', success: false }
         }
-        source_path = resolveFilePath(source_path, context)
-        destination_path = resolveFilePath(destination_path, context)
+        source_path = await assertAllowedPath(source_path, context)
+        destination_path = await assertAllowedPath(destination_path, context, true)
         if (!fs.existsSync(source_path)) {
           return { content: `错误：源文件不存在: ${source_path}`, success: false }
         }
@@ -198,7 +303,7 @@ export class FileExecutor implements IToolExecutor {
       if (api === 'delete_file') {
         let { file_path } = args
         if (!file_path) return { content: '错误：缺少参数 file_path', success: false }
-        file_path = resolveFilePath(file_path, context)
+        file_path = await assertAllowedPath(file_path, context)
         if (!fs.existsSync(file_path)) {
           return { content: `错误：文件或目录不存在: ${file_path}`, success: false }
         }
@@ -217,7 +322,7 @@ export class FileExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return ['read_file', 'write_file', 'edit_file', 'move_file', 'delete_file']
+    return ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'write_file', 'edit_file', 'move_file', 'delete_file']
   }
 }
 

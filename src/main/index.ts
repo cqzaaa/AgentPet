@@ -3458,7 +3458,8 @@ app.whenReady().then(() => {
       const stepStream = executor.run(
         {
           ...config,
-          sandboxMode: sandboxMode
+          sandboxMode: sandboxMode,
+          event
         },
         messages,
         workspacePath,

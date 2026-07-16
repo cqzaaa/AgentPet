@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import iconSvg from '../assets/icon_from_image.svg'
+import { ClarificationCard } from './ClarificationCard'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
@@ -1160,6 +1161,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
 
   const toolSteps = msg.toolSteps || []
+  const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
   const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
   const webSources = Array.from(new Map(
     toolSteps
@@ -1314,6 +1316,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         )}
 
         {/* 工具调用流（现代内联样式） */}
+        {clarificationSteps.map((step: any) => (
+          <ClarificationCard key={step.id} step={step} />
+        ))}
+
         {shouldShowToolSteps && (
           <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
             {currentCollapsed ? (

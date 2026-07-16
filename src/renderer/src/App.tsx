@@ -42,15 +42,15 @@ function App(): React.JSX.Element {
     return undefined
   }, [])
 
-  if (currentHash === '#/agent') {
-    return <AgentWindow />
-  } else if (currentHash === '#/chat-input') {
-    return <ChatInputWindow />
-  } else if (currentHash.startsWith('#/screenshot')) {
-    return <ScreenshotWindow />
-  } else {
-    return <PetWidget />
-  }
+  const page = currentHash === '#/agent'
+    ? <AgentWindow />
+    : currentHash === '#/chat-input'
+      ? <ChatInputWindow />
+      : currentHash.startsWith('#/screenshot')
+        ? <ScreenshotWindow />
+        : <PetWidget />
+
+  return page
 }
 
 export default App
