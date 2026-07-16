@@ -303,7 +303,20 @@ export class AgentExecutor {
 
       let responseMsg: ChatMessage
       try {
-        responseMsg = await modelProvider.chat(chatHistory, chatOptions)
+        if (modelProvider.chatStream) {
+          let streamedMessage: ChatMessage | null = null
+          for await (const event of modelProvider.chatStream(chatHistory, chatOptions)) {
+            if (event.type === 'delta') {
+              yield { type: 'text_delta', content: event.content }
+            } else {
+              streamedMessage = event.message
+            }
+          }
+          if (!streamedMessage) throw new Error('流式响应未包含最终消息')
+          responseMsg = streamedMessage
+        } else {
+          responseMsg = await modelProvider.chat(chatHistory, chatOptions)
+        }
       } catch (err: any) {
         const errorText = err.message || String(err)
         // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删除降级

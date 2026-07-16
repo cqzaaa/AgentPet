@@ -3524,6 +3524,14 @@ app.whenReady().then(() => {
           }
         } else if (step.type === 'text') {
           finalResponse = step.content
+        } else if (step.type === 'text_delta') {
+          if (event) {
+            event.sender.send('api:llm-text-delta', {
+              content: step.content,
+              sessionId: config.sessionId,
+              messageId: config.messageId
+            })
+          }
         } else if (step.type === 'error') {
           throw new Error(step.message)
         }

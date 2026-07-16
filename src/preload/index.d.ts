@@ -38,6 +38,7 @@ declare global {
       copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
       onToolEvent: (callback: (data: any) => void) => () => void
+      onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
       getStoragePath: () => Promise<string>

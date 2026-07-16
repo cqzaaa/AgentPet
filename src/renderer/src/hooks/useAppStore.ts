@@ -1171,6 +1171,55 @@ export function useAppStore() {
     }
   }
 
+  // 文本增量按动画帧合并：IPC 可能在同一帧内到达多个 token，不能每个 token 都触发一次 React 渲染。
+  useEffect(() => {
+    if (!window.api.onLlmTextDelta) return
+
+    const pendingByMessage = new Map<string, { sessionId: string; messageId: number; content: string }>()
+    let frameId: number | null = null
+
+    const flush = () => {
+      frameId = null
+      if (pendingByMessage.size === 0) return
+      const updates = [...pendingByMessage.values()]
+      pendingByMessage.clear()
+      const updatesBySession = new Map(updates.map(update => [update.sessionId, update]))
+
+      setSessions(prev => {
+        let changed = false
+        const next = prev.map(session => {
+          const update = updatesBySession.get(session.id)
+          if (!update) return session
+          const index = session.messages.findIndex(message => message.id === update.messageId)
+          if (index < 0) return session
+          const message = session.messages[index]
+          // 已中止或已完成的消息不再接受迟到的 IPC chunk。
+          if (!message.isThinking || abortedReplyIdsRef.current.has(update.messageId)) return session
+          const messages = [...session.messages]
+          messages[index] = { ...message, text: (message.text || '') + update.content }
+          changed = true
+          return { ...session, messages }
+        })
+        return changed ? next : prev
+      })
+    }
+
+    const unsubscribe = window.api.onLlmTextDelta(({ content, sessionId, messageId }) => {
+      if (!content || !sessionId || !messageId) return
+      const key = `${sessionId}:${messageId}`
+      const pending = pendingByMessage.get(key)
+      if (pending) pending.content += content
+      else pendingByMessage.set(key, { sessionId, messageId, content })
+      if (frameId === null) frameId = requestAnimationFrame(flush)
+    })
+
+    return () => {
+      unsubscribe()
+      if (frameId !== null) cancelAnimationFrame(frameId)
+      flush()
+    }
+  }, [])
+
   // 监听大模型在后台的系统工具调用日志事件并插入最新的一条机器人消息中
   useEffect(() => {
     if (!window.api.onToolEvent) return
@@ -1190,18 +1239,28 @@ export function useAppStore() {
 
       // 1. 处理普通前台会话消息事件的合并更新
       if (normalEvents.length > 0) {
+        const eventsBySession = new Map<string, any[]>()
+        for (const event of normalEvents) {
+          const sessionId = event.sessionId || activeSessionId
+          const events = eventsBySession.get(sessionId)
+          if (events) events.push(event)
+          else eventsBySession.set(sessionId, [event])
+        }
         setSessions(prev => {
           let updatedMsg: any = null
           const next = prev.map(s => {
-            const sessEvents = normalEvents.filter(e => {
-              const targetId = e.sessionId || activeSessionId
-              return s.id === targetId
-            })
+            const sessEvents = eventsBySession.get(s.id)
 
-            if (sessEvents.length === 0) return s
+            if (!sessEvents?.length) return s
 
             const messages = [...s.messages]
-            const latestAgentIdx = messages.map(m => m.sender).lastIndexOf('agent')
+            let latestAgentIdx = -1
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].sender === 'agent') {
+                latestAgentIdx = i
+                break
+              }
+            }
             if (latestAgentIdx !== -1) {
               const agentMsg = { ...messages[latestAgentIdx] }
               // [A] 回复已收尾（startTypingEffect 把 isThinking 置 false）后到达的 toolEvent

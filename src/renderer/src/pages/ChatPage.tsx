@@ -846,7 +846,8 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
               ref={virtuosoRef}
               style={{ height: '100%' }}
               data={activeSessMessages}
-              followOutput={(isAtBottom) => isAtBottom || isSending ? 'smooth' : false}
+              // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
+              followOutput={(isAtBottom) => isAtBottom ? 'auto' : false}
               initialTopMostItemIndex={999999}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}

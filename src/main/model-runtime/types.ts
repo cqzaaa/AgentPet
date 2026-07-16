@@ -19,4 +19,8 @@ export interface ChatOptions {
 
 export interface ModelProvider {
   chat(messages: ChatMessage[], options: ChatOptions): Promise<ChatMessage>
+  chatStream?(
+    messages: ChatMessage[],
+    options: ChatOptions
+  ): AsyncGenerator<{ type: 'delta'; content: string } | { type: 'message'; message: ChatMessage }, void, unknown>
 }

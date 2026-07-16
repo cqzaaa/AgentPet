@@ -85,6 +85,11 @@ const api = {
       ipcRenderer.removeListener('api:llm-tool-event', subscription)
     }
   },
+  onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void): (() => void) => {
+    const subscription = (_event: any, data: { content: string; sessionId?: string; messageId?: number }) => callback(data)
+    ipcRenderer.on('api:llm-text-delta', subscription)
+    return () => ipcRenderer.removeListener('api:llm-text-delta', subscription)
+  },
   onTokenUsage: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:llm-token-usage', subscription)

@@ -116,6 +116,106 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
     return resultMessage
   }
+
+  // OpenAI-compatible providers commonly expose SSE through the same endpoint.
+  // Keep the non-streaming method above as the compatibility fallback for providers
+  // that do not honour `stream: true`.
+  public async *chatStream(
+    messages: ChatMessage[],
+    options: ChatOptions
+  ): AsyncGenerator<{ type: 'delta'; content: string } | { type: 'message'; message: ChatMessage }, void, unknown> {
+    const cleanApiKey = (this.apiKey || '').trim()
+    const cleanBaseUrl = (this.baseUrl || this.defaultBaseUrl || '').trim().replace(/\/+$/, '')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (cleanApiKey) headers.Authorization = `Bearer ${cleanApiKey}`
+
+    const requestBody: any = {
+      model: options.model || this.defaultModel,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.name ? { name: m.name } : {}),
+        ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+        ...(m.tool_calls ? { tool_calls: m.tool_calls } : {})
+      })),
+      temperature: options.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true }
+    }
+    if (options.maxTokens) requestBody.max_tokens = options.maxTokens
+    if (options.tools?.length) {
+      requestBody.tools = options.tools
+      requestBody.tool_choice = options.tool_choice || 'auto'
+    }
+
+    const response = await net.fetch(`${cleanBaseUrl}/chat/completions`, {
+      method: 'POST', headers, body: JSON.stringify(requestBody), signal: options.signal
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      // Older OpenAI-compatible gateways sometimes reject only the stream flag.
+      // Preserve chat availability by falling back to the established JSON path.
+      if (response.status === 400 && /stream|unknown parameter|unsupported/i.test(text)) {
+        yield { type: 'message', message: await this.chat(messages, options) }
+        return
+      }
+      throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`)
+    }
+
+    // Some compatible providers silently return ordinary JSON for stream requests.
+    if (!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) {
+      const data: any = await response.json()
+      const message = data.choices?.[0]?.message
+      if (!message) throw new Error('未获取到有效的模型回答结果')
+      yield { type: 'message', message: {
+        role: 'assistant', content: message.content || '', tool_calls: message.tool_calls,
+        reasoning_content: message.reasoning_content || '', usage: data.usage
+      } }
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let content = ''
+    let reasoning = ''
+    let usage: ChatMessage['usage']
+    const toolCalls: any[] = []
+
+    const consume = (payload: string): string | null => {
+      if (!payload || payload === '[DONE]') return null
+      let data: any
+      try { data = JSON.parse(payload) } catch { return null }
+      if (data.usage) usage = { prompt_tokens: data.usage.prompt_tokens || 0, completion_tokens: data.usage.completion_tokens || 0 }
+      const delta = data.choices?.[0]?.delta
+      if (!delta) return null
+      if (typeof delta.content === 'string') content += delta.content
+      if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content
+      for (const partial of delta.tool_calls || []) {
+        const index = partial.index ?? toolCalls.length
+        const current = toolCalls[index] || (toolCalls[index] = { id: '', type: 'function', function: { name: '', arguments: '' } })
+        if (partial.id) current.id = partial.id
+        if (partial.type) current.type = partial.type
+        if (partial.function?.name) current.function.name += partial.function.name
+        if (partial.function?.arguments) current.function.arguments += partial.function.arguments
+      }
+      return typeof delta.content === 'string' ? delta.content : null
+    }
+
+    for await (const chunk of response.body as any) {
+      buffer += decoder.decode(chunk, { stream: true })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() || ''
+      for (const event of events) {
+        const payload = event.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
+        const delta = consume(payload)
+        if (delta) yield { type: 'delta', content: delta }
+      }
+    }
+    const trailing = buffer.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
+    const delta = consume(trailing)
+    if (delta) yield { type: 'delta', content: delta }
+    yield { type: 'message', message: { role: 'assistant', content, reasoning_content: reasoning, tool_calls: toolCalls.length ? toolCalls : undefined, usage } }
+  }
 }
 
 export class OpenAIProvider extends OpenAICompatibleProvider {
