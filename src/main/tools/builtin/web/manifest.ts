@@ -25,7 +25,7 @@ export const webManifest: ToolManifest = {
     },
     {
       name: 'web_fetch',
-      description: '抓取网页正文。优先使用 Jina.ai Reader 进行抓取与清洗，自动降级为本地浏览器隐藏渲染与文本提取。',
+      description: '使用 Electron 本地隐藏浏览器抓取网页正文，清理后提取为 Markdown 文本。',
       parameters: {
         type: 'object',
         properties: {

@@ -3431,7 +3431,7 @@ app.whenReady().then(() => {
     messages: any[],
     workspacePath?: string,
     event?: Electron.IpcMainInvokeEvent,
-    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string }) => void
+    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string; sources?: any[] }) => void
   ): Promise<string> {
     const executor = new AgentExecutor()
     let thisController: AbortController
@@ -3502,6 +3502,17 @@ app.whenReady().then(() => {
           }
           if (onToolEvent) {
             onToolEvent({ type: 'tool_result', name: step.name, result: step.result })
+          }
+        } else if (step.type === 'web_sources') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'web_sources',
+              sources: step.sources,
+              sessionId: config.sessionId
+            })
+          }
+          if (onToolEvent) {
+            onToolEvent({ type: 'web_sources', name: 'web_sources', sources: step.sources })
           }
         } else if (step.type === 'token') {
           const payload = {

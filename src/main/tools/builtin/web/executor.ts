@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
+import { IToolExecutor, ToolContext, ToolResult, WebSource } from '../../core/types'
 import { getActiveStorageDir } from '../../utils/paths'
 import { LocalBrowser } from './localBrowser'
 
@@ -16,35 +16,30 @@ export class WebExecutor implements IToolExecutor {
         const { query } = args
         if (!query) return { content: '错误：缺少必要参数 query', success: false }
 
-        /* 之前使用的 Jina.ai 搜索逻辑已注释
-        const searchUrl = `https://s.jina.ai/${encodeURIComponent(query)}`
-        const response = await net.fetch(searchUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Authorization': 'Bearer jina_01998ab7ad694519abec1e712b5cd6ecpJTAmfuva19C6pOPQ5Z71dUbQucc'
-          }
-        })
-
-        if (!response.ok) {
-          const errMsg = await response.text().catch(() => '')
-          return { content: `联网搜索失败：Jina.ai 搜索服务返回状态码 ${response.status}${errMsg ? ' - ' + errMsg : ''}`, success: false }
-        }
-
-        const data = await response.text()
-        return { content: data || `未找到与 "${query}" 相关的搜索结果。`, success: true }
-        */
-
-        // 改用本地无头浏览器获取搜索结果（基于必应）
+        // 使用 Electron 本地无头浏览器获取 Bing 搜索结果。
         const results = await LocalBrowser.localSearch(query)
         if (results.length === 0) {
           return { content: `未找到与 "${query}" 相关的搜索结果。`, success: true }
         }
 
-        const formattedResults = results
-          .map((r, i) => `[${i + 1}] 标题: ${r.title}\n链接: ${r.url}\n摘要: ${r.snippet}\n`)
-          .join('\n')
+        const fetchedAt = new Date().toISOString()
+        const sources: WebSource[] = results.map((result, index) => ({
+          id: `S${index + 1}`,
+          title: result.title,
+          url: result.url,
+          snippet: result.snippet,
+          fetchedAt,
+          sourceType: 'search'
+        }))
+        const sourceContext = sources
+          .map(source => `[${source.id}] 标题: ${source.title}\nURL: ${source.url}\n摘要: ${source.snippet || '无'}`)
+          .join('\n\n')
 
-        return { content: formattedResults, success: true }
+        return {
+          content: `<web_sources>\n${sourceContext}\n</web_sources>\n\n回答中对依赖网页的事实必须引用上述来源 ID（例如 [S1]），不得编造其他引用。`,
+          state: { sources },
+          success: true
+        }
       }
 
       // 2. web_fetch
@@ -54,80 +49,7 @@ export class WebExecutor implements IToolExecutor {
 
         let textContent = ''
 
-        /* 之前使用的 Jina.ai 抓取及本地隐藏 BrowserWindow 兜底降级逻辑已注释
-        // 优先使用 Jina.ai Reader 进行抓取与清洗（效果最好）
-        try {
-          const readerUrl = `https://r.jina.ai/${url}`
-          const response = await net.fetch(readerUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Authorization': 'Bearer jina_01998ab7ad694519abec1e712b5cd6ecpJTAmfuva19C6pOPQ5Z71dUbQucc'
-            }
-          })
-          if (response.ok) {
-            const data = await response.text()
-            if (data && data.trim()) {
-              textContent = data
-            }
-          }
-        } catch (jinaErr: any) {
-          console.warn('[web_fetch] Jina Reader 抓取失败，降级到本地 BrowserWindow 后台渲染抓取:', jinaErr.message)
-        }
-
-        // 兜底方案：使用隐藏的 BrowserWindow 进行本地加载并渲染提取文字
-        if (!textContent) {
-          textContent = await new Promise<string>((resolve, reject) => {
-            const tempWin = new BrowserWindow({
-              show: false,
-              webPreferences: {
-                nodeIntegration: false,
-                contextIsolation: true,
-                images: false, // 禁用图片加载
-              }
-            })
-
-            const timer = setTimeout(() => {
-              tempWin.destroy()
-              reject(new Error('网页加载超时（15秒）'))
-            }, 15000)
-
-            tempWin.webContents.on('did-finish-load', async () => {
-              try {
-                const text = await tempWin.webContents.executeJavaScript(`
-                  (() => {
-                    const excludes = ['script', 'style', 'nav', 'footer', 'iframe', 'header', 'noscript'];
-                    excludes.forEach(tag => {
-                      document.querySelectorAll(tag).forEach(el => el.remove());
-                    });
-                    return document.body.innerText || document.body.textContent || '';
-                  })()
-                `)
-                clearTimeout(timer)
-                tempWin.destroy()
-                resolve(text)
-              } catch (err) {
-                clearTimeout(timer)
-                tempWin.destroy()
-                reject(err)
-              }
-            })
-
-            tempWin.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-              clearTimeout(timer)
-              tempWin.destroy()
-              reject(new Error(`网页加载失败: ${errorDescription} (代码: ${errorCode})`))
-            })
-
-            tempWin.loadURL(url).catch(err => {
-              clearTimeout(timer)
-              tempWin.destroy()
-              reject(err)
-            })
-          })
-        }
-        */
-
-        // 直接调用本地浏览器加载、智能清理并转换为结构化的 Markdown 正文
+        // 使用 Electron 本地浏览器加载、清理并转换为 Markdown 正文。
         textContent = await LocalBrowser.localFetch(url)
 
         if (!textContent || !textContent.trim()) {
@@ -159,7 +81,17 @@ export class WebExecutor implements IToolExecutor {
         }
 
         const relPath = `.agentpet_cache/${cacheFileName}`
-        const finalResult = `【网页抓取成功】
+        const source: WebSource = {
+          id: 'S1',
+          title: textContent.match(/^#\s+(.+)$/m)?.[1]?.trim() || new URL(url).hostname,
+          url,
+          snippet: textContent.replace(/^#.+\n*/, '').replace(/\s+/g, ' ').slice(0, 300),
+          fetchedAt: new Date().toISOString(),
+          sourceType: 'fetch'
+        }
+        const finalResult = `<web_sources>\n[S1] 标题: ${source.title}\nURL: ${source.url}\n摘要: ${source.snippet}\n</web_sources>\n回答中对依赖本网页的事实必须引用 [S1]。
+
+【网页抓取成功】
 全文已保存至本地缓存文件：
 ${cacheFilePath}
 
@@ -170,7 +102,7 @@ ${displayContent}
 ⚠️ 【系统强制指令】：网页的完整离线 Markdown 内容已成功保存至相对路径：\`${relPath}\`。
 由于网页内容较长，上方预览已被系统截断。如果您根据上述预览无法 100% 把握回答主人的问题，您【必须】立即调用 \`read_file\` 工具，传入参数 \`file_path: "${relPath}"\` 来阅读该缓存文件的完整内容，绝对不允许向主人进行猜测回答或直接发起二次联网搜索！`
 
-        return { content: finalResult, success: true }
+        return { content: finalResult, state: { sources: [source] }, success: true }
       }
 
       return { content: `未知的操作类型: ${api}`, success: false }

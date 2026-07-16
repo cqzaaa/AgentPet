@@ -226,6 +226,8 @@ function parseInlineMarkdown(text: string): string {
   html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>⚠️ 已被删除 (\'+this.alt+\')</div>\'" />')
   // 4. 链接 [text](url)
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
+  // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
+  html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">S$1</span>')
   return html
 }
 
@@ -1076,13 +1078,27 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   const renderedText = useMemo(() => {
     if (!textForRender) return null
-    const displayText = textForRender === '__WELCOME_MSG__'
+    let displayText = textForRender === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
       : textForRender === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
         : textForRender
+    // Resolve source IDs emitted by the model (for example [新浪新闻 S32])
+    // to the URL retained in the corresponding web_sources tool event.
+    const sourceById = new Map(
+      (msg.toolSteps || [])
+        .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
+        .flatMap((step: any) => step.detail)
+        .filter((source: any) => source?.id && source?.url)
+        .map((source: any) => [source.id, source])
+    )
+    displayText = displayText.replace(/\[([^\]\n]*?\bS\d+)\](?!\()/g, (citation, label) => {
+      const sourceId = label.match(/\b(S\d+)\b/)?.[1]
+      const source = sourceId ? sourceById.get(sourceId) as any : undefined
+      return source ? `[${label}](${source.url})` : citation
+    })
     return renderAdvancedMessage(displayText)
-  }, [textForRender, currentAvatarName])
+  }, [textForRender, currentAvatarName, msg.toolSteps])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1144,6 +1160,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
 
   const toolSteps = msg.toolSteps || []
+  const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
+  const webSources = Array.from(new Map(
+    toolSteps
+      .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
+      .flatMap((step: any) => step.detail)
+      .filter((source: any) => source?.id && source?.url && citedSourceIds.has(source.id))
+      .map((source: any) => [source.id, source])
+  ).values()) as any[]
   const toolStepsScrollRef = useRef<HTMLDivElement>(null)
 
   // 当工具调用步骤改变时，自动将步骤框滚动到底部
@@ -1394,6 +1418,26 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           >
             {renderedText}
           </div>
+        )}
+
+        {webSources.length > 0 && !msg.isThinking && (
+          <details style={{ marginTop: '12px', border: '1px solid rgba(59, 130, 246, 0.24)', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.04)', padding: '8px 12px' }}>
+            <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: '12px', fontWeight: 600 }}>
+              来源 ({webSources.length})
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+              {webSources.map((source: any) => (
+                <a key={source.id} href={source.url} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', padding: '8px', borderRadius: '6px', background: 'var(--bg-card, #fff)' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'baseline' }}>
+                    <span className="web-citation">{source.id}</span>
+                    <span style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.title}</span>
+                  </div>
+                  {source.snippet && <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', marginTop: '4px', lineHeight: 1.45 }}>{source.snippet}</div>}
+                  <div style={{ fontSize: '10px', color: '#2563eb', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.url}</div>
+                </a>
+              ))}
+            </div>
+          </details>
         )}
       </div>
 

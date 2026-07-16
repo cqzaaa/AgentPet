@@ -33,6 +33,15 @@ export interface ToolResult {
   error?: { message: string; name?: string }
 }
 
+export interface WebSource {
+  id: string
+  title: string
+  url: string
+  snippet?: string
+  fetchedAt: string
+  sourceType: 'search' | 'fetch'
+}
+
 export interface ToolContext {
   workspacePath: string
   sessionId?: string

@@ -11,11 +11,12 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, detail } of events) {
+  for (const { type, name, args, result, detail, sources } of events) {
     const id = `step-${Date.now()}-${Math.random()}`
     if (type === 'tool_call') toolSteps.push({ id, type: 'call', name, detail: args })
     else if (type === 'tool_result') toolSteps.push({ id, type: 'result', name, detail: result })
     else if (type === 'think') toolSteps.push({ id, type: 'think', name, detail })
+    else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, type: 'sources', detail: sources })
   }
   return toolSteps
 }

@@ -5219,4 +5219,17 @@ body {
 .chat-skeleton-container {
   padding: 0 20px;
   box-sizing: border-box;
-}
+}
+.web-citation {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1.25;
+  vertical-align: baseline;
+}

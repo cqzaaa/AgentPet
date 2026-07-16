@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { isIP } from 'net'
 
 export interface SearchResult {
   title: string
@@ -18,7 +19,7 @@ export class LocalBrowser {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: false, // 允许部分复杂的页面加载和跨域请求
+        webSecurity: true,
         images: false // 禁用图片加载以大幅提升渲染速度
       }
     })
@@ -34,13 +35,45 @@ export class LocalBrowser {
     return win
   }
 
+  private static assertSafeRemoteUrl(value: string): void {
+    let parsed: URL
+    try {
+      parsed = new URL(value)
+    } catch {
+      throw new Error('无效的网页 URL')
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('仅允许抓取 http 或 https 网页')
+    }
+
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    const privateIpv4 = (ip: string) => {
+      const parts = ip.split('.').map(Number)
+      return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 ||
+        (parts[0] === 169 && parts[1] === 254) ||
+        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+        (parts[0] === 192 && parts[1] === 168)
+    }
+    const isPrivateIpv6 = host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
+        (isIP(host) === 4 && privateIpv4(host)) || (isIP(host) === 6 && isPrivateIpv6)) {
+      throw new Error('为保护本机和内网，不允许访问本地或私网地址')
+    }
+  }
+
   /**
-   * 本地搜索服务 (使用 Bing)
+   * 本地搜索服务（使用 Bing）
    */
   public static async localSearch(query: string): Promise<SearchResult[]> {
+    const normalizedQuery = query.trim().replace(/\s+/g, ' ')
+    if (!normalizedQuery) {
+      throw new Error('搜索关键词不能为空')
+    }
+
     return new Promise<SearchResult[]>((resolve, reject) => {
       const win = this.createHiddenWindow()
       let isResolved = false
+      let isSearchPage = false
 
       const cleanup = () => {
         isResolved = true
@@ -60,12 +93,14 @@ export class LocalBrowser {
 
       win.webContents.on('did-finish-load', async () => {
         if (isResolved) return
+        // The first load only initializes Bing's cookie-backed session.
+        if (!isSearchPage) return
         try {
-          // 注入 JS 提取 Bing 的搜索结果
-          const results = (await win.webContents.executeJavaScript(`
+          // 提取 Bing 的自然搜索结果。
+          const searchResponse = (await win.webContents.executeJavaScript(`
             (() => {
+              const submittedQuery = (document.querySelector('#sb_form_q')?.value || '').trim();
               const list = [];
-              // Bing 的自然搜索条目通常包含在 #b_results .b_algo 中
               const items = document.querySelectorAll('#b_results .b_algo');
               items.forEach(item => {
                 const titleEl = item.querySelector('h2 a');
@@ -83,12 +118,19 @@ export class LocalBrowser {
                   }
                 }
               });
-              return list;
+              return { submittedQuery, results: list };
             })()
-          `)) as SearchResult[]
+          `)) as { submittedQuery: string; results: SearchResult[] }
+
+          // Do not return a result page if Bing changed the submitted query
+          // during a regional redirect or client-side navigation.
+          const actualQuery = searchResponse.submittedQuery.replace(/\s+/g, ' ')
+          if (actualQuery && actualQuery !== normalizedQuery) {
+            throw new Error(`Bing 搜索词被改写：期望“${normalizedQuery}”，实际为“${actualQuery}”`)
+          }
 
           cleanup()
-          resolve(results.slice(0, 5))
+          resolve(searchResponse.results.slice(0, 5))
         } catch (err) {
           cleanup()
           reject(err)
@@ -106,8 +148,21 @@ export class LocalBrowser {
         reject(new Error(`搜索页面加载失败: ${errorDescription} (代码: ${errorCode})`))
       })
 
-      const searchUrl = `https://cn.bing.com/search?q=${encodeURIComponent(query)}`
-      win.loadURL(searchUrl).catch(err => {
+      // Keep the request shape aligned with a regular browser Bing search.
+      // Forcing mkt/setlang makes the Electron request differ from the user's
+      // working URL and can trigger Bing's degraded automated-search response.
+      const searchUrl = new URL('https://www.bing.com/search')
+      searchUrl.searchParams.set('q', normalizedQuery)
+      searchUrl.searchParams.set('form', 'QBLH')
+
+      // Establish MUID/MUIDB and related cookies before searching, using this
+      // exact BrowserWindow session. Bing otherwise may search only the first
+      // Chinese character while leaving the full term in #sb_form_q.
+      win.loadURL('https://www.bing.com/').then(() => {
+        if (isResolved) return
+        isSearchPage = true
+        return win.loadURL(searchUrl.toString())
+      }).catch(err => {
         if (isResolved) return
         cleanup()
         reject(err)
@@ -119,6 +174,7 @@ export class LocalBrowser {
    * 本地网页爬取服务 (加载 URL 并提取 Markdown)
    */
   public static async localFetch(url: string): Promise<string> {
+    this.assertSafeRemoteUrl(url)
     return new Promise<string>((resolve, reject) => {
       const win = this.createHiddenWindow()
       let isResolved = false
@@ -250,6 +306,16 @@ export class LocalBrowser {
         }
         cleanup()
         reject(new Error(`网页加载失败: ${errorDescription} (代码: ${errorCode})`))
+      })
+
+      win.webContents.on('will-redirect', (event, redirectUrl) => {
+        try {
+          this.assertSafeRemoteUrl(redirectUrl)
+        } catch (err) {
+          event.preventDefault()
+          cleanup()
+          reject(err)
+        }
       })
 
       win.loadURL(url).catch(err => {

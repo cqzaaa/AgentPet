@@ -68,6 +68,62 @@ export class AgentExecutor {
     return fullTools.find((t: any) => t.function.name === name) || null
   }
 
+  /** Keep the parameter prompt small while retaining enough structure to validate a call. */
+  private compactJsonSchema(schema: any, depth = 0): any {
+    if (!schema || typeof schema !== 'object' || depth > 4) return {}
+
+    const compact: any = {}
+    if (typeof schema.type === 'string') compact.type = schema.type
+    if (typeof schema.description === 'string') compact.description = schema.description.slice(0, 160)
+    if (Array.isArray(schema.enum)) compact.enum = schema.enum.slice(0, 20)
+    if (Array.isArray(schema.required) && schema.required.length > 0) compact.required = schema.required
+    if (schema.items) compact.items = this.compactJsonSchema(schema.items, depth + 1)
+    if (schema.properties && typeof schema.properties === 'object') {
+      compact.properties = Object.fromEntries(
+        Object.entries(schema.properties).map(([key, value]) => [key, this.compactJsonSchema(value, depth + 1)])
+      )
+    }
+    return compact
+  }
+
+  private parseJsonObject(content: unknown): Record<string, any> | null {
+    if (typeof content !== 'string') return null
+    const candidates = [
+      content.trim(),
+      content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    ]
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+      } catch {
+        // Try the next representation, including a fenced JSON response.
+      }
+    }
+    return null
+  }
+
+  private hasValidToolArguments(args: unknown, schema: any): args is Record<string, any> {
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return false
+    const objectArgs = args as Record<string, any>
+    const required = Array.isArray(schema?.required) ? schema.required : []
+    if (required.some((key: string) => objectArgs[key] === undefined || objectArgs[key] === null || objectArgs[key] === '')) return false
+
+    for (const [key, value] of Object.entries(objectArgs)) {
+      const propertySchema = schema?.properties?.[key]
+      if (!propertySchema || value === undefined || value === null) continue
+      const type = propertySchema.type
+      if ((type === 'string' && typeof value !== 'string') ||
+          (type === 'number' && typeof value !== 'number') ||
+          (type === 'integer' && (!Number.isInteger(value))) ||
+          (type === 'boolean' && typeof value !== 'boolean') ||
+          (type === 'array' && !Array.isArray(value)) ||
+          (type === 'object' && (typeof value !== 'object' || Array.isArray(value)))) return false
+    }
+    return true
+  }
+
   private async handleLongTaskAutoMemory(
     sessionId: string,
     chatHistory: ChatMessage[],
@@ -176,6 +232,9 @@ export class AgentExecutor {
     const isFrontend = !config.isBackground
 
     let chatHistory: ChatMessage[] = JSON.parse(JSON.stringify(messages))
+    let webSourceCounter = 0
+    const availableWebSourceIds = new Set<string>()
+    const executedWebSearchQueries = new Set<string>()
 
     if (sessionId) {
       const chatDir = getActiveChatDir()
@@ -372,28 +431,44 @@ export class AgentExecutor {
         for (let i = 0; i < toolCalls.length; i++) {
           const toolCall = toolCalls[i]
           const toolName = toolCall.function.name
-          const fullTool = this.getFullToolDefinitionByName(toolName, isFrontend)
+          const fullToolDefinition = this.getFullToolDefinitionByName(toolName, isFrontend)
+          const fullTool = fullToolDefinition
+            ? { ...fullToolDefinition, function: { ...fullToolDefinition.function } }
+            : null
+          const parameterSchema = fullTool?.function.parameters
 
           const isMcpTool = mcpManager.hasTool(toolName)
-          if (isMcpTool && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
+          // 简化 Schema 仅用于帮助模型在大量 MCP 工具中选择目标。部分模型即使
+          // 面对空 Schema 也会返回完整参数；这种情况下无需再发一次参数补全请求。
+          // 否则，兼容性较弱的网关会在第二次请求报 400，尽管原始 MCP 调用可正常执行。
+          let hasArguments = false
+          try {
+            const parsedArguments = this.parseJsonObject(toolCall.function.arguments)
+            hasArguments = this.hasValidToolArguments(parsedArguments, parameterSchema)
+          } catch {
+            // 无法解析的参数仍交由第二阶段尝试修复。
+          }
+
+          if (isMcpTool && !hasArguments && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
             console.log(`[Two-Stage] 检测到简化工具调用: ${toolName}，正在启动第二阶段参数填充...`)
             try {
+              const compactSchema = this.compactJsonSchema(parameterSchema)
+              fullTool.function.parameters = compactSchema
               const tempHistory: ChatMessage[] = [
                 ...chatHistory,
-                responseMsg,
                 {
-                  role: 'tool' as const,
-                  tool_call_id: toolCall.id,
-                  name: toolName,
+                  role: 'user' as const,
                   content: `【系统提示】此工具需要输入参数。请根据以下 JSON Schema 定义重新生成此工具调用，并提供正确的 arguments 参数字段：\n${JSON.stringify(fullTool.function.parameters)}`
+                },
+                {
+                  role: 'user' as const,
+                  content: `Return only a valid JSON object of arguments for the selected MCP tool "${toolName}". Do not call a tool and do not add explanation.`
                 }
               ]
 
               const fillOptions: ChatOptions = {
                 model,
                 temperature: 0.1,
-                tools: [fullTool],
-                tool_choice: { type: 'function', function: { name: toolName } },
                 signal: abortSignal
               }
 
@@ -405,8 +480,6 @@ export class AgentExecutor {
                 const fallbackOptions: ChatOptions = {
                   model,
                   temperature: 0.1,
-                  tools: [fullTool],
-                  tool_choice: 'auto',
                   signal: abortSignal
                 }
                 fillResponse = await modelProvider.chat(tempHistory, fallbackOptions)
@@ -420,6 +493,12 @@ export class AgentExecutor {
                 }
               }
 
+              const generatedArgs = this.parseJsonObject(fillResponse.content)
+              if (this.hasValidToolArguments(generatedArgs, parameterSchema)) {
+                fillResponse.tool_calls = [{
+                  function: { name: toolName, arguments: JSON.stringify(generatedArgs) }
+                }]
+              }
               const matchedCall = fillResponse.tool_calls?.find((tc: any) => tc.function.name === toolName)
               if (matchedCall && matchedCall.function.arguments) {
                 console.log(`[Two-Stage] 成功获取参数:`, matchedCall.function.arguments)
@@ -428,7 +507,8 @@ export class AgentExecutor {
                 console.warn(`[Two-Stage] 未能从模型返回中获取到匹配的参数`)
               }
             } catch (fillErr) {
-              console.error(`[Two-Stage] 参数填充出错:`, fillErr)
+              // 参数补全是兼容性优化；保留初始调用，让 MCP 自身决定是否接受参数。
+              console.warn(`[Two-Stage] 参数补全不可用，将继续执行初始 MCP 调用:`, fillErr)
             }
           }
         }
@@ -498,9 +578,52 @@ export class AgentExecutor {
             }
 
             let toolResult: string
+            let webSources: any[] | undefined
             if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
               toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
+            } else if (toolName === 'web_search') {
+              let query = typeof toolArgs.query === 'string' ? toolArgs.query.trim().replace(/\s+/g, ' ') : ''
+              const hanCharacters = (query.match(/[\u3400-\u9fff]/g) || []).length
+              if (hanCharacters === 1) {
+                // The model occasionally emits the first character of a Chinese name as
+                // the query. Recover the user's complete request rather than searching it.
+                const latestUserMessage = [...chatHistory].reverse().find((message: any) => message.role === 'user')
+                const userContent = typeof latestUserMessage?.content === 'string'
+                  ? latestUserMessage.content
+                  : Array.isArray(latestUserMessage?.content)
+                    ? latestUserMessage.content
+                      .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+                      .map((part: any) => part.text)
+                      .join(' ')
+                    : ''
+                const recoveredQuery = userContent.trim().replace(/\s+/g, ' ')
+                const recoveredHanCharacters = (recoveredQuery.match(/[\u3400-\u9fff]/g) || []).length
+                if (recoveredHanCharacters > 1) {
+                  query = recoveredQuery
+                  toolArgs = { ...toolArgs, query }
+                } else {
+                  toolResult = '已拦截单字搜索：请使用包含完整人名、事件或主题的查询词。'
+                }
+              }
+
+              if (!toolResult!) {
+                if (executedWebSearchQueries.has(query)) {
+                  toolResult = `已跳过重复搜索：${query}`
+                } else {
+                  executedWebSearchQueries.add(query)
+                  const ctx = {
+                    workspacePath: workspacePath || '',
+                    sessionId,
+                    isFrontend,
+                    sandboxMode: !!sandboxMode,
+                    abortSignal
+                  }
+                  const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
+                  toolResult = res.content
+                  webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
+                }
+              }
             } else {
               const ctx = {
                 workspacePath: workspacePath || '',
@@ -511,6 +634,7 @@ export class AgentExecutor {
               }
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
               toolResult = res.content
+              webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
             }
 
             if (abortSignal?.aborted) {
@@ -533,7 +657,8 @@ export class AgentExecutor {
               toolCallId: toolCall.id,
               toolName,
               displayResult,
-              contextToolResult
+              contextToolResult,
+              webSources
             }
           }))
           toolExecutionResults.push(...batchResults)
@@ -543,10 +668,24 @@ export class AgentExecutor {
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
+          const normalizedSources: any[] = []
+          if (res.webSources?.length) {
+            normalizedSources.push(...res.webSources.map((source: any) => ({ ...source, id: `S${++webSourceCounter}` })))
+            normalizedSources.forEach(source => availableWebSourceIds.add(source.id))
+            for (let index = 0; index < res.webSources.length; index++) {
+              const oldId = res.webSources[index].id
+              const newId = normalizedSources[index].id
+              res.displayResult = String(res.displayResult).split(`[${oldId}]`).join(`[${newId}]`)
+              res.contextToolResult = String(res.contextToolResult).split(`[${oldId}]`).join(`[${newId}]`)
+            }
+          }
           yield {
             type: 'tool_result',
             name: res.toolName,
             result: res.displayResult
+          }
+          if (normalizedSources.length) {
+            yield { type: 'web_sources', sources: normalizedSources }
           }
 
           chatHistory.push({
@@ -562,6 +701,10 @@ export class AgentExecutor {
         // 完成整个调用链
         let finalResponse = typeof responseMsg.content === 'string' ? responseMsg.content : ''
         finalResponse = finalResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+        // 只保留实际由本轮联网工具产生的引用，防止模型编造来源编号。
+        finalResponse = finalResponse.replace(/\[S(\d+)\]/g, (citation, number) =>
+          availableWebSourceIds.has(`S${number}`) ? citation : ''
+        )
 
         if (!finalResponse.trim() && loopCount > 1) {
           finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'

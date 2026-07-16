@@ -2,6 +2,7 @@ export type AgentStepEvent =
   | { type: 'think'; detail: string }
   | { type: 'tool_call'; name: string; args: any; id: string }
   | { type: 'tool_result'; name: string; result: string }
+  | { type: 'web_sources'; sources: Array<{ id: string; title: string; url: string; snippet?: string; fetchedAt: string; sourceType: 'search' | 'fetch' }> }
   | { type: 'text_delta'; content: string }
   | { type: 'text'; content: string }
   | { type: 'token'; promptTokens: number; completionTokens: number }
