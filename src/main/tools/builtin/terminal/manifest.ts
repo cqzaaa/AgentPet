@@ -26,6 +26,11 @@ export const terminalManifest: ToolManifest = {
           cwd: {
             type: 'string',
             description: '工作目录（可选）'
+          },
+          shell: {
+            type: 'string',
+            enum: ['powershell', 'bash', 'cmd'],
+            description: '执行命令的 shell。本机默认 powershell；仅在需要 POSIX 语法时使用 bash；SSH 远程主机默认 bash。'
           }
         },
         required: ['command']
@@ -74,6 +79,11 @@ export const terminalManifest: ToolManifest = {
             type: 'string',
             description: '要执行的终端命令'
           },
+          shell: {
+            type: 'string',
+            enum: ['powershell', 'bash', 'cmd'],
+            description: '执行命令的 shell。本机默认 powershell；仅在需要 POSIX 语法时使用 bash；SSH 远程主机默认 bash。'
+          },
           timeout_seconds: {
             type: 'number',
             description: '可选。命令执行的超时秒数。如果是如拉取镜像、编译打包等长耗时操作，请传入合适的值（例如 600 代表10分钟，或传入 0 代表无超时限制）。默认 120。'
@@ -90,6 +100,11 @@ export const terminalManifest: ToolManifest = {
 - 对于长时间运行的命令（如服务器启动、打包编译），必须使用 run_command 异步执行
 - 异步命令执行后，使用 get_command_output 跟踪最新的输出进度
 - 使用 kill_command 终止不再需要的挂起或超时进程
+- 本机 Windows 默认使用 shell=powershell。PowerShell 命令示例：Get-Date、Get-ChildItem、Get-Process。
+- 仅在需要 POSIX 语法或 Unix 工具链时显式使用 shell=bash，例如 date +"%Y-%m-%d"、grep、sed、awk。
+- shell=cmd 仅用于 .bat 文件或明确的传统 CMD 命令。不要依赖命令文本自动猜测 shell。
+- git、node、npm、python、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。
+- SSH 远程会话默认 shell=bash；除非远程主机明确是 Windows，才指定 shell=powershell 或 shell=cmd。
 </rules>
 </tool_instructions>`
 }

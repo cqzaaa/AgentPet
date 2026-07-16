@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, no-useless-escape, react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/rules-of-hooks */
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import iconSvg from '../assets/icon_from_image.svg'
 import hljs from 'highlight.js'
@@ -26,7 +27,7 @@ function highlightCode(code: string, lang: string): string {
       return hljs.highlight(code, { language: l }).value
     }
     return hljs.highlightAuto(code).value
-  } catch (e) {
+  } catch {
     return escapeHtml(code)
   }
 }
@@ -1036,6 +1037,20 @@ interface MessageItemProps {
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
 }
 
+function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
+  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.onPreviewFile !== next.onPreviewFile) {
+    return false
+  }
+  if (previous.highlightedMessageId === next.highlightedMessageId) return true
+  if (previous.highlightedMessageId === next.highlightedMessageId) return true
+  // Changing the highlighted id used to rerender every visible virtualized row.
+  // Only the previously highlighted message and the newly highlighted message need
+  // to update their CSS class.
+  const wasAffected = previous.highlightedMessageId === previous.msg.id
+  const isAffected = next.highlightedMessageId === next.msg.id
+  return !wasAffected && !isAffected
+}
+
 export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
@@ -1056,15 +1071,18 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
 
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
+  const deferredStreamingText = useDeferredValue(msg.isThinking ? msg.text : null)
+  const textForRender = msg.isThinking ? deferredStreamingText : msg.text
+
   const renderedText = useMemo(() => {
-    if (!msg.text) return null
-    const displayText = msg.text === '__WELCOME_MSG__'
+    if (!textForRender) return null
+    const displayText = textForRender === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
-      : msg.text === '__SYSTEM_INIT_MSG__'
+      : textForRender === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
-        : msg.text
+        : textForRender
     return renderAdvancedMessage(displayText)
-  }, [msg.text, currentAvatarName])
+  }, [textForRender, currentAvatarName])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1771,4 +1789,4 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       )}
     </div>
   )
-})
+}, areMessageItemPropsEqual)

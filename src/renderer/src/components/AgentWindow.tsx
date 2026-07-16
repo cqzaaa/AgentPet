@@ -1,7 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react'
+/* eslint-disable react-hooks/set-state-in-effect */
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { FilePreviewPanel } from './FilePreviewPanel'
 import { useAppStore, useAppStoreRaw } from '../hooks/useAppStore'
+import type { Session } from '../hooks/useAppStore'
 import { ChatPage } from '../pages/ChatPage'
+import { ChatControllerProvider } from '../hooks/useChatController'
 import { ControlPage } from '../pages/ControlPage'
 import { AgentPage } from '../pages/AgentPage'
 import { SettingsPage } from '../pages/SettingsPage'
@@ -48,7 +51,7 @@ function HistoryListIcon(): React.JSX.Element {
   )
 }
 
-const checkIsThinking = (s: any): boolean => {
+const checkIsThinking = (s: Session | undefined): boolean => {
   if (!s || !s.messages) return false
   for (let i = s.messages.length - 1; i >= 0; i--) {
     const m = s.messages[i]
@@ -57,15 +60,57 @@ const checkIsThinking = (s: any): boolean => {
   return false
 }
 
+function getSessionPreview(session: Session): string {
+  const messages = session.messages || []
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.sender === 'system' || message.isThinking) continue
+    const text = (message.text || '')
+      .replace(/```[\s\S]*?```/g, '[代码]')
+      .replace(/[-*_`#>]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text) return text.slice(0, 40)
+  }
+  return ''
+}
+
+/** Keeps the shell stable while only the active agent message text is growing. */
+function createShellSessionsSelector(): (state: { sessions: Session[] }) => Session[] {
+  let cachedSessions: Session[] = []
+  let cachedSignatures: string[] = []
+  return (state: { sessions: Session[] }) => {
+    const sessions = state.sessions
+    const signatures = sessions.map(session => [
+      session.id,
+      session.name,
+      session.pinned ? '1' : '0',
+      session.createdAt || session.time,
+      checkIsThinking(session) ? '1' : '0',
+      getSessionPreview(session)
+    ].join('\u0000'))
+    if (
+      signatures.length === cachedSignatures.length &&
+      signatures.every((signature, index) => signature === cachedSignatures[index])
+    ) {
+      return cachedSessions
+    }
+    cachedSessions = sessions
+    cachedSignatures = signatures
+    return sessions
+  }
+}
+
 export function AgentWindow(): React.JSX.Element {
   const store = useAppStore()
+  const selectShellSessions = useMemo(() => createShellSessionsSelector(), [])
 
   // 使用 Zustand 细粒度选择器订阅状态以阻止全局无用重渲染
   const theme = useAppStoreRaw(state => state.theme)
   const isCollapsed = useAppStoreRaw(state => state.isCollapsed)
   const activeTab = useAppStoreRaw(state => state.activeTab)
   const showApiKeyModal = useAppStoreRaw(state => state.showApiKeyModal)
-  const sessions = useAppStoreRaw(state => state.sessions)
+  const sessions = useAppStoreRaw(selectShellSessions)
   const activeSessionId = useAppStoreRaw(state => state.activeSessionId)
   const customModelFile = useAppStoreRaw(state => state.customModelFile)
   const skillsList = useAppStoreRaw(state => state.skillsList)
@@ -121,6 +166,30 @@ export function AgentWindow(): React.JSX.Element {
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
 
+  const chatActions = {
+    setInputValue: store.setInputValue,
+    handleSendChat: store.handleSendChat,
+    saveLlmConfig: store.saveLlmConfig,
+    setAttachedFiles: store.setAttachedFiles,
+    handlePasteFiles: store.handlePasteFiles,
+    handleUploadFile: store.handleUploadFile,
+    setHighlightedMessageId: store.setHighlightedMessageId,
+    handleAbortLlm: store.handleAbortLlm,
+    handleUpdateExecutionDevice: store.handleUpdateExecutionDevice,
+    handleConnectSsh: store.handleConnectSsh,
+    handleDisconnectSsh: store.handleDisconnectSsh,
+    showToast: store.showToast,
+    handleRespondPermission: store.handleRespondPermission,
+    toggleSkillEnable: store.toggleSkillEnable,
+    setActiveTab: store.setActiveTab,
+    setAgentSubTab: store.setAgentSubTab,
+    refreshSkillsAndStorage: store.refreshSkillsAndStorage,
+    refreshMcpServers: store.refreshMcpServers,
+    saveMcpConfig: store.saveMcpConfig,
+    handlePreviewFile: store.handlePreviewFile,
+    setShowFilePanel: store.setShowFilePanel
+  }
+
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -132,7 +201,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const [isMaximized, setIsMaximized] = useState(false)
 
-  const checkMaximized = async () => {
+  const checkMaximized = async (): Promise<void> => {
     if (window.api?.isAgentWindowMaximized) {
       const max = await window.api.isAgentWindowMaximized()
       setIsMaximized(max)
@@ -159,7 +228,7 @@ export function AgentWindow(): React.JSX.Element {
     setOpenSessionIds(prev => prev.filter(id => validIds.includes(id)))
   }, [sessions])
 
-  const handleCloseTab = (idToClose: string, e: React.MouseEvent) => {
+  const handleCloseTab = (idToClose: string, e: React.MouseEvent): void => {
     e.stopPropagation()
     const nextTabs = openSessionIds.filter(id => id !== idToClose)
     setOpenSessionIds(nextTabs)
@@ -185,7 +254,7 @@ export function AgentWindow(): React.JSX.Element {
 
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) {
         setShowHistoryDropdown(false)
       }
@@ -200,7 +269,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const renderPage = (): React.JSX.Element => {
     switch (activeTab) {
-      case 'chat': return <ChatPage store={store} />
+      case 'chat': return <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>
       case 'control': return <ControlPage store={store} />
       case 'agent': return <AgentPage store={store} />
       case 'logs': return <LogsPage store={store} />
@@ -216,7 +285,7 @@ export function AgentWindow(): React.JSX.Element {
       <div className={`agent-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
         <div>
           {/* 顶部无边框拖拽区 */}
-          <div style={{ height: '16px', flexShrink: 0, WebkitAppRegion: 'drag' } as any} />
+          <div style={{ height: '16px', flexShrink: 0, WebkitAppRegion: 'drag' } as React.CSSProperties & { WebkitAppRegion: string }} />
           {/* Brand/Avatar Info */}
           <div className="sidebar-brand">
             <div className="brand-left">

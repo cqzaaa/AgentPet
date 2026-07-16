@@ -1,14 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, react-hooks/set-state-in-effect */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import type { AppStore } from '../hooks/useAppStore'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
+import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
 import { getModelIcon } from '../utils/modelIcons'
 
-
-interface ChatPageProps {
-  store: AppStore
-}
 
 // ── 模块级样式常量（避免每次渲染分配临时对象） ─────────────
 const SEARCH_INPUT_STYLE: React.CSSProperties = {
@@ -23,7 +20,7 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
   boxSizing: 'border-box'
 }
 
-function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
+function ChatPageImpl(): React.JSX.Element {
   const {
     llmConfig,
     activeSessMessages,
@@ -63,8 +60,11 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
     refreshSkillsAndStorage,
     refreshMcpServers,
     mcpConfig,
-    saveMcpConfig
-  } = store
+    saveMcpConfig,
+    handlePreviewFile: previewFile,
+    setShowFilePanel,
+    currentContextTokens
+  } = useChatController()
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
@@ -587,43 +587,6 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
   const [showContextTooltip, setShowContextTooltip] = useState(false)
   const contextLimit = 168000
 
-  // ── 优化：用 ref 跟踪消息数量和最后消息文本长度，避免 toolSteps 变更触发 O(n) 遍历 ──
-  const lastTokenCalcSigRef = useRef<string>('')
-  const cachedTokensRef = useRef<number>(0)
-
-  const currentContextTokens = useMemo(() => {
-    // 计算签名：消息数量 + 最后一条消息的前 500 字符（捕获流式文本变化，忽略 toolStep 变化）
-    const msgCount = activeSessMessages?.length ?? 0
-    const lastMsg = msgCount > 0 ? activeSessMessages[msgCount - 1] : null
-    const sig = `${msgCount}|${typeof lastMsg?.text === 'string' ? lastMsg.text.slice(0, 500) : ''}|${typeof lastMsg?.isThinking === 'boolean' ? lastMsg.isThinking : ''}`
-
-    if (sig === lastTokenCalcSigRef.current) {
-      return cachedTokensRef.current
-    }
-
-    let total = 0
-    if (activeSessMessages) {
-      for (const msg of activeSessMessages) {
-        if (msg.sender === 'user' || msg.sender === 'agent') {
-          let text = msg.text || ''
-          if (msg.fileInfo && msg.fileInfo.content) {
-            text += '\n' + msg.fileInfo.content
-          } else if (msg.fileInfos) {
-            for (const f of msg.fileInfos) {
-              if (f.content) text += '\n' + f.content
-            }
-          }
-          total += Math.max(1, Math.round(text.length * 0.5))
-        }
-      }
-    }
-    // 加入人设及系统开销预估
-    total += 1500
-
-    lastTokenCalcSigRef.current = sig
-    cachedTokensRef.current = total
-    return total
-  }, [activeSessMessages])
 
   const contextPercent = useMemo(() => {
     return Math.min(100, (currentContextTokens / contextLimit) * 100)
@@ -722,9 +685,9 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
   }, [isSending])
 
   const handlePreviewFile = useCallback((f: { name: string; path: string; size: number }) => {
-    store.handlePreviewFile(f)
-    store.setShowFilePanel(true)
-  }, [store.handlePreviewFile, store.setShowFilePanel])
+    previewFile(f)
+    setShowFilePanel(true)
+  }, [previewFile, setShowFilePanel])
 
   // 切换会话时重置滚动状态
   useEffect(() => {
@@ -826,16 +789,16 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
             <div className="chat-empty-state">
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
-                <div className="suggestion-chip" onClick={() => store.setInputValue('帮我处理一下这份文档的内容，提取关键信息')}>
+                <div className="suggestion-chip" onClick={() => setInputValue('帮我处理一下这份文档的内容，提取关键信息')}>
                   <span className="chip-icon">📄</span>文档处理
                 </div>
-                <div className="suggestion-chip" onClick={() => store.setInputValue('帮我分析这组数据并生成一份可视化报告')}>
+                <div className="suggestion-chip" onClick={() => setInputValue('帮我分析这组数据并生成一份可视化报告')}>
                   <span className="chip-icon">📊</span>数据分析与可视化
                 </div>
-                <div className="suggestion-chip" onClick={() => store.setInputValue('请为我构思一个独特的UI设计方案')}>
+                <div className="suggestion-chip" onClick={() => setInputValue('请为我构思一个独特的UI设计方案')}>
                   <span className="chip-icon">🎨</span>设计创意
                 </div>
-                <div className="suggestion-chip" onClick={() => store.setInputValue('用最佳实践编写这段代码功能')}>
+                <div className="suggestion-chip" onClick={() => setInputValue('用最佳实践编写这段代码功能')}>
                   <span className="chip-icon">💻</span>代码开发
                 </div>
               </div>
@@ -1589,5 +1552,4 @@ function ChatPageImpl({ store }: ChatPageProps): React.JSX.Element {
   )
 }
 
-// 使用 React.memo 配合 useAppStore 的 useMemo 返回值，在 store 引用不变时跳过重渲染
 export const ChatPage = React.memo(ChatPageImpl)

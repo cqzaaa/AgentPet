@@ -1,6 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
+import { useChatStreamEvents } from './useChatStreamEvents'
+import { useChatToolEvents } from './useChatToolEvents'
+import { useChatReplyRuntime } from './useChatReplyRuntime'
+import { useChatSend } from './useChatSend'
+import { useChatSessionSummary } from './useChatSessionSummary'
 
 // ── 类型定义 ─────────────────────────────────────────────────
 export interface CronLog {
@@ -55,6 +62,92 @@ export interface AttachedFile {
   content?: string
   safeName?: string
   objectUrl?: string
+}
+
+interface CachedContextMessage {
+  signature: string
+  tokens: number
+}
+
+interface SessionContextCache {
+  total: number
+  messages: Map<string | number, CachedContextMessage>
+}
+
+const contextTokenCache = new Map<string, SessionContextCache>()
+
+function getMessageTokenSignature(message: any): string {
+  const fileContent = message.fileInfo?.content || message.fileInfos?.map((file: any) => file.content || '').join('\n') || ''
+  return `${message.sender || ''}\u0000${message.text || ''}\u0000${fileContent}`
+}
+
+function estimateContextMessageTokens(message: any): number {
+  if (message.sender !== 'user' && message.sender !== 'agent') return 0
+  return Math.max(1, Math.round(getMessageTokenSignature(message).split('\u0000').slice(1).join('\n').length * 0.5))
+}
+
+function rebuildSessionContextTokens(session: Session): number {
+  const messages = new Map<string | number, CachedContextMessage>()
+  let total = 1500
+  for (const message of session.messages || []) {
+    const signature = getMessageTokenSignature(message)
+    const tokens = estimateContextMessageTokens(message)
+    messages.set(message.id, { signature, tokens })
+    total += tokens
+  }
+  contextTokenCache.set(session.id, { total, messages })
+  return total
+}
+
+/**
+ * Streaming only replaces the final agent message. Keep the total in the store
+ * and update that one message in O(1); other message edits safely fall back to
+ * a full rebuild.
+ */
+function getSessionContextTokens(previous: Session | undefined, next: Session): number {
+  const cache = contextTokenCache.get(next.id)
+  const previousMessages = previous?.messages || []
+  const nextMessages = next.messages || []
+  const previousLast = previousMessages[previousMessages.length - 1]
+  const nextLast = nextMessages[nextMessages.length - 1]
+
+  if (
+    cache && previousLast && nextLast &&
+    previousMessages.length === nextMessages.length &&
+    previousLast.id === nextLast.id && previousLast !== nextLast
+  ) {
+    const cached = cache.messages.get(nextLast.id)
+    const previousSignature = getMessageTokenSignature(previousLast)
+    if (cached?.signature === previousSignature) {
+      const signature = getMessageTokenSignature(nextLast)
+      const tokens = estimateContextMessageTokens(nextLast)
+      cache.messages.set(nextLast.id, { signature, tokens })
+      cache.total += tokens - cached.tokens
+      return cache.total
+    }
+  }
+  return rebuildSessionContextTokens(next)
+}
+
+function syncContextTokenUsage(previous: Session[], next: Session[], usage: Record<string, number>): Record<string, number> {
+  const previousById = new Map(previous.map(session => [session.id, session]))
+  let changed = false
+  const nextUsage: Record<string, number> = {}
+  for (const session of next) {
+    const prior = previousById.get(session.id)
+    const tokens = prior?.messages === session.messages && usage[session.id] !== undefined
+      ? usage[session.id]
+      : getSessionContextTokens(prior, session)
+    nextUsage[session.id] = tokens
+    changed ||= usage[session.id] !== tokens
+  }
+  for (const id of Object.keys(usage)) {
+    if (!(id in nextUsage)) {
+      contextTokenCache.delete(id)
+      changed = true
+    }
+  }
+  return changed ? nextUsage : usage
 }
 
 // ── 内部剪贴板（用于消息间复制文件） ─────────────────────────
@@ -133,8 +226,10 @@ export const useAppStoreRaw = create<any>((set) => ({
   })(),
   cronTasks: [],
   sessions: [],
+  contextTokenUsageBySession: {},
   activeSessionId: localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default',
   inputValue: '',
+  attachedFiles: [],
   tokenLogs: (() => {
     const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
     if (saved) {
@@ -154,7 +249,7 @@ export const useAppStoreRaw = create<any>((set) => ({
     try {
       const saved = localStorage.getItem('agentpet_disabled_skills')
       return saved ? JSON.parse(saved) : []
-    } catch (e) { return [] }
+    } catch { return [] }
   })(),
   activeMcpServers: [],
   storageInputPath: '',
@@ -203,12 +298,20 @@ export const useAppStoreRaw = create<any>((set) => ({
   setCronTasks: (val: any) => set((state: any) => ({
     cronTasks: typeof val === 'function' ? val(state.cronTasks) : val
   })),
-  setSessions: (val: any) => set((state: any) => ({
-    sessions: typeof val === 'function' ? val(state.sessions) : val
-  })),
+  setSessions: (val: any) => set((state: any) => {
+    const sessions = typeof val === 'function' ? val(state.sessions) : val
+    if (sessions === state.sessions) return state
+    return {
+      sessions,
+      contextTokenUsageBySession: syncContextTokenUsage(state.sessions, sessions, state.contextTokenUsageBySession)
+    }
+  }),
   setActiveSessionId: (val: any) => set({ activeSessionId: val }),
   setInputValue: (val: any) => set((state: any) => ({
     inputValue: typeof val === 'function' ? val(state.inputValue) : val
+  })),
+  setAttachedFiles: (val: any) => set((state: any) => ({
+    attachedFiles: typeof val === 'function' ? val(state.attachedFiles) : val
   })),
   setTokenLogs: (val: any) => set((state: any) => ({
     tokenLogs: typeof val === 'function' ? val(state.tokenLogs) : val
@@ -256,7 +359,18 @@ export function useAppSelector<T>(selector: (state: any) => T): T {
 
 // ── useAppStore hook ─────────────────────────────────────────
 export function useAppStore() {
-  const store = useAppStoreRaw()
+  // Message text and its derived token count are high-frequency fields. The
+  // aggregate compatibility hook must not execute for every streaming frame.
+  const store = useAppStoreRaw(useShallow((state: any) => {
+    const {
+      sessions: streamingSessions,
+      contextTokenUsageBySession: streamingTokenUsage,
+      ...stableState
+    } = state
+    void streamingSessions
+    void streamingTokenUsage
+    return stableState
+  }))
 
   const {
     activeTab, setActiveTab,
@@ -278,9 +392,10 @@ export function useAppStore() {
     llmConfig, setLlmConfig,
     mcpConfig, setMcpConfig,
     cronTasks, setCronTasks,
-    sessions, setSessions,
+    setSessions,
     activeSessionId, setActiveSessionId,
     inputValue, setInputValue,
+    attachedFiles, setAttachedFiles,
     tokenLogs, setTokenLogs,
     highlightedMessageId, setHighlightedMessageId,
     generatedFiles, setGeneratedFiles,
@@ -311,13 +426,17 @@ export function useAppStore() {
     isSessionSwitching, setIsSessionSwitching,
     isSessionsInitialized, setIsSessionsInitialized
   } = store
+  const sessions = useAppStoreRaw.getState().sessions as Session[]
 
   const dropdownRef = useRef<HTMLDivElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
-  const latestMsgToSaveRef = useRef<{ msg: any; sessionId: string } | null>(null)
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const activeSessionIdRef = useRef(activeSessionId)
   const creatingSessionIdsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
 
   const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
   const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
@@ -398,20 +517,6 @@ export function useAppStore() {
   }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile, setOpenTabs, setPreviewFile])
 
   // ── 打字机流式效果控制 ──────────────────────────────────────────
-  const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const isTypingRef = useRef<boolean>(false)
-  const abortedReplyIdsRef = useRef<Set<number>>(new Set())
-
-  // 卸载时清理定时器，防止内存泄漏
-  useEffect(() => {
-    return () => {
-      isTypingRef.current = false
-      if (typingTimerRef.current) {
-        clearTimeout(typingTimerRef.current)
-      }
-    }
-  }, [])
-
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type })
   }
@@ -686,7 +791,7 @@ export function useAppStore() {
           const llmThinkingAt = localStorage.getItem('agentpet_llm_thinking_at')
           const isLlmActive = llmThinkingAt && (Date.now() - Number(llmThinkingAt) < 30000)
 
-          let cleanedMessagesToSave: { msg: any, sessionId: string }[] = []
+          const cleanedMessagesToSave: { msg: any, sessionId: string }[] = []
           const cleaned = localSess.map((s: any) => ({
             ...s,
             messages: (s.messages || []).map((m: any) => {
@@ -1006,7 +1111,8 @@ export function useAppStore() {
   }
 
   const handleDeleteSession = async (id: string): Promise<void> => {
-    const filtered = sessions.filter(s => s.id !== id)
+    const currentSessions = useAppStoreRaw.getState().sessions as Session[]
+    const filtered = currentSessions.filter(s => s.id !== id)
     let nextSessions = filtered
     if (filtered.length === 0) {
       const timeStr = formatDateTime()
@@ -1058,8 +1164,9 @@ export function useAppStore() {
   }
 
   const handleCreateNewSession = async (): Promise<void> => {
-    if (sessions.length > 0 && sessions[sessions.length - 1].name === '(未命名)') {
-      setActiveSessionId(sessions[sessions.length - 1].id)
+    const currentSessions = useAppStoreRaw.getState().sessions as Session[]
+    if (currentSessions.length > 0 && currentSessions[currentSessions.length - 1].name === '(未命名)') {
+      setActiveSessionId(currentSessions[currentSessions.length - 1].id)
       setAttachedFiles([])
       setInputValue('')
       setActiveTab('chat')
@@ -1077,7 +1184,7 @@ export function useAppStore() {
       pinned: false
     }
     creatingSessionIdsRef.current.add(newId)
-    setSessions([...sessions, newSess])
+    setSessions([...currentSessions, newSess])
     setActiveSessionId(newId)
     setAttachedFiles([])
     setInputValue('')
@@ -1094,8 +1201,6 @@ export function useAppStore() {
     return localStorage.getItem('agentpet_workspace_path') || ''
   })
   
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
-
   const handleSelectWorkspace = async (): Promise<void> => {
     try {
       const path = await window.api.selectDirectory({ title: '选择工作空间/项目目录' })
@@ -1171,811 +1276,34 @@ export function useAppStore() {
     }
   }
 
-  // 文本增量按动画帧合并：IPC 可能在同一帧内到达多个 token，不能每个 token 都触发一次 React 渲染。
-  useEffect(() => {
-    if (!window.api.onLlmTextDelta) return
+  const { discardPendingMessageSave } = useChatToolEvents({
+    setSessions,
+    setCronTasks,
+    activeSessionIdRef,
+    cronRunningLogsRef
+  })
+  const { abortedReplyIdsRef, finalizeReply, failReply, abortReply } = useChatReplyRuntime({
+    setSessions,
+    setSendingSessionIds,
+    discardPendingMessageSave
+  })
+  const getChatState = useCallback(() => useAppStoreRaw.getState(), [])
+  const { triggerSessionSummary } = useChatSessionSummary({ getState: getChatState, setSessions })
+  const { handleSendChat } = useChatSend({
+    getState: getChatState,
+    workspacePath,
+    setShowApiKeyModal,
+    setSessions,
+    setInputValue,
+    setAttachedFiles,
+    setSendingSessionIds,
+    abortedReplyIdsRef,
+    finalizeReply,
+    failReply,
+    triggerSessionSummary
+  })
+  useChatStreamEvents({ setSessions, abortedReplyIdsRef })
 
-    const pendingByMessage = new Map<string, { sessionId: string; messageId: number; content: string }>()
-    let frameId: number | null = null
-
-    const flush = () => {
-      frameId = null
-      if (pendingByMessage.size === 0) return
-      const updates = [...pendingByMessage.values()]
-      pendingByMessage.clear()
-      const updatesBySession = new Map(updates.map(update => [update.sessionId, update]))
-
-      setSessions(prev => {
-        let changed = false
-        const next = prev.map(session => {
-          const update = updatesBySession.get(session.id)
-          if (!update) return session
-          const index = session.messages.findIndex(message => message.id === update.messageId)
-          if (index < 0) return session
-          const message = session.messages[index]
-          // 已中止或已完成的消息不再接受迟到的 IPC chunk。
-          if (!message.isThinking || abortedReplyIdsRef.current.has(update.messageId)) return session
-          const messages = [...session.messages]
-          messages[index] = { ...message, text: (message.text || '') + update.content }
-          changed = true
-          return { ...session, messages }
-        })
-        return changed ? next : prev
-      })
-    }
-
-    const unsubscribe = window.api.onLlmTextDelta(({ content, sessionId, messageId }) => {
-      if (!content || !sessionId || !messageId) return
-      const key = `${sessionId}:${messageId}`
-      const pending = pendingByMessage.get(key)
-      if (pending) pending.content += content
-      else pendingByMessage.set(key, { sessionId, messageId, content })
-      if (frameId === null) frameId = requestAnimationFrame(flush)
-    })
-
-    return () => {
-      unsubscribe()
-      if (frameId !== null) cancelAnimationFrame(frameId)
-      flush()
-    }
-  }, [])
-
-  // 监听大模型在后台的系统工具调用日志事件并插入最新的一条机器人消息中
-  useEffect(() => {
-    if (!window.api.onToolEvent) return
-
-    let pendingEvents: any[] = []
-    let throttleTimeout: NodeJS.Timeout | null = null
-
-    const flushEvents = () => {
-      if (pendingEvents.length === 0) return
-
-      const eventsToProcess = [...pendingEvents]
-      pendingEvents = []
-      throttleTimeout = null
-
-      const normalEvents = eventsToProcess.filter(e => !e.sessionId || !e.sessionId.startsWith('cron:'))
-      const cronEvents = eventsToProcess.filter(e => e.sessionId && e.sessionId.startsWith('cron:'))
-
-      // 1. 处理普通前台会话消息事件的合并更新
-      if (normalEvents.length > 0) {
-        const eventsBySession = new Map<string, any[]>()
-        for (const event of normalEvents) {
-          const sessionId = event.sessionId || activeSessionId
-          const events = eventsBySession.get(sessionId)
-          if (events) events.push(event)
-          else eventsBySession.set(sessionId, [event])
-        }
-        setSessions(prev => {
-          let updatedMsg: any = null
-          const next = prev.map(s => {
-            const sessEvents = eventsBySession.get(s.id)
-
-            if (!sessEvents?.length) return s
-
-            const messages = [...s.messages]
-            let latestAgentIdx = -1
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i].sender === 'agent') {
-                latestAgentIdx = i
-                break
-              }
-            }
-            if (latestAgentIdx !== -1) {
-              const agentMsg = { ...messages[latestAgentIdx] }
-              // [A] 回复已收尾（startTypingEffect 把 isThinking 置 false）后到达的 toolEvent
-              // 属于主进程 agent loop 的尾部迟发，不再往已完成气泡里塞 toolSteps，
-              // 避免对已完成消息的无意义重写与重渲。
-              if (agentMsg.isThinking === false) {
-                return s
-              }
-              const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
-
-              sessEvents.forEach(evt => {
-                const { type, name, args, result, detail } = evt
-                if (type === 'tool_call') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'call',
-                    name,
-                    detail: args
-                  })
-                } else if (type === 'tool_result') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'result',
-                    name,
-                    detail: result
-                  })
-                } else if (type === 'think') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'think',
-                    name,
-                    detail: detail
-                  })
-                }
-              })
-
-              agentMsg.toolSteps = toolSteps
-              messages[latestAgentIdx] = agentMsg
-              updatedMsg = { ...agentMsg, sessionId: s.id }
-            }
-            return { ...s, messages }
-          })
-
-          if (updatedMsg) {
-            latestMsgToSaveRef.current = updatedMsg
-            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-            saveTimeoutRef.current = setTimeout(() => {
-              if (latestMsgToSaveRef.current) {
-                window.api.saveMessage(latestMsgToSaveRef.current).catch(console.error)
-              }
-            }, 500)
-          }
-
-          return next
-        })
-      }
-
-      // 2. 处理 Cron 定时后台任务的消息事件的合并更新
-      if (cronEvents.length > 0) {
-        const cronEventsBySession: Record<string, any[]> = {}
-        cronEvents.forEach(e => {
-          const sid = e.sessionId
-          if (!cronEventsBySession[sid]) {
-            cronEventsBySession[sid] = []
-          }
-          cronEventsBySession[sid].push(e)
-        })
-
-        const updatedTaskIds = new Set<string>()
-
-        Object.entries(cronEventsBySession).forEach(([sid, evts]) => {
-          const runningLog = cronRunningLogsRef.current[sid]
-          if (runningLog && runningLog.messages) {
-            const messages = [...runningLog.messages]
-            const agentMsgIdx = messages.findIndex(m => m.sender === 'agent')
-            if (agentMsgIdx !== -1) {
-              const agentMsg = { ...messages[agentMsgIdx] }
-              const toolSteps = agentMsg.toolSteps ? [...agentMsg.toolSteps] : []
-
-              evts.forEach(evt => {
-                const { type, name, args, result, detail } = evt
-                if (type === 'tool_call') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'call',
-                    name,
-                    detail: args
-                  })
-                } else if (type === 'tool_result') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'result',
-                    name,
-                    detail: result
-                  })
-                } else if (type === 'think') {
-                  toolSteps.push({
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: 'think',
-                    name,
-                    detail: detail
-                  })
-                }
-              })
-
-              agentMsg.toolSteps = toolSteps
-              messages[agentMsgIdx] = agentMsg
-              runningLog.messages = messages
-
-              const parts = sid.split(':')
-              const taskId = parts[1]
-              updatedTaskIds.add(taskId)
-            }
-          }
-        })
-
-        if (updatedTaskIds.size > 0) {
-          setCronTasks(prevTasks => {
-            return prevTasks.map(t => {
-              if (updatedTaskIds.has(t.id)) {
-                const updatedLogs = (t.logs || []).map(l => {
-                  const matchedRunningLog = Object.values(cronRunningLogsRef.current).find(
-                    rl => rl.id === l.id
-                  )
-                  return matchedRunningLog ? { ...matchedRunningLog } : l
-                })
-                return { ...t, logs: updatedLogs }
-              }
-              return t
-            })
-          })
-        }
-      }
-    }
-
-    const unsubscribe = window.api.onToolEvent((data: any) => {
-      pendingEvents.push(data)
-      if (!throttleTimeout) {
-        throttleTimeout = setTimeout(flushEvents, 50)
-      }
-    })
-
-    return () => {
-      unsubscribe()
-      if (throttleTimeout) clearTimeout(throttleTimeout)
-      if (pendingEvents.length > 0) {
-        flushEvents()
-      }
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-        saveTimeoutRef.current = null
-      }
-      if (latestMsgToSaveRef.current) {
-        window.api.saveMessage(latestMsgToSaveRef.current).catch(console.error)
-        latestMsgToSaveRef.current = null
-      }
-    }
-  }, [activeSessionId])
-
-  // 打字机流式打印辅助函数
-  // 打字机流式打印辅助函数 (已优化为瞬间渲染以保证桌宠 Live2D 60FPS 帧率并消除卡顿)
-  const startTypingEffect = (replyId: number, fullText: string, sessionId: string) => {
-    // 清理 toolEvent 的保存缓存，防止残留的 toolEvent 脏数据在切换会话或卸载时覆写已完成的消息状态
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-      saveTimeoutRef.current = null
-    }
-    latestMsgToSaveRef.current = null
-
-    let savedMsg: any = null
-    let wasAborted = false
-
-    setSessions(prev => {
-      const next = prev.map(s => {
-        if (s.id === sessionId) {
-          const messages = s.messages.map(m => {
-            if (m.id === replyId) {
-              // 检查该消息在此前是否已被手动终止
-              if (abortedReplyIdsRef.current.has(replyId) || !m.isThinking || (m.text && (m.text.includes('手动终止') || m.text.includes('手动中断')))) {
-                wasAborted = true
-                return m
-              }
-              return { ...m, text: fullText, isThinking: false }
-            }
-            return m
-          })
-          const target = messages.find(m => m.id === replyId)
-          if (target && !wasAborted) savedMsg = target
-          return { ...s, messages }
-        }
-        return s
-      })
-
-      if (savedMsg) {
-        window.api.saveMessage({ ...savedMsg, sessionId })
-      }
-      return next
-    })
-
-    isTypingRef.current = false
-    setSendingSessionIds(prev => ({ ...prev, [sessionId]: false }))
-
-    if (!wasAborted) {
-      setTimeout(() => {
-        setSessions(prev => {
-          triggerSessionSummary(sessionId, prev)
-          return prev
-        })
-      }, 500)
-    }
-    abortedReplyIdsRef.current.delete(replyId)
-  }
-
-  const handleSendChat = async (): Promise<void> => {
-    if ((!inputValue.trim() && attachedFiles.length === 0) || isSending) return
-
-    const isOllama = llmConfig.provider === 'ollama'
-    const hasKey = isOllama || !!llmConfig.apiKey
-    if (!hasKey) {
-      setShowApiKeyModal(true)
-      return
-    }
-
-    const text = inputValue.trim()
-    const timeStr = formatDateTime()
-    
-    const fileNames = attachedFiles.map(f => f.name).join(', ')
-    // 1. 构建用户发送的消息
-    const userMsg: any = {
-      id: Date.now(),
-      sender: 'user',
-      text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''),
-      time: timeStr
-    }
-    if (attachedFiles.length > 0) {
-      userMsg.fileInfos = attachedFiles.map(f => ({
-        name: f.name,
-        path: f.path,
-        content: f.content,
-        safeName: f.safeName
-        // ⚠️ 不保存 objectUrl（blob URL 仅在当前进程生命周期内有效，重启后失效）
-        // 渲染层会通过 local-file:// 协议直接从磁盘读取 path 来展示图片
-      }))
-    }
-
-    // 2. 构建机器人的思考占位消息
-    const replyId = Date.now() + 1
-    const agentPlaceholderMsg: any = {
-      id: replyId,
-      sender: 'agent',
-      text: '',
-      isThinking: true,
-      toolSteps: [],
-      time: timeStr
-    }
-
-    let updatedSessions = sessions.map(s => {
-      if (s.id === activeSessionId) {
-        let name = s.name
-        const isFirstUserMsg = s.messages.filter(m => m.sender === 'user').length === 0
-        if (isFirstUserMsg || s.name === '(未命名)' || s.name === '新会话' || s.name.startsWith('agent:main:dashboard:')) {
-          const displayTitle = text || (attachedFiles.length > 0 ? attachedFiles[0].name : '新会话')
-          name = displayTitle.length > 15 ? displayTitle.substring(0, 15) + '...' : displayTitle
-        }
-        // 先清理上一次可能残留的 isThinking 状态（异常退出或工具调用失败时可能遗留）
-        const cleanedMessages = s.messages.map(m => {
-          if (m.isThinking) {
-            const cleanedMsg = { ...m, isThinking: false, text: m.text || '⚠️ 对话生成被中断。' }
-            window.api.saveMessage({ ...cleanedMsg, sessionId: activeSessionId }).catch(console.error)
-            return cleanedMsg
-          }
-          return m
-        })
-        // 同步塞入用户消息和机器人的空白占位消息
-        return { ...s, name, messages: [...cleanedMessages, userMsg, agentPlaceholderMsg] }
-      }
-      return s
-    })
-    
-    setSessions(updatedSessions)
-    setInputValue('')
-    setAttachedFiles([]) // 发送后清空附件
-    setSendingSessionIds(prev => ({ ...prev, [activeSessionId]: true }))
-
-    // 增量落库会话标题变更和消息
-    // ⚠️ 必须串行写入（先 userMsg → 再 agentPlaceholder），否则并行插入时
-    // agentPlaceholder 可能先写入 DB，refreshSessions 读取后消息顺序颠倒
-    // fire-and-forget：不 await，不阻塞 UI 响应
-    const activeSess = updatedSessions.find(s => s.id === activeSessionId)
-    ;(async () => {
-      await window.api.saveMessage({ ...userMsg, sessionId: activeSessionId })
-      await window.api.saveMessage({ ...agentPlaceholderMsg, sessionId: activeSessionId })
-      if (activeSess) {
-        await window.api.updateSession(activeSessionId, { name: activeSess.name })
-      }
-    })().catch(console.error)
-
-    let typingStarted = false
-    try {
-      const activeSessObj = updatedSessions.find(s => s.id === activeSessionId)
-      const currentMessages = activeSessObj ? activeSessObj.messages : []
-      const filtered = currentMessages.filter(m => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking)
-      const chatMessages = filtered.slice(-contextRounds * 2).map(m => {
-        // 如果此条消息带有附件，则把文件内容拼装进去送给大模型
-        let textContent = m.text || ''
-        let hasImage = false
-        const imageBlocks: any[] = []
-
-        if (m.fileInfo) {
-          const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(m.fileInfo.name || '')
-          const pathNote = needsPath && m.fileInfo.path ? `\n[源文件路径: ${m.fileInfo.path}]` : ''
-          textContent = `${m.text}\n\n--- [附带文件: ${m.fileInfo.name}]${pathNote}\n${m.fileInfo.content}`
-        } else if (m.fileInfos && m.fileInfos.length > 0) {
-          const attachmentsText = m.fileInfos.filter((f: any) => f.content).map((f: any) => {
-            const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(f.name || '')
-            const pathNote = needsPath && f.path ? `\n[源文件路径: ${f.path}]` : ''
-            return `--- [附带文件: ${f.name}]${pathNote}\n${f.content}`
-          }).join('\n\n')
-          if (attachmentsText) {
-             textContent = `${m.text}\n\n${attachmentsText}`
-          }
-
-          // 提取图片（依据扩展名或者包含 objectUrl 判断）
-          const imageFiles = m.fileInfos.filter((f: any) => !f.content && f.path && (f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i) || f.objectUrl))
-          if (imageFiles.length > 0) {
-            hasImage = true
-            imageFiles.forEach((f: any) => {
-              imageBlocks.push({
-                type: 'image_url',
-                image_url: { url: `local-file:///${f.path.replace(/\\/g, '/')}` }
-              })
-            })
-          }
-        }
-
-        if (hasImage) {
-          const finalContent: any[] = []
-          if (textContent) {
-            finalContent.push({ type: 'text', text: textContent })
-          }
-          finalContent.push(...imageBlocks)
-          return { role: m.sender === 'user' ? 'user' : 'assistant', content: finalContent }
-        } else {
-          return { role: m.sender === 'user' ? 'user' : 'assistant', content: textContent }
-        }
-      })
-
-      // ── 并行获取所有上下文数据（替代原来的 5 个串行 await，节省数百ms）──
-      const enabledSkillNamesList = skillsList
-        .filter(s => !disabledSkillNames.includes(s.name))
-        .map(s => s.name)
-
-      const [
-        profileContent,
-        recallRes,
-        skillsPromptText,
-        activeMcpServers,
-      ] = await Promise.all([
-        window.api.getMemoryProfile().catch((err: any) => { console.error('获取人物画像失败:', err); return '' }),
-        window.api.recallExperiences(text).catch((err: any) => { console.error('获取避坑经验失败:', err); return [] }),
-        window.api.getActiveSkillsPrompt(enabledSkillNamesList).catch((err: any) => { console.error('获取已启用技能提示词失败:', err); return '' }),
-        window.api.getActiveMcpServers().catch((err: any) => { console.error('获取可用 MCP 服务列表失败:', err); return [] }),
-      ])
-
-      let relevantExperiences: any[] = []
-      let recallDebug: any = null
-      if (recallRes && !Array.isArray(recallRes)) {
-        relevantExperiences = (recallRes as any).results || []
-        recallDebug = (recallRes as any).debug || null
-      } else {
-        relevantExperiences = Array.isArray(recallRes) ? recallRes : []
-      }
-
-      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` +
-        (relevantExperiences.length > 0
-          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((e: any, i: number) => {
-              let itemText = `${i + 1}. ${e.fact}`
-              if (e.relatedContent) {
-                itemText += `\n   [关联的原始总结上下文]:\n   """\n   ${e.relatedContent.replace(/\n/g, '\n   ')}\n   """`
-              } else if (e.absolutePath) {
-                itemText += `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${e.absolutePath}`
-              }
-              return itemText
-            }).join('\n')}`
-          : '')
-
-      const skillsContext = (skillsPromptText as string).trim()
-        ? `你当前已配备、激活并载入了以下专属技能扩展规约，请严格遵守这些技能定义的规约与最佳实践：\n\n${skillsPromptText}`
-        : '你当前尚未启用任何第三方扩展skill技能。'
-      const stylePrompt = currentAvatarStyle === 'cute'
-        ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
-        : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
-
-      const mcpContext = activeMcpServers.length > 0
-        ? `\n\n🔗 此外，你已成功接入 MCP（Model Context Protocol）扩展服务：
-${activeMcpServers.map((s: any, i: number) => `${i + 1}. ${s.name} — ${s.description || '外部 MCP 服务'} (包含 ${s.toolsCount} 个工具)`).join('\n')}
-当主人的问题涉及上述 MCP 服务领域时，请务必主动调用对应的扩展工具来完成任务。`
-        : ''
-
-      const systemPrompt = `# [角色设定]
-你是一只名为 ${currentAvatarName} 的桌面智能助理宠物（智能体）。
-你的性格与语气：${stylePrompt}
-
-<avatar_profile>
-- 核心人设：你是专属的桌面萌宠助理，永远坚称自己是 ${currentAvatarName}。
-- 🚫 绝对约束：严禁泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免破坏人设。
-</avatar_profile>
-${memoryContext}
-${skillsContext}
-
-<tool_use_rules>
-- 工具授权：主进程已为你绑定了本地系统操作工具（文件读写、终端命令执行、系统状态获取）与外部 MCP 扩展工具。
-- ⚠️ 调用原则：普通的打招呼（例如 hi、你好）、日常闲聊、常识问答等，请直接以文字回复，【严禁】无意义地调用系统工具。
-- 🚫 调用约束：你只能使用已提供给你的工具，绝对不允许编造任何不存在的工具名称。
-- 💡 变通调用：如果遇到未提供专用工具的需求（例如获取当前时间），请通过 'run_terminal_command' 执行相应的系统指令（如 'date /T'）来变通获取。${mcpContext}
-
-</tool_use_rules>
-
-<output_rules>
-- 对话风格：语气需保持人设风格（${currentAvatarStyle === 'cute' ? '可爱、萌系、活泼' : '专业、友好、自然'}）。
-- 错误处理：遇到工具执行报错或空结果时，请以萌宠的语气告知主人，并尝试提供替代的解决方法。
-- 主动澄清与消歧准则（Disambiguation Rules）：
-  1. 识别模糊与多义性：当用户的提问存在多种合理的解释，或者你无法确定具体指向（例如“记忆api”可能指代码文件，也可能指持久化数据，或外部项目）时，禁止擅自做假设或发散脑补。
-  2. 停止并提问：此时你必须立刻暂停长篇大论的回答，转而向用户提出一个简明、有针对性的澄清问题。
-  3. 提问模板：明确罗列出你怀疑的几种可能性，友好地请用户进行选择或补充。
-- 隐式 Wiki 知识溯源：在回答具体内容时，如果你参考了本地工作空间文件（或抓取的网页缓存文档）中的信息，请务必**直接在该句话或该段落的末尾**以 HTML 注释的形式精准标注出你引用的具体文件绝对或相对路径（例如 \`...相关内容。<!-- 关联文件: /path/to/file.md -->\`）。此标注对前端用户不可见，专用于后台精确到句的 Wiki 知识溯源，请确保标注的位置与参考内容紧密对应。
-</output_rules>`
-
-      // 将 system prompt 注入为上下文的首条消息
-      chatMessages.unshift({ role: 'system', content: systemPrompt })
-
-      // 如果当前会话有累积摘要，将其作为一条 user 消息注入到 system 之后、最近消息之前
-      // 让大模型在不展开完整旧消息的前提下，仍能了解旧对话要点
-      const rawContextSummary = activeSessObj?.contextSummary || ''
-      if (rawContextSummary.trim()) {
-        // 限制摘要单条消息长度：超出 8000 字符时从头部截断（保留最新内容）
-        const MAX_SUMMARY_CHARS = 8000
-        const trimmedSummary = rawContextSummary.length > MAX_SUMMARY_CHARS
-          ? '...(旧摘要已裁剪)...\n' + rawContextSummary.slice(-MAX_SUMMARY_CHARS)
-          : rawContextSummary
-        chatMessages.splice(1, 0, {
-          role: 'user',
-          content: `📝 [历史对话摘要]（以下是当前会话中超出上下文窗口的旧对话的精炼总结，请以此为参考背景）：\n${trimmedSummary}`
-        })
-        console.log(`[Context] 已将历史摘要回注到上下文 (长度: ${trimmedSummary.length} 字符)`)
-      }
-
-      // 获取工具定义（与 callLLM 准备阶段并行，不阻塞主流程）
-      // promptInfo 仅用于"明盒化"调试功能，异步获取后更新即可
-      window.api.getToolsDefinition().then((toolsDefinition: any[]) => {
-        const promptInfo = {
-          systemPrompt,
-          chatMessages: [...chatMessages],
-          toolsDefinition,
-          model: llmConfig.model,
-          provider: llmConfig.provider,
-          temperature: llmConfig.temperature,
-          maxTokens: llmConfig.maxTokens,
-          recallDebug
-        }
-        // 异步更新 promptInfo（不阻塞 callLLM）
-        setSessions(prev => prev.map(s => {
-          if (s.id === activeSessionId) {
-            return {
-              ...s,
-              messages: s.messages.map(m => m.id === userMsg.id ? { ...m, promptInfo } : m)
-            }
-          }
-          return s
-        }))
-        // fire-and-forget：保存 promptInfo 到 DB（不阻塞 callLLM）
-        window.api.saveMessage({
-          ...userMsg,
-          promptInfo,
-          sessionId: activeSessionId
-        }).catch(console.error)
-      }).catch((err: any) => {
-        console.error('获取工具定义失败:', err)
-      })
-
-      // 检查在此准备期间是否已被手动终止
-      if (abortedReplyIdsRef.current.has(replyId)) {
-        throw new Error('UserAborted')
-      }
-
-      // 调用大模型接口，传入 workspacePath 参数，同时把 sessionId 和 messageId 传进去
-      const response = await window.api.callLLM(
-        {
-          ...llmConfig,
-          sessionId: activeSessionId,
-          messageId: replyId
-        },
-        chatMessages,
-        workspacePath
-      )
-
-      typingStarted = false
-      if (response !== undefined) {
-        typingStarted = true
-        startTypingEffect(replyId, response, activeSessionId)
-
-        // 成功回复后，若有命中的避坑经验/习惯记忆，则进行渐进式强化
-        if (relevantExperiences && relevantExperiences.length > 0) {
-          const ids = relevantExperiences.map((e: any) => e.id)
-          window.api.strengthenExperiences(ids).catch((err: any) => {
-            console.error('[Memory] 强化复习记忆失败:', err)
-          })
-        }
-      }
-
-      // TTS 语音合成：LLM 回复后自动朗读
-      if (ttsEnabled && response && currentAvatarVoice) {
-        try {
-          const audioBuffer = await window.api.synthesizeTts(response, currentAvatarVoice)
-          if (audioBuffer) {
-            window.api.playTtsAudio(audioBuffer)
-          }
-        } catch (ttsErr) {
-          console.error('TTS 播放失败', ttsErr)
-        }
-      }
-    } catch (e: any) {
-      console.error(e)
-      const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
-      
-      // 清理 toolEvent 的保存缓存，防止残留的 toolEvent 脏数据在切换会话或卸载时覆写已完成的消息状态
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-        saveTimeoutRef.current = null
-      }
-      latestMsgToSaveRef.current = null
-
-      let savedMsg: any = null
-      setSessions(prev => {
-        const next = prev.map(s => {
-          if (s.id === activeSessionId) {
-            const messages = s.messages.map(m => {
-              if (m.id === replyId) {
-                const currentText = m.text || ''
-                if (isAbort && (currentText.includes('手动终止') || currentText.includes('手动中断'))) {
-                  savedMsg = {
-                    ...m,
-                    isThinking: false,
-                    isError: false
-                  }
-                  return savedMsg
-                }
-                const appendMsg = isAbort 
-                  ? '\n\n⚠️ 对话生成已被用户手动中断。'
-                  : `\n\n系统错误：调用智能代理接口失败（${e.message || e}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
-                savedMsg = {
-                  ...m,
-                  text: currentText + appendMsg,
-                  isThinking: false,
-                  isError: !isAbort
-                }
-                return savedMsg
-              }
-              return m
-            })
-            return { ...s, messages }
-          }
-          return s
-        })
-        if (savedMsg) {
-          window.api.saveMessage({ ...savedMsg, sessionId: activeSessionId }).catch(console.error)
-        }
-        return next
-      })
-    } finally {
-      abortedReplyIdsRef.current.delete(replyId)
-      if (!typingStarted) {
-        setSendingSessionIds(prev => ({ ...prev, [activeSessionId]: false }))
-      }
-    }
-  }
-
-  const triggerSessionSummary = async (sessionId: string, latestSessions: any[]): Promise<void> => {
-    const sessionObj = latestSessions.find(s => s.id === sessionId)
-    if (!sessionObj) return
-
-    // 过滤出有效且未进行总结的历史对话消息
-    // 有效消息：sender === 'user' 或者是 sender === 'agent'，且 !m.isThinking 且 !m.isError
-    const filtered = (sessionObj.messages || []).filter(m => 
-      (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError
-    )
-
-    // 筛选未总结的消息
-    const unsummarized = filtered.filter(m => !m.isSummarized)
-
-    // 根据用户配置的单次会话记忆上下文轮数，动态计算触发总结的消息数
-    // 1 轮对答 = 1 条用户消息 + 1 条助手消息，即 contextRounds * 2
-    const TRIGGER_COUNT = contextRounds * 2
-    if (unsummarized.length < TRIGGER_COUNT) {
-      console.log(`[Summary] 未总结消息条数 (${unsummarized.length}/${TRIGGER_COUNT})，暂不触发总结。`)
-      return
-    }
-
-    // 提取出刚好用于这次总结的 20 条消息
-    const summaryBatch = unsummarized.slice(0, TRIGGER_COUNT)
-
-    // 拼装对话及工具调用/异常日志
-    let chatLogStr = ''
-    summaryBatch.forEach((m) => {
-      const roleName = m.sender === 'user' ? '用户 (User)' : '助手 (Agent)'
-      chatLogStr += `[${roleName}]：${m.text}\n`
-      
-      if (m.toolSteps && m.toolSteps.length > 0) {
-        chatLogStr += `  工具调用过程:\n`
-        m.toolSteps.forEach((step: any) => {
-          if (step.type === 'call') {
-            chatLogStr += `    - 尝试执行工具 [${step.name}]，参数: ${JSON.stringify(step.detail)}\n`
-          } else if (step.type === 'result') {
-            const isErrResult = m.isError || String(step.detail).toLowerCase().includes('error') || String(step.detail).toLowerCase().includes('fail')
-            chatLogStr += `    - 工具 [${step.name}] 执行${isErrResult ? '失败' : '成功'}，返回结果: ${String(step.detail).slice(0, 1000)}\n`
-          }
-        })
-      }
-      chatLogStr += '\n'
-    })
-
-    console.log('[Summary] 开始生成这 20 条消息的记忆摘要与纠错沉淀...')
-
-    const summarySystemPrompt = `你是一个经验丰富的 AI 对话与开发任务总结助手。
-请你仔细阅读以下【一轮包含了用户提问、助手回答及本地系统工具调用的对话日志】，并为他们生成一段精炼、实用的 Markdown 摘要。
-
-请遵循以下总结规则：
-1. 用一到两句话提炼这部分对话中的核心任务或日常交流主题。
-2. **非常重要**：请检索这部分对话中是否存在任何“工具调用（Terminal终端命令、MCP工具、文档读写等）执行失败或产生报错（Error）”的情况。
-3. 如果有调用报错：
-   - 提取出发生了什么错误，哪一步失败了。
-   - 提取出最终是如何解决的（若已解决），或者总结出在此类任务中需要注意的“避坑教训/经验沉淀”。
-   - 将这部分写在特定的“### 🛠 任务执行与避坑经验沉淀”标题下。
-4. 如果没有报错，则不需要写避坑经验小节。
-5. 不要包含过多的寒暄，直接输出 Markdown 总结内容。
-6. **字数严格限制**：生成的摘要与避坑经验沉淀总字数必须严格控制在 300 字以内，简明扼要，直击重点，剔除任何修饰性词汇。
-7. **精准 Wiki 溯源**：如果对话日志中助手参考了特定的本地文件或缓存文档路径（日志中可能已有 \`<!-- 关联文件: ... -->\` 注释），在总结对应要点时，请务必在这句话的末尾**原样保留或加上**该 HTML 注释文件引用，以实现知识到文件的精准溯源。
-
-以下是对话日志：
-----------------------
-${chatLogStr}
-----------------------`
-
-    try {
-      const summaryResult = await window.api.callLLM(
-        {
-          ...llmConfig,
-          temperature: 0.3,
-          sessionId: 'system:summary'
-        },
-        [
-          { role: 'system', content: summarySystemPrompt },
-          { role: 'user', content: '请为以上对话日志生成 Markdown 摘要与经验沉淀。' }
-        ]
-      )
-
-      const timeStr = formatDateTime()
-      let backupDialogStr = '\n\n---\n<details>\n<summary>展开查看本次对话原始备份</summary>\n\n'
-      summaryBatch.forEach((m) => {
-        const roleName = m.sender === 'user' ? '用户 (User)' : '助手 (Agent)'
-        backupDialogStr += `**${roleName}**:\n${m.text || ''}\n\n`
-      })
-      backupDialogStr += '</details>'
-
-      const finalMarkdownText = `## [${timeStr}] 记忆摘要与纠错沉淀\n${summaryResult.trim()}${backupDialogStr}`
-
-      const appendSuccess = await window.api.appendMemorySummary(sessionId, finalMarkdownText)
-      if (appendSuccess) {
-        console.log('[Summary] 成功追加到本地 Markdown 记忆日志文件。')
-
-        // 将本次摘要文本累积到 session.contextSummary 中，下次发送时回注到 LLM 上下文
-        const batchIds = summaryBatch.map(m => m.id)
-        let savedMsgs: any[] = []
-        let newContextSummary = ''
-        setSessions(prev => {
-          return prev.map(s => {
-            if (s.id === sessionId) {
-              const messages = s.messages.map(m => {
-                if (batchIds.includes(m.id)) {
-                  const updatedMsg = { ...m, isSummarized: true }
-                  savedMsgs.push(updatedMsg)
-                  return updatedMsg
-                }
-                return m
-              })
-              // 将本次摘要文本追加到历史摘要中
-              const prevSummary = s.contextSummary || ''
-              newContextSummary = prevSummary
-                ? `${prevSummary}
-
-${finalMarkdownText}`
-                : finalMarkdownText
-              return { ...s, messages, contextSummary: newContextSummary }
-            }
-            return s
-          })
-        })
-
-        // 批量保存已标记为已总结的消息，合并为单次调用，避免频繁触发 IPC 和 UI 重新渲染
-        if (savedMsgs.length > 0) {
-          window.api.saveMessages(savedMsgs.map(m => ({ ...m, sessionId }))).catch(console.error)
-        }
-
-        // 将累积摘要持久化到 SQLite sessions 表
-        if (newContextSummary) {
-          window.api.updateSession(sessionId, { contextSummary: newContextSummary }).catch(e =>
-            console.error('[Summary] 持久化 contextSummary 到 DB 失败:', e)
-          )
-          console.log(`[Summary] contextSummary 已更新 (总长度: ${newContextSummary.length} 字符)`)
-        }
-      }
-    } catch (err) {
-      console.error('[Summary] 生成对话总结失败:', err)
-    }
-  }
 
   const handleTestConnection = async (): Promise<void> => {
     setTestStatus('testing')
@@ -2094,43 +1422,9 @@ ${finalMarkdownText}`
   }
 
   const handleAbortLlm = async (): Promise<void> => {
-    try {
-      isTypingRef.current = false
-      if (typingTimerRef.current) {
-        clearTimeout(typingTimerRef.current)
-        typingTimerRef.current = null
-      }
-      await window.api.abortLlm(activeSessionId)
-      setSendingSessionIds(prev => ({ ...prev, [activeSessionId]: false }))
-      // 在中断时，立刻将当前处于正在思考（loading）的消息的状态更新为“已终止任务”并隐藏 loading 动画
-      const currentActiveSess = sessions.find(s => s.id === activeSessionId)
-      if (currentActiveSess) {
-        currentActiveSess.messages.filter(m => m.isThinking).forEach(m => {
-          abortedReplyIdsRef.current.add(m.id)
-          const updatedMsg = { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false }
-          window.api.saveMessage({ ...updatedMsg, sessionId: activeSessionId }).catch(console.error)
-        })
-      }
-      setSessions(prev => prev.map(s => {
-        if (s.id === activeSessionId) {
-          return {
-            ...s,
-            messages: s.messages.map(m => {
-              if (m.isThinking) {
-                abortedReplyIdsRef.current.add(m.id)
-                return { ...m, text: m.text ? `${m.text}\n\n⚠️ 对话生成已被手动终止。` : '⚠️ 对话生成已被手动终止。', isThinking: false }
-              }
-              return m
-            })
-          }
-        }
-        return s
-      }))
-      showToast('已中断大模型生成', 'info')
-    } catch (e: any) {
-      console.error(e)
-      showToast(`中断失败: ${e.message || e}`, 'error')
-    }
+    const activeMessages = (useAppStoreRaw.getState().sessions as Session[])
+      .find(session => session.id === activeSessionId)?.messages || []
+    await abortReply(activeSessionId, activeMessages, showToast)
   }
 
   const handleToggleCronTask = async (id: string): Promise<void> => {

@@ -2,9 +2,15 @@ import * as fs from 'fs'
 import * as os from 'os'
 import { join } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { shellManager } from './shell-manager'
+import { ShellKind, shellManager } from './shell-manager'
 import { sshManager } from './ssh-manager'
 import { getActiveStorageDir } from '../../utils/paths'
+
+function resolveShell(value: unknown, fallback: ShellKind): ShellKind {
+  if (value === undefined || value === null) return fallback
+  if (value === 'powershell' || value === 'bash' || value === 'cmd') return value
+  throw new Error(`不支持的 shell: ${String(value)}。可选值为 powershell、bash、cmd。`)
+}
 
 export class TerminalExecutor implements IToolExecutor {
   public async execute(
@@ -15,6 +21,8 @@ export class TerminalExecutor implements IToolExecutor {
     try {
       if (api === 'run_terminal_command') {
         const { command } = args
+        const isSsh = Boolean(context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh')
+        const shell = resolveShell(args.shell, isSsh ? 'bash' : 'powershell')
 
         // 动态覆盖超时时间，若模型传入了 timeout_seconds 则换算为毫秒，否则默认 120 秒
         let cmdTimeout = 120000
@@ -22,50 +30,52 @@ export class TerminalExecutor implements IToolExecutor {
           cmdTimeout = args.timeout_seconds * 1000
         }
 
-        if (context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh') {
+        if (isSsh) {
           // SSH 模式下不传递本地物理盘符的路径作为 cwd
-          const { stdout, stderr } = await sshManager.executeCommand(context.sessionId, command, undefined)
+          const { stdout, stderr } = await sshManager.executeCommand(context.sessionId!, command, undefined)
           return {
-            content: `[远程 SSH 命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
+            content: `[远程 SSH 命令执行输出 | shell: ${shell}]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
             success: true
           }
         }
 
         const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
         // run_terminal_command 同步执行，传入动态超时与中止信号
-        const { stdout, stderr } = await shellManager.execWithBash(command, { 
-          cwd: execCwd, 
+        const { stdout, stderr } = await shellManager.exec(command, shell, {
+          cwd: execCwd,
           timeout: cmdTimeout,
           signal: context.abortSignal
         } as any)
         return {
-          content: `[命令执行输出]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
+          content: `[命令执行输出 | shell: ${shell}]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
           success: true
         }
       }
 
       if (api === 'run_command') {
         const { command, description, cwd } = args
+        const isSsh = Boolean(context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh')
+        const shell = resolveShell(args.shell, isSsh ? 'bash' : 'powershell')
 
-        if (context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh') {
+        if (isSsh) {
           // 过滤 Windows 本地物理路径，非 Windows 物理路径才被视作远程路径带给 SSH
           let remoteCwd: string | undefined = undefined
           if (cwd && !cwd.includes(':\\') && !cwd.includes(':/') && cwd !== context.workspacePath) {
             remoteCwd = cwd
           }
-          const session = sshManager.startSshShellSession(context.sessionId, command, remoteCwd)
+          const session = sshManager.startSshShellSession(context.sessionId!, command, remoteCwd)
           return {
-            content: `[远程 SSH 命令已启动]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
-            state: { shell_id: session.id, command },
+            content: `[远程 SSH 命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
+            state: { shell_id: session.id, command, shell },
             success: true
           }
         }
 
         const execCwd = cwd || this.resolveCwd(context.sessionId, context.workspacePath)
-        const session = shellManager.startSession(command, execCwd)
+        const session = shellManager.startSession(command, shell, execCwd)
         return {
-          content: `[命令已启动]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
-          state: { shell_id: session.id, command },
+          content: `[命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
+          state: { shell_id: session.id, command, shell },
           success: true
         }
       }

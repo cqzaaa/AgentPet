@@ -6,6 +6,8 @@ import * as iconv from 'iconv-lite'
 
 const execAsync = promisify(exec)
 
+export type ShellKind = 'powershell' | 'bash' | 'cmd'
+
 function decodeOutputBuffer(data: Buffer | string): string {
   if (typeof data === 'string') return data
   const utf8Str = data.toString('utf8')
@@ -88,65 +90,10 @@ export class ShellManager {
     return null
   }
 
-  // 检测命令类型
-  public detectCommandType(command: string): 'powershell' | 'cmd' | 'bash' {
-    const cmd = command.trim().toLowerCase()
-    const powershellPatterns = [
-      /^powershell\b/i, /^pwsh\b/i, /\bget-childitem\b/i, /\bget-process\b/i,
-      /\bget-service\b/i, /\bget-item\b/i, /\bset-item\b/i, /\bnew-item\b/i,
-      /\bremove-item\b/i, /\binvoke-/i, /\bwrite-output\b/i, /\bwrite-host\b/i,
-      /\bformat-table\b/i, /\bselect-object\b/i, /\bwhere-object\b/i,
-      /\bforeach-object\b/i, /\b-sort-object\b/i, /\bmeasure-object\b/i,
-      /\bconvertto-/i, /\bconvertfrom-/i, /\bimport-module\b/i,
-      /\bexport-module\b/i, /\badd-type\b/i, /\[math\]::/i, /\bpsobject\b/i
-    ]
-
-    const cmdPatterns = [
-      /^wmic\b/i, /^systeminfo\b/i, /^ipconfig\b/i, /^ping\b/i, /^tracert\b/i,
-      /^netstat\b/i, /^tasklist\b/i, /^taskkill\b/i, /^schtasks\b/i, /^reg\b/i,
-      /^sc\b/i, /^net\b/i, /^dir\b/i, /^type\b/i, /^copy\b/i, /^move\b/i,
-      /^del\b/i, /^rd\b/i, /^md\b/i, /^mkdir\b/i, /^rmdir\b/i, /^echo\b/i,
-      /^set\b/i, /^cls\b/i, /^color\b/i, /^title\b/i, /^timeout\b/i,
-      /^start\b/i, /^assoc\b/i, /^ftype\b/i, /^for\b/i, /^if\b/i
-    ]
-
-    const bashPatterns = [
-      /^ls\b/i, /^du\b/i, /^df\b/i, /^grep\b/i, /^find\b/i, /^awk\b/i,
-      /^sed\b/i, /^cat\b/i, /^head\b/i, /^tail\b/i, /^sort\b/i, /^uniq\b/i,
-      /^wc\b/i, /^chmod\b/i, /^chown\b/i, /^mkdir\b/i, /^rm\b/i, /^cp\b/i,
-      /^mv\b/i, /^tar\b/i, /^gzip\b/i, /^gunzip\b/i, /^ssh\b/i, /^scp\b/i,
-      /^rsync\b/i, /^git\b/i, /^npm\b/i, /^node\b/i, /^python\b/i, /^pip\b/i,
-      /^curl\b/i, /^wget\b/i, /^docker\b/i, /^kubectl\b/i
-    ]
-
-    if (powershellPatterns.some(p => p.test(cmd))) return 'powershell'
-    if (cmdPatterns.some(p => p.test(cmd))) return 'cmd'
-    if (bashPatterns.some(p => p.test(cmd))) return 'bash'
-
-    if (cmd.includes(' 2>/dev/null') || (cmd.includes(' | ') && cmd.includes('grep')) ||
-        cmd.includes('$( ') || cmd.includes('`') || (cmd.includes('&&') && !cmd.includes('&'))) {
-      return 'bash'
-    }
-
-    if ((cmd.includes('$(') && !cmd.includes('$()')) || cmd.includes('| %') || cmd.includes('|?') ||
-        cmd.includes('$_') || cmd.includes('$PSVersionTable')) {
-      return 'powershell'
-    }
-
-    return 'cmd'
-  }
-
-  // 使用 bash 执行命令（同步）
-  public async execWithBash(command: string, options: { cwd?: string; timeout?: number } = {}) {
+  // 同步执行命令。shell 由调用方显式指定；本机未指定时固定使用 PowerShell，避免猜测命令语法。
+  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd?: string; timeout?: number } = {}) {
     const bashPath = this.getBashPath()
     const cmd = command.trim()
-
-    const isAlreadyWrapped =
-      /^powershell\s+-Command\s+/i.test(cmd) ||
-      /^pwsh\s+-Command\s+/i.test(cmd) ||
-      /^bash\s+-c\s+/i.test(cmd) ||
-      /^sh\s+-c\s+/i.test(cmd) ||
-      /^cmd\s+\/c\s+/i.test(cmd)
 
     const runExec = async (cmdStr: string, execOptions: any) => {
       try {
@@ -164,20 +111,14 @@ export class ShellManager {
       }
     }
 
-    if (isAlreadyWrapped) {
-      return runExec(cmd, options)
-    }
-
-    const commandType = this.detectCommandType(cmd)
-
-    switch (commandType) {
+    switch (shell) {
       case 'powershell':
         const psCmd = process.platform === 'win32'
           ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${cmd}`
           : cmd
         return runExec(psCmd, {
           ...options,
-          shell: 'powershell.exe',
+          shell: process.platform === 'win32' ? 'powershell.exe' : 'pwsh',
         })
       case 'bash':
         if (bashPath) {
@@ -185,11 +126,16 @@ export class ShellManager {
             ...options,
             shell: bashPath,
           })
-        } else {
+        }
+        if (process.platform !== 'win32') {
           return runExec(cmd, { ...options, shell: 'sh' })
         }
+        throw new Error('未找到 Git Bash。请安装 Git for Windows，或改用 shell=powershell。')
       case 'cmd':
       default:
+        if (process.platform !== 'win32') {
+          throw new Error('shell=cmd 仅支持 Windows。')
+        }
         const cmdCmd = process.platform === 'win32'
           ? `chcp 65001 >nul && ${cmd}`
           : cmd
@@ -198,25 +144,35 @@ export class ShellManager {
   }
 
   // 启动异步 shell 会话
-  public startSession(command: string, cwd?: string): ShellSession {
+  public startSession(command: string, shell: ShellKind = 'powershell', cwd?: string): ShellSession {
     const shellId = `shell_${this.nextShellId++}`
     const bashPath = this.getBashPath()
 
     let proc: any
-    if (bashPath) {
-      proc = spawn(bashPath, ['-c', command], {
+    if (shell === 'bash') {
+      const bashExecutable = bashPath || (process.platform !== 'win32' ? 'sh' : null)
+      if (!bashExecutable) {
+        throw new Error('未找到 Git Bash。请安装 Git for Windows，或改用 shell=powershell。')
+      }
+      proc = spawn(bashExecutable, ['-lc', command], {
         cwd: cwd || process.cwd(),
-        shell: bashPath,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } else if (shell === 'powershell') {
+      const psCommand = process.platform === 'win32'
+        ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+        : command
+      proc = spawn(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
+        cwd: cwd || process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else {
-      let finalCommand = command
-      if (process.platform === 'win32') {
-        finalCommand = `chcp 65001 >nul && ${command}`
+      if (process.platform !== 'win32') {
+        throw new Error('shell=cmd 仅支持 Windows。')
       }
-      proc = spawn(finalCommand, [], {
+      const finalCommand = process.platform === 'win32' ? `chcp 65001 >nul && ${command}` : command
+      proc = spawn(process.platform === 'win32' ? 'cmd.exe' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', finalCommand] : ['-c', finalCommand], {
         cwd: cwd || process.cwd(),
-        shell: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     }
