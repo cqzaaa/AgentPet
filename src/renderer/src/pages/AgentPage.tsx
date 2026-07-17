@@ -57,6 +57,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [editName, setEditName] = React.useState('')
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
+  const [editClearApiKey, setEditClearApiKey] = React.useState(false)
   const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
 
   // MCP 测试结果弹框状态
@@ -824,8 +825,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <span className={`mcp-badge ${server.apiKey ? 'configured' : 'none'}`}>
-                              {server.apiKey ? '已配置' : '无'}
+                            <span className={`mcp-badge ${server.hasApiKey ? 'configured' : 'none'}`}>
+                              {server.hasApiKey ? '已配置' : '无'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -852,8 +853,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   try {
                                     showToast(`正在测试连接 [${server.name}]...`, 'info')
                                     const res = await window.api.testMcpServer({
+                                      id: server.id,
                                       url: server.url,
-                                      apiKey: server.apiKey,
                                       type: server.type || 'stream'
                                     })
                                     setTestResultData(res)
@@ -873,7 +874,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   setEditingServer(server)
                                   setEditName(server.name)
                                   setEditUrl(server.url)
-                                  setEditApiKey(server.apiKey || '')
+                                  setEditApiKey('')
+                                  setEditClearApiKey(false)
                                   setEditType(server.type || 'stream')
                                   setShowEditModal(true)
                                 }}
@@ -944,10 +946,20 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 <input
                   type="password"
                   className="mcp-input-fancy"
-                  placeholder="默认留空"
+                  placeholder={editingServer.hasApiKey ? '密钥已安全保存；留空表示保持不变' : '默认留空'}
                   value={editApiKey}
                   onChange={e => setEditApiKey(e.target.value)}
                 />
+                {editingServer.hasApiKey && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editClearApiKey}
+                      onChange={e => setEditClearApiKey(e.target.checked)}
+                    />
+                    删除已安全保存的密钥
+                  </label>
+                )}
               </div>
 
               <div>
@@ -983,7 +995,15 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   }
                   const newServers = mcpConfig.servers.map((s: any) =>
                     s.id === editingServer.id
-                      ? { ...s, name: editName.trim(), url: editUrl.trim(), apiKey: editApiKey.trim(), type: editType }
+                      ? {
+                        ...s,
+                        name: editName.trim(),
+                        url: editUrl.trim(),
+                        apiKey: editApiKey.trim(),
+                        hasApiKey: editClearApiKey ? false : Boolean(editApiKey.trim()) || Boolean(s.hasApiKey),
+                        clearApiKey: editClearApiKey,
+                        type: editType
+                      }
                       : s
                   )
                   saveMcpConfig({ servers: newServers })

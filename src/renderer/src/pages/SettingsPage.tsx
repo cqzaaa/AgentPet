@@ -42,6 +42,25 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editAvatarYOffset, setEditAvatarYOffset] = React.useState(0)
   const [openAvatarDropdownId, setOpenAvatarDropdownId] = React.useState<string | null>(null)
   const [dropdownPos, setDropdownPos] = React.useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 })
+  const [apiKeyDraft, setApiKeyDraft] = React.useState('')
+  const [isSavingApiKey, setIsSavingApiKey] = React.useState(false)
+
+  const handleSaveApiKey = async (): Promise<void> => {
+    if (!apiKeyDraft) {
+      showToast('请输入要安全保存的 API 密钥', 'info')
+      return
+    }
+    setIsSavingApiKey(true)
+    try {
+      const saved = await saveLlmConfig({ ...llmConfig, apiKey: apiKeyDraft })
+      if (saved) {
+        setApiKeyDraft('')
+        showToast('API 密钥已使用系统凭据保护安全保存', 'success')
+      }
+    } finally {
+      setIsSavingApiKey(false)
+    }
+  }
 
   // 点击外部/滚动/缩放时关闭下拉菜单
   React.useEffect(() => {
@@ -86,7 +105,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     key={prov}
                     className={`provider-btn ${llmConfig.provider === prov ? 'active' : ''}`}
                     onClick={() => {
-                      let defaults = { provider: prov, apiKey: '', baseUrl: '', model: '', temperature: llmConfig.temperature, maxTokens: undefined }
+                      const defaults = { provider: prov, apiKey: '', hasApiKey: llmConfig.hasApiKey, baseUrl: '', model: '', temperature: llmConfig.temperature, maxTokens: undefined }
                       if (prov === 'gemini') { defaults.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai' }
                       else if (prov === 'openai') { defaults.baseUrl = 'https://api.openai.com/v1' }
                       else if (prov === 'deepseek') { defaults.baseUrl = 'https://api.deepseek.com/v1' }
@@ -111,22 +130,41 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
             {llmConfig.provider !== 'ollama' && (
               <div className="form-group" style={{ position: 'relative' }}>
                 <label className="form-label">API 密钥 (API Key)</label>
-                <div style={{ display: 'flex', position: 'relative', width: '100%' }}>
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    className="form-input"
-                    placeholder="输入大模型提供商的 API 密钥"
-                    value={llmConfig.apiKey}
-                    onChange={e => saveLlmConfig({ ...llmConfig, apiKey: e.target.value })}
-                    style={{ flex: 1, paddingRight: '40px' }}
-                  />
-                  <span
-                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', userSelect: 'none', fontSize: '14px', opacity: 0.6 }}
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    title={showApiKey ? '隐藏密钥' : '显示密钥'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+                  <div style={{ display: 'flex', position: 'relative', flex: 1 }}>
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      className="form-input"
+                      placeholder={llmConfig.hasApiKey ? '密钥已安全保存；输入新密钥可替换' : '输入大模型提供商的 API 密钥'}
+                      value={apiKeyDraft}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      onChange={e => setApiKeyDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !isSavingApiKey) void handleSaveApiKey()
+                      }}
+                      style={{ flex: 1, paddingRight: '40px' }}
+                    />
+                    <span
+                      style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', userSelect: 'none', fontSize: '14px', opacity: 0.6 }}
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      title={showApiKey ? '隐藏密钥' : '显示密钥'}
+                    >
+                      {showApiKey ? '👁️' : '🙈'}
+                    </span>
+                  </div>
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    disabled={!apiKeyDraft || isSavingApiKey}
+                    onClick={() => void handleSaveApiKey()}
+                    style={{ whiteSpace: 'nowrap' }}
                   >
-                    {showApiKey ? '👁️' : '🙈'}
-                  </span>
+                    {isSavingApiKey ? '保存中…' : '安全保存'}
+                  </button>
+                </div>
+                <div style={{ marginTop: '6px', fontSize: '11px', opacity: 0.65 }}>
+                  {llmConfig.hasApiKey ? '✓ 已保存到系统加密凭据库，页面不会回显密钥。' : '密钥不会写入 localStorage 或普通配置文件。'}
                 </div>
               </div>
             )}

@@ -47,7 +47,8 @@ export class ToolRegistry {
       file: { name: '文件操作', description: '读取、写入、编辑文件', tools: [] },
       search: { name: '搜索查找', description: '搜索文件和内容', tools: [] },
       office: { name: 'Office 文档', description: '处理 Excel、Word、PDF 等文档', tools: [] },
-      system: { name: '系统工具', description: '系统状态和任务管理', tools: [] }
+      system: { name: '系统工具', description: '系统状态和任务管理', tools: [] },
+      rpa: { name: 'RPA 工作流', description: '搜索并执行持久化自动化流程', tools: [] }
     }
 
     for (const manifest of this.getAllManifests()) {
@@ -121,7 +122,8 @@ export class ToolRegistry {
       file: { name: '文件操作', description: '读取、写入、编辑文件', tools: [] },
       search: { name: '搜索查找', description: '搜索文件和内容', tools: [] },
       office: { name: 'Office 文档', description: '处理 Excel、Word、PDF 等文档', tools: [] },
-      system: { name: '系统工具', description: '系统状态和任务管理', tools: [] }
+      system: { name: '系统工具', description: '系统状态和任务管理', tools: [] },
+      rpa: { name: 'RPA 工作流', description: '搜索并执行持久化自动化流程', tools: [] }
     }
 
     for (const [apiName, manifest] of this.manifestMap.entries()) {
@@ -149,4 +151,3 @@ export class ToolRegistry {
 }
 
 export const toolRegistry = ToolRegistry.getInstance()
-

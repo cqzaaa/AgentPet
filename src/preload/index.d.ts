@@ -74,7 +74,7 @@ declare global {
       getSandboxMode: () => Promise<boolean>
       setSandboxMode: (enabled: boolean) => Promise<boolean>
       onRequestPermission: (callback: (data: any) => void) => () => void
-      respondPermission: (requestId: number, approved: boolean) => void
+      respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn') => void
       respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
       abortLlm: (sessionId?: string) => Promise<boolean>
       getCronTasks: () => Promise<any[] | null>
@@ -89,10 +89,11 @@ declare global {
       wechatLogout: () => Promise<boolean>
       wechatGetStatus: () => Promise<any>
       wechatSaveSettings: (settings: any) => Promise<boolean>
-      syncLlmConfig: (config: any) => Promise<boolean>
+      getSystemLlmConfig: () => Promise<any>
+      syncLlmConfig: (config: any) => Promise<any>
       onWechatStatusUpdated: (callback: (data: any) => void) => () => void
       onWechatSessionUpdated: (callback: (sessionId?: string) => void) => () => void
-      syncMcpConfig: (config: any) => Promise<boolean>
+      syncMcpConfig: (config: any) => Promise<any>
       testMcpServer: (config: any) => Promise<any>
       getMcpConfig: () => Promise<any>
       onRequestGeolocation: (callback: (data: { requestId: number }) => void) => () => void
@@ -135,6 +136,12 @@ declare global {
       respondRpaManualConfirm: (taskId: string, updates?: any) => Promise<boolean>
       rpaPickElement: (url: string) => Promise<string | null>
       rpaRecordActions: (url: string) => Promise<any[]>
+      listRpaSecrets: () => Promise<any[]>
+      createRpaSecret: (input: { ref: string; plaintext: string; label: string; allowedWorkflowIds: string[]; allowedSurfaces: Array<'browser' | 'desktop' | 'system' | 'agent'> }) => Promise<any>
+      rotateRpaSecret: (ref: string, plaintext: string) => Promise<any>
+      setRpaSecretStatus: (ref: string, status: 'active' | 'disabled') => Promise<any>
+      deleteRpaSecret: (ref: string) => Promise<boolean>
+      captureRpaDesktopTarget: (delayMs?: number) => Promise<{ x: number; y: number; name?: string; automationId?: string; controlType?: string; processId?: number; processName?: string; windowTitle?: string }>
       onRpaLog: (callback: (data: { taskId: string; message: string; level: 'info' | 'warn' | 'error' }) => void) => () => void
       onRpaStatusEvent: (callback: (data: { taskId: string; status: 'running' | 'success' | 'failed'; errorMsg?: string }) => void) => () => void
       onRpaStepEvent: (callback: (data: { taskId: string; nodeId: string; state: 'idle' | 'running' | 'paused' | 'success' | 'failed'; data?: any; context?: any }) => void) => () => void

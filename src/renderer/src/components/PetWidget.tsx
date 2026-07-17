@@ -253,13 +253,13 @@ export function PetWidget(): React.JSX.Element {
 
     try {
       const savedLlmConfig = localStorage.getItem('agentpet_llm_config') || localStorage.getItem('agentself_llm_config')
-      let llmConfig = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
+      let llmConfig = { provider: 'gemini', apiKey: '', hasApiKey: false, baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
       if (savedLlmConfig) {
         try { llmConfig = JSON.parse(savedLlmConfig) } catch (e) { }
       }
 
       const isOllama = llmConfig.provider === 'ollama'
-      const hasKey = isOllama || !!llmConfig.apiKey
+      const hasKey = isOllama || !!llmConfig.apiKey || !!llmConfig.hasApiKey
 
       if (!hasKey) {
         const reply = '主人，您还没有配置大模型 API Key 呢，我已经为您打开配置页面，请先配置一下密钥哦~'
@@ -940,7 +940,13 @@ ${memoryContext}
           overflow-y: auto;
           box-sizing: border-box;
           z-index: 1000;
+          cursor: pointer;
           animation: bubbleFadeIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .pet-toast-bubble:focus-visible {
+          outline: 2px solid rgba(79, 140, 255, 0.85);
+          outline-offset: 3px;
         }
 
         .pet-toast-bubble::-webkit-scrollbar {
@@ -975,7 +981,19 @@ ${memoryContext}
 
       {/* 定时提醒气泡 */}
       {bubbleText && (
-        <div className="pet-toast-bubble">
+        <div
+          className="pet-toast-bubble"
+          role="button"
+          tabIndex={0}
+          title="点击回到 AgentPet"
+          onClick={handleViewDetails}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              handleViewDetails(event as unknown as React.MouseEvent)
+            }
+          }}
+        >
           <div className="pet-toast-bubble-content">
             <div>{renderBubbleContent(bubbleText)}</div>
             {bubbleDetails && (

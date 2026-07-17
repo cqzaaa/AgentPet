@@ -5,10 +5,17 @@ import { randomBytes } from 'node:crypto'
 import * as crypto from 'crypto'
 import * as https from 'https'
 import * as http from 'http'
+import { getSecretVault } from './security/secret-vault'
+import {
+  WechatSecureStore,
+  type RuntimeWechatSettings
+} from './security/wechat-secure-store'
 
 export interface WechatLlmConfig {
+  [key: string]: unknown
   provider: string
   apiKey: string
+  hasApiKey: boolean
   baseUrl: string
   model: string
   temperature: number
@@ -391,6 +398,7 @@ export class WechatBotManager {
   private tokenPath: string
   private syncBufPath: string
   private activeChatsPath: string
+  private secureStore: WechatSecureStore
 
   // 内存状态
   private state: WechatBotState = {
@@ -403,6 +411,7 @@ export class WechatBotManager {
     llmConfig: {
       provider: 'gemini',
       apiKey: '',
+      hasApiKey: false,
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
       model: '',
       temperature: 0.7,
@@ -429,6 +438,7 @@ export class WechatBotManager {
     this.tokenPath = join(userData, 'wechat_token.json')
     this.syncBufPath = join(userData, 'wechat_sync_buf.dat')
     this.activeChatsPath = join(userData, 'wechat_active_chats.json')
+    this.secureStore = new WechatSecureStore(this.configPath, this.tokenPath, getSecretVault())
 
     this.loadConfig()
     this.loadActiveChats()
@@ -538,12 +548,12 @@ export class WechatBotManager {
   // 加载局部配置文件
   private loadConfig() {
     try {
-      if (fs.existsSync(this.configPath)) {
-        const data = fs.readFileSync(this.configPath, 'utf8')
-        const parsed = JSON.parse(data)
-        this.state.llmConfig = { ...this.state.llmConfig, ...parsed.llmConfig }
-        if (parsed.autoReplyText !== undefined) this.state.autoReplyText = parsed.autoReplyText
-        if (parsed.enableAutoReply !== undefined) this.state.enableAutoReply = parsed.enableAutoReply
+      const settings = this.secureStore.loadSettings(this.getRuntimeSettings())
+      this.state.llmConfig = settings.llmConfig
+      this.state.autoReplyText = settings.autoReplyText
+      this.state.enableAutoReply = settings.enableAutoReply
+      if (settings.secretMigrationPending) {
+        this.addLog('info', '微信专属模型密钥迁移等待系统凭据加密服务可用')
       }
     } catch (e) {
       this.addLog('info', `加载配置文件 wechat_config.json 失败: ${e}`)
@@ -551,32 +561,34 @@ export class WechatBotManager {
   }
 
   // 保存局部配置到物理文件
-  public async saveSettings(settings: { llmConfig: WechatLlmConfig; autoReplyText: string; enableAutoReply: boolean }) {
+  public async saveSettings(settings: { llmConfig: WechatLlmConfig; autoReplyText: string; enableAutoReply: boolean }): Promise<boolean> {
     const prevEnable = this.state.enableAutoReply
-    this.state.llmConfig = settings.llmConfig
-    this.state.autoReplyText = settings.autoReplyText
-    this.state.enableAutoReply = settings.enableAutoReply
-    
+
     try {
-      await fs.promises.writeFile(this.configPath, JSON.stringify({
-        llmConfig: this.state.llmConfig,
-        autoReplyText: this.state.autoReplyText,
-        enableAutoReply: this.state.enableAutoReply
-      }, null, 2), 'utf8')
+      const saved = this.secureStore.saveSettings(settings, this.getRuntimeSettings())
+      this.state.llmConfig = saved.llmConfig
+      this.state.autoReplyText = saved.autoReplyText
+      this.state.enableAutoReply = saved.enableAutoReply
       this.addLog('info', '微信 Bot 独立大模型及自动回复配置已成功保存！')
 
       // 联动重连：如果 enableAutoReply 变为了 true，并且当前连接断开，自动在后台重连
       if (this.state.enableAutoReply && !prevEnable && this.state.status === 'disconnected') {
         this.autoReconnect()
       }
+      return true
     } catch (e) {
       this.addLog('info', `保存配置文件 wechat_config.json 失败: ${e}`)
+      return false
     }
   }
 
   // 获取当前的内存状态（发送给渲染层）
   public getState(): WechatBotState {
-    return this.state
+    const sanitized = this.secureStore.sanitizeSettings(this.getRuntimeSettings())
+    return {
+      ...this.state,
+      llmConfig: sanitized.llmConfig
+    }
   }
 
   // 微信登录：扫码授权
@@ -663,7 +675,7 @@ export class WechatBotManager {
           } catch {}
 
           // 保存 Token，用于重启自动连线
-          this.saveToken(this.client.token, this.client.baseUrl)
+          await this.saveToken(this.client.token, this.client.baseUrl)
 
           // 启动消息循环
           this.startMessageLoop()
@@ -702,7 +714,7 @@ export class WechatBotManager {
 
     // 清理本地 Token 保存
     try {
-      await fs.promises.unlink(this.tokenPath)
+      this.secureStore.deleteSession()
     } catch {}
 
     this.addLog('info', '微信 Bot 连接已完全断开！已恢复未登录状态。')
@@ -711,13 +723,10 @@ export class WechatBotManager {
 
   // 重启时自动恢复会话连接
   public async autoReconnect() {
-    if (!fs.existsSync(this.tokenPath)) {
-      return
-    }
-
     try {
-      const data = fs.readFileSync(this.tokenPath, 'utf8')
-      const { token, baseUrl } = JSON.parse(data)
+      const session = this.secureStore.loadSession()
+      if (!session) return
+      const { token, baseUrl } = session
 
       if (token) {
         this.addLog('info', '检测到已保存的微信令牌，正在尝试自动恢复微信 Bot 会话连接...')
@@ -743,9 +752,28 @@ export class WechatBotManager {
   // 保存 token
   private async saveToken(token: string, baseUrl: string) {
     try {
-      await fs.promises.writeFile(this.tokenPath, JSON.stringify({ token, baseUrl }), 'utf8')
+      this.secureStore.saveSession(token, baseUrl)
     } catch (e) {
       this.addLog('info', `保存微信 token 失败: ${e}`)
+    }
+  }
+
+  public getRuntimeLlmConfig(): WechatLlmConfig {
+    return this.state.llmConfig
+  }
+
+  // 应用退出只停止网络活动，不等同于用户主动注销；保留加密会话令牌用于下次自动连接。
+  public async shutdown(): Promise<void> {
+    this.stopMessageLoop()
+    this.client = null
+    this.state.status = 'disconnected'
+  }
+
+  private getRuntimeSettings(): RuntimeWechatSettings {
+    return {
+      llmConfig: this.state.llmConfig,
+      autoReplyText: this.state.autoReplyText,
+      enableAutoReply: this.state.enableAutoReply
     }
   }
 

@@ -174,7 +174,7 @@ if (-not $task.Wait(15000)) {
 
       if (api === 'request_user_clarification') {
         const rawQuestions = Array.isArray(args.questions) ? args.questions.slice(0, 3) : []
-        const questions = rawQuestions
+        const questions = this.dedupeClarificationQuestions(rawQuestions
           .filter(question => question && typeof question.id === 'string' && typeof question.question === 'string')
           .map(question => ({
             id: question.id.slice(0, 80),
@@ -188,7 +188,7 @@ if (-not $task.Wait(15000)) {
                 description: typeof option.description === 'string' ? option.description.slice(0, 120) : ''
               }))
               : []
-          }))
+          })))
         if (questions.length === 0) return { content: '错误：至少需要一个有效的澄清问题。', success: false }
 
         const response = await clarificationManager.request(questions, context.sessionId, context.event?.sender)
@@ -302,6 +302,19 @@ if (-not $task.Wait(15000)) {
 
   public getApiNames(): string[] {
     return ['get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+  }
+
+  private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {
+    const hasSpecificQuestion = questions.some(question => !this.isGenericClarificationPrompt(question.question) && this.isSpecificClarificationQuestion(question.question))
+    return questions.filter(question => !(hasSpecificQuestion && this.isGenericClarificationPrompt(question.question)))
+  }
+
+  private isGenericClarificationPrompt(question: string): boolean {
+    return /(\u7ebf\u7d22|\u6bd4\u5982|\u4f8b\u5982|\u63d0\u4f9b\u4e00\u4e9b|\u5e2e\u6211\u63d0\u4f9b|\u544a\u8bc9\u6211\u4e00\u4e9b|clue|for example)/i.test(question)
+  }
+
+  private isSpecificClarificationQuestion(question: string): boolean {
+    return /(\u5b8c\u6574\u76ee\u5f55|\u76ee\u5f55|\u8def\u5f84|\u4f4d\u7f6e|\u78c1\u76d8|\u6587\u4ef6\u5939|\u6587\u4ef6\u7c7b\u578b|\u8d26\u53f7|\u5bc6\u7801|\u51ed\u636e|path|directory|folder|drive|account|credential)/i.test(question)
   }
 }
 

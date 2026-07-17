@@ -1,22 +1,15 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright-core'
-import { app } from 'electron'
-import { join } from 'path'
-import * as fs from 'fs'
 import { ModelRuntimeFactory } from '../model-runtime'
+import { loadSecureSystemLlmConfig } from '../security/secure-llm-config'
+import type { RpaEdge, RpaNode } from './domain/types'
+import { closeAllRpaRepositories } from './persistence/repository-manager'
+import { RpaRunJournal } from './runtime/run-journal'
+import { containsSecretExpression, parseSecretExpression, sanitizeRuntimeValue } from './domain/secret-ref'
+import { getRpaSecretService } from './security/rpa-secret-service-provider'
+import { computerExecutor } from '../tools/builtin/computer/executor'
+import { invokeDesktopElement } from './rpaDesktopPicker'
 
-export interface RpaNode {
-  id: string
-  type: string
-  data: Record<string, any>
-}
-
-export interface RpaEdge {
-  id: string
-  source: string
-  target: string
-  sourceHandle?: string
-  targetHandle?: string
-}
+export type { RpaEdge, RpaNode } from './domain/types'
 
 export class PlaywrightRpaExecutor {
   private static activeExecutors = new Map<string, PlaywrightRpaExecutor>()
@@ -25,26 +18,44 @@ export class PlaywrightRpaExecutor {
   private nodes: RpaNode[]
   private edges: RpaEdge[]
   private webContents: Electron.WebContents
+  private runJournal: RpaRunJournal
   
   private browser: Browser | null = null
   private context: BrowserContext | null = null
   private page: Page | null = null
   
   private runContext: Record<string, any> = {}
+  private initialContext: Record<string, any>
   private isPaused: boolean = false
   private isStopped: boolean = false
   private resolvePause: (() => void) | null = null
   
   private currentNodeId: string = ''
+  private readonly resolvedSecrets = new Set<string>()
+  private currentSurface: 'system' | 'browser' | 'desktop' | 'agent' = 'system'
 
-  constructor(taskId: string, nodes: RpaNode[], edges: RpaEdge[], webContents: Electron.WebContents) {
+  constructor(
+    taskId: string,
+    nodes: RpaNode[],
+    edges: RpaEdge[],
+    webContents: Electron.WebContents,
+    initialContext: Record<string, any> = {}
+  ) {
     this.taskId = taskId
     this.nodes = nodes
     this.edges = edges
     this.webContents = webContents
+    this.runJournal = new RpaRunJournal(taskId, nodes.length)
+    this.initialContext = { ...initialContext }
   }
 
-  public static async run(taskId: string, nodes: RpaNode[], edges: RpaEdge[], webContents: Electron.WebContents): Promise<void> {
+  public static async run(
+    taskId: string,
+    nodes: RpaNode[],
+    edges: RpaEdge[],
+    webContents: Electron.WebContents,
+    initialContext: Record<string, any> = {}
+  ): Promise<string> {
     // 如果已经有正在运行的相同任务，先停止它
     const existing = this.activeExecutors.get(taskId)
     if (existing) {
@@ -52,7 +63,13 @@ export class PlaywrightRpaExecutor {
       this.activeExecutors.delete(taskId)
     }
 
-    const executor = new PlaywrightRpaExecutor(taskId, nodes, edges, webContents)
+    const executor = new PlaywrightRpaExecutor(
+      taskId,
+      nodes,
+      edges,
+      webContents,
+      initialContext
+    )
     this.activeExecutors.set(taskId, executor)
     
     // 异步启动，不阻塞 IPC
@@ -61,10 +78,15 @@ export class PlaywrightRpaExecutor {
         this.activeExecutors.delete(taskId)
       }
     })
+    return executor.getRunId()
   }
 
   public static getActive(taskId: string): PlaywrightRpaExecutor | undefined {
     return this.activeExecutors.get(taskId)
+  }
+
+  public static findByRunId(runId: string): PlaywrightRpaExecutor | undefined {
+    return [...this.activeExecutors.values()].find((executor) => executor.getRunId() === runId)
   }
 
   public static async cleanAll(): Promise<void> {
@@ -74,6 +96,7 @@ export class PlaywrightRpaExecutor {
       } catch (_) {}
     }
     this.activeExecutors.clear()
+    await closeAllRpaRepositories()
   }
 
   /**
@@ -85,6 +108,7 @@ export class PlaywrightRpaExecutor {
     }
     this.isPaused = false
     this.log(`用户手动恢复了流程`)
+    this.runJournal.resume(this.nodes.find((node) => node.id === this.currentNodeId))
     if (this.resolvePause) {
       this.resolvePause()
       this.resolvePause = null
@@ -105,17 +129,27 @@ export class PlaywrightRpaExecutor {
    */
   public async stop(): Promise<void> {
     this.isStopped = true
+    this.runJournal.cancel()
     this.log(`正在中止 RPA 流程...`)
     if (this.resolvePause) {
       this.resolvePause()
       this.resolvePause = null
     }
     await this.cleanup()
+    await this.runJournal.flush()
     PlaywrightRpaExecutor.activeExecutors.delete(this.taskId)
   }
 
   public isBrowserCleaned(): boolean {
     return this.browser === null
+  }
+
+  public getRunId(): string {
+    return this.runJournal.runId
+  }
+
+  public getRunStatus(): string {
+    return this.runJournal.getStatus()
   }
 
   /**
@@ -133,7 +167,7 @@ export class PlaywrightRpaExecutor {
         throw new Error('未找到开始节点 (Start Node)')
       }
 
-      this.runContext = {}
+      this.runContext = { ...this.initialContext }
       let currentNode: RpaNode | null = startNode
 
       // 3. 循环解释执行节点
@@ -182,6 +216,7 @@ export class PlaywrightRpaExecutor {
           this.log(`💡 流程执行完毕，浏览器窗口已保留以便您查看最终状态。你可以点击“停止运行”来手动关闭浏览器。`, 'info')
         }
       }
+      await this.runJournal.flush()
     }
   }
 
@@ -397,7 +432,7 @@ export class PlaywrightRpaExecutor {
    * 执行单个节点逻辑
    */
   private async executeNode(node: RpaNode): Promise<any> {
-    const webNodeTypes = ['open_url', 'click', 'fill', 'extract', 'wait']
+    const webNodeTypes = ['open_url', 'click', 'fill', 'extract']
     if (webNodeTypes.includes(node.type)) {
       if (!this.page) {
         await this.initBrowser()
@@ -410,6 +445,18 @@ export class PlaywrightRpaExecutor {
     }
 
     const page = this.page!
+
+    const nextSurface = node.type.startsWith('desktop_')
+      ? 'desktop'
+      : webNodeTypes.includes(node.type)
+        ? 'browser'
+        : node.type === 'ai_node'
+          ? 'agent'
+          : 'system'
+    if (nextSurface !== this.currentSurface) {
+      this.currentSurface = nextSurface
+      this.log(`执行面已切换到 ${nextSurface.toUpperCase()}`)
+    }
 
     switch (node.type) {
       case 'start':
@@ -439,13 +486,62 @@ export class PlaywrightRpaExecutor {
 
       case 'fill': {
         const selector = this.resolveExpression(node.data?.selector || '')
-        const value = this.resolveExpression(node.data?.value || '')
+        const rawValue = node.data?.valueSource?.type === 'secretRef'
+          ? `\${${node.data.valueSource.ref}}`
+          : node.data?.value || ''
+        const value = this.resolveActionValue(rawValue, node)
         if (!selector) throw new Error('输入节点未配置选择器 (Selector)')
-        this.log(`正在输入文本到 ${selector}: "${value}"`)
+        this.log(`正在输入文本到 ${selector}（长度: ${value.length}）`)
         await page.waitForSelector(selector, { timeout: 10000 })
         await page.fill(selector, value)
         return null
       }
+
+      case 'desktop_focus':
+        return this.executeDesktop('focus_window', {
+          title: node.data?.windowTitle,
+          pid: Number(node.data?.pid) || undefined
+        })
+
+      case 'desktop_click': {
+        const invoked = await invokeDesktopElement({
+          automationId: node.data?.automationId,
+          name: node.data?.name,
+          processId: Number(node.data?.pid) || undefined
+        })
+        if (invoked) return null
+        this.log('UI Automation Invoke 不可用，使用录制坐标降级', 'warn')
+        return this.executeDesktop('mouse_click', {
+          x: Number(node.data?.x),
+          y: Number(node.data?.y),
+          button: node.data?.button || 'left',
+          double: Boolean(node.data?.double)
+        })
+      }
+
+      case 'desktop_type': {
+        const rawValue = node.data?.valueSource?.type === 'secretRef'
+          ? `\${${node.data.valueSource.ref}}`
+          : node.data?.value || ''
+        const text = this.resolveActionValue(rawValue, node, 'desktop')
+        await this.executeDesktop('type_text', { text })
+        return null
+      }
+
+      case 'desktop_hotkey':
+        return this.executeDesktop('key_press', {
+          keys: Array.isArray(node.data?.keys)
+            ? node.data.keys
+            : String(node.data?.keys || '').split('+').map((key) => key.trim()).filter(Boolean)
+        })
+
+      case 'desktop_scroll':
+        return this.executeDesktop('mouse_scroll', {
+          x: Number(node.data?.x),
+          y: Number(node.data?.y),
+          direction: node.data?.direction === 'up' ? 'up' : 'down',
+          amount: Math.max(1, Number(node.data?.amount) || 3)
+        })
 
       case 'extract': {
         const selector = this.resolveExpression(node.data?.selector || '')
@@ -468,7 +564,7 @@ export class PlaywrightRpaExecutor {
 
         result = result.trim()
         this.runContext[varName] = result
-        this.log(`提取结果已保存至变量 [${varName}]: "${result.substring(0, 100)}${result.length > 100 ? '...' : ''}"`)
+        this.log(`提取结果已保存至变量 [${varName}]（长度: ${result.length}）`)
         return result
       }
 
@@ -485,7 +581,7 @@ export class PlaywrightRpaExecutor {
         
         // 强制进入暂停状态并发出暂停 IPC，带上当前的运行上下文
         this.isPaused = true
-        this.notifyStep(node.id, 'paused', { prompt, runContext: this.runContext })
+        this.notifyStep(node.id, 'paused', { prompt })
         
         // 更新网页上的操作条
         if (this.page) {
@@ -515,11 +611,14 @@ export class PlaywrightRpaExecutor {
         if (!varName) throw new Error('AI 节点未配置目标变量名 (Variable Name)')
 
         const resolvedPrompt = this.resolveExpression(promptTemplate)
-        this.log(`🤖 正在调用大模型 AI 节点，Prompt: "${resolvedPrompt.substring(0, 100)}..."`)
+        if (containsSecretExpression(resolvedPrompt)) {
+          throw new Error('AI 节点不允许解析或发送 secretRef')
+        }
+        this.log(`🤖 正在调用大模型 AI 节点（Prompt 长度: ${resolvedPrompt.length}）`)
 
         const aiResult = await this.callLLMForRpa(resolvedPrompt)
         this.runContext[varName] = aiResult
-        this.log(`AI 节点响应结果已保存至变量 [${varName}]: "${aiResult.substring(0, 150)}..."`)
+        this.log(`AI 节点响应结果已保存至变量 [${varName}]（长度: ${aiResult.length}）`)
         return aiResult
       }
 
@@ -533,14 +632,11 @@ export class PlaywrightRpaExecutor {
    */
   private async callLLMForRpa(prompt: string): Promise<string> {
     try {
-      const configPath = join(app.getPath('userData'), 'system_llm_config.json')
-      if (!fs.existsSync(configPath)) {
+      const llmConfig = loadSecureSystemLlmConfig()
+      if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey) {
         throw new Error('未检测到大模型 API 密钥配置，请先在设置中完成配置。')
       }
-      
-      const configRaw = await fs.promises.readFile(configPath, 'utf-8')
-      const llmConfig = JSON.parse(configRaw)
-      
+
       const provider = ModelRuntimeFactory.getProvider(
         llmConfig.provider,
         llmConfig.apiKey,
@@ -563,10 +659,37 @@ export class PlaywrightRpaExecutor {
    */
   private resolveExpression(template: string): string {
     if (typeof template !== 'string') return template
+    if (containsSecretExpression(template)) {
+      throw new Error('secretRef 只能作为受支持动作的完整输入值，不能嵌入普通模板')
+    }
     return template.replace(/\{\{([^}]+)\}\}/g, (_, varName) => {
       const key = varName.trim()
       return this.runContext[key] !== undefined ? String(this.runContext[key]) : `{{${key}}}`
     })
+  }
+
+  private resolveActionValue(value: unknown, node: RpaNode, surface: 'browser' | 'desktop' = 'browser'): string {
+    const secretRef = parseSecretExpression(value)
+    if (!secretRef) return this.resolveExpression(typeof value === 'string' ? value : String(value ?? ''))
+    const plaintext = getRpaSecretService().resolve(secretRef, {
+      workflowId: this.taskId,
+      runId: this.runJournal.runId,
+      actionId: node.id,
+      surface
+    })
+    this.resolvedSecrets.add(plaintext)
+    return plaintext
+  }
+
+  private async executeDesktop(api: string, args: Record<string, unknown>): Promise<null> {
+    const result = await computerExecutor.execute(api, args, {
+      workspacePath: '',
+      sessionId: this.runJournal.runId,
+      isFrontend: true,
+      sandboxMode: false
+    })
+    if (!result.success) throw new Error(result.error?.message || result.content || `Desktop action failed: ${api}`)
+    return null
   }
 
   /**
@@ -635,6 +758,7 @@ export class PlaywrightRpaExecutor {
    * 辅助日志打印并发送至前端渲染
    */
   private log(message: string, level: 'info' | 'warn' | 'error' = 'info'): void {
+    message = this.redact(message)
     console.log(`[RPA Executor] [${level.toUpperCase()}] ${message}`)
     try {
       this.webContents.send('api:rpa-log', {
@@ -646,6 +770,14 @@ export class PlaywrightRpaExecutor {
   }
 
   private notifyStatus(status: 'running' | 'success' | 'failed', errorMsg?: string): void {
+    errorMsg = errorMsg ? this.redact(errorMsg) : undefined
+    if (status === 'running') {
+      this.runJournal.start()
+    } else if (status === 'success') {
+      this.runJournal.complete(Object.keys(this.runContext))
+    } else {
+      this.runJournal.fail(errorMsg)
+    }
     try {
       this.webContents.send('api:rpa-status-event', {
         taskId: this.taskId,
@@ -656,14 +788,37 @@ export class PlaywrightRpaExecutor {
   }
 
   private notifyStep(nodeId: string, state: 'idle' | 'running' | 'paused' | 'success' | 'failed', data?: any): void {
+    const safeData = typeof data === 'string' ? this.redact(data) : sanitizeRuntimeValue(data)
+    this.runJournal.recordStep(
+      this.nodes.find((node) => node.id === nodeId),
+      state,
+      safeData
+    )
     try {
       this.webContents.send('api:rpa-step-event', {
         taskId: this.taskId,
         nodeId,
         state,
-        data,
-        context: this.runContext
+        data: safeData,
+        context: this.publicContextSummary(),
+        surface: this.currentSurface
       })
     } catch (_) {}
+  }
+
+  private publicContextSummary(): Record<string, import('./domain/types').JsonValue> {
+    const summary: Record<string, import('./domain/types').JsonValue> = Object.create(null)
+    for (const [key, value] of Object.entries(this.runContext)) {
+      summary[key] = sanitizeRuntimeValue(value)
+    }
+    return summary
+  }
+
+  private redact(value: string): string {
+    let output = value
+    for (const secret of this.resolvedSecrets) {
+      if (secret) output = output.split(secret).join('[redacted]')
+    }
+    return output
   }
 }

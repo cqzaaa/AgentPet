@@ -31,6 +31,42 @@ function getActiveChatDir(): string {
 export class AgentExecutor {
   private toolListCache: { full?: any[], simplified?: any[] } = {}
 
+  private getToolImagePaths(state: any): string[] {
+    const candidates = [
+      state?.filePath,
+      state?.imagePath,
+      ...(Array.isArray(state?.imagePaths) ? state.imagePaths : [])
+    ]
+    return candidates
+      .filter((filePath: unknown): filePath is string => typeof filePath === 'string' && /\.(png|jpe?g|webp|gif|bmp)$/i.test(filePath))
+      .filter(filePath => {
+        try {
+          return fs.existsSync(filePath)
+        } catch {
+          return false
+        }
+      })
+  }
+
+  private buildToolImageBlocks(filePaths: string[]): any[] {
+    const blocks: any[] = []
+    for (const filePath of filePaths) {
+      try {
+        const buffer = fs.readFileSync(filePath)
+        let ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+        if (ext === 'jpg') ext = 'jpeg'
+        const mimeType = `image/${ext}`
+        blocks.push({
+          type: 'image_url',
+          image_url: { url: `data:${mimeType};base64,${buffer.toString('base64')}` }
+        })
+      } catch (err) {
+        console.error('[AgentExecutor] 读取工具截图给大模型失败:', err)
+      }
+    }
+    return blocks
+  }
+
   /**
    * Web citations are transient during an agent run. Before persisting a memory,
    * turn its stable source ids into links and retain a small source index so the
@@ -292,6 +328,15 @@ export class AgentExecutor {
     const availableWebSourceIds = new Set<string>()
     const webSourcesForMemory: WebMemorySource[] = []
     const executedWebSearchQueries = new Set<string>()
+    chatHistory.unshift({
+      role: 'system',
+      content: [
+        '[交互控件规则]',
+        'request_user_clarification 是可选的交互控件：当你判断用卡片能让用户更清楚地补充信息、选择范围、确认对象或继续普通追问时，可以主动调用。',
+        '如果用户的问题已经足够明确，请先直接回答；不要因为程序规则而把普通文本强制转换成卡片。',
+        '普通文本和提问控件都可以用于追问；由你根据当前上下文、用户体验和任务是否需要继续来判断。'
+      ].join('\n')
+    })
 
     if (sessionId) {
       const chatDir = getActiveChatDir()
@@ -429,7 +474,9 @@ export class AgentExecutor {
           let streamedMessage: ChatMessage | null = null
           for await (const event of modelProvider.chatStream(chatHistory, chatOptions)) {
             if (event.type === 'delta') {
-              yield { type: 'text_delta', content: event.content }
+              if (effectiveTools.length === 0) {
+                yield { type: 'text_delta', content: event.content }
+              }
             } else {
               streamedMessage = event.message
             }
@@ -642,6 +689,7 @@ export class AgentExecutor {
 
             let toolResult: string
             let webSources: any[] | undefined
+            let imageFilePaths: string[] = []
             if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
               toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
@@ -686,6 +734,7 @@ export class AgentExecutor {
                   const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
                   toolResult = res.content
                   webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
+                  imageFilePaths = this.getToolImagePaths(res.state)
                 }
               }
             } else {
@@ -700,6 +749,7 @@ export class AgentExecutor {
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
               toolResult = res.content
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
+              imageFilePaths = this.getToolImagePaths(res.state)
             }
 
             if (abortSignal?.aborted) {
@@ -727,13 +777,15 @@ export class AgentExecutor {
               toolName,
               displayResult,
               contextToolResult,
-              webSources
+              webSources,
+              imageFilePaths
             }
           }))
           toolExecutionResults.push(...batchResults)
         }
 
         const results = toolExecutionResults
+        const toolImagePathsForNextTurn: string[] = []
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
@@ -764,6 +816,26 @@ export class AgentExecutor {
             name: res.toolName,
             content: res.contextToolResult
           })
+
+          if (Array.isArray(res.imageFilePaths) && res.imageFilePaths.length > 0) {
+            toolImagePathsForNextTurn.push(...res.imageFilePaths)
+          }
+        }
+
+        if (toolImagePathsForNextTurn.length > 0) {
+          const imageBlocks = this.buildToolImageBlocks(toolImagePathsForNextTurn)
+          if (imageBlocks.length > 0) {
+            chatHistory.push({
+              role: 'user' as const,
+              content: [
+                {
+                  type: 'text',
+                  text: '以下是刚才工具截图得到的视觉内容，请直接观察图片并基于图片继续完成任务；不要再说无法查看图片。'
+                },
+                ...imageBlocks
+              ]
+            })
+          }
         }
 
         continue

@@ -85,13 +85,18 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'type_text',
-      description: '用键盘输入一段文字（将文字逐字符输入到当前焦点元素）。',
+      description: '向当前焦点元素输入一段文字。默认使用剪贴板粘贴，适合中文、emoji 和复杂标点；仅在确需逐键模拟时使用 method="keyboard"。',
       parameters: {
         type: 'object',
         properties: {
           text: {
             type: 'string',
             description: '要输入的文字内容'
+          },
+          method: {
+            type: 'string',
+            enum: ['clipboard_paste', 'keyboard'],
+            description: '输入方式，默认 clipboard_paste；中文和复杂文本不要使用 keyboard'
           }
         },
         required: ['text']

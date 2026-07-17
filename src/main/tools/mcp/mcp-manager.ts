@@ -5,12 +5,19 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import { join } from 'path'
 import { McpNameMapper } from './mcp-name-mapper.js'
+import {
+  loadSecureSystemMcpConfig,
+  sanitizeSystemMcpConfig,
+  saveSecureSystemMcpConfig
+} from '../../security/secure-mcp-config'
+import type { RuntimeMcpConfig } from '../../security/mcp-config-store'
 
 export interface McpServerConfig {
   id: string
   name: string
   url: string
   apiKey: string
+  hasApiKey?: boolean
   type?: 'sse' | 'stream' | 'auto'
   enabled: boolean
   description?: string
@@ -26,9 +33,7 @@ export class McpManager {
   private toolsCache: Record<string, any[]> = {}
 
 
-  private constructor() {
-    this.loadSystemMcpConfig()
-  }
+  private constructor() {}
 
   public static getInstance(): McpManager {
     if (!McpManager.instance) {
@@ -502,22 +507,13 @@ export class McpManager {
   }
 
 
-  public loadSystemMcpConfig() {
+  public loadSystemMcpConfig(): { servers: McpServerConfig[] } {
     try {
-      const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
       const cachePath = join(app.getPath('userData'), 'mcp_tools_cache.json')
-      let parsed: any = null
-      if (fs.existsSync(configPath)) {
-        const data = fs.readFileSync(configPath, 'utf8')
-        try {
-          parsed = JSON.parse(data)
-        } catch {}
-      }
-
-      if (parsed && Array.isArray(parsed.servers)) {
-        this.systemMcpConfig = { servers: parsed.servers }
-      } else {
-        this.systemMcpConfig = { servers: [] }
+      const loaded = loadSecureSystemMcpConfig()
+      this.systemMcpConfig = { servers: loaded.servers as McpServerConfig[] }
+      if (loaded.secretMigrationPending) {
+        console.warn('[Secrets] MCP credential migration is pending because OS encryption is unavailable')
       }
 
       // 尝试加载工具定义缓存
@@ -541,24 +537,20 @@ export class McpManager {
       this.setConfigs(this.systemMcpConfig.servers)
     } catch (e) {
       console.error('加载全局 MCP 配置文件失败:', e)
+      this.systemMcpConfig = { servers: [] }
     }
+    return this.systemMcpConfig
   }
 
-  public saveSystemMcpConfig(config: any) {
-    try {
-      const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
-      // 过滤掉大体积的 tools 缓存字段，使主配置文件保持精炼
-      const cleanedConfig = {
-        ...config,
-        servers: (config.servers || []).map((s: any) => {
-          const { tools: _t, ...rest } = s
-          return rest
-        })
-      }
-      fs.writeFileSync(configPath, JSON.stringify(cleanedConfig, null, 2), 'utf8')
-    } catch (e) {
-      console.error('保存全局 MCP 配置文件失败:', e)
-    }
+  public saveSystemMcpConfig(config: Record<string, unknown>): { servers: McpServerConfig[] } {
+    const saved = saveSecureSystemMcpConfig(config)
+    this.systemMcpConfig = { servers: saved.servers as McpServerConfig[] }
+    this.setConfigs(this.systemMcpConfig.servers)
+    return this.systemMcpConfig
+  }
+
+  public getSanitizedSystemMcpConfig(): RuntimeMcpConfig {
+    return sanitizeSystemMcpConfig(this.systemMcpConfig as RuntimeMcpConfig)
   }
 
 }

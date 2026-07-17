@@ -11,6 +11,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test:security:compile": "tsc src/main/tools/security/safety-checker.ts src/main/tools/security/audit-pipeline.ts src/main/tools/core/types.ts --outDir node_modules/.cache/agentpet-security-tests --module commonjs --moduleResolution node --target ES2022 --types node,electron --esModuleInterop --skipLibCheck",
+    "test:security": "npm run test:security:compile",
     "start": "chcp 65001 > nul && electron-vite preview",
     "dev": "chcp 65001 > nul && electron-vite dev",
     "build": "npm run typecheck && electron-vite build",

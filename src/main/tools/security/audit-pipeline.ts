@@ -1,5 +1,5 @@
 import { ToolManifest, ToolContext } from '../core/types'
-import { isReadOnlyCommand, checkCommandSafety } from './safety-checker'
+import { checkCommandSafety, getCommandSegments, isReadOnlyCommand, looksLikeReadOnlyInspection } from './safety-checker'
 
 export interface AuditResult {
   blocked: boolean
@@ -27,29 +27,37 @@ export class AuditPipeline {
     _context: ToolContext
   ): Promise<AuditResult> {
     const api = manifest.api.find(a => a.name === toolName)
-    
-    // 如果是 never，免除所有人工干预/审批
+
     if (api?.humanIntervention === 'never') {
       return { blocked: false, requireApproval: false }
     }
 
-    // 处理命令行工具安全审计 (例如 run_terminal_command 或 run_command)
-    if (toolName === 'run_terminal_command' || toolName === 'run_command') {
-      const command = args.command || ''
-      if (/\b(cat|type|head|tail|more|less|grep|rg|get-content|select-string)\b/i.test(command)) {
-        return {
-          blocked: false,
-          requireApproval: true,
-          warning: '检测到终端直接读取或搜索文件。请确认该路径已获授权；常规文件读取应使用 read_file 或 grep_content。'
-        }
+    if (api?.humanIntervention === 'required') {
+      return {
+        blocked: false,
+        requireApproval: true,
+        warning: `工具 ${toolName} 将执行可能改变外部状态的操作，请核对参数后确认。`
       }
-      
-      // 1. 只读或无害查询命令自动放行 (不需弹窗)
+    }
+
+    if (toolName === 'run_terminal_command' || toolName === 'run_command') {
+      const command = typeof args.command === 'string' ? args.command : ''
+
+      // Allow pure inspection commands without interrupting the user. This is
+      // segment-based, so code text such as PowerShell Add-Type is not mistaken
+      // for the CMD "type" command.
       if (isReadOnlyCommand(command)) {
         return { blocked: false, requireApproval: false }
       }
 
-      // 2. 检查是否有高危操作
+      if (this.hasPermanentDeleteCommand(command)) {
+        return {
+          blocked: true,
+          requireApproval: false,
+          reason: '检测到终端永久删除命令。删除文件必须改用 delete_file 工具，以便移入回收站并允许用户回退。'
+        }
+      }
+
       const safety = checkCommandSafety(command)
       if (!safety.safe) {
         return {
@@ -58,20 +66,31 @@ export class AuditPipeline {
           warning: safety.warning
         }
       }
+
+      if (looksLikeReadOnlyInspection(command)) {
+        return {
+          blocked: false,
+          requireApproval: true,
+          warning: '命令包含只读查看片段，但还混合了未识别或可能改变状态的操作。请核对完整命令后再允许。'
+        }
+      }
     }
 
-    // 处理内置文件删除工具安全审计 (delete_file)
     if (toolName === 'delete_file') {
       const filePath = args.file_path || ''
       return {
         blocked: false,
         requireApproval: true,
-        warning: `检测到 AI 助理正在请求调用内置删除工具 'delete_file' 物理删除路径：${filePath}。系统默认不开启自动删除权限，此操作必须经由您手动核对批准后方可执行。`
+        warning: `检测到 AI 正在请求删除文件：${filePath}。请手动核对批准后再执行。`
       }
     }
 
-    // 默认不需要审批
     return { blocked: false, requireApproval: false }
+  }
+
+  private hasPermanentDeleteCommand(command: string): boolean {
+    const deleteCommands = new Set(['rm', 'del', 'erase', 'rd', 'rmdir', 'unlink', 'remove-item'])
+    return getCommandSegments(command).some(segment => deleteCommands.has(segment.command))
   }
 }
 

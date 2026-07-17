@@ -15,6 +15,36 @@ interface ChatReplyRuntime {
   abortReply: (sessionId: string, messages: any[], showToast: (message: string, type: 'info' | 'error') => void) => Promise<void>
 }
 
+function withoutClarificationSteps(message: any): any {
+  if (!Array.isArray(message?.toolSteps)) return message
+  return {
+    ...message,
+    toolSteps: message.toolSteps.filter((step: any) => step?.type !== 'clarification')
+  }
+}
+
+function shouldNotifyWhenReplySettles(): boolean {
+  return typeof document !== 'undefined' && (document.hidden || !document.hasFocus())
+}
+
+function notificationSnippet(text: string): string {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```[\s\S]*?```/g, '[代码块]')
+    .replace(/!\[[^\]]*]\([^)]+\)/g, '[图片]')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/[#>*_`~|-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+}
+
+function notifyReplySettled(title: string, body: string): void {
+  if (!shouldNotifyWhenReplySettles()) return
+  const snippet = notificationSnippet(body)
+  window.api.showNotification(title, snippet || '点击回到 AgentPet 查看详情').catch(console.error)
+}
+
 export function useChatReplyRuntime({
   setSessions,
   setSendingSessionIds,
@@ -35,7 +65,7 @@ export function useChatReplyRuntime({
             wasAborted = true
             return message
           }
-          return { ...message, text: fullText, isThinking: false }
+          return withoutClarificationSteps({ ...message, text: fullText, isThinking: false })
         })
         const target = messages.find((message: any) => message.id === replyId)
         if (target && !wasAborted) savedMessage = target
@@ -45,7 +75,10 @@ export function useChatReplyRuntime({
       return next
     })
     setSendingSessionIds(previous => ({ ...previous, [sessionId]: false }))
-    if (savedMessage && !wasAborted) setTimeout(onComplete, 500)
+    if (savedMessage && !wasAborted) {
+      notifyReplySettled('AgentPet 已回复', fullText)
+      setTimeout(onComplete, 500)
+    }
     abortedReplyIdsRef.current.delete(replyId)
   }, [discardPendingMessageSave, setSendingSessionIds, setSessions])
 
@@ -66,18 +99,19 @@ export function useChatReplyRuntime({
         const suffix = isAbort
           ? '\n\n⚠️ 对话生成已被用户手动中断。'
           : `\n\n系统错误：调用智能代理接口失败（${message}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
-        savedMessage = {
+        savedMessage = withoutClarificationSteps({
           ...item,
           text: currentText + suffix,
           isThinking: false,
           isError: !isAbort
-        }
+        })
         return savedMessage
       })
       return { ...session, messages }
     }))
 
     if (savedMessage) window.api.saveMessage({ ...savedMessage, sessionId }).catch(console.error)
+    if (savedMessage && !isAbort) notifyReplySettled('AgentPet 回复失败', message)
     setSendingSessionIds(previous => ({ ...previous, [sessionId]: false }))
     abortedReplyIdsRef.current.delete(replyId)
   }, [discardPendingMessageSave, setSendingSessionIds, setSessions])
@@ -98,8 +132,9 @@ export function useChatReplyRuntime({
             text: message.text ? `${message.text}\n\n⚠️ 对话生成已被手动中断。` : '⚠️ 对话生成已被手动中断。',
             isThinking: false
           }
-          interrupted.push(updated)
-          return updated
+          const cleanedUpdated = withoutClarificationSteps(updated)
+          interrupted.push(cleanedUpdated)
+          return cleanedUpdated
         })
         return { ...session, messages: nextMessages }
       }))

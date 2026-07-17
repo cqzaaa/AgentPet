@@ -1,21 +1,9 @@
 import { app } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
+import type { RpaTaskFlow, RpaTaskManifest } from './domain/types'
 
-export interface RpaTaskManifest {
-  id: string
-  name: string
-  description?: string
-  lastRunStatus?: 'idle' | 'running' | 'paused' | 'success' | 'failed'
-  lastRunTime?: string
-  createdAt?: string
-}
-
-export interface RpaTaskFlow {
-  id: string
-  nodes: any[]
-  edges: any[]
-}
+export type { RpaTaskFlow, RpaTaskManifest } from './domain/types'
 
 const getRpaDir = (): string => {
   return join(app.getPath('userData'), 'rpa')

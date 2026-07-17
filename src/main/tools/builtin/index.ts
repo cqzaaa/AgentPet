@@ -21,6 +21,9 @@ import { systemExecutor } from './system/executor'
 import { computerManifest } from './computer/manifest'
 import { computerExecutor } from './computer/executor'
 
+import { rpaManifest } from './rpa/manifest'
+import { rpaToolExecutor } from './rpa/executor'
+
 export function registerBuiltinTools(): void {
   toolRegistry.register(terminalManifest, terminalExecutor)
   toolRegistry.register(fileManifest, fileExecutor)
@@ -29,4 +32,5 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(officeManifest, officeExecutor)
   toolRegistry.register(systemManifest, systemExecutor)
   toolRegistry.register(computerManifest, computerExecutor)
+  toolRegistry.register(rpaManifest, rpaToolExecutor)
 }

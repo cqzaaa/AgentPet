@@ -152,6 +152,51 @@ function syncContextTokenUsage(previous: Session[], next: Session[], usage: Reco
 
 // ── 内部剪贴板（用于消息间复制文件） ─────────────────────────
 let internalClipboard: { files: { name: string; path: string; content?: string }[]; text: string } | null = null
+let legacyLlmConfigForMigration: any = null
+let llmConfigHydrationPromise: Promise<any> | null = null
+let legacyMcpConfigForMigration: any = null
+let initialMcpConfigForSync: any = null
+let mcpConfigHydrationPromise: Promise<any> | null = null
+
+function sanitizeLlmConfigForRenderer(config: any, fallbackHasApiKey = false): any {
+  const rest = { ...(config || {}) }
+  delete rest.apiKey
+  delete rest.apiKeyRef
+  delete rest.secretMigrationPending
+  return {
+    ...rest,
+    apiKey: '',
+    hasApiKey: Boolean(config?.apiKey) || Boolean(config?.hasApiKey) || fallbackHasApiKey
+  }
+}
+
+function persistSanitizedLlmConfig(config: any): void {
+  if (legacyLlmConfigForMigration) return
+  const serialized = JSON.stringify(sanitizeLlmConfigForRenderer(config))
+  localStorage.setItem('agentpet_llm_config', serialized)
+  localStorage.setItem('agentself_llm_config', serialized)
+}
+
+function sanitizeMcpConfigForRenderer(config: any, fallbackConfig?: any): any {
+  const fallbackById = new Map((fallbackConfig?.servers || []).map((server: any) => [server.id, server]))
+  return {
+    ...(config || {}),
+    servers: (config?.servers || []).map((server: any) => {
+      const fallback = fallbackById.get(server.id) as any
+      const sanitized = { ...server }
+      delete sanitized.apiKeyRef
+      delete sanitized.clearApiKey
+      sanitized.hasApiKey = Boolean(server.apiKey) || Boolean(server.hasApiKey) || Boolean(fallback?.hasApiKey)
+      sanitized.apiKey = ''
+      return sanitized
+    })
+  }
+}
+
+function persistSanitizedMcpConfig(config: any): void {
+  if (legacyMcpConfigForMigration) return
+  localStorage.setItem('agentpet_mcp_config', JSON.stringify(sanitizeMcpConfigForRenderer(config)))
+}
 
 export function setInternalClipboard(files: { name: string; path: string; content?: string }[] | null, text?: string) {
   if (files && files.length > 0) {
@@ -191,10 +236,13 @@ export const useAppStoreRaw = create<any>((set) => ({
         if (parsed && parsed.maxTokens === 2048) {
           delete parsed.maxTokens
         }
-        return parsed
+        if (parsed?.apiKey) legacyLlmConfigForMigration = parsed
+        const sanitized = sanitizeLlmConfigForRenderer(parsed)
+        if (!parsed?.apiKey) persistSanitizedLlmConfig(sanitized)
+        return sanitized
       } catch (e) { console.error(e) }
     }
-    return { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: undefined }
+    return { provider: 'gemini', apiKey: '', hasApiKey: false, baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7, maxTokens: undefined }
   })(),
   mcpConfig: (() => {
     const saved = localStorage.getItem('agentpet_mcp_config')
@@ -222,7 +270,13 @@ export const useAppStoreRaw = create<any>((set) => ({
     if (!currentConfig || !currentConfig.servers) {
       currentConfig = { servers: [] }
     }
-    return currentConfig
+    initialMcpConfigForSync = currentConfig
+    if (currentConfig.servers.some((server: any) => Boolean(server.apiKey))) {
+      legacyMcpConfigForMigration = currentConfig
+    }
+    const sanitized = sanitizeMcpConfigForRenderer(currentConfig)
+    if (!legacyMcpConfigForMigration) persistSanitizedMcpConfig(sanitized)
+    return sanitized
   })(),
   cronTasks: [],
   sessions: [],
@@ -443,18 +497,30 @@ export function useAppStore() {
   const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
   const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
 
-  const saveLlmConfig = (newConfig: any) => {
+  const saveLlmConfig = async (newConfig: any): Promise<boolean> => {
     if (isSending) {
       showToast('大模型正在思考中，无法修改配置', 'error')
-      return
+      return false
     }
     const prevModel = llmConfig.model
     const newModel = newConfig.model
-    setLlmConfig(newConfig)
-    localStorage.setItem('agentpet_llm_config', JSON.stringify(newConfig))
+    const sanitized = sanitizeLlmConfigForRenderer(newConfig, Boolean(llmConfig.hasApiKey))
+    setLlmConfig(sanitized)
+    persistSanitizedLlmConfig(sanitized)
 
-    // 同步配置到主进程
-    window.api.syncLlmConfig(newConfig).catch(console.error)
+    try {
+      const saved = await window.api.syncLlmConfig(newConfig)
+      const serverConfig = sanitizeLlmConfigForRenderer(saved)
+      if (newConfig.apiKey) legacyLlmConfigForMigration = null
+      setLlmConfig(serverConfig)
+      persistSanitizedLlmConfig(serverConfig)
+    } catch (error) {
+      console.error('保存大模型配置失败', error)
+      setLlmConfig(llmConfig)
+      persistSanitizedLlmConfig(llmConfig)
+      showToast('大模型配置保存失败，密钥未写入明文存储', 'error')
+      return false
+    }
 
     if (prevModel && newModel && prevModel !== newModel) {
       const timeStr = formatDateTime()
@@ -473,16 +539,38 @@ export function useAppStore() {
         return s
       }))
     }
+    return true
   }
 
-  const saveMcpConfig = (newConfig: any) => {
-    setMcpConfig(newConfig)
-    localStorage.setItem('agentpet_mcp_config', JSON.stringify(newConfig))
-    window.api.syncMcpConfig(newConfig)
-      .then(() => {
-        refreshMcpServers()
-      })
-      .catch(console.error)
+  const saveMcpConfig = async (newConfig: any): Promise<boolean> => {
+    if (mcpConfigHydrationPromise) {
+      try {
+        await mcpConfigHydrationPromise
+      } catch {
+        showToast('MCP 凭据初始化失败，已阻止覆盖旧配置', 'error')
+        return false
+      }
+    }
+
+    const sanitized = sanitizeMcpConfigForRenderer(newConfig, mcpConfig)
+    setMcpConfig(sanitized)
+    persistSanitizedMcpConfig(sanitized)
+    try {
+      const saved = await window.api.syncMcpConfig(newConfig)
+      const serverConfig = sanitizeMcpConfigForRenderer(saved)
+      legacyMcpConfigForMigration = null
+      initialMcpConfigForSync = null
+      setMcpConfig(serverConfig)
+      persistSanitizedMcpConfig(serverConfig)
+      await refreshMcpServers()
+      return true
+    } catch (error) {
+      console.error('保存 MCP 配置失败', error)
+      setMcpConfig(mcpConfig)
+      persistSanitizedMcpConfig(mcpConfig)
+      showToast('MCP 配置保存失败，密钥未写入明文存储', 'error')
+      return false
+    }
   }
 
   const loadGeneratedFiles = useCallback(async () => {
@@ -517,9 +605,9 @@ export function useAppStore() {
   }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile, setOpenTabs, setPreviewFile])
 
   // ── 打字机流式效果控制 ──────────────────────────────────────────
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type })
-  }
+  }, [setToast])
 
   useEffect(() => {
     if (toast) {
@@ -543,7 +631,7 @@ export function useAppStore() {
   // 应用启动或配置更改时自动获取最新可用模型列表
   useEffect(() => {
     const isOllama = llmConfig.provider === 'ollama'
-    const hasKey = isOllama || !!llmConfig.apiKey
+    const hasKey = isOllama || !!llmConfig.apiKey || !!llmConfig.hasApiKey
     if (hasKey) {
       const autoFetch = async () => {
         setIsLoadingModels(true)
@@ -570,16 +658,16 @@ export function useAppStore() {
     } else {
       setAvailableModels([])
     }
-  }, [llmConfig.provider, llmConfig.apiKey, llmConfig.baseUrl])
+  }, [llmConfig.provider, llmConfig.apiKey, llmConfig.hasApiKey, llmConfig.baseUrl])
 
   // 校验 API Key 初始化，如果没有有效的 key，就弹出需要配置 key
   useEffect(() => {
     const isOllama = llmConfig.provider === 'ollama'
-    const hasKey = isOllama || !!llmConfig.apiKey
+    const hasKey = isOllama || !!llmConfig.apiKey || !!llmConfig.hasApiKey
     if (!hasKey) {
       setShowApiKeyModal(true)
     }
-  }, [llmConfig.provider, llmConfig.apiKey])
+  }, [llmConfig.provider, llmConfig.apiKey, llmConfig.hasApiKey])
 
   // Click outside to close model dropdown
   useEffect(() => {
@@ -795,8 +883,17 @@ export function useAppStore() {
           const cleaned = localSess.map((s: any) => ({
             ...s,
             messages: (s.messages || []).map((m: any) => {
+              const toolSteps = Array.isArray(m.toolSteps)
+                ? m.toolSteps.filter((step: any) => step?.type !== 'clarification')
+                : m.toolSteps
               if (m.isThinking && !isLlmActive) {
                 const cleanedMsg = { ...m, isThinking: false, text: m.text || '⚠️ 应用异常退出，对话生成被中断。' }
+                cleanedMsg.toolSteps = toolSteps
+                cleanedMessagesToSave.push({ msg: cleanedMsg, sessionId: s.id })
+                return cleanedMsg
+              }
+              if (toolSteps !== m.toolSteps) {
+                const cleanedMsg = { ...m, toolSteps }
                 cleanedMessagesToSave.push({ msg: cleanedMsg, sessionId: s.id })
                 return cleanedMsg
               }
@@ -854,6 +951,16 @@ export function useAppStore() {
 
               const mergedMessages = (ls.messages || []).map((lm: any) => {
                 const pm = matchedPrev.messages?.find((m: any) => m.id === lm.id)
+                const hasPendingClarification = pm?.isThinking && Array.isArray(pm.toolSteps) && pm.toolSteps.some((step: any) => step?.type === 'clarification')
+                if (hasPendingClarification) {
+                  return {
+                    ...lm,
+                    text: pm.text || lm.text,
+                    isThinking: pm.isThinking,
+                    isError: pm.isError,
+                    toolSteps: pm.toolSteps
+                  }
+                }
                 // 竞态保护：如果内存中当前消息已完成生成(isThinking=false)，但 DB 读出来的还是 loading(isThinking=true)
                 // 说明当前正处于保存回复与拉取会话的竞态时序中，应保留内存中的最新生成状态
                 if (pm && lm.isThinking && !pm.isThinking) {
@@ -890,8 +997,40 @@ export function useAppStore() {
 
   // 同步初始化大模型与 MCP 配置
   useEffect(() => {
-    window.api.syncLlmConfig(llmConfig).catch(console.error)
-    window.api.syncMcpConfig(mcpConfig).catch(console.error)
+    if (!llmConfigHydrationPromise) {
+      llmConfigHydrationPromise = legacyLlmConfigForMigration
+        ? window.api.syncLlmConfig(legacyLlmConfigForMigration)
+        : window.api.getSystemLlmConfig()
+    }
+    llmConfigHydrationPromise
+      .then(config => {
+        const sanitized = sanitizeLlmConfigForRenderer(config)
+        legacyLlmConfigForMigration = null
+        setLlmConfig(sanitized)
+        persistSanitizedLlmConfig(sanitized)
+      })
+      .catch(error => {
+        // Keep a legacy localStorage value intact when migration fails so the
+        // user can retry after OS encryption becomes available.
+        console.error('初始化大模型安全配置失败', error)
+      })
+    if (!mcpConfigHydrationPromise) {
+      mcpConfigHydrationPromise = initialMcpConfigForSync
+        ? window.api.syncMcpConfig(initialMcpConfigForSync)
+        : window.api.getMcpConfig()
+    }
+    mcpConfigHydrationPromise
+      .then(config => {
+        const sanitized = sanitizeMcpConfigForRenderer(config)
+        legacyMcpConfigForMigration = null
+        initialMcpConfigForSync = null
+        setMcpConfig(sanitized)
+        persistSanitizedMcpConfig(sanitized)
+        return refreshMcpServers()
+      })
+      .catch(error => {
+        console.error('初始化 MCP 安全配置失败', error)
+      })
   }, [])
 
   // 监听微信聊天会话更新通知
@@ -1280,7 +1419,8 @@ export function useAppStore() {
     setSessions,
     setCronTasks,
     activeSessionIdRef,
-    cronRunningLogsRef
+    cronRunningLogsRef,
+    showToast
   })
   const { abortedReplyIdsRef, finalizeReply, failReply, abortReply } = useChatReplyRuntime({
     setSessions,
@@ -1365,9 +1505,9 @@ export function useAppStore() {
     }
   }
 
-  const handleRespondPermission = (approved: boolean): void => {
+  const handleRespondPermission = (approved: boolean, scope: 'once' | 'turn' = 'once'): void => {
     if (activePermissionRequest) {
-      window.api.respondPermission(activePermissionRequest.requestId, approved)
+      window.api.respondPermission(activePermissionRequest.requestId, approved, scope)
       setActivePermissionRequest(null)
     }
   }

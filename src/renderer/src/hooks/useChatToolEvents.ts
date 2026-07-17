@@ -7,6 +7,7 @@ interface UseChatToolEventsOptions {
   setCronTasks: (updater: (tasks: any[]) => any[]) => void
   activeSessionIdRef: MutableRefObject<string>
   cronRunningLogsRef: MutableRefObject<Record<string, any>>
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void
 }
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
@@ -22,12 +23,41 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
   return toolSteps
 }
 
+function withoutEphemeralToolSteps(message: any): any {
+  if (!Array.isArray(message?.toolSteps)) return message
+  return {
+    ...message,
+    toolSteps: message.toolSteps.filter((step: any) => step?.type !== 'clarification')
+  }
+}
+
+function toolNoticeForEvent(event: any): { message: string; type: 'success' | 'error' | 'info' } | null {
+  if (event?.type !== 'tool_result') return null
+  const name = String(event.name || '')
+  const result = String(event.result || '')
+  const isError = /失败|错误|error|failed/i.test(result)
+  if (name === 'type_text') {
+    return { message: isError ? '输入文本失败，请检查当前焦点' : '文本已输入到当前焦点', type: isError ? 'error' : 'success' }
+  }
+  if (name === 'screenshot') {
+    return { message: isError ? '截图失败' : '截图已完成，并传入视觉上下文', type: isError ? 'error' : 'success' }
+  }
+  if (name === 'mouse_click') {
+    return { message: isError ? '点击操作失败' : '点击操作已完成', type: isError ? 'error' : 'success' }
+  }
+  if (name === 'focus_window') {
+    return { message: isError ? '窗口切换失败' : '窗口已切换到前台', type: isError ? 'error' : 'success' }
+  }
+  return null
+}
+
 /** Batches tool IPC updates and persists only the latest affected chat message. */
 export function useChatToolEvents({
   setSessions,
   setCronTasks,
   activeSessionIdRef,
-  cronRunningLogsRef
+  cronRunningLogsRef,
+  showToast
 }: UseChatToolEventsOptions): { discardPendingMessageSave: () => void } {
   const latestMessageRef = useRef<any>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -48,7 +78,7 @@ export function useChatToolEvents({
       saveTimeoutRef.current = null
       const message = latestMessageRef.current
       latestMessageRef.current = null
-      if (message) window.api.saveMessage(message).catch(console.error)
+      if (message) window.api.saveMessage(withoutEphemeralToolSteps(message)).catch(console.error)
     }
 
     const scheduleSave = (message: any) => {
@@ -122,6 +152,10 @@ export function useChatToolEvents({
     }
 
     const unsubscribe = window.api.onToolEvent((event: any) => {
+      const notice = toolNoticeForEvent(event)
+      if (notice && (!event.sessionId || event.sessionId === activeSessionIdRef.current)) {
+        showToast?.(notice.message, notice.type)
+      }
       pendingEvents.push(event)
       if (!throttleTimeout) throttleTimeout = setTimeout(flushEvents, 50)
     })
@@ -131,10 +165,10 @@ export function useChatToolEvents({
       if (throttleTimeout) clearTimeout(throttleTimeout)
       flushEvents()
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-      if (latestMessageRef.current) window.api.saveMessage(latestMessageRef.current).catch(console.error)
+      if (latestMessageRef.current) window.api.saveMessage(withoutEphemeralToolSteps(latestMessageRef.current)).catch(console.error)
       latestMessageRef.current = null
     }
-  }, [activeSessionIdRef, cronRunningLogsRef, setCronTasks, setSessions])
+  }, [activeSessionIdRef, cronRunningLogsRef, setCronTasks, setSessions, showToast])
 
   return { discardPendingMessageSave }
 }

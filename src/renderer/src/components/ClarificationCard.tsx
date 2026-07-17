@@ -34,7 +34,7 @@ export function ClarificationCard({ step }: { step: { requestId: number; questio
   }
 
   if (submitted) {
-    return <div className="clarification-complete"><span>✓</span> 已收到补充，正在继续处理</div>
+    return null
   }
 
   if (!portalTarget) return null
@@ -75,33 +75,21 @@ export function ClarificationCard({ step }: { step: { requestId: number; questio
                     </button>
                   )
                 })}
-                <button
-                  type="button"
-                  className={`clarification-option clarification-option--custom ${answer.useCustom ? 'is-selected' : ''}`}
-                  aria-pressed={answer.useCustom}
-                  onClick={() => {
-                    update(question.id, { selected: '', useCustom: true })
-                    requestAnimationFrame(() => document.getElementById(`clarification-custom-${question.id}`)?.focus())
-                  }}
-                >
-                  <span className="clarification-option__marker">＋</span>
-                  <span className="clarification-option__copy"><strong>其他</strong><small>自由补充你的要求</small></span>
-                </button>
               </div>
-              {answer.useCustom && (
-                <div className="clarification-custom-input">
-                  <input
-                    id={`clarification-custom-${question.id}`}
-                    maxLength={200}
-                    value={answer.custom}
-                    onChange={event => update(question.id, { custom: event.target.value })}
-                    onKeyDown={event => { if (event.key === 'Enter' && canSubmit) respond(false) }}
-                    placeholder={question.placeholder || '输入你的具体想法…'}
-                    aria-label={`${question.question}的其他回答`}
-                  />
-                  <span>{answer.custom.length}/200</span>
-                </div>
-              )}
+              <div className={`clarification-custom-input ${answer.useCustom ? 'is-active' : ''}`}>
+                <span className="clarification-custom-input__label">其他</span>
+                <input
+                  id={`clarification-custom-${question.id}`}
+                  maxLength={200}
+                  value={answer.custom}
+                  onFocus={() => update(question.id, { selected: '', useCustom: true })}
+                  onChange={event => update(question.id, { selected: '', custom: event.target.value, useCustom: true })}
+                  onKeyDown={event => { if (event.key === 'Enter' && canSubmit) respond(false) }}
+                  placeholder={question.placeholder || '自由补充你的要求'}
+                  aria-label={`${question.question}的其他回答`}
+                />
+                <span>{answer.custom.length}/200</span>
+              </div>
             </fieldset>
           )
         })}

@@ -59,6 +59,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
     llmConfig: {
       provider: 'gemini',
       apiKey: '',
+      hasApiKey: false,
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
       model: '',
       temperature: 0.7,
@@ -71,6 +72,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
   const [localLlmConfig, setLocalLlmConfig] = useState<any>({
     provider: 'gemini',
     apiKey: '',
+    hasApiKey: false,
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     model: '',
     temperature: 0.7,
@@ -80,6 +82,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
   const [autoReplyText, setAutoReplyText] = useState('你好，我是 Mao 的微信集成助手。')
   const [enableAutoReply, setEnableAutoReply] = useState(true)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [wechatApiKeyDraft, setWechatApiKeyDraft] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
   // 微信专属模型下拉菜单状态
@@ -108,8 +111,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
     try {
       const list = await window.api.getModels({
         provider: localLlmConfig.provider,
-        apiKey: localLlmConfig.apiKey,
-        baseUrl: localLlmConfig.baseUrl
+        apiKey: wechatApiKeyDraft,
+        baseUrl: localLlmConfig.baseUrl,
+        credentialScope: 'wechat'
       })
       if (list && list.length > 0) {
         setWechatAvailableModels(list)
@@ -156,6 +160,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
         setLocalLlmConfig(state.llmConfig || {
           provider: 'gemini',
           apiKey: '',
+          hasApiKey: false,
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
           model: '',
           temperature: 0.7,
@@ -219,7 +224,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       
       // 同步把新的启用状态写入配置中
       const settings = {
-        llmConfig: localLlmConfig,
+        llmConfig: { ...localLlmConfig, apiKey: wechatApiKeyDraft },
         autoReplyText,
         enableAutoReply: checked
       }
@@ -237,12 +242,13 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
     setIsLoading(true)
     try {
       const settings = {
-        llmConfig: localLlmConfig,
+        llmConfig: { ...localLlmConfig, apiKey: wechatApiKeyDraft },
         autoReplyText,
         enableAutoReply
       }
       const ok = await window.api.wechatSaveSettings(settings)
       if (ok) {
+        setWechatApiKeyDraft('')
         showToast('微信 Bot 配置保存成功！', 'success')
         fetchWechatStatus()
       } else {
@@ -250,6 +256,27 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       }
     } catch (err: any) {
       showToast(`保存失败: ${err.message || err}`, 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleClearWechatApiKey = async (): Promise<void> => {
+    if (!confirm('确认删除微信助手专属大模型密钥吗？')) return
+    setIsLoading(true)
+    try {
+      const ok = await window.api.wechatSaveSettings({
+        llmConfig: { ...localLlmConfig, apiKey: '', clearApiKey: true },
+        autoReplyText,
+        enableAutoReply
+      })
+      if (ok) {
+        setWechatApiKeyDraft('')
+        await fetchWechatStatus()
+        showToast('微信助手专属密钥已删除', 'success')
+      } else {
+        showToast('删除微信助手专属密钥失败', 'error')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -556,9 +583,11 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                         <input
                           type={showApiKey ? 'text' : 'password'}
                           className="form-input"
-                          value={localLlmConfig.apiKey}
-                          onChange={e => setLocalLlmConfig({ ...localLlmConfig, apiKey: e.target.value })}
-                          placeholder="输入微信助手专属大模型密钥"
+                          value={wechatApiKeyDraft}
+                          autoComplete="new-password"
+                          spellCheck={false}
+                          onChange={e => setWechatApiKeyDraft(e.target.value)}
+                          placeholder={localLlmConfig.hasApiKey ? '密钥已安全保存；留空表示保持不变' : '输入微信助手专属大模型密钥'}
                           style={{ height: '30px', padding: '0 8px', fontSize: '12px', flex: 1, paddingRight: '30px' }}
                         />
                         <span
@@ -568,6 +597,16 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                           {showApiKey ? '👁' : '🙈'}
                         </span>
                       </div>
+                      {localLlmConfig.hasApiKey && (
+                        <button
+                          type="button"
+                          onClick={() => void handleClearWechatApiKey()}
+                          disabled={isLoading}
+                          style={{ marginTop: '5px', padding: 0, border: 0, background: 'transparent', color: '#ef4444', fontSize: '11px', cursor: 'pointer' }}
+                        >
+                          删除已安全保存的密钥
+                        </button>
+                      )}
                     </div>
                   )}
 

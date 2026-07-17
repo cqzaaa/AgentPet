@@ -722,7 +722,19 @@ export function AgentWindow(): React.JSX.Element {
 
       {/* Global Toast */}
       {toast && (
-        <div className={`global-toast-notification ${toast.type}`}>
+        <div
+          className={`global-toast-notification ${toast.type} ${activePermissionRequest ? 'has-approval' : ''}`}
+          role="button"
+          tabIndex={0}
+          title="点击回到 AgentPet"
+          onClick={() => window.api?.openAgentWindow?.()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              window.api?.openAgentWindow?.()
+            }
+          }}
+        >
           <span className="toast-icon">
             {toast.type === 'success' && '✨'}
             {toast.type === 'error' && '❌'}

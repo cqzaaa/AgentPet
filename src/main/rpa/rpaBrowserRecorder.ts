@@ -1,20 +1,37 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright-core'
+import type { BrowserRecordedAction } from './domain/types'
 
-export interface RecordedAction {
-  type: 'open_url' | 'click' | 'fill'
-  url?: string
-  selector?: string
-  value?: string
-  label?: string
-}
+export type RecordedAction = BrowserRecordedAction
 
 export class RpaBrowserRecorder {
+  private static sessions = new Map<string, { paused: boolean; finish: () => Promise<void> }>()
+
+  public static pause(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    session.paused = true
+    return true
+  }
+
+  public static resume(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    session.paused = false
+    return true
+  }
+
+  public static async finish(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    await session.finish()
+    return true
+  }
   /**
    * 启动浏览器，访问指定 URL 并录制用户的操作行为。
    * @param url 起始网页地址
    * @returns 录制的操作步骤数组。
    */
-  public static async record(url: string): Promise<RecordedAction[]> {
+  public static async record(url: string, sessionId?: string): Promise<RecordedAction[]> {
     let browser: Browser | null = null
     let context: BrowserContext | null = null
     let page: Page | null = null
@@ -35,7 +52,10 @@ export class RpaBrowserRecorder {
         if (page) try { await page.close() } catch (_) {}
         if (context) try { await context.close() } catch (_) {}
         if (browser) try { await browser.close() } catch (_) {}
+        if (sessionId) this.sessions.delete(sessionId)
       }
+
+      if (sessionId) this.sessions.set(sessionId, { paused: false, finish })
 
       try {
         let launchOptions = {
@@ -195,11 +215,15 @@ export class RpaBrowserRecorder {
               const value = el.value
               if (lastValues.get(selector) !== value) {
                 lastValues.set(selector, value)
-                recordAction({
-                  type: 'fill',
-                  selector,
-                  value
-                })
+                const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase()
+                const identity = `${el.getAttribute('name') || ''} ${el.id || ''}`
+                const sensitive =
+                  (el instanceof HTMLInputElement && el.type === 'password') ||
+                  /current-password|new-password|one-time-code|username/.test(autocomplete) ||
+                  /pass(word)?|secret|token|api.?key|credential|user(name)?/i.test(identity)
+                recordAction(sensitive
+                  ? { type: 'fill', selector, sensitive: true }
+                  : { type: 'fill', selector, value })
               }
             }
           }
@@ -284,8 +308,12 @@ export class RpaBrowserRecorder {
             if (action && action.type === 'finish') {
               finish()
             } else {
-              actions.push(action)
-              console.log('[RPA Recorder] Recorded action on page:', action)
+              if (!sessionId || !this.sessions.get(sessionId)?.paused) actions.push(action)
+              console.log('[RPA Recorder] Recorded action on page:', {
+                type: action?.type,
+                selector: action?.selector,
+                sensitive: Boolean(action?.sensitive)
+              })
             }
           })
         })
@@ -297,8 +325,12 @@ export class RpaBrowserRecorder {
           if (action && action.type === 'finish') {
             finish()
           } else {
-            actions.push(action)
-            console.log('[RPA Recorder] Recorded action:', action)
+            if (!sessionId || !this.sessions.get(sessionId)?.paused) actions.push(action)
+            console.log('[RPA Recorder] Recorded action:', {
+              type: action?.type,
+              selector: action?.selector,
+              sensitive: Boolean(action?.sensitive)
+            })
           }
         })
 

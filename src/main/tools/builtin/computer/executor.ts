@@ -1,11 +1,24 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { execFile } from 'child_process'
+import { clipboard } from 'electron'
 import { promisify } from 'util'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { getActiveStorageDir } from '../../utils/paths'
 
 const execFileAsync = promisify(execFile)
+
+function cleanWindowText(value: unknown): string {
+  const text = String(value ?? '')
+    .normalize('NFC')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+  return text || '(无标题)'
+}
+
+function hasEncodingDamage(value: string): boolean {
+  return value.includes('\uFFFD') || /�{2,}/.test(value)
+}
 
 // nut-js 按键名称映射表
 const KEY_MAP: Record<string, string> = {
@@ -126,7 +139,7 @@ export class ComputerExecutor implements IToolExecutor {
     const { width, height } = thumbnail.getSize()
 
     return {
-      content: `[截图完成]\n文件路径: ${filePath}\n分辨率: ${width}x${height}\n显示器: ${source.name}\n${delayMs > 0 ? `等待了 ${delayMs}ms 后截图\n` : ''}\n请使用文件工具读取此图片以分析屏幕内容。`,
+      content: `[截图完成]\n文件路径: ${filePath}\n分辨率: ${width}x${height}\n显示器: ${source.name}\n${delayMs > 0 ? `等待了 ${delayMs}ms 后截图\n` : ''}\n截图已自动传入视觉上下文，请直接观察图片继续分析屏幕内容。`,
       state: { filePath, width, height, displayName: source.name },
       success: true
     }
@@ -186,14 +199,28 @@ export class ComputerExecutor implements IToolExecutor {
   // ─── 键盘输入文字 ──────────────────────────────────────────────────────────────
 
   private async typeText(args: Record<string, any>): Promise<ToolResult> {
-    const { text } = args
+    const { text, method = 'clipboard_paste' } = args
     if (!text) return { content: '缺少参数 text', success: false }
 
-    const { keyboard } = await import('@nut-tree/nut-js')
-    await keyboard.type(text)
+    const { keyboard, Key } = await import('@nut-tree/nut-js')
+    if (method === 'keyboard') {
+      await keyboard.type(text)
+    } else {
+      const previousText = clipboard.readText()
+      clipboard.writeText(String(text))
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      await keyboard.pressKey(Key.LeftControl, Key.V)
+      await keyboard.releaseKey(Key.V, Key.LeftControl)
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      try {
+        clipboard.writeText(previousText)
+      } catch {
+        // Restoring clipboard is best-effort; input correctness is more important.
+      }
+    }
 
     return {
-      content: `[文字输入] 已输入 ${text.length} 个字符: "${text.length > 50 ? text.slice(0, 50) + '...' : text}"`,
+      content: `[文字输入] 已通过 ${method === 'keyboard' ? '键盘逐字输入' : '剪贴板粘贴'} 输入 ${String(text).length} 个字符: "${String(text).length > 50 ? String(text).slice(0, 50) + '...' : String(text)}"`,
       success: true
     }
   }
@@ -237,6 +264,8 @@ export class ComputerExecutor implements IToolExecutor {
 
   private async getWindows(): Promise<ToolResult> {
     const ps = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type @"
 using System;
 using System.Collections.Generic;
@@ -250,8 +279,8 @@ public class WindowInfo {
 public class WinAPI {
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern int GetWindowTextLength(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     public static List<WindowInfo> GetWindows() {
@@ -291,7 +320,12 @@ public class WinAPI {
     }
 
     const list = windows
-      .map((w) => `PID=${w.ProcessId}  进程=${w.ProcessName}  标题="${w.Title}"`)
+      .map((w) => {
+        const title = cleanWindowText(w.Title)
+        const processName = cleanWindowText(w.ProcessName)
+        const warning = hasEncodingDamage(title) ? '  [标题可能编码异常，建议截图确认]' : ''
+        return `PID=${w.ProcessId}  进程=${processName}  标题="${title}"${warning}`
+      })
       .join('\n')
 
     return {
@@ -327,6 +361,8 @@ Write-Output "OK:Desktop"
     const targetPid = pid ? pid : 0
 
     const ps = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -334,8 +370,8 @@ using System.Text;
 public class WinAPI {
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern int GetWindowTextLength(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);

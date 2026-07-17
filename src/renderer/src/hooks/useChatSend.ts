@@ -104,7 +104,7 @@ export function useChatSend({
     if ((!text && attachedFiles.length === 0) || state.sendingSessionIds[sessionId]) return
 
     const llmConfig = { ...state.llmConfig }
-    if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey) {
+    if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey && !llmConfig.hasApiKey) {
       setShowApiKeyModal(true)
       return
     }

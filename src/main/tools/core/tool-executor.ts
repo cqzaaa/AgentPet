@@ -58,15 +58,22 @@ export class UnifiedToolExecutor {
 
     if (auditResult.requireApproval) {
       // 触发弹窗授权
+      const approvalCommand = name === 'rpa_run_workflow'
+        ? `${name} ${JSON.stringify({
+          workflow_id: args.workflow_id,
+          input_keys: args.inputs && typeof args.inputs === 'object' ? Object.keys(args.inputs) : []
+        })}`
+        : args.command || `${name} ${JSON.stringify(args)}`
       const approved = await permissionManager.requestCommandPermission({
-        command: args.command || '',
+        command: approvalCommand,
         execCwd: args.cwd || context.workspacePath,
+        sessionId: context.sessionId,
         warning: auditResult.warning
       })
 
       if (!approved) {
         return {
-          content: `[安全提示] 用户拒绝了此终端命令的执行。指令内容: "${args.command}"`,
+          content: `[安全提示] 用户拒绝了工具 ${name} 的执行。`,
           success: false
         }
       }

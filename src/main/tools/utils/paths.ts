@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import * as fs from 'fs'
-import { join, relative, resolve } from 'path'
+import { join, parse, relative, resolve } from 'path'
 import type { ToolContext } from '../core/types'
 
 export function readConfig(): any {
@@ -35,6 +35,22 @@ export function getActiveStorageDir(): string {
 export function resolveLocalPath(filePath: string): string {
   if (!filePath || typeof filePath !== 'string') return filePath
   let resolved = filePath
+  const normalizedAlias = resolved.trim().toLowerCase()
+  const aliasMap: Record<string, string> = {
+    desktop: app.getPath('desktop'),
+    '桌面': app.getPath('desktop'),
+    downloads: app.getPath('downloads'),
+    '下载': app.getPath('downloads'),
+    '下载目录': app.getPath('downloads'),
+    documents: app.getPath('documents'),
+    '文档': app.getPath('documents'),
+    home: app.getPath('home'),
+    '~': app.getPath('home')
+  }
+  if (aliasMap[normalizedAlias]) return aliasMap[normalizedAlias]
+  if (resolved.startsWith('~/') || resolved.startsWith('~\\')) {
+    return join(app.getPath('home'), resolved.slice(2))
+  }
   if (resolved.startsWith('local-file:///')) {
     resolved = resolved.replace('local-file:///', '')
     if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
@@ -90,7 +106,21 @@ export function getSessionFilesDir(sessionId?: string): string {
 export function getAllowedFileRoots(context: ToolContext): string[] {
   const roots = [getSessionFilesDir(context.sessionId), getGeneratedFilesDir(context.sessionId)]
   if (context.workspacePath && fs.existsSync(context.workspacePath)) roots.push(context.workspacePath)
+  roots.push(...getLocalFileSystemRoots())
   return [...new Set(roots.map(path => resolve(path)))]
+}
+
+function getLocalFileSystemRoots(): string[] {
+  if (process.platform === 'win32') {
+    const roots: string[] = []
+    for (let code = 65; code <= 90; code += 1) {
+      const root = `${String.fromCharCode(code)}:\\`
+      if (fs.existsSync(root)) roots.push(root)
+    }
+    return roots
+  }
+
+  return [parse(app.getPath('home')).root || '/']
 }
 
 export function isPathWithinRoots(targetPath: string, roots: string[]): boolean {

@@ -178,8 +178,8 @@ const api = {
       ipcRenderer.removeListener('api:request-permission', subscription)
     }
   },
-  respondPermission: (requestId: number, approved: boolean): void => {
-    ipcRenderer.send('api:permission-response', { requestId, approved })
+  respondPermission: (requestId: number, approved: boolean, scope: 'once' | 'turn' = 'once'): void => {
+    ipcRenderer.send('api:permission-response', { requestId, approved, scope })
   },
   respondClarification: (requestId: number, answers: Record<string, string>, cancelled = false): void => {
     ipcRenderer.send('api:clarification-response', { requestId, answers, cancelled })
@@ -224,7 +224,8 @@ const api = {
   wechatLogout: (): Promise<boolean> => ipcRenderer.invoke('api:wechat-logout'),
   wechatGetStatus: (): Promise<any> => ipcRenderer.invoke('api:wechat-get-status'),
   wechatSaveSettings: (settings: any): Promise<boolean> => ipcRenderer.invoke('api:wechat-save-settings', settings),
-  syncLlmConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-llm-config', config),
+  getSystemLlmConfig: (): Promise<any> => ipcRenderer.invoke('api:get-system-llm-config'),
+  syncLlmConfig: (config: any): Promise<any> => ipcRenderer.invoke('api:sync-llm-config', config),
   onWechatStatusUpdated: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:wechat-status-updated', subscription)
@@ -237,7 +238,7 @@ const api = {
     ipcRenderer.on('api:wechat-session-updated', handler)
     return (): void => { ipcRenderer.removeListener('api:wechat-session-updated', handler) }
   },
-  syncMcpConfig: (config: any): Promise<boolean> => ipcRenderer.invoke('api:sync-mcp-config', config),
+  syncMcpConfig: (config: any): Promise<any> => ipcRenderer.invoke('api:sync-mcp-config', config),
   testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
   getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config'),
   onRequestGeolocation: (callback: (data: { requestId: number }) => void): (() => void) => {
@@ -390,7 +391,13 @@ const api = {
     return () => { ipcRenderer.removeListener('api:rpa-step-event', handler) }
   },
   rpaPickElement: (url: string): Promise<string | null> => ipcRenderer.invoke('api:rpa-pick-element', url),
-  rpaRecordActions: (url: string): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', url)
+  rpaRecordActions: (url: string): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', url),
+  listRpaSecrets: (): Promise<any[]> => ipcRenderer.invoke('api:list-rpa-secrets'),
+  createRpaSecret: (input: any): Promise<any> => ipcRenderer.invoke('api:create-rpa-secret', input),
+  rotateRpaSecret: (ref: string, plaintext: string): Promise<any> => ipcRenderer.invoke('api:rotate-rpa-secret', ref, plaintext),
+  setRpaSecretStatus: (ref: string, status: 'active' | 'disabled'): Promise<any> => ipcRenderer.invoke('api:set-rpa-secret-status', ref, status),
+  deleteRpaSecret: (ref: string): Promise<boolean> => ipcRenderer.invoke('api:delete-rpa-secret', ref),
+  captureRpaDesktopTarget: (delayMs = 1500): Promise<any> => ipcRenderer.invoke('api:capture-rpa-desktop-target', delayMs)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

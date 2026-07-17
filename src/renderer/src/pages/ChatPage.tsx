@@ -75,6 +75,8 @@ function ChatPageImpl(): React.JSX.Element {
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
   const [showMcpPopover, setShowMcpPopover] = useState(false)
   const [showModelPopover, setShowModelPopover] = useState(false)
+  const [approvalDetailsExpanded, setApprovalDetailsExpanded] = useState(false)
+  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
   const mcpPopoverRef = useRef<HTMLDivElement>(null)
   const modelPopoverRef = useRef<HTMLDivElement>(null)
@@ -694,6 +696,11 @@ function ChatPageImpl(): React.JSX.Element {
     setShowScrollToBottom(false)
   }, [activeSessionId])
 
+  useEffect(() => {
+    setApprovalDetailsExpanded(false)
+    setApprovalMenuOpen(false)
+  }, [activePermissionRequest])
+
   const scrollToBottom = () => {
     virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
   }
@@ -744,6 +751,15 @@ function ChatPageImpl(): React.JSX.Element {
       onPreviewFile={handlePreviewFile}
     />
   ), [currentAvatarName, highlightedMessageId, handlePreviewFile])
+
+  const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
+  const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
+  const approvalIsDangerous = /删除|高危|rm\b|del\b|remove-item|delete/i.test(`${approvalCommand}\n${approvalWarning}`)
+  const approvalLines = approvalCommand.split(/\r?\n/)
+  const approvalHasMore = approvalLines.length > 6 || approvalCommand.length > 700
+  const approvalPreview = approvalDetailsExpanded
+    ? approvalCommand
+    : approvalLines.slice(0, 6).join('\n').slice(0, 700)
 
   return (
     <div className="chat-split-container">
@@ -850,6 +866,84 @@ function ChatPageImpl(): React.JSX.Element {
 
         {/* 人机协作安全核对面板 */}
         {activePermissionRequest && (
+          <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
+            <div className="approval-card-head">
+              <div className="approval-card-title">
+                <span className="approval-icon">⌁</span>
+                <div>
+                  <div className="approval-kicker">{approvalIsDangerous ? '高风险操作' : '需要审批'}</div>
+                  <div className="approval-title">是否允许执行这项操作？</div>
+                </div>
+              </div>
+              <span className="approval-status-pulse">等待确认</span>
+            </div>
+
+            <div className="approval-card-body">
+              <p className="approval-reason">{approvalWarning}</p>
+
+              <div className="approval-command-box">
+                <pre>{approvalPreview}{!approvalDetailsExpanded && approvalHasMore ? '\n...' : ''}</pre>
+                {approvalHasMore && (
+                  <button
+                    type="button"
+                    className="approval-link-button"
+                    onClick={() => setApprovalDetailsExpanded(prev => !prev)}
+                  >
+                    {approvalDetailsExpanded ? '收起详情' : '展开详情'}
+                  </button>
+                )}
+              </div>
+
+              {activePermissionRequest.execCwd && (
+                <div className="approval-meta">
+                  <span>目录</span>
+                  <code>{activePermissionRequest.execCwd}</code>
+                </div>
+              )}
+
+              <div className="approval-actions">
+                <button
+                  type="button"
+                  className="approval-action reject"
+                  onClick={() => handleRespondPermission(false)}
+                >
+                  拒绝
+                </button>
+
+                <div className="approval-allow-group">
+                  <button
+                    type="button"
+                    className="approval-action allow"
+                    onClick={() => handleRespondPermission(true)}
+                  >
+                    允许一次
+                  </button>
+                  <button
+                    type="button"
+                    className="approval-action allow menu"
+                    onClick={() => setApprovalMenuOpen(prev => !prev)}
+                    aria-label="更多允许选项"
+                    aria-expanded={approvalMenuOpen}
+                  >
+                    ▾
+                  </button>
+                  {approvalMenuOpen && (
+                    <div className="approval-menu">
+                      <button
+                        type="button"
+                        onClick={() => handleRespondPermission(true, 'turn')}
+                      >
+                        本次提问全部允许
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {false && activePermissionRequest && (
           <div className="permission-approval-card" style={{
             margin: '0 16px 12px 16px',
             background: 'var(--bg-card, #ffffff)',
@@ -1543,9 +1637,209 @@ function ChatPageImpl(): React.JSX.Element {
         .approval-status-pulse {
           animation: pulseGlow 2s infinite ease-in-out;
         }
+        .permission-approval-card.compact {
+          position: fixed;
+          left: 24px;
+          bottom: 24px;
+          z-index: 1400;
+          width: min(520px, calc(100vw - 48px));
+          margin: 0;
+          border: 1px solid rgba(15, 23, 42, 0.1);
+          border-radius: 18px;
+          background: var(--bg-card, #fff);
+          box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+          color: var(--text-color, #111827);
+          overflow: visible;
+          animation: approvalRailIn 0.22s cubic-bezier(0.2, 0.9, 0.2, 1);
+        }
+        @keyframes approvalRailIn {
+          from { opacity: 0; transform: translateX(-10px) translateY(12px) scale(0.98); }
+          to { opacity: 1; transform: translateX(0) translateY(0) scale(1); }
+        }
+        .approval-card-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 18px 22px 10px;
+        }
+        .approval-card-title {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          min-width: 0;
+        }
+        .approval-icon {
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: #6b7280;
+          border: 1px solid rgba(15, 23, 42, 0.14);
+          font-size: 15px;
+          flex: 0 0 auto;
+        }
+        .approval-kicker {
+          color: var(--text-muted, #6b7280);
+          font-size: 12px;
+          line-height: 1.2;
+          margin-bottom: 6px;
+        }
+        .approval-title {
+          font-size: 15px;
+          line-height: 1.35;
+          font-weight: 700;
+        }
+        .permission-approval-card.is-danger .approval-icon {
+          color: #b42318;
+          border-color: rgba(180, 35, 24, 0.22);
+          background: rgba(180, 35, 24, 0.06);
+        }
+        .approval-card-body {
+          padding: 8px 22px 18px;
+        }
+        .approval-reason {
+          margin: 0 0 12px;
+          color: var(--text-muted, #4b5563);
+          font-size: 13px;
+          line-height: 1.55;
+        }
+        .approval-command-box {
+          border: 1px solid rgba(15, 23, 42, 0.1);
+          border-radius: 12px;
+          background: rgba(248, 250, 252, 0.9);
+          overflow: hidden;
+        }
+        .approval-command-box pre {
+          margin: 0;
+          padding: 12px 14px;
+          max-height: 180px;
+          overflow: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-family: Consolas, Monaco, 'Courier New', monospace;
+          font-size: 12px;
+          line-height: 1.45;
+          color: var(--text-color, #111827);
+        }
+        .approval-link-button {
+          width: 100%;
+          border: 0;
+          border-top: 1px solid rgba(15, 23, 42, 0.08);
+          padding: 8px 12px;
+          background: transparent;
+          color: var(--accent-color, #2563eb);
+          cursor: pointer;
+          font-size: 12px;
+          text-align: left;
+        }
+        .approval-meta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          margin-top: 10px;
+          color: var(--text-muted, #6b7280);
+          font-size: 12px;
+        }
+        .approval-meta code {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-family: Consolas, Monaco, 'Courier New', monospace;
+          color: var(--text-color, #111827);
+        }
+        .approval-actions {
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 10px;
+          margin-top: 16px;
+        }
+        .approval-action {
+          height: 36px;
+          border-radius: 999px;
+          border: 1px solid rgba(15, 23, 42, 0.1);
+          padding: 0 16px;
+          font-size: 13px;
+          font-weight: 650;
+          cursor: pointer;
+          transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+        .approval-action:hover {
+          transform: translateY(-1px);
+        }
+        .approval-action.reject {
+          background: var(--bg-card, #fff);
+          color: var(--text-color, #111827);
+        }
+        .approval-action.allow {
+          background: var(--accent-color, #4f8cff);
+          border-color: var(--accent-color, #4f8cff);
+          color: #fff;
+          box-shadow: 0 8px 18px rgba(79, 140, 255, 0.22);
+        }
+        .approval-allow-group {
+          position: relative;
+          display: inline-flex;
+          align-items: stretch;
+        }
+        .approval-allow-group .approval-action.allow {
+          border-radius: 999px 0 0 999px;
+        }
+        .approval-action.allow.menu {
+          width: 38px;
+          padding: 0;
+          border-left-color: rgba(255, 255, 255, 0.18);
+          border-radius: 0 999px 999px 0;
+        }
+        .approval-menu {
+          position: absolute;
+          right: 0;
+          bottom: calc(100% + 8px);
+          min-width: 178px;
+          border: 1px solid rgba(15, 23, 42, 0.12);
+          border-radius: 10px;
+          background: var(--bg-card, #fff);
+          box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+          padding: 6px;
+          z-index: 50;
+        }
+        .approval-menu button {
+          width: 100%;
+          border: 0;
+          border-radius: 7px;
+          background: transparent;
+          color: var(--text-color, #111827);
+          cursor: pointer;
+          font-size: 13px;
+          padding: 9px 10px;
+          text-align: left;
+        }
+        .approval-menu button:hover {
+          background: color-mix(in srgb, var(--accent-color, #4f8cff) 10%, transparent);
+          color: var(--accent-color, #4f8cff);
+        }
         @keyframes pulseGlow {
           0%, 100% { opacity: 0.6; }
           50% { opacity: 1; }
+        }
+        @media (max-width: 640px) {
+          .permission-approval-card.compact {
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            width: auto;
+          }
+          .approval-card-head {
+            padding: 15px 16px 8px;
+          }
+          .approval-card-body {
+            padding: 8px 16px 16px;
+          }
         }
       `}</style>
     </div>

@@ -13,7 +13,12 @@ import {
   WaitNode,
   ManualConfirmNode,
   AiNode,
-  ConditionNode
+  ConditionNode,
+  DesktopFocusNode,
+  DesktopClickNode,
+  DesktopTypeNode,
+  DesktopHotkeyNode,
+  DesktopScrollNode
 } from './nodes/CustomNodes'
 import './rpa.css'
 
@@ -28,7 +33,12 @@ const nodeTypes = {
   wait: WaitNode,
   manual_confirm: ManualConfirmNode,
   ai_node: AiNode,
-  condition: ConditionNode
+  condition: ConditionNode,
+  desktop_focus: DesktopFocusNode,
+  desktop_click: DesktopClickNode,
+  desktop_type: DesktopTypeNode,
+  desktop_hotkey: DesktopHotkeyNode,
+  desktop_scroll: DesktopScrollNode
 }
 
 export function RpaPage(): React.JSX.Element {
@@ -61,6 +71,7 @@ export function RpaPage(): React.JSX.Element {
   // 1. 初始化监听 IPC 状态
   useEffect(() => {
     fetchTasks()
+    window.api.listRpaSecrets().then(setSecrets).catch(() => setSecrets([]))
     const cleanup = setupListeners()
     return () => cleanup()
   }, [])
@@ -72,7 +83,11 @@ export function RpaPage(): React.JSX.Element {
   }, [nodes, selectedNodeId])
 
   // 3. 状态：右侧 Tab
-  const [activeTab, setActiveTab] = useState<'attr' | 'logs' | 'chat'>('logs')
+  const [activeTab, setActiveTab] = useState<'attr' | 'logs' | 'chat' | 'credentials'>('logs')
+  const [secrets, setSecrets] = useState<any[]>([])
+  const [newSecretRef, setNewSecretRef] = useState('secret.')
+  const [newSecretLabel, setNewSecretLabel] = useState('')
+  const [newSecretValue, setNewSecretValue] = useState('')
 
   // 4. 状态：创建新任务 Modal
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -196,6 +211,11 @@ export function RpaPage(): React.JSX.Element {
       case 'manual_confirm': label = '人工干预'; data = { prompt: '确认继续操作' }; break
       case 'ai_node': label = 'AI 处理'; data = { prompt: '分析以下内容: {{var}}', varName: 'ai_var' }; break
       case 'condition': label = '条件判断'; data = { expression: 'output !== null' }; break
+      case 'desktop_focus': label = '聚焦窗口'; data = { windowAlias: 'desktop', windowTitle: '', processName: '' }; break
+      case 'desktop_click': label = '桌面点击'; data = { windowAlias: 'desktop', automationId: '', controlType: '', x: 0, y: 0, button: 'left', double: false }; break
+      case 'desktop_type': label = '桌面输入'; data = { windowAlias: 'desktop', value: '', requiresCredentialBinding: false }; break
+      case 'desktop_hotkey': label = '快捷键'; data = { windowAlias: 'desktop', keys: 'Ctrl+C' }; break
+      case 'desktop_scroll': label = '桌面滚轮'; data = { windowAlias: 'desktop', direction: 'down', amount: 3, x: 0, y: 0 }; break
 
       default: return
     }
@@ -235,6 +255,28 @@ export function RpaPage(): React.JSX.Element {
     if (activeTaskId) {
       window.api.saveRpaTaskFlow(activeTaskId, { id: activeTaskId, nodes: updatedNodes, edges })
     }
+  }
+
+  const captureDesktopTargetForNode = async () => {
+    if (!selectedNodeId) return
+    store.appendLog('info', '[桌面拾取] 请在 1.5 秒内将鼠标移到目标控件上。')
+    const target = await window.api.captureRpaDesktopTarget(1500)
+    const updatedNodes = nodes.map((node) => node.id === selectedNodeId ? {
+      ...node,
+      data: {
+        ...node.data,
+        x: target.x,
+        y: target.y,
+        name: target.name || node.data?.name,
+        automationId: target.automationId || node.data?.automationId,
+        controlType: target.controlType || node.data?.controlType,
+        processName: target.processName || node.data?.processName,
+        windowTitle: target.windowTitle || node.data?.windowTitle
+      }
+    } : node)
+    setNodes(updatedNodes)
+    if (activeTaskId) await window.api.saveRpaTaskFlow(activeTaskId, { id: activeTaskId, nodes: updatedNodes, edges })
+    store.appendLog('info', `[桌面拾取] 已捕获 ${target.controlType || '坐标'} · (${target.x}, ${target.y})`)
   }
 
   // ── 元素拾取器处理逻辑 ──────────────────────────────────────
@@ -499,7 +541,11 @@ export function RpaPage(): React.JSX.Element {
       store.appendLog('info', `[录制] 录制结束。共捕获到 ${recordedActions.length} 步操作。`)
 
       // 智能过滤第一步的打开网页/导航操作，因为当前节点已经代劳了
-      let filteredActions = [...recordedActions]
+      let filteredActions = recordedActions.map((action: any) => {
+        if (!action?.sensitive) return action
+        const { value: _discardedValue, ...safeAction } = action
+        return { ...safeAction, value: '', requiresCredentialBinding: true }
+      })
       if (filteredActions.length > 0) {
         const first = filteredActions[0]
         if (
@@ -566,6 +612,7 @@ ${JSON.stringify(filteredActions, null, 2)}
 支持的节点类型（type）规范：
 - "click"：点击元素。data 格式为 { "label": "点击xxx", "selector": "CSS 选择器" }
 - "fill"：输入文本。data 格式为 { "label": "输入xxx", "selector": "CSS 选择器", "value": "输入文本内容" }
+- 录制步骤标记 sensitive 或 requiresCredentialBinding 时，严禁猜测或生成原值；对应 fill 节点必须保留空 value，并设置 "requiresCredentialBinding": true，等待用户绑定 secretRef。
 - "wait"：延时等待。data 格式为 { "label": "延时", "ms": "延迟毫秒数" }
 按垂直向下排列的拓扑顺序为 position 赋值（y坐标以100为步长递增，从当前节点的 y 坐标开始递增）。`
 
@@ -591,6 +638,20 @@ ${JSON.stringify(filteredActions, null, 2)}
     } finally {
       setIsChatSending(false)
     }
+  }
+
+  const createCredential = async () => {
+    if (!activeTaskId || !newSecretRef.startsWith('secret.') || !newSecretValue) return
+    await window.api.createRpaSecret({
+      ref: newSecretRef,
+      plaintext: newSecretValue,
+      label: newSecretLabel || newSecretRef,
+      allowedWorkflowIds: [activeTaskId],
+      allowedSurfaces: ['browser', 'desktop']
+    })
+    setNewSecretValue('')
+    setNewSecretLabel('')
+    setSecrets(await window.api.listRpaSecrets())
   }
 
   // 选中节点的表单渲染
@@ -665,6 +726,11 @@ ${JSON.stringify(filteredActions, null, 2)}
               value={selectedNode.data?.value || ''}
               onChange={(e) => handleAttrChange('value', e.target.value)}
             />
+            <label className="attr-label" style={{ marginTop: 10 }}>或绑定凭据</label>
+            <select className="attr-input" value={String(selectedNode.data?.value || '').startsWith('${secret.') ? selectedNode.data.value : ''} onChange={(e) => handleAttrChange('value', e.target.value)}>
+              <option value="">不使用凭据</option>
+              {secrets.filter((secret) => secret.status === 'active').map((secret) => <option key={secret.ref} value={`\${${secret.ref}}`}>{secret.label} · {secret.ref}</option>)}
+            </select>
           </div>
         )}
 
@@ -753,6 +819,18 @@ ${JSON.stringify(filteredActions, null, 2)}
               onChange={(e) => handleAttrChange('expression', e.target.value)}
               placeholder="e.g. context.var_name.includes('成功')"
             />
+          </div>
+        )}
+
+        {selectedNode.type.startsWith('desktop_') && (
+          <div className="rpa-desktop-inspector">
+            <div className="rpa-surface-note"><span />桌面操作优先使用窗口与控件语义定位；坐标仅作为降级。</div>
+            <div className="attr-group"><label className="attr-label">窗口锚点</label><input className="attr-input" value={selectedNode.data?.windowAlias || 'desktop'} onChange={(e) => handleAttrChange('windowAlias', e.target.value)} /></div>
+            {selectedNode.type === 'desktop_focus' && <><div className="attr-group"><label className="attr-label">窗口标题</label><input className="attr-input" value={selectedNode.data?.windowTitle || ''} onChange={(e) => handleAttrChange('windowTitle', e.target.value)} placeholder="例如：ERP 客户端" /></div><div className="attr-group"><label className="attr-label">进程名</label><input className="attr-input" value={selectedNode.data?.processName || ''} onChange={(e) => handleAttrChange('processName', e.target.value)} /></div></>}
+            {selectedNode.type === 'desktop_click' && <><button className="btn-primary rpa-pick-desktop" onClick={captureDesktopTargetForNode}>◎ 悬停拾取 Windows 控件</button><div className="attr-group"><label className="attr-label">Automation ID</label><input className="attr-input" value={selectedNode.data?.automationId || ''} onChange={(e) => handleAttrChange('automationId', e.target.value)} placeholder="推荐：UI Automation 标识" /></div><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></>}
+            {selectedNode.type === 'desktop_type' && <><div className="attr-group"><label className="attr-label">输入内容</label><input className="attr-input" value={selectedNode.data?.value || ''} onChange={(e) => handleAttrChange('value', e.target.value)} /></div><div className="attr-group"><label className="attr-label">凭据绑定</label><select className="attr-input" value={String(selectedNode.data?.value || '').startsWith('${secret.') ? selectedNode.data.value : ''} onChange={(e) => handleAttrChange('value', e.target.value)}><option value="">不使用凭据</option>{secrets.filter((secret) => secret.status === 'active').map((secret) => <option key={secret.ref} value={`\${${secret.ref}}`}>{secret.label} · {secret.ref}</option>)}</select></div></>}
+            {selectedNode.type === 'desktop_hotkey' && <div className="attr-group"><label className="attr-label">组合键</label><input className="attr-input" value={selectedNode.data?.keys || ''} onChange={(e) => handleAttrChange('keys', e.target.value)} placeholder="Ctrl+Shift+S" /></div>}
+            {selectedNode.type === 'desktop_scroll' && <><div className="attr-group"><label className="attr-label">方向</label><select className="attr-input" value={selectedNode.data?.direction || 'down'} onChange={(e) => handleAttrChange('direction', e.target.value)}><option value="down">向下</option><option value="up">向上</option></select></div><div className="attr-group"><label className="attr-label">滚动量</label><input className="attr-input" type="number" value={selectedNode.data?.amount || 3} onChange={(e) => handleAttrChange('amount', Number(e.target.value))} /></div></>}
           </div>
         )}
 
@@ -968,6 +1046,11 @@ ${JSON.stringify(filteredActions, null, 2)}
           <div style={{ fontSize: '16px', fontWeight: 700 }}>
             {currentTask?.name}
           </div>
+          <div className="rpa-surface-rail" aria-label="工作流执行面">
+            <span className="browser"><i />Browser {nodes.filter((node) => ['open_url', 'click', 'fill', 'extract'].includes(node.type)).length}</span>
+            <b>→</b>
+            <span className="desktop"><i />Desktop {nodes.filter((node) => node.type?.startsWith('desktop_')).length}</span>
+          </div>
         </div>
       </div>
 
@@ -983,6 +1066,14 @@ ${JSON.stringify(filteredActions, null, 2)}
             <button className="btn-back" onClick={() => handleAddNode('wait')} title="添加延时节点 (延时等待)">⏳</button>
             <button className="btn-back" onClick={() => handleAddNode('manual_confirm')} title="添加人工确认节点 (人工干预)">⚠️</button>
             <button className="btn-back" onClick={() => handleAddNode('condition')} title="添加条件判断节点 (条件分支)">❓</button>
+
+            <span className="rpa-toolbar-divider" />
+            <span className="rpa-surface-label desktop">DESKTOP</span>
+            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_focus')} title="聚焦 Windows 窗口">▣</button>
+            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_click')} title="点击桌面控件">◎</button>
+            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_type')} title="桌面输入">⌨</button>
+            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_hotkey')} title="快捷键">⌘</button>
+            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_scroll')} title="滚轮">↕</button>
 
 
 
@@ -1054,6 +1145,9 @@ ${JSON.stringify(filteredActions, null, 2)}
               })
             }}
             fitView
+            fitViewOptions={{ padding: 0.28, maxZoom: 1 }}
+            minZoom={0.35}
+            maxZoom={1.6}
           >
             <Background />
             <Controls />
@@ -1096,6 +1190,9 @@ ${JSON.stringify(filteredActions, null, 2)}
                 <div className={`rpa-panel-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
                   💬 AI 助手
                 </div>
+                <div className={`rpa-panel-tab ${activeTab === 'credentials' ? 'active' : ''}`} onClick={() => setActiveTab('credentials')}>
+                  ◈ 凭据
+                </div>
               </div>
               <button
                 onClick={() => setShowPanel(false)}
@@ -1120,6 +1217,27 @@ ${JSON.stringify(filteredActions, null, 2)}
             <div className="rpa-panel-content">
               {activeTab === 'attr' && renderAttrEditor()}
               {activeTab === 'chat' && renderChatTab()}
+              {activeTab === 'credentials' && (
+                <div className="rpa-credential-panel">
+                  <div className="attr-title">凭据绑定</div>
+                  <p className="rpa-panel-hint">真实值只在主进程执行动作时解密。流程、日志和 AI 仅能看到 secretRef。</p>
+                  <div className="rpa-credential-list">
+                    {secrets.map((secret) => (
+                      <div className="rpa-credential-row" key={secret.ref}>
+                        <div><strong>{secret.label}</strong><code>{secret.ref}</code></div>
+                        <span className={`status-badge ${secret.status === 'active' ? 'success' : 'idle'}`}>{secret.status}</span>
+                      </div>
+                    ))}
+                    {secrets.length === 0 && <div className="rpa-empty-compact">还没有凭据。创建后可在输入节点中绑定。</div>}
+                  </div>
+                  <div className="rpa-credential-create">
+                    <div className="attr-group"><label className="attr-label">引用</label><input className="attr-input" value={newSecretRef} onChange={(e) => setNewSecretRef(e.target.value)} placeholder="secret.crm.password" /></div>
+                    <div className="attr-group"><label className="attr-label">名称</label><input className="attr-input" value={newSecretLabel} onChange={(e) => setNewSecretLabel(e.target.value)} placeholder="CRM 密码" /></div>
+                    <div className="attr-group"><label className="attr-label">真实值</label><input className="attr-input" type="password" value={newSecretValue} onChange={(e) => setNewSecretValue(e.target.value)} autoComplete="new-password" /></div>
+                    <button className="btn-primary" onClick={createCredential} disabled={!activeTaskId || !newSecretValue || !newSecretRef.startsWith('secret.')}>保存并授权当前工作流</button>
+                  </div>
+                </div>
+              )}
 
               {activeTab === 'logs' && (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

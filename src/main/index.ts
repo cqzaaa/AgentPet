@@ -102,43 +102,30 @@ import * as rpaStorage from './rpa/rpaStorage'
 import { PlaywrightRpaExecutor } from './rpa/playwrightExecutor'
 import { RpaElementPicker } from './rpa/rpaElementPicker'
 import { RpaBrowserRecorder } from './rpa/rpaBrowserRecorder'
+import { captureDesktopTarget } from './rpa/rpaDesktopPicker'
+import { getRpaSecretService } from './rpa/security/rpa-secret-service-provider'
+import type { RpaSecretRef, RpaSurface } from './rpa/domain/types'
+import {
+  loadSecureSystemLlmConfig,
+  sanitizeSystemLlmConfig,
+  saveSecureSystemLlmConfig
+} from './security/secure-llm-config'
+import { DEFAULT_LLM_CONFIG, type RuntimeLlmConfig } from './security/llm-config-store'
 
 let wechatBotManager: WechatBotManager | null = null
-let systemLlmConfig: any = { provider: 'gemini', apiKey: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', temperature: 0.7 }
+let systemLlmConfig: RuntimeLlmConfig = { ...DEFAULT_LLM_CONFIG }
 let systemMcpConfig: any = { servers: [] }
 
 function loadSystemLlmConfig() {
   try {
-    const configPath = join(app.getPath('userData'), 'system_llm_config.json')
-    if (fs.existsSync(configPath)) {
-      const data = fs.readFileSync(configPath, 'utf8')
-      systemLlmConfig = { ...systemLlmConfig, ...JSON.parse(data) }
+    systemLlmConfig = loadSecureSystemLlmConfig()
+    if (systemLlmConfig.secretMigrationPending) {
+      console.warn('[Secrets] System LLM credential migration is pending because OS encryption is unavailable')
     }
   } catch (e) {
-    console.error('加载全局大模型配置文件失败:', e)
+    console.error('[Secrets] Failed to load the system LLM configuration', e)
   }
 }
-
-
-function saveSystemLlmConfig(config: any) {
-  try {
-    const configPath = join(app.getPath('userData'), 'system_llm_config.json')
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
-  } catch (e) {
-    console.error('保存全局大模型配置文件失败:', e)
-  }
-}
-
-function saveSystemMcpConfig(config: any) {
-  try {
-    const configPath = join(app.getPath('userData'), 'system_mcp_config.json')
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
-  } catch (e) {
-    console.error('保存全局 MCP 配置文件失败:', e)
-  }
-}
-
-
 
 // 提高 Windows 下透明窗口和 Live2D WebGL 渲染的稳定性，防止 GPU 进程 TDR 崩溃或睡眠后唤醒黑屏
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
@@ -194,6 +181,7 @@ function runImmediateGarbageCollection(): void {
 // 窗口尺寸
 const winWidth = 260
 const winHeight = 300
+const windowsAppUserModelId = 'com.electron.app'
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
@@ -201,6 +189,7 @@ let inputWindow: BrowserWindow | null = null
 let pendingAgentInput: string = '' // 缓存快捷输入框传递过来的待发送文本
 let tray: Tray | null = null
 let customModelDir = ''
+const activeNotifications = new Set<Notification>()
 let customModelFile = ''
 
 let screenshotWindows: BrowserWindow[] = []
@@ -350,9 +339,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
   }
 
   if (agentWindow) {
-    if (agentWindow.isMinimized()) agentWindow.restore()
-    agentWindow.show()
-    agentWindow.focus()
+    showAgentWindow(agentWindow)
     if (openParams) {
       agentWindow.webContents.send('api:open-cron-log-details', openParams.taskId, openParams.logId)
     }
@@ -393,7 +380,9 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
   })
 
   agentWindow.on('ready-to-show', () => {
-    agentWindow?.show()
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      showAgentWindow(agentWindow)
+    }
     // 窗口就绪后，如果有待投递的通知则发送（数据在 localStorage 中）
     if (pendingAgentInput && agentWindow && !agentWindow.isDestroyed()) {
       agentWindow.webContents.send('pending-input')
@@ -554,6 +543,37 @@ function createTray(): void {
 }
 
 let ipcWindowHandlersRegistered = false
+
+function showAgentWindow(win: BrowserWindow): void {
+  const wasAlwaysOnTop = win.isAlwaysOnTop()
+  let restoredAlwaysOnTop = false
+
+  const restoreAlwaysOnTop = (): void => {
+    if (restoredAlwaysOnTop || win.isDestroyed()) return
+    restoredAlwaysOnTop = true
+    win.setAlwaysOnTop(wasAlwaysOnTop)
+  }
+
+  const activate = (forceTop = false): void => {
+    if (win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.setFocusable(true)
+    if (!win.isVisible()) win.show()
+    if (forceTop) win.setAlwaysOnTop(true)
+    win.show()
+    win.moveTop()
+    win.focus()
+    app.focus({ steal: true })
+  }
+
+  activate(true)
+  setTimeout(() => activate(true), 80)
+  setTimeout(() => {
+    activate(true)
+    restoreAlwaysOnTop()
+  }, 320)
+  setTimeout(restoreAlwaysOnTop, 1000)
+}
 
 function createWindow(): void {
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -832,11 +852,11 @@ app.whenReady().then(() => {
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   registerBuiltinTools()
   loadSystemLlmConfig()
-  mcpManager.loadSystemMcpConfig()
+  systemMcpConfig = mcpManager.loadSystemMcpConfig()
 
 
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId(windowsAppUserModelId)
 
   // 配置地理定位权限处理器，允许渲染进程获取系统定位
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -1841,6 +1861,18 @@ app.whenReady().then(() => {
         body,
         icon: icon
       })
+      activeNotifications.add(notification)
+      const releaseNotification = (): void => {
+        activeNotifications.delete(notification)
+      }
+      notification.on('click', () => {
+        releaseNotification()
+        notification.close()
+        app.focus({ steal: true })
+        createAgentWindow()
+      })
+      notification.on('close', releaseNotification)
+      notification.on('failed', releaseNotification)
       notification.show()
       return true
     } catch (err) {
@@ -2198,8 +2230,12 @@ app.whenReady().then(() => {
   })
 
   // 动态获取大模型服务商的模型列表
-  ipcMain.handle('api:get-models', async (_, config: { provider: string; apiKey: string; baseUrl: string }) => {
-    const { provider, apiKey, baseUrl } = config
+  ipcMain.handle('api:get-models', async (_, config: { provider: string; apiKey?: string; baseUrl: string; credentialScope?: 'system' | 'wechat' }) => {
+    const { provider, baseUrl } = config
+    const scopedApiKey = config.credentialScope === 'wechat'
+      ? wechatBotManager?.getRuntimeLlmConfig().apiKey
+      : systemLlmConfig.apiKey
+    const apiKey = config.apiKey || scopedApiKey || ''
 
     // 如果是 ollama，优先用原有的 api/tags 获取方式
     if (provider === 'ollama') {
@@ -3433,6 +3469,10 @@ app.whenReady().then(() => {
     event?: Electron.IpcMainInvokeEvent,
     onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string; sources?: any[] }) => void
   ): Promise<string> {
+    config = {
+      ...config,
+      apiKey: config?.apiKey || systemLlmConfig.apiKey
+    }
     const executor = new AgentExecutor()
     let thisController: AbortController
     const sessionId = config.sessionId || 'default'
@@ -3610,24 +3650,23 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:wechat-save-settings', async (_, settings) => {
     if (wechatBotManager) {
-      await wechatBotManager.saveSettings(settings)
-      return true
+      return wechatBotManager.saveSettings(settings)
     }
     return false
   })
 
+  ipcMain.handle('api:get-system-llm-config', () => {
+    return sanitizeSystemLlmConfig(systemLlmConfig)
+  })
+
   ipcMain.handle('api:sync-llm-config', (_, config) => {
-    systemLlmConfig = config
-    saveSystemLlmConfig(config)
-    return true
+    systemLlmConfig = saveSecureSystemLlmConfig(config)
+    return sanitizeSystemLlmConfig(systemLlmConfig)
   })
 
   ipcMain.handle('api:sync-mcp-config', (_, config) => {
-    systemMcpConfig = config
-    saveSystemMcpConfig(config)
-    // 懒加载模式：只注册配置，不立即连接，等实际需要工具时再按需连接
-    mcpManager.setConfigs(config.servers)
-    return true
+    systemMcpConfig = mcpManager.saveSystemMcpConfig(config)
+    return mcpManager.getSanitizedSystemMcpConfig()
   })
 
   ipcMain.handle('api:test-mcp-server', async (_, config) => {
@@ -3638,8 +3677,10 @@ app.whenReady().then(() => {
         import('@modelcontextprotocol/sdk/client/sse.js'),
       ])
 
+      const runtimeServer = systemMcpConfig.servers.find((server: any) => server.id === config.id)
+      const apiKey = config.apiKey || runtimeServer?.apiKey || ''
       const headers: Record<string, string> = {}
-      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
       let client = new Client(
         { name: 'AgentPet-Test', version: '1.0.0' },
@@ -3699,7 +3740,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('api:get-mcp-config', () => {
-    return systemMcpConfig
+    return mcpManager.getSanitizedSystemMcpConfig()
   })
 
   ipcMain.handle('api:get-active-mcp-servers', async () => {
@@ -3771,7 +3812,7 @@ app.whenReady().then(() => {
 
     // 4. 断开微信 Bot
     if (wechatBotManager) {
-      wechatBotManager.logout().catch(() => { })
+      wechatBotManager.shutdown().catch(() => { })
     }
 
     // 5. 中止所有运行中的 RPA 任务并释放浏览器资源
@@ -3830,6 +3871,34 @@ app.whenReady().then(() => {
       return true
     }
     return false
+  })
+
+  ipcMain.handle('api:list-rpa-secrets', () => getRpaSecretService().list())
+  ipcMain.handle('api:capture-rpa-desktop-target', (_, delayMs?: number) => captureDesktopTarget(delayMs))
+
+  ipcMain.handle('api:create-rpa-secret', (_, input: {
+    ref: RpaSecretRef
+    plaintext: string
+    label: string
+    allowedWorkflowIds: string[]
+    allowedSurfaces: RpaSurface[]
+  }) => getRpaSecretService().create(input.ref, input.plaintext, input))
+
+  ipcMain.handle('api:rotate-rpa-secret', (_, ref: RpaSecretRef, plaintext: string) =>
+    getRpaSecretService().rotate(ref, plaintext)
+  )
+
+  ipcMain.handle('api:set-rpa-secret-status', (_, ref: RpaSecretRef, status: 'active' | 'disabled') =>
+    getRpaSecretService().setStatus(ref, status)
+  )
+
+  ipcMain.handle('api:delete-rpa-secret', async (_, ref: RpaSecretRef) => {
+    const referencedBy: string[] = []
+    for (const workflow of await rpaStorage.loadManifest()) {
+      const flow = await rpaStorage.loadTaskFlow(workflow.id)
+      if (flow && JSON.stringify(flow).includes(ref)) referencedBy.push(workflow.id)
+    }
+    return getRpaSecretService().delete(ref, referencedBy)
   })
 
 
