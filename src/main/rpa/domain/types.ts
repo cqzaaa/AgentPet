@@ -81,6 +81,7 @@ export interface RpaNode<TData extends Record<string, any> = Record<string, any>
   type: string
   data: TData
   position?: { x: number; y: number }
+  recordedDelayMs?: number
 }
 
 export interface RpaEdge {
@@ -106,6 +107,13 @@ export interface RpaTaskManifest {
   id: string
   name: string
   description?: string
+  enabled?: boolean
+  schedule?: {
+    type: 'manual' | 'interval' | 'daily'
+    intervalMinutes?: number
+    dailyTime?: string
+  }
+  lastScheduledRunAt?: string
   lastRunStatus?: RpaRunStatus
   lastRunTime?: string
   createdAt?: string
@@ -184,8 +192,8 @@ export interface RpaArtifactRecord {
 }
 
 export type BrowserRecordedAction =
-  | { type: 'open_url'; url: string; label?: string }
-  | { type: 'click'; selector: string; label?: string }
+  | { type: 'open_url'; url: string; label?: string; recordedAt?: number }
+  | { type: 'click'; selector: string; label?: string; recordedAt?: number }
   | {
       type: 'fill'
       selector: string
@@ -193,4 +201,95 @@ export type BrowserRecordedAction =
       valueSource?: RpaValueSource
       sensitive?: boolean
       label?: string
+      recordedAt?: number
     }
+
+export type DesktopRecordedAction =
+  | {
+      type: 'desktop_focus'
+      windowTitle?: string
+      processName?: string
+      processId?: number
+      showDesktop?: boolean
+      label?: string
+      recordedAt?: number
+    }
+  | {
+      type: 'desktop_click'
+      x: number
+      y: number
+      button?: 'left' | 'right'
+      double?: boolean
+      relativeX?: number
+      relativeY?: number
+      displayRelativeX?: number
+      displayRelativeY?: number
+      displayLeft?: number
+      displayTop?: number
+      displayWidth?: number
+      displayHeight?: number
+      displayPrimary?: boolean
+      name?: string
+      automationId?: string
+      controlType?: string
+      processId?: number
+      processName?: string
+      windowTitle?: string
+      label?: string
+      recordedAt?: number
+    }
+  | {
+      type: 'desktop_type'
+      value?: string
+      rawRecordedValue?: string
+      normalizationSource?: 'uia' | 'model'
+      normalizationConfidence?: 'high' | 'medium' | 'low'
+      inputLanguage?: number
+      processId?: number
+      sensitive?: boolean
+      requiresCredentialBinding?: boolean
+      x?: number
+      y?: number
+      name?: string
+      automationId?: string
+      controlType?: string
+      relativeX?: number
+      relativeY?: number
+      displayRelativeX?: number
+      displayRelativeY?: number
+      displayPrimary?: boolean
+      processName?: string
+      windowTitle?: string
+      label?: string
+      recordedAt?: number
+    }
+  | {
+      type: 'desktop_hotkey'
+      keys: string
+      processName?: string
+      windowTitle?: string
+      label?: string
+      recordedAt?: number
+    }
+  | {
+      type: 'desktop_scroll'
+      x: number
+      y: number
+      direction: 'up' | 'down'
+      amount: number
+      relativeX?: number
+      relativeY?: number
+      displayRelativeX?: number
+      displayRelativeY?: number
+      displayLeft?: number
+      displayTop?: number
+      displayWidth?: number
+      displayHeight?: number
+      displayPrimary?: boolean
+      processName?: string
+      windowTitle?: string
+      label?: string
+      recordedAt?: number
+    }
+
+export type RpaRecordedAction = BrowserRecordedAction | DesktopRecordedAction

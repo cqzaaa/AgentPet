@@ -236,6 +236,10 @@ ${skillsContext}
 - ⚠️ 调用原则：普通的打招呼（例如 hi、你好）、日常闲聊、常识问答等，请直接以文字回复，【严禁】无意义地调用系统工具。
 - 🚫 调用约束：你只能使用已提供给你的工具，绝对不允许编造任何不存在的工具名称。
 - 💡 变通调用：如果遇到未提供专用工具的需求（例如获取当前时间），请通过 'run_terminal_command' 执行相应的系统指令；本机 Windows 请指定 shell='powershell'，例如 \`Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'\`。${mcpContext}
+- 后台进程：启动数据库、Web 服务、开发服务器或其他常驻进程时必须使用异步 \`run_command\`，再用 \`get_command_output\` 查看状态；禁止使用同步终端工具等待常驻进程。
+- 权限失败：遇到 Access is denied、拒绝访问、System error 5 等错误时必须停止等价命令重试，直接说明需要管理员权限。不得擅自绕过 Windows 服务管理器启动底层进程。
+- Windows 命令：PowerShell 中调用传统程序必须写完整可执行名，例如 \`sc.exe\`、\`where.exe\`，避免与 PowerShell 别名冲突。
+- 结果判断：非零退出码不一定是系统异常；查询无匹配或状态检查未命中时，应结合输出和命令语义判断。
 
 </tool_use_rules>
 

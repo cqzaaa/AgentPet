@@ -11,6 +11,7 @@ import { SettingsPage } from '../pages/SettingsPage'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import { LogsPage } from '../pages/LogsPage'
 import { RpaPage } from '../rpa/RpaPage'
+import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
 
@@ -50,6 +51,36 @@ function HistoryListIcon(): React.JSX.Element {
     </svg>
   )
 }
+
+type FunctionPageId = 'control' | 'agent' | 'rpa' | 'logs' | 'settings'
+
+type WorkspaceTab =
+  | { key: string; kind: 'session'; sessionId: string }
+  | { key: string; kind: 'page'; pageId: FunctionPageId; detailId?: string }
+
+const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
+  control: '订阅频道',
+  agent: '代理',
+  rpa: 'RPA 任务',
+  logs: '日志',
+  settings: '设置'
+}
+
+const AGENT_SUB_TAB_LABELS: Record<string, string> = {
+  skills: '技能加入',
+  memory: '记忆控制',
+  cron: '定时任务',
+  mcp: 'MCP 服务'
+}
+
+const SETTINGS_SUB_TAB_LABELS: Record<string, string> = {
+  keys: '模型配置',
+  storage: '存储管理',
+  avatar: '虚拟体'
+}
+
+const isFunctionPage = (tab: string): tab is FunctionPageId =>
+  Object.prototype.hasOwnProperty.call(FUNCTION_PAGE_LABELS, tab)
 
 const checkIsThinking = (s: Session | undefined): boolean => {
   if (!s || !s.messages) return false
@@ -109,6 +140,8 @@ export function AgentWindow(): React.JSX.Element {
   const theme = useAppStoreRaw(state => state.theme)
   const isCollapsed = useAppStoreRaw(state => state.isCollapsed)
   const activeTab = useAppStoreRaw(state => state.activeTab)
+  const agentSubTab = useAppStoreRaw(state => state.agentSubTab)
+  const settingsSubTab = useAppStoreRaw(state => state.settingsSubTab)
   const showApiKeyModal = useAppStoreRaw(state => state.showApiKeyModal)
   const sessions = useAppStoreRaw(selectShellSessions)
   const activeSessionId = useAppStoreRaw(state => state.activeSessionId)
@@ -120,9 +153,20 @@ export function AgentWindow(): React.JSX.Element {
   const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
   const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
   const isSessionsInitialized = useAppStoreRaw(state => state.isSessionsInitialized)
+  const rpaTasks = useRpaStore(state => state.tasks)
+  const activeRpaTaskId = useRpaStore(state => state.activeTaskId)
+  const selectRpaTask = useRpaStore(state => state.selectTask)
+  const sessionsById = useMemo(
+    () => new Map(sessions.map(session => [session.id, session])),
+    [sessions]
+  )
+  const rpaTasksById = useMemo(
+    () => new Map(rpaTasks.map(task => [task.id, task])),
+    [rpaTasks]
+  )
 
   // 派生状态从 Zustand 中获取
-  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || { messages: [] }
+  const activeSession = sessionsById.get(activeSessionId) || sessions[0] || { messages: [] }
   const activeSessMessages = activeSession.messages || []
 
   const [showSplash, setShowSplash] = useState(true)
@@ -214,43 +258,167 @@ export function AgentWindow(): React.JSX.Element {
     return () => window.removeEventListener('resize', checkMaximized)
   }, [])
 
-  const [openSessionIds, setOpenSessionIds] = useState<string[]>([])
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([])
   const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null)
+  const [hiddenTabKeys, setHiddenTabKeys] = useState<string[]>([])
+  const [showTabOverflowMenu, setShowTabOverflowMenu] = useState(false)
+  const tabsViewportRef = useRef<HTMLDivElement>(null)
+  const tabElementRefs = useRef(new Map<string, HTMLDivElement>())
+  const tabOverflowMenuRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (activeSessionId && !openSessionIds.includes(activeSessionId)) {
-      setOpenSessionIds(prev => [...prev, activeSessionId])
+  const getWorkspaceTabLabel = (tab: WorkspaceTab): string => {
+    if (tab.kind === 'session') {
+      return sessionsById.get(tab.sessionId)?.name || '新会话'
     }
-  }, [activeSessionId])
+    if (tab.pageId === 'rpa' && tab.detailId) {
+      return `RPA-${rpaTasksById.get(tab.detailId)?.name || '未知任务'}`
+    }
+    if (tab.pageId === 'agent') {
+      return `代理-${AGENT_SUB_TAB_LABELS[agentSubTab] || '技能加入'}`
+    }
+    if (tab.pageId === 'settings') {
+      return `设置-${SETTINGS_SUB_TAB_LABELS[settingsSubTab] || '模型配置'}`
+    }
+    return FUNCTION_PAGE_LABELS[tab.pageId]
+  }
+
+  const workspaceTabLabelSignature = workspaceTabs
+    .map(tab => `${tab.key}:${getWorkspaceTabLabel(tab)}`)
+    .join('\u0000')
+
+  const activeWorkspaceKey = activeTab === 'chat'
+    ? `session:${activeSessionId}`
+    : activeTab === 'rpa' && activeRpaTaskId
+      ? `page:rpa:${activeRpaTaskId}`
+      : `page:${activeTab}`
 
   useEffect(() => {
-    const validIds = sessions.map(s => s.id)
-    setOpenSessionIds(prev => prev.filter(id => validIds.includes(id)))
+    if (activeTab === 'chat' && activeSessionId) {
+      const key = `session:${activeSessionId}`
+      setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
+        ? prev
+        : [...prev, { key, kind: 'session', sessionId: activeSessionId }])
+    }
+  }, [activeSessionId, activeTab])
+
+  useEffect(() => {
+    if (isFunctionPage(activeTab)) {
+      const detailId = activeTab === 'rpa' ? activeRpaTaskId || undefined : undefined
+      const key = detailId ? `page:${activeTab}:${detailId}` : `page:${activeTab}`
+      setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
+        ? prev
+        : [...prev, { key, kind: 'page', pageId: activeTab, detailId }])
+    }
+  }, [activeRpaTaskId, activeTab])
+
+  useEffect(() => {
+    const validIds = new Set(sessions.map(s => s.id))
+    setWorkspaceTabs(prev => {
+      const next = prev.filter(tab => tab.kind === 'page' || validIds.has(tab.sessionId))
+      return next.length === prev.length ? prev : next
+    })
   }, [sessions])
 
-  const handleCloseTab = (idToClose: string, e: React.MouseEvent): void => {
-    e.stopPropagation()
-    const nextTabs = openSessionIds.filter(id => id !== idToClose)
-    setOpenSessionIds(nextTabs)
+  const activateWorkspaceTab = (tab: WorkspaceTab): void => {
+    if (tab.kind === 'session') {
+      setActiveSessionId(tab.sessionId)
+      setActiveTab('chat')
+    } else if (tab.pageId === 'rpa') {
+      void selectRpaTask(tab.detailId || null).then(() => setActiveTab('rpa'))
+    } else {
+      setActiveTab(tab.pageId)
+    }
+  }
 
-    if (activeSessionId === idToClose) {
-      if (nextTabs.length > 0) {
-        const currentIndex = openSessionIds.indexOf(idToClose)
-        const nextIndex = Math.max(0, currentIndex - 1)
-        const nextActiveId = nextTabs[nextIndex] || nextTabs[0]
-        setActiveSessionId(nextActiveId)
+  const handleCloseTab = (keyToClose: string, e: React.MouseEvent): void => {
+    e.stopPropagation()
+    const currentIndex = workspaceTabs.findIndex(tab => tab.key === keyToClose)
+    const closingTab = workspaceTabs[currentIndex]
+    if (!closingTab) return
+
+    const isClosingActive = closingTab.key === activeWorkspaceKey
+    const nextTabs = workspaceTabs.filter(tab => tab.key !== keyToClose)
+    setWorkspaceTabs(nextTabs)
+
+    if (isClosingActive) {
+      const nextTab = nextTabs[Math.min(currentIndex, nextTabs.length - 1)]
+      if (nextTab) {
+        activateWorkspaceTab(nextTab)
+      } else if (sessions.length > 0) {
+        setActiveSessionId(sessions[0].id)
         setActiveTab('chat')
       } else {
-        const remainingSessions = sessions.filter(s => s.id !== idToClose)
-        if (remainingSessions.length > 0) {
-          setActiveSessionId(remainingSessions[0].id)
-          setActiveTab('chat')
-        } else {
-          handleCreateNewSession()
-        }
+        handleCreateNewSession()
       }
     }
   }
+
+  useEffect(() => {
+    const viewport = tabsViewportRef.current
+    if (!viewport) return undefined
+
+    let frameId = 0
+    const updateHiddenTabs = (): void => {
+      cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(() => {
+        const viewportRect = viewport.getBoundingClientRect()
+        const nextHiddenKeys = workspaceTabs
+          .filter(tab => {
+            const element = tabElementRefs.current.get(tab.key)
+            if (!element) return false
+            const rect = element.getBoundingClientRect()
+            return rect.left < viewportRect.left - 1 || rect.right > viewportRect.right + 1
+          })
+          .map(tab => tab.key)
+        setHiddenTabKeys(prev => (
+          prev.length === nextHiddenKeys.length && prev.every((key, index) => key === nextHiddenKeys[index])
+            ? prev
+            : nextHiddenKeys
+        ))
+      })
+    }
+
+    updateHiddenTabs()
+    const resizeObserver = new ResizeObserver(updateHiddenTabs)
+    resizeObserver.observe(viewport)
+    viewport.addEventListener('scroll', updateHiddenTabs, { passive: true })
+    return () => {
+      cancelAnimationFrame(frameId)
+      resizeObserver.disconnect()
+      viewport.removeEventListener('scroll', updateHiddenTabs)
+    }
+  }, [workspaceTabs, workspaceTabLabelSignature])
+
+  useEffect(() => {
+    const viewport = tabsViewportRef.current
+    const activeElement = tabElementRefs.current.get(activeWorkspaceKey)
+    if (!viewport || !activeElement) return
+
+    const frameId = requestAnimationFrame(() => {
+      const viewportRect = viewport.getBoundingClientRect()
+      const activeRect = activeElement.getBoundingClientRect()
+      if (activeRect.left < viewportRect.left) {
+        viewport.scrollLeft -= viewportRect.left - activeRect.left
+      } else if (activeRect.right > viewportRect.right) {
+        viewport.scrollLeft += activeRect.right - viewportRect.right
+      }
+    })
+    return () => cancelAnimationFrame(frameId)
+  }, [activeWorkspaceKey, workspaceTabs])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent): void => {
+      if (tabOverflowMenuRef.current && !tabOverflowMenuRef.current.contains(event.target as Node)) {
+        setShowTabOverflowMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (hiddenTabKeys.length === 0) setShowTabOverflowMenu(false)
+  }, [hiddenTabKeys])
 
 
   useEffect(() => {
@@ -278,6 +446,9 @@ export function AgentWindow(): React.JSX.Element {
       default: return <div>Overview</div>
     }
   }
+
+  const hiddenTabKeySet = new Set(hiddenTabKeys)
+  const hiddenTabs = workspaceTabs.filter(tab => hiddenTabKeySet.has(tab.key))
 
   return (
     <div className={`agent-window-container ${theme}`}>
@@ -353,7 +524,11 @@ export function AgentWindow(): React.JSX.Element {
                 <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
                 <span className="menu-item-arrow">&gt;</span>
               </div>
-              <div className={`menu-item ${activeTab === 'rpa' ? 'active' : ''}`} onClick={() => setActiveTab('rpa')} title="RPA 任务">
+              <div
+                className={`menu-item ${activeTab === 'rpa' ? 'active' : ''}`}
+                onClick={() => { void selectRpaTask(null).then(() => setActiveTab('rpa')) }}
+                title="RPA 任务"
+              >
                 <div className="menu-item-left"><RpaIcon /><span>RPA 任务</span></div>
                 <span className="menu-item-arrow">&gt;</span>
               </div>
@@ -381,27 +556,31 @@ export function AgentWindow(): React.JSX.Element {
       <div className="agent-content-area">
         {/* ── 自定义标题栏 (Custom Titlebar) ── */}
         <div className="window-titlebar">
-          {/* 会话标签页 */}
-          <div className="titlebar-tabs" onDoubleClick={() => handleCreateNewSession()}>
-            {openSessionIds.map(id => {
-              const session = sessions.find(s => s.id === id)
-              if (!session) return null
-              const isActive = activeSessionId === id && activeTab === 'chat'
-              const isThinking = checkIsThinking(session)
+          <div className="titlebar-tabs-shell">
+          <div ref={tabsViewportRef} className="titlebar-tabs" onDoubleClick={() => handleCreateNewSession()}>
+            {workspaceTabs.map(tab => {
+              const session = tab.kind === 'session'
+                ? sessionsById.get(tab.sessionId)
+                : undefined
+              if (tab.kind === 'session' && !session) return null
+              const isActive = tab.key === activeWorkspaceKey
+              const isThinking = tab.kind === 'session' && checkIsThinking(session)
+              const label = getWorkspaceTabLabel(tab)
               return (
                 <div
-                  key={id}
-                  className={`titlebar-tab ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
-                  onClick={() => {
-                    setActiveSessionId(id)
-                    setActiveTab('chat')
+                  key={tab.key}
+                  ref={element => {
+                    if (element) tabElementRefs.current.set(tab.key, element)
+                    else tabElementRefs.current.delete(tab.key)
                   }}
+                  className={`titlebar-tab ${tab.kind === 'page' ? 'function-tab' : ''} ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
+                  onClick={() => activateWorkspaceTab(tab)}
                 >
                   {isThinking && <span className="tab-status-dot-pulse"></span>}
-                  <span className="titlebar-tab-name" title={session.name}>{session.name}</span>
+                  <span className="titlebar-tab-name" title={label}>{label}</span>
                   <span
                     className="titlebar-tab-close"
-                    onClick={(e) => handleCloseTab(id, e)}
+                    onClick={(e) => handleCloseTab(tab.key, e)}
                     title="关闭标签页"
                   >
                     ✕
@@ -417,6 +596,46 @@ export function AgentWindow(): React.JSX.Element {
             >
               +
             </button>
+          </div>
+          {hiddenTabs.length > 0 && (
+            <div className="titlebar-tab-overflow" ref={tabOverflowMenuRef}>
+              <button
+                className={`titlebar-tab-overflow-btn ${showTabOverflowMenu ? 'active' : ''}`}
+                onClick={() => setShowTabOverflowMenu(prev => !prev)}
+                title={`还有 ${hiddenTabs.length} 个标签`}
+                aria-label="显示更多标签"
+                aria-expanded={showTabOverflowMenu}
+              >
+                •••
+              </button>
+              {showTabOverflowMenu && (
+                <div className="titlebar-tab-overflow-menu">
+                  {hiddenTabs.map(tab => (
+                    <div
+                      key={tab.key}
+                      className={`titlebar-tab-overflow-item ${tab.key === activeWorkspaceKey ? 'active' : ''}`}
+                      onClick={() => {
+                        activateWorkspaceTab(tab)
+                        setShowTabOverflowMenu(false)
+                      }}
+                    >
+                      <span title={getWorkspaceTabLabel(tab)}>{getWorkspaceTabLabel(tab)}</span>
+                      <span
+                        className="titlebar-tab-overflow-close"
+                        onClick={event => {
+                          handleCloseTab(tab.key, event)
+                          setShowTabOverflowMenu(false)
+                        }}
+                        title="关闭标签页"
+                      >
+                        ✕
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           </div>
 
           {/* 窗口控制按钮 */}
@@ -462,6 +681,7 @@ export function AgentWindow(): React.JSX.Element {
           </div>
         </div>
 
+        {activeTab !== 'rpa' && (
         <div className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div className="content-title">
@@ -470,7 +690,6 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
-              {activeTab === 'rpa' && 'RPA 自动化任务清单'}
             </div>
             {activeTab !== 'chat' && (
               <div className="content-subtitle">
@@ -478,7 +697,6 @@ export function AgentWindow(): React.JSX.Element {
                 {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
                 {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
                 {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
-                {activeTab === 'rpa' && '基于混合 AI 决策与可视化编排的桌面 RPA 流程引擎'}
               </div>
             )}
           </div>
@@ -534,6 +752,7 @@ export function AgentWindow(): React.JSX.Element {
             </div>
           )}
         </div>
+        )}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <div className={`content-body tab-${activeTab}`} style={{ flex: 1, minWidth: 0 }}>
             {renderPage()}

@@ -742,15 +742,18 @@ function ChatPageImpl(): React.JSX.Element {
   }, [])
 
   // 稳定 Virtuoso itemContent 回调，避免每次渲染重新创建
-  const itemContent = useCallback((_index: number, msg: any) => (
+  const itemContent = useCallback((index: number, msg: any) => (
     <ChatMessageItem
       key={msg.id}
       msg={msg}
       currentAvatarName={currentAvatarName}
+      requestMessage={msg.sender === 'agent'
+        ? activeSessMessages.slice(0, index).findLast((message: any) => message.sender === 'user')
+        : undefined}
       highlightedMessageId={highlightedMessageId}
       onPreviewFile={handlePreviewFile}
     />
-  ), [currentAvatarName, highlightedMessageId, handlePreviewFile])
+  ), [activeSessMessages, currentAvatarName, highlightedMessageId, handlePreviewFile])
 
   const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
   const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
@@ -862,85 +865,6 @@ function ChatPageImpl(): React.JSX.Element {
               </div>
             ))}
           </div>
-        )}
-
-        {/* 人机协作安全核对面板 */}
-        {activePermissionRequest && (
-          <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
-            <div className="approval-card-head">
-              <div className="approval-card-title">
-                <span className="approval-icon">⌁</span>
-                <div>
-                  <div className="approval-kicker">{approvalIsDangerous ? '高风险操作' : '需要审批'}</div>
-                  <div className="approval-title">是否允许执行这项操作？</div>
-                </div>
-              </div>
-              <span className="approval-status-pulse">等待确认</span>
-            </div>
-
-            <div className="approval-card-body">
-              <p className="approval-reason">{approvalWarning}</p>
-
-              <div className="approval-command-box">
-                <pre>{approvalPreview}{!approvalDetailsExpanded && approvalHasMore ? '\n...' : ''}</pre>
-                {approvalHasMore && (
-                  <button
-                    type="button"
-                    className="approval-link-button"
-                    onClick={() => setApprovalDetailsExpanded(prev => !prev)}
-                  >
-                    {approvalDetailsExpanded ? '收起详情' : '展开详情'}
-                  </button>
-                )}
-              </div>
-
-              {activePermissionRequest.execCwd && (
-                <div className="approval-meta">
-                  <span>目录</span>
-                  <code>{activePermissionRequest.execCwd}</code>
-                </div>
-              )}
-
-              <div className="approval-actions">
-                <button
-                  type="button"
-                  className="approval-action reject"
-                  onClick={() => handleRespondPermission(false)}
-                >
-                  拒绝
-                </button>
-
-                <div className="approval-allow-group">
-                  <button
-                    type="button"
-                    className="approval-action allow"
-                    onClick={() => handleRespondPermission(true)}
-                  >
-                    允许一次
-                  </button>
-                  <button
-                    type="button"
-                    className="approval-action allow menu"
-                    onClick={() => setApprovalMenuOpen(prev => !prev)}
-                    aria-label="更多允许选项"
-                    aria-expanded={approvalMenuOpen}
-                  >
-                    ▾
-                  </button>
-                  {approvalMenuOpen && (
-                    <div className="approval-menu">
-                      <button
-                        type="button"
-                        onClick={() => handleRespondPermission(true, 'turn')}
-                      >
-                        本次提问全部允许
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
         )}
 
         {false && activePermissionRequest && (
@@ -1100,6 +1024,85 @@ function ChatPageImpl(): React.JSX.Element {
 
         {/* 现代卡片式输入控制面板 */}
         <div className="chat-control-card">
+          {/* 人机协作安全核对面板：锚定在输入框上方 */}
+          {activePermissionRequest && (
+            <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
+              <div className="approval-card-head">
+                <div className="approval-card-title">
+                  <span className="approval-icon">⌁</span>
+                  <div>
+                    <div className="approval-kicker">{approvalIsDangerous ? '高风险操作' : '需要审批'}</div>
+                    <div className="approval-title">是否允许执行这项操作？</div>
+                  </div>
+                </div>
+                <span className="approval-status-pulse">等待确认</span>
+              </div>
+
+              <div className="approval-card-body">
+                <p className="approval-reason">{approvalWarning}</p>
+
+                <div className="approval-command-box">
+                  <pre>{approvalPreview}{!approvalDetailsExpanded && approvalHasMore ? '\n...' : ''}</pre>
+                  {approvalHasMore && (
+                    <button
+                      type="button"
+                      className="approval-link-button"
+                      onClick={() => setApprovalDetailsExpanded(prev => !prev)}
+                    >
+                      {approvalDetailsExpanded ? '收起详情' : '展开详情'}
+                    </button>
+                  )}
+                </div>
+
+                {activePermissionRequest.execCwd && (
+                  <div className="approval-meta">
+                    <span>目录</span>
+                    <code>{activePermissionRequest.execCwd}</code>
+                  </div>
+                )}
+
+                <div className="approval-actions">
+                  <button
+                    type="button"
+                    className="approval-action reject"
+                    onClick={() => handleRespondPermission(false)}
+                  >
+                    拒绝
+                  </button>
+
+                  <div className="approval-allow-group">
+                    <button
+                      type="button"
+                      className="approval-action allow"
+                      onClick={() => handleRespondPermission(true)}
+                    >
+                      允许一次
+                    </button>
+                    <button
+                      type="button"
+                      className="approval-action allow menu"
+                      onClick={() => setApprovalMenuOpen(prev => !prev)}
+                      aria-label="更多允许选项"
+                      aria-expanded={approvalMenuOpen}
+                    >
+                      ▾
+                    </button>
+                    {approvalMenuOpen && (
+                      <div className="approval-menu">
+                        <button
+                          type="button"
+                          onClick={() => handleRespondPermission(true, 'turn')}
+                        >
+                          本次提问全部允许
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           <textarea
             className="chat-textarea-field"
             rows={2}
@@ -1638,11 +1641,12 @@ function ChatPageImpl(): React.JSX.Element {
           animation: pulseGlow 2s infinite ease-in-out;
         }
         .permission-approval-card.compact {
-          position: fixed;
-          left: 24px;
-          bottom: 24px;
-          z-index: 1400;
-          width: min(520px, calc(100vw - 48px));
+          position: absolute;
+          left: -1px;
+          right: -1px;
+          bottom: calc(100% + 9px);
+          z-index: 40;
+          width: auto;
           margin: 0;
           border: 1px solid rgba(15, 23, 42, 0.1);
           border-radius: 18px;
@@ -1653,8 +1657,8 @@ function ChatPageImpl(): React.JSX.Element {
           animation: approvalRailIn 0.22s cubic-bezier(0.2, 0.9, 0.2, 1);
         }
         @keyframes approvalRailIn {
-          from { opacity: 0; transform: translateX(-10px) translateY(12px) scale(0.98); }
-          to { opacity: 1; transform: translateX(0) translateY(0) scale(1); }
+          from { opacity: 0; transform: translateY(10px) scale(0.99); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
         .approval-card-head {
           display: flex;
@@ -1829,10 +1833,9 @@ function ChatPageImpl(): React.JSX.Element {
         }
         @media (max-width: 640px) {
           .permission-approval-card.compact {
-            left: 12px;
-            right: 12px;
-            bottom: 12px;
-            width: auto;
+            left: -1px;
+            right: -1px;
+            bottom: calc(100% + 7px);
           }
           .approval-card-head {
             padding: 15px 16px 8px;

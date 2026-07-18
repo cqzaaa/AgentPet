@@ -98,9 +98,15 @@ export const terminalManifest: ToolManifest = {
 <rules>
 - 对于 ≤2分钟的快速命令，优先使用 run_terminal_command
 - 对于长时间运行的命令（如服务器启动、打包编译），必须使用 run_command 异步执行
+- 启动数据库、Web 服务、开发服务器、守护进程等常驻进程时，即使命令本身看似很短，也必须使用 run_command；禁止使用 run_terminal_command 等待常驻进程
 - 异步命令执行后，使用 get_command_output 跟踪最新的输出进度
 - 使用 kill_command 终止不再需要的挂起或超时进程
 - 本机 Windows 默认使用 shell=powershell。PowerShell 命令示例：Get-Date、Get-ChildItem、Get-Process。
+- PowerShell 中调用传统系统程序时使用完整可执行名，例如 sc.exe、where.exe，避免 sc、where 等别名冲突
+- 命令返回非零 exit_code 不一定代表执行器异常：findstr/Select-String/grep 没有匹配、状态检查发现目标未运行时都可能返回非零。应结合 stdout、stderr 和命令语义判断
+- 遇到 Access is denied、拒绝访问、System error 5、UnauthorizedAccess 等权限错误后，立即停止使用等价命令重复尝试；明确告知用户需要管理员权限或提升应用权限
+- Windows 服务启动失败且确认是权限问题时，禁止绕过服务管理器直接启动其底层守护进程，除非用户明确要求临时手动启动并理解服务状态不会同步
+- 验证数据库端口是否可用时优先使用 Test-NetConnection 或数据库自带的 readiness 工具；不要直接运行可能等待密码输入的交互式客户端
 - 仅在需要 POSIX 语法或 Unix 工具链时显式使用 shell=bash，例如 date +"%Y-%m-%d"、grep、sed、awk。
 - shell=cmd 仅用于 .bat 文件或明确的传统 CMD 命令。不要依赖命令文本自动猜测 shell。
 - git、node、npm、python、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。

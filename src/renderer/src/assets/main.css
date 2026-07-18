@@ -261,15 +261,26 @@ body {
   z-index: 1000;
 }
 
-/* 会话标签页容器 */
+/* 工作区标签页容器 */
+.titlebar-tabs-shell {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin-right: 20px;
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
 .titlebar-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
   flex: 1;
-  margin-right: 20px;
+  min-width: 0;
   height: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   -webkit-app-region: no-drag;
   /* 允许标签点击 */
@@ -278,6 +289,11 @@ body {
 /* 隐藏标签栏滚动条 */
 .titlebar-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.titlebar-drag-region {
+  flex: 1;
+  height: 100%;
 }
 
 /* 每一个 Tab */
@@ -311,6 +327,95 @@ body {
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   border: 1px solid var(--border-color);
+}
+
+.titlebar-tab.function-tab {
+  min-width: 82px;
+}
+
+.titlebar-tab-overflow {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.titlebar-tab-overflow-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.titlebar-tab-overflow-btn:hover,
+.titlebar-tab-overflow-btn.active {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-primary);
+}
+
+.titlebar-tab-overflow-menu {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  width: 220px;
+  max-height: 320px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  z-index: 2100;
+}
+
+.titlebar-tab-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.titlebar-tab-overflow-item > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.titlebar-tab-overflow-item:hover,
+.titlebar-tab-overflow-item.active {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-titlebar-tab-active);
+}
+
+.titlebar-tab-overflow-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.titlebar-tab-overflow-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 
 /* 标签页呼吸灯样式 */
@@ -4358,6 +4463,33 @@ body {
 
 .msg-copy-btn:active {
   transform: scale(0.92);
+}
+
+.msg-export-trace-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  padding: 4px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #777);
+  font-size: 11.5px;
+  cursor: pointer;
+  opacity: 0.78;
+  transition: color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.msg-export-trace-btn:hover:not(:disabled) {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  opacity: 1;
+}
+
+.msg-export-trace-btn:disabled {
+  cursor: wait;
+  opacity: 0.5;
 }
 
 /* --- 输入框上方的沙盒指令审批嵌入面板 --- */

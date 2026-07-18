@@ -1036,12 +1036,13 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
 interface MessageItemProps {
   msg: any
   currentAvatarName: string
+  requestMessage?: any
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
 }
 
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.onPreviewFile !== next.onPreviewFile) {
+  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1054,7 +1055,77 @@ function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemP
   return !wasAffected && !isAffected
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
+function getToolStepTimestamp(step: any): number | null {
+  const explicitTimestamp = Number(step?.timestamp)
+  if (Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) return explicitTimestamp
+  const match = String(step?.id || '').match(/step-(\d+)-/)
+  return match ? Number(match[1]) : null
+}
+
+function buildToolTrace(msg: any, requestMessage: any): any {
+  const rawSteps = Array.isArray(msg.toolSteps) ? msg.toolSteps : []
+  const calls: any[] = []
+  const pendingByName = new Map<string, any[]>()
+  const timeline = rawSteps.map((step: any, index: number) => {
+    const timestamp = getToolStepTimestamp(step)
+    const normalized: any = {
+      sequence: step.sequence || index + 1,
+      type: step.type,
+      name: step.name || null,
+      timestamp,
+      time: timestamp ? new Date(timestamp).toISOString() : null,
+      detail: step.detail ?? null
+    }
+
+    if (step.type === 'call') {
+      const call = {
+        sequence: normalized.sequence,
+        tool: step.name || 'unknown',
+        startedAt: normalized.time,
+        arguments: step.detail ?? null,
+        result: null,
+        finishedAt: null,
+        durationMs: null
+      }
+      calls.push(call)
+      const queue = pendingByName.get(call.tool) || []
+      queue.push(call)
+      pendingByName.set(call.tool, queue)
+    } else if (step.type === 'result') {
+      const queue = pendingByName.get(step.name || 'unknown') || []
+      const call = queue.shift()
+      if (call) {
+        call.result = step.detail ?? null
+        call.finishedAt = normalized.time
+        if (timestamp && call.startedAt) call.durationMs = Math.max(0, timestamp - Date.parse(call.startedAt))
+      } else {
+        calls.push({
+          sequence: normalized.sequence,
+          tool: step.name || 'unknown',
+          startedAt: null,
+          arguments: null,
+          result: step.detail ?? null,
+          finishedAt: normalized.time,
+          durationMs: null,
+          unmatchedResult: true
+        })
+      }
+    }
+    return normalized
+  })
+
+  return {
+    request: {
+      text: requestMessage?.text || '',
+      model: requestMessage?.promptInfo?.model || null,
+      toolsDefinition: requestMessage?.promptInfo?.toolsDefinition || []
+    },
+    toolCalls: calls,
+    timeline
+  }
+}
+
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1069,6 +1140,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   // 使用 userCollapsed 状态，绝对且强制在思考状态变化时更新折叠展示
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [copied, setCopied] = useState(false)
+  const [traceExportState, setTraceExportState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showPromptModal, setShowPromptModal] = useState(false)
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
@@ -1148,6 +1220,23 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleExportToolTrace = async () => {
+    if (!window.api?.exportToolTrace || traceExportState === 'saving') return
+    setTraceExportState('saving')
+    const datePart = new Date(Number(msg.id) || Date.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    try {
+      const result = await window.api.exportToolTrace({
+        defaultFileName: `agentpet-tool-trace-${datePart}.json`,
+        trace: buildToolTrace(msg, requestMessage)
+      })
+      setTraceExportState(result.success ? 'success' : result.error ? 'error' : 'idle')
+      if (result.success) setTimeout(() => setTraceExportState('idle'), 2000)
+    } catch (error) {
+      console.error('导出调用过程失败', error)
+      setTraceExportState('error')
+    }
   }
 
   useEffect(() => {
@@ -1452,6 +1541,16 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
             {copied ? '✓' : '📋'}
           </button>
+          {msg.sender === 'agent' && !msg.isThinking && toolSteps.some((step: any) => step.type === 'call' || step.type === 'result') && (
+            <button
+              className="msg-export-trace-btn"
+              onClick={handleExportToolTrace}
+              disabled={traceExportState === 'saving'}
+              title="原样导出本轮模型回复的全部工具调用参数和返回结果"
+            >
+              {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : '⇩ 导出调用过程'}
+            </button>
+          )}
           {msg.sender === 'user' && msg.promptInfo && (
             <button
               className="msg-prompt-btn"

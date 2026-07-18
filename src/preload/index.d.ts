@@ -32,6 +32,7 @@ declare global {
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
+      exportToolTrace: (payload: { defaultFileName?: string; trace: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
@@ -132,10 +133,15 @@ declare global {
       getRpaTaskFlow: (taskId: string) => Promise<any>
       saveRpaTaskFlow: (taskId: string, flowData: any) => Promise<boolean>
       runRpaTask: (taskId: string, flowData: any) => Promise<boolean>
+      pauseRpaTask: (taskId: string) => Promise<boolean>
+      resumeRpaTask: (taskId: string) => Promise<boolean>
       stopRpaTask: (taskId: string) => Promise<boolean>
       respondRpaManualConfirm: (taskId: string, updates?: any) => Promise<boolean>
       rpaPickElement: (url: string) => Promise<string | null>
-      rpaRecordActions: (url: string) => Promise<any[]>
+      listRpaDesktopWindows: () => Promise<Array<{ processId: number; processName: string; windowTitle: string }>>
+      completeRpaRecordingProcessing: () => Promise<boolean>
+      rpaRecordActions: (input: string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }) => Promise<any[]>
+      normalizeRpaRecordedActions: (actions: any[]) => Promise<any[]>
       listRpaSecrets: () => Promise<any[]>
       createRpaSecret: (input: { ref: string; plaintext: string; label: string; allowedWorkflowIds: string[]; allowedSurfaces: Array<'browser' | 'desktop' | 'system' | 'agent'> }) => Promise<any>
       rotateRpaSecret: (ref: string, plaintext: string) => Promise<any>
@@ -143,7 +149,7 @@ declare global {
       deleteRpaSecret: (ref: string) => Promise<boolean>
       captureRpaDesktopTarget: (delayMs?: number) => Promise<{ x: number; y: number; name?: string; automationId?: string; controlType?: string; processId?: number; processName?: string; windowTitle?: string }>
       onRpaLog: (callback: (data: { taskId: string; message: string; level: 'info' | 'warn' | 'error' }) => void) => () => void
-      onRpaStatusEvent: (callback: (data: { taskId: string; status: 'running' | 'success' | 'failed'; errorMsg?: string }) => void) => () => void
+      onRpaStatusEvent: (callback: (data: { taskId: string; status: 'idle' | 'running' | 'paused' | 'success' | 'failed'; errorMsg?: string }) => void) => () => void
       onRpaStepEvent: (callback: (data: { taskId: string; nodeId: string; state: 'idle' | 'running' | 'paused' | 'success' | 'failed'; data?: any; context?: any }) => void) => () => void
     }
   }

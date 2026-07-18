@@ -240,14 +240,13 @@ export function ConditionNode({ id, data }: any): React.JSX.Element {
   )
 }
 
-function DesktopNode({ id, data, icon, title, description }: any): React.JSX.Element {
+function DesktopNode({ id, icon, title, description }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block rpa-node-desktop ${getStateClass(state)}`} data-kind="desktop">
       <Handle type="target" position={Position.Top} />
       <div className="rpa-node-strip" />
       <div className="rpa-node-content">
-        <div className="rpa-node-surface">DESKTOP · {data?.windowAlias || 'active'}</div>
         <div className="rpa-node-header"><span className="rpa-node-icon">{icon}</span><span>{title}</span></div>
         <div className="rpa-node-desc">{description}</div>
       </div>
@@ -257,10 +256,10 @@ function DesktopNode({ id, data, icon, title, description }: any): React.JSX.Ele
 }
 
 export const DesktopFocusNode = (props: any): React.JSX.Element => (
-  <DesktopNode {...props} icon="▣" title="聚焦窗口" description={props.data?.windowTitle || '按窗口标题定位'} />
+  <DesktopNode {...props} icon="▣" title="切换窗口" description={props.data?.windowTitle || props.data?.processName || '切换到目标应用'} />
 )
 export const DesktopClickNode = (props: any): React.JSX.Element => (
-  <DesktopNode {...props} icon="◎" title={props.data?.double ? '双击控件' : '点击控件'} description={props.data?.automationId || `${props.data?.x ?? 0}, ${props.data?.y ?? 0} · 坐标降级`} />
+  <DesktopNode {...props} icon="◎" title={props.data?.double ? '双击坐标' : '点击坐标'} description={`${props.data?.x ?? 0}, ${props.data?.y ?? 0}`} />
 )
 export const DesktopTypeNode = (props: any): React.JSX.Element => (
   <DesktopNode {...props} icon="⌨" title="桌面输入" description={String(props.data?.value || '').startsWith('${secret.') ? '凭据 · 执行时注入' : '文本输入'} />
@@ -271,4 +270,3 @@ export const DesktopHotkeyNode = (props: any): React.JSX.Element => (
 export const DesktopScrollNode = (props: any): React.JSX.Element => (
   <DesktopNode {...props} icon="↕" title="滚轮" description={`${props.data?.direction || 'down'} · ${props.data?.amount || 3}`} />
 )
-

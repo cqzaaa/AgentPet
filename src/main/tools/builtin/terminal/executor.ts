@@ -41,13 +41,29 @@ export class TerminalExecutor implements IToolExecutor {
 
         const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
         // run_terminal_command 同步执行，传入动态超时与中止信号
-        const { stdout, stderr } = await shellManager.exec(command, shell, {
+        const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
           cwd: execCwd,
           timeout: cmdTimeout,
           signal: context.abortSignal
         } as any)
+        const combinedOutput = `${stdout}\n${stderr}`
+        const permissionDenied = /access is denied|拒绝访问|system error 5|unauthorizedaccess/i.test(combinedOutput)
+        const noOutputNonZero = exitCode !== 0 && !stdout.trim() && !stderr.trim()
+        const guidance = permissionDenied
+          ? '[权限不足] 当前应用进程没有完成该操作所需的系统权限。请停止使用等价命令重复尝试，并告知用户需要以管理员身份运行或授权提升权限。'
+          : noOutputNonZero
+            ? '[结果说明] 命令未返回匹配内容。对于查询、搜索或状态检查，这通常表示“未找到/未运行”，不等同于终端执行器故障。'
+            : ''
+        const output = [
+          `[命令执行完成 | shell: ${shell} | exit_code: ${exitCode}]`,
+          stdout || '',
+          stderr ? `[stderr]\n${stderr}` : '',
+          !stdout && !stderr ? '(无输出)' : '',
+          guidance
+        ].filter(Boolean).join('\n')
         return {
-          content: `[命令执行输出 | shell: ${shell}]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
+          content: output,
+          state: { exitCode, stdout, stderr },
           success: true
         }
       }

@@ -5,11 +5,17 @@ import type { RpaEdge, RpaNode } from './domain/types'
 import { closeAllRpaRepositories } from './persistence/repository-manager'
 import { RpaRunJournal } from './runtime/run-journal'
 import { containsSecretExpression, parseSecretExpression, sanitizeRuntimeValue } from './domain/secret-ref'
+import { updateManifestTask } from './rpaStorage'
 import { getRpaSecretService } from './security/rpa-secret-service-provider'
 import { computerExecutor } from '../tools/builtin/computer/executor'
-import { invokeDesktopElement } from './rpaDesktopPicker'
+import { resolveDesktopDisplayPoint, resolveDesktopRelativePoint, scrollDesktopPointNative } from './rpaDesktopPicker'
 
 export type { RpaEdge, RpaNode } from './domain/types'
+
+export interface RpaExecutionObserver {
+  onStatus?: (status: 'running' | 'success' | 'failed', errorMsg?: string) => void
+  onStep?: (input: { nodeId: string; label: string; state: 'idle' | 'running' | 'paused' | 'success' | 'failed'; index: number; total: number; surface: string; requiresConfirmation: boolean }) => void
+}
 
 export class PlaywrightRpaExecutor {
   private static activeExecutors = new Map<string, PlaywrightRpaExecutor>()
@@ -31,15 +37,18 @@ export class PlaywrightRpaExecutor {
   private resolvePause: (() => void) | null = null
   
   private currentNodeId: string = ''
+  private currentStepNumber = 0
   private readonly resolvedSecrets = new Set<string>()
   private currentSurface: 'system' | 'browser' | 'desktop' | 'agent' = 'system'
+  private readonly observer?: RpaExecutionObserver
 
   constructor(
     taskId: string,
     nodes: RpaNode[],
     edges: RpaEdge[],
     webContents: Electron.WebContents,
-    initialContext: Record<string, any> = {}
+    initialContext: Record<string, any> = {},
+    observer?: RpaExecutionObserver
   ) {
     this.taskId = taskId
     this.nodes = nodes
@@ -47,6 +56,7 @@ export class PlaywrightRpaExecutor {
     this.webContents = webContents
     this.runJournal = new RpaRunJournal(taskId, nodes.length)
     this.initialContext = { ...initialContext }
+    this.observer = observer
   }
 
   public static async run(
@@ -54,7 +64,8 @@ export class PlaywrightRpaExecutor {
     nodes: RpaNode[],
     edges: RpaEdge[],
     webContents: Electron.WebContents,
-    initialContext: Record<string, any> = {}
+    initialContext: Record<string, any> = {},
+    observer?: RpaExecutionObserver
   ): Promise<string> {
     // 如果已经有正在运行的相同任务，先停止它
     const existing = this.activeExecutors.get(taskId)
@@ -68,7 +79,8 @@ export class PlaywrightRpaExecutor {
       nodes,
       edges,
       webContents,
-      initialContext
+      initialContext,
+      observer
     )
     this.activeExecutors.set(taskId, executor)
     
@@ -103,12 +115,14 @@ export class PlaywrightRpaExecutor {
    * 外部触发恢复执行
    */
   public resume(contextUpdates?: Record<string, any>): void {
+    if (!this.isPaused) return
     if (contextUpdates) {
       this.runContext = { ...this.runContext, ...contextUpdates }
     }
     this.isPaused = false
     this.log(`用户手动恢复了流程`)
     this.runJournal.resume(this.nodes.find((node) => node.id === this.currentNodeId))
+    this.notifyStep(this.currentNodeId, 'running')
     if (this.resolvePause) {
       this.resolvePause()
       this.resolvePause = null
@@ -119,6 +133,7 @@ export class PlaywrightRpaExecutor {
    * 外部触发暂停流程
    */
   public pause(): void {
+    if (this.isPaused || this.isStopped) return
     this.isPaused = true
     this.log(`正在请求暂停流程...`)
     this.notifyStep(this.currentNodeId, 'paused')
@@ -173,6 +188,7 @@ export class PlaywrightRpaExecutor {
       // 3. 循环解释执行节点
       while (currentNode && !this.isStopped) {
         this.currentNodeId = currentNode.id
+        this.currentStepNumber++
         
         // 检查暂停
         await this.checkPause()
@@ -290,6 +306,9 @@ export class PlaywrightRpaExecutor {
   }
 
   private async injectHtmlControl(targetPage: Page): Promise<void> {
+    // 全局顶部运行控制条已接管暂停/继续/停止，网页内不再注入重复面板。
+    void targetPage
+    return
     const script = `
       (function() {
         if (document.getElementById('rpa-overlay-panel')) return;
@@ -428,10 +447,38 @@ export class PlaywrightRpaExecutor {
     }
   }
 
+  private async waitForRecordedPacing(node: RpaNode): Promise<void> {
+    if (!node.type.startsWith('desktop_')) return
+    const minimumByType: Record<string, number> = {
+      desktop_focus: 120,
+      desktop_click: 140,
+      desktop_type: 120,
+      desktop_hotkey: 120,
+      desktop_scroll: 100
+    }
+    let minimum = minimumByType[node.type] || 80
+    const incoming = this.edges.find(edge => edge.target === node.id)
+    const previousNode = incoming ? this.nodes.find(item => item.id === incoming.source) : undefined
+    const previousKeys = String(previousNode?.data?.keys || '').toLowerCase()
+    if (previousNode?.type === 'desktop_hotkey' && previousKeys.split('+').some(key => key.trim() === 'enter')) {
+      minimum = Math.max(minimum, 500)
+    } else if (previousNode?.type === 'desktop_click' && previousNode.data?.double) {
+      minimum = Math.max(minimum, 400)
+    } else if (previousNode?.type === 'desktop_focus') {
+      minimum = Math.max(minimum, 220)
+    }
+    const recordedDelay = Number(node.recordedDelayMs)
+    const delay = Number.isFinite(recordedDelay) && recordedDelay > 0
+      ? Math.min(1500, Math.max(minimum, Math.round(recordedDelay * 0.75)))
+      : minimum
+    await new Promise(resolve => setTimeout(resolve, delay))
+  }
+
   /**
    * 执行单个节点逻辑
    */
   private async executeNode(node: RpaNode): Promise<any> {
+    await this.waitForRecordedPacing(node)
     const webNodeTypes = ['open_url', 'click', 'fill', 'extract']
     if (webNodeTypes.includes(node.type)) {
       if (!this.page) {
@@ -497,23 +544,62 @@ export class PlaywrightRpaExecutor {
         return null
       }
 
-      case 'desktop_focus':
-        return this.executeDesktop('focus_window', {
-          title: node.data?.windowTitle,
-          pid: Number(node.data?.pid) || undefined
-        })
+      case 'desktop_focus': {
+        const title = String(node.data?.windowTitle || '').trim()
+        const recordedPid = Number(node.data?.pid || node.data?.recordedPid) || undefined
+        const processName = String(node.data?.processName || '').trim().toLowerCase()
+        const label = String(node.data?.label || '').trim()
+        const showDesktop = Boolean(node.data?.showDesktop) || (
+          !title && !recordedPid && (['idle', 'system'].includes(processName) || /桌面|idle/i.test(label))
+        )
+        if (showDesktop) return this.executeDesktop('focus_window', { show_desktop: true })
+
+        // PID 只代表录制当时的进程，应用重启后必然变化。优先使用标题/进程名，并等待应用启动。
+        const focusArgs = {
+          title: title || undefined,
+          process_name: processName || undefined,
+          pid: title || processName ? undefined : recordedPid
+        }
+        const deadline = Date.now() + Math.max(1000, Number(node.data?.startupTimeoutMs) || 15000)
+        let lastError: unknown = new Error('窗口尚未出现')
+        while (Date.now() < deadline && !this.isStopped) {
+          try {
+            const result = await this.executeDesktop('focus_window', focusArgs)
+            return result
+          } catch (error) {
+            lastError = error
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
+        }
+        throw lastError
+      }
 
       case 'desktop_click': {
-        const invoked = await invokeDesktopElement({
-          automationId: node.data?.automationId,
-          name: node.data?.name,
-          processId: Number(node.data?.pid) || undefined
+        if (node.data?.automationId === 'finish-button') {
+          this.log('已忽略旧流程中误录的“结束录制”控制条按钮', 'warn')
+          return null
+        }
+        const isDesktopSurface = String(node.data?.processName || '').toLowerCase() === 'explorer' &&
+          /^(program manager|workerw)$/i.test(String(node.data?.windowTitle || ''))
+        const relativePoint = isDesktopSurface ? null : await resolveDesktopRelativePoint({
+          windowTitle: node.data?.windowTitle,
+          processName: node.data?.processName,
+          relativeX: Number(node.data?.relativeX),
+          relativeY: Number(node.data?.relativeY)
         })
-        if (invoked) return null
-        this.log('UI Automation Invoke 不可用，使用录制坐标降级', 'warn')
+        const displayPoint = relativePoint ? null : await resolveDesktopDisplayPoint({
+          displayRelativeX: Number(node.data?.displayRelativeX),
+          displayRelativeY: Number(node.data?.displayRelativeY),
+          displayLeft: Number(node.data?.displayLeft),
+          displayTop: Number(node.data?.displayTop),
+          displayWidth: Number(node.data?.displayWidth),
+          displayHeight: Number(node.data?.displayHeight),
+          displayPrimary: node.data?.displayPrimary
+        })
+        const x = relativePoint?.x ?? displayPoint?.x ?? Number(node.data?.x)
+        const y = relativePoint?.y ?? displayPoint?.y ?? Number(node.data?.y)
         return this.executeDesktop('mouse_click', {
-          x: Number(node.data?.x),
-          y: Number(node.data?.y),
+          x, y,
           button: node.data?.button || 'left',
           double: Boolean(node.data?.double)
         })
@@ -524,24 +610,71 @@ export class PlaywrightRpaExecutor {
           ? `\${${node.data.valueSource.ref}}`
           : node.data?.value || ''
         const text = this.resolveActionValue(rawValue, node, 'desktop')
+        const incoming = this.edges.find(edge => edge.target === node.id)
+        const previousNode = incoming ? this.nodes.find(item => item.id === incoming.source) : undefined
+        const focusedOnlyOnWindow = /ControlType\.Window$/i.test(String(node.data?.controlType || ''))
+        const targetWindowTitle = node.data?.windowTitle || previousNode?.data?.windowTitle
+        const inputProcessName = node.data?.processName || previousNode?.data?.processName
+        const isDesktopSurface = String(inputProcessName || '').toLowerCase() === 'explorer' &&
+          /^(program manager|workerw)$/i.test(String(targetWindowTitle || ''))
+        const relativePoint = isDesktopSurface ? null : await resolveDesktopRelativePoint({
+          windowTitle: targetWindowTitle,
+          processName: inputProcessName,
+          relativeX: Number(focusedOnlyOnWindow ? previousNode?.data?.relativeX : (node.data?.relativeX ?? previousNode?.data?.relativeX)),
+          relativeY: Number(focusedOnlyOnWindow ? previousNode?.data?.relativeY : (node.data?.relativeY ?? previousNode?.data?.relativeY))
+        })
+        const displayPoint = relativePoint ? null : await resolveDesktopDisplayPoint({
+          displayRelativeX: Number(focusedOnlyOnWindow ? previousNode?.data?.displayRelativeX : (node.data?.displayRelativeX ?? previousNode?.data?.displayRelativeX)),
+          displayRelativeY: Number(focusedOnlyOnWindow ? previousNode?.data?.displayRelativeY : (node.data?.displayRelativeY ?? previousNode?.data?.displayRelativeY)),
+          displayPrimary: focusedOnlyOnWindow ? previousNode?.data?.displayPrimary : (node.data?.displayPrimary ?? previousNode?.data?.displayPrimary)
+        })
+        const recordedFallbackX = focusedOnlyOnWindow && previousNode?.type === 'desktop_click'
+          ? Number(previousNode.data?.x)
+          : (Number(node.data?.x) || (previousNode?.type === 'desktop_click' ? Number(previousNode.data?.x) : 0))
+        const recordedFallbackY = focusedOnlyOnWindow && previousNode?.type === 'desktop_click'
+          ? Number(previousNode.data?.y)
+          : (Number(node.data?.y) || (previousNode?.type === 'desktop_click' ? Number(previousNode.data?.y) : 0))
+        const inputX = relativePoint?.x ?? displayPoint?.x ?? recordedFallbackX
+        const inputY = relativePoint?.y ?? displayPoint?.y ?? recordedFallbackY
+        if (!Number.isFinite(inputX) || !Number.isFinite(inputY)) throw new Error('输入节点缺少有效坐标')
+        await this.executeDesktop('mouse_click', { x: inputX, y: inputY, button: 'left' })
+        await new Promise(resolve => setTimeout(resolve, 30))
         await this.executeDesktop('type_text', { text })
         return null
       }
 
-      case 'desktop_hotkey':
+      case 'desktop_hotkey': {
         return this.executeDesktop('key_press', {
           keys: Array.isArray(node.data?.keys)
             ? node.data.keys
             : String(node.data?.keys || '').split('+').map((key) => key.trim()).filter(Boolean)
         })
+      }
 
-      case 'desktop_scroll':
-        return this.executeDesktop('mouse_scroll', {
-          x: Number(node.data?.x),
-          y: Number(node.data?.y),
-          direction: node.data?.direction === 'up' ? 'up' : 'down',
-          amount: Math.max(1, Number(node.data?.amount) || 3)
+      case 'desktop_scroll': {
+        const relativePoint = await resolveDesktopRelativePoint({
+          windowTitle: node.data?.windowTitle,
+          processName: node.data?.processName,
+          relativeX: Number(node.data?.relativeX),
+          relativeY: Number(node.data?.relativeY)
         })
+        const displayPoint = relativePoint ? null : await resolveDesktopDisplayPoint({
+          displayRelativeX: Number(node.data?.displayRelativeX),
+          displayRelativeY: Number(node.data?.displayRelativeY),
+          displayLeft: Number(node.data?.displayLeft),
+          displayTop: Number(node.data?.displayTop),
+          displayWidth: Number(node.data?.displayWidth),
+          displayHeight: Number(node.data?.displayHeight),
+          displayPrimary: node.data?.displayPrimary
+        })
+        const x = relativePoint?.x ?? displayPoint?.x ?? Number(node.data?.x)
+        const y = relativePoint?.y ?? displayPoint?.y ?? Number(node.data?.y)
+        const direction = node.data?.direction === 'up' ? 'up' : 'down'
+        const amount = Math.max(1, Number(node.data?.amount) || 3)
+        const scrolled = await scrollDesktopPointNative({ x, y, direction, amount })
+        if (scrolled) return null
+        return this.executeDesktop('mouse_scroll', { x, y, direction, amount })
+      }
 
       case 'extract': {
         const selector = this.resolveExpression(node.data?.selector || '')
@@ -785,12 +918,18 @@ export class PlaywrightRpaExecutor {
         errorMsg
       })
     } catch (_) {}
+    this.observer?.onStatus?.(status, errorMsg)
+    void updateManifestTask(this.taskId, {
+      lastRunStatus: status,
+      ...(status === 'running' ? {} : { lastRunTime: new Date().toLocaleString() })
+    }).catch(error => console.error('[RPA Executor] 更新任务清单状态失败:', error))
   }
 
   private notifyStep(nodeId: string, state: 'idle' | 'running' | 'paused' | 'success' | 'failed', data?: any): void {
     const safeData = typeof data === 'string' ? this.redact(data) : sanitizeRuntimeValue(data)
+    const node = this.nodes.find((item) => item.id === nodeId)
     this.runJournal.recordStep(
-      this.nodes.find((node) => node.id === nodeId),
+      node,
       state,
       safeData
     )
@@ -804,6 +943,15 @@ export class PlaywrightRpaExecutor {
         surface: this.currentSurface
       })
     } catch (_) {}
+    this.observer?.onStep?.({
+      nodeId,
+      label: node?.data?.label || node?.type || '执行步骤',
+      state,
+      index: Math.max(1, this.currentStepNumber),
+      total: Math.max(1, this.nodes.length),
+      surface: this.currentSurface,
+      requiresConfirmation: Boolean(data && typeof data === 'object' && 'prompt' in data)
+    })
   }
 
   private publicContextSummary(): Record<string, import('./domain/types').JsonValue> {

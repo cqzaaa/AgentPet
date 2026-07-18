@@ -12,13 +12,15 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, detail, sources, requestId, questions } of events) {
-    const id = `step-${Date.now()}-${Math.random()}`
-    if (type === 'tool_call') toolSteps.push({ id, type: 'call', name, detail: args })
-    else if (type === 'tool_result') toolSteps.push({ id, type: 'result', name, detail: result })
-    else if (type === 'think') toolSteps.push({ id, type: 'think', name, detail })
-    else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, type: 'sources', detail: sources })
-    else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, type: 'clarification', requestId, questions })
+  for (const { type, name, args, result, detail, sources, requestId, questions, timestamp: eventTimestamp } of events) {
+    const timestamp = Number(eventTimestamp) || Date.now()
+    const id = `step-${timestamp}-${Math.random()}`
+    const sequence = toolSteps.length + 1
+    if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
+    else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result })
+    else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
+    else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
+    else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, sequence, timestamp, type: 'clarification', requestId, questions })
   }
   return toolSteps
 }
@@ -110,8 +112,11 @@ export function useChatToolEvents({
           const next = previous.map(session => {
             const sessionEvents = normalBySession.get(session.id)
             if (!sessionEvents) return session
-            const index = session.messages.findLastIndex((message: any) => message.sender === 'agent')
-            if (index < 0 || session.messages[index].isThinking === false) return session
+            const eventMessageId = sessionEvents.findLast((event: any) => event.messageId != null)?.messageId
+            const index = eventMessageId != null
+              ? session.messages.findIndex((message: any) => message.id === eventMessageId)
+              : session.messages.findLastIndex((message: any) => message.sender === 'agent')
+            if (index < 0) return session
 
             const messages = [...session.messages]
             const message = { ...messages[index] }

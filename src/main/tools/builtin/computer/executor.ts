@@ -338,26 +338,27 @@ public class WinAPI {
   // ─── 切换窗口焦点 ──────────────────────────────────────────────────────────────
 
   private async focusWindow(args: Record<string, any>): Promise<ToolResult> {
-    const { title, pid, show_desktop } = args
+    const { title, pid, process_name, show_desktop } = args
 
-    // 显示桌面（Win+D）
+    // 确定性显示桌面；避免 ToggleDesktop 在已经位于桌面时反向恢复窗口。
     if (show_desktop) {
       const ps = `
 $shell = New-Object -ComObject Shell.Application
-$shell.ToggleDesktop()
+$shell.MinimizeAll()
 Write-Output "OK:Desktop"
 `
       await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 5000 })
       // 等待桌面动画完成
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await new Promise((resolve) => setTimeout(resolve, 300))
       return { content: '[显示桌面] 已切换到桌面，可以截图查看桌面图标', success: true }
     }
 
-    if (!pid && !title) {
-      return { content: '缺少参数：请提供 title、pid 或 show_desktop=true', success: false }
+    if (!pid && !title && !process_name) {
+      return { content: '缺少参数：请提供 title、pid、process_name 或 show_desktop=true', success: false }
     }
 
     const safeTitle = title ? title.replace(/["'\`\\]/g, '') : ''
+    const safeProcessName = process_name ? String(process_name).replace(/["'\`\\]/g, '') : ''
     const targetPid = pid ? pid : 0
 
     const ps = `
@@ -365,8 +366,10 @@ Write-Output "OK:Desktop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type @"
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 public class WinAPI {
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
@@ -376,10 +379,14 @@ public class WinAPI {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     
-    public static string FocusWindow(string targetTitle, int targetPid) {
+    public static string FocusWindow(string targetTitle, int targetPid, string targetProcessName) {
         IntPtr targetHWnd = IntPtr.Zero;
+        IntPtr processFallbackHWnd = IntPtr.Zero;
         string foundTitle = "";
+        string processFallbackTitle = "";
         
         EnumWindows((hWnd, lParam) => {
             if (IsWindowVisible(hWnd)) {
@@ -391,31 +398,52 @@ public class WinAPI {
                     uint wPid;
                     GetWindowThreadProcessId(hWnd, out wPid);
                     
-                    bool match = false;
-                    if (targetPid > 0 && wPid == targetPid) match = true;
-                    else if (!string.IsNullOrEmpty(targetTitle) && wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0) match = true;
-                    
-                    if (match) {
+                    bool titleMatch = !string.IsNullOrEmpty(targetTitle) && wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0;
+                    bool pidMatch = targetPid > 0 && wPid == targetPid;
+                    bool processMatch = false;
+                    if (!string.IsNullOrEmpty(targetProcessName)) {
+                        try {
+                            string processName = Process.GetProcessById((int)wPid).ProcessName;
+                            processMatch = processName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase);
+                        } catch { }
+                    }
+
+                    if (pidMatch || titleMatch) {
                         targetHWnd = hWnd;
                         foundTitle = wTitle;
-                        return false; 
+                        return false;
+                    }
+                    if (processFallbackHWnd == IntPtr.Zero && processMatch) {
+                        processFallbackHWnd = hWnd;
+                        processFallbackTitle = wTitle;
                     }
                 }
             }
             return true;
         }, IntPtr.Zero);
+
+        if (targetHWnd == IntPtr.Zero && processFallbackHWnd != IntPtr.Zero) {
+            targetHWnd = processFallbackHWnd;
+            foundTitle = processFallbackTitle;
+        }
         
         if (targetHWnd != IntPtr.Zero) {
             ShowWindow(targetHWnd, 9);
-            SetForegroundWindow(targetHWnd);
-            return "OK:" + foundTitle;
+            bool activated = SetForegroundWindow(targetHWnd);
+            if (!activated || GetForegroundWindow() != targetHWnd) {
+                keybd_event(0x12, 0, 0, UIntPtr.Zero);
+                SetForegroundWindow(targetHWnd);
+                keybd_event(0x12, 0, 2, UIntPtr.Zero);
+            }
+            Thread.Sleep(180);
+            return GetForegroundWindow() == targetHWnd ? "OK:" + foundTitle : "FOCUS_FAILED:" + foundTitle;
         }
         return "NOT_FOUND";
     }
 }
 "@ -ErrorAction SilentlyContinue
 
-[WinAPI]::FocusWindow("${safeTitle}", ${targetPid})
+[WinAPI]::FocusWindow("${safeTitle}", ${targetPid}, "${safeProcessName}")
 `
 
     const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], {
@@ -426,14 +454,14 @@ public class WinAPI {
     if (result.startsWith('OK:')) {
       const windowTitle = result.slice(3)
       // 内置等待：给窗口动画和渲染留出时间，之后调用 screenshot 就能截到正确画面
-      await new Promise((resolve) => setTimeout(resolve, 800))
+      await new Promise((resolve) => setTimeout(resolve, 250))
       return {
         content: `[窗口切换成功] 已聚焦: "${windowTitle}"\n提示：窗口已置顶，现在可以直接调用 screenshot 截图（无需再传 delay_ms）。`,
         success: true
       }
     } else {
       return {
-        content: `[窗口切换失败] 未找到匹配的窗口（title="${title ?? ''}" pid=${pid ?? ''}）\n建议先调用 get_windows 查看当前窗口列表。`,
+        content: `[窗口切换失败] 未找到匹配的窗口（title="${title ?? ''}" process="${process_name ?? ''}" pid=${pid ?? ''}）\n建议先调用 get_windows 查看当前窗口列表。`,
         success: false
       }
     }

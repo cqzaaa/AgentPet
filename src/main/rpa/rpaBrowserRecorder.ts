@@ -2,6 +2,7 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright-core'
 import type { BrowserRecordedAction } from './domain/types'
 
 export type RecordedAction = BrowserRecordedAction
+export type BrowserRecordingOptions = { showOverlay?: boolean }
 
 export class RpaBrowserRecorder {
   private static sessions = new Map<string, { paused: boolean; finish: () => Promise<void> }>()
@@ -31,7 +32,7 @@ export class RpaBrowserRecorder {
    * @param url 起始网页地址
    * @returns 录制的操作步骤数组。
    */
-  public static async record(url: string, sessionId?: string): Promise<RecordedAction[]> {
+  public static async record(url: string, sessionId?: string, options: BrowserRecordingOptions = {}): Promise<RecordedAction[]> {
     let browser: Browser | null = null
     let context: BrowserContext | null = null
     let page: Page | null = null
@@ -39,7 +40,27 @@ export class RpaBrowserRecorder {
     const actions: RecordedAction[] = []
 
     // 记录初始打开网页的操作
-    actions.push({ type: 'open_url', url })
+    actions.push({ type: 'open_url', url, recordedAt: Date.now() })
+
+    const appendAction = (action: RecordedAction): void => {
+      actions.push({ ...action, recordedAt: action.recordedAt || Date.now() })
+    }
+    const lastNavigationByPage = new WeakMap<Page, string>()
+    const navigationTrackedPages = new WeakSet<Page>()
+    const trackNavigation = (trackedPage: Page): void => {
+      if (navigationTrackedPages.has(trackedPage)) return
+      navigationTrackedPages.add(trackedPage)
+      trackedPage.on('framenavigated', frame => {
+        if (frame !== trackedPage.mainFrame()) return
+        const navigationUrl = frame.url()
+        if (!navigationUrl || navigationUrl === 'about:blank' || lastNavigationByPage.get(trackedPage) === navigationUrl) return
+        lastNavigationByPage.set(trackedPage, navigationUrl)
+        if (navigationUrl === url) return
+        if (!sessionId || !this.sessions.get(sessionId)?.paused) {
+          appendAction({ type: 'open_url', url: navigationUrl, label: '打开网页' })
+        }
+      })
+    }
 
     return new Promise(async (resolve) => {
       let isResolved = false
@@ -53,6 +74,27 @@ export class RpaBrowserRecorder {
         if (context) try { await context.close() } catch (_) {}
         if (browser) try { await browser.close() } catch (_) {}
         if (sessionId) this.sessions.delete(sessionId)
+      }
+
+      const recorderBindingByPage = new WeakMap<Page, Promise<unknown>>()
+      const exposeRecorderBinding = (targetPage: Page): Promise<unknown> => {
+        const existingBinding = recorderBindingByPage.get(targetPage)
+        if (existingBinding) return existingBinding
+
+        const binding = targetPage.exposeFunction('rpaNotifyMainRecorder', (action: any) => {
+          if (action && action.type === 'finish') {
+            finish()
+          } else {
+            if (!sessionId || !this.sessions.get(sessionId)?.paused) appendAction(action)
+            console.log('[RPA Recorder] Recorded action:', {
+              type: action?.type,
+              selector: action?.selector,
+              sensitive: Boolean(action?.sensitive)
+            })
+          }
+        })
+        recorderBindingByPage.set(targetPage, binding)
+        return binding
       }
 
       if (sessionId) this.sessions.set(sessionId, { paused: false, finish })
@@ -75,7 +117,7 @@ export class RpaBrowserRecorder {
         context = await browser.newContext({ viewport: null })
 
         // 暴露回调函数，并在 context 级别注册，自动应用到所有新建页面与导航页面
-        await context.addInitScript(() => {
+        await context.addInitScript((recorderOptions: { showOverlay: boolean }) => {
           // 防重复注入
           if ((window as any).__rpaRecorderInjected) return
           ;(window as any).__rpaRecorderInjected = true
@@ -290,11 +332,12 @@ export class RpaBrowserRecorder {
             }
           }
 
-          showOverlay()
-        })
+          if (recorderOptions.showOverlay) showOverlay()
+        }, { showOverlay: options.showOverlay !== false })
 
         // 新建网页时自动暴露出回调
-        context.on('page', async (newPage) => {
+        context.on('page', (newPage) => {
+          trackNavigation(newPage)
           newPage.on('close', () => {
             // 如果所有页面都关闭了，结束录制
             setTimeout(() => {
@@ -303,41 +346,16 @@ export class RpaBrowserRecorder {
               }
             }, 100)
           })
-
-          await newPage.exposeFunction('rpaNotifyMainRecorder', (action: any) => {
-            if (action && action.type === 'finish') {
-              finish()
-            } else {
-              if (!sessionId || !this.sessions.get(sessionId)?.paused) actions.push(action)
-              console.log('[RPA Recorder] Recorded action on page:', {
-                type: action?.type,
-                selector: action?.selector,
-                sensitive: Boolean(action?.sensitive)
-              })
-            }
+          void exposeRecorderBinding(newPage).catch(error => {
+            console.error('[RPA Recorder] Failed to expose recorder binding on page:', error)
           })
         })
 
         page = await context.newPage()
-        
-        // 暴露出回调给主页面
-        await page.exposeFunction('rpaNotifyMainRecorder', (action: any) => {
-          if (action && action.type === 'finish') {
-            finish()
-          } else {
-            if (!sessionId || !this.sessions.get(sessionId)?.paused) actions.push(action)
-            console.log('[RPA Recorder] Recorded action:', {
-              type: action?.type,
-              selector: action?.selector,
-              sensitive: Boolean(action?.sensitive)
-            })
-          }
-        })
+        trackNavigation(page)
 
-        // 监听主页面关闭
-        page.on('close', () => {
-          finish()
-        })
+        // context 的 page 事件也会处理主页面；复用同一个 Promise，避免重复注册同名函数。
+        await exposeRecorderBinding(page)
 
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
         console.log(`[RPA Recorder] 已开启网页：${url}，开始录制操作步骤。`)

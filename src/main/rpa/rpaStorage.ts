@@ -58,6 +58,16 @@ export async function saveManifest(manifest: RpaTaskManifest[]): Promise<boolean
   }
 }
 
+export async function updateManifestTask(taskId: string, updates: Partial<RpaTaskManifest>): Promise<RpaTaskManifest | null> {
+  const manifest = await loadManifest()
+  const index = manifest.findIndex(task => task.id === taskId)
+  if (index < 0) return null
+  const updated = { ...manifest[index], ...updates }
+  manifest[index] = updated
+  await saveManifest(manifest)
+  return updated
+}
+
 /**
  * 加载单个任务的流程图数据
  */

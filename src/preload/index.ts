@@ -63,6 +63,8 @@ const api = {
     ipcRenderer.invoke('api:get-generated-files', sessionId),
   saveGeneratedFileAs: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('api:save-generated-file-as', filePath),
+  exportToolTrace: (payload: { defaultFileName?: string; trace: any }): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('api:export-tool-trace', payload),
   deleteGeneratedFile: (filePath: string, sessionId?: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-generated-file', filePath, sessionId),
   onGeneratedFileUpdated: (callback: () => void): (() => void) => {
@@ -373,6 +375,8 @@ const api = {
   getRpaTaskFlow: (taskId: string): Promise<any> => ipcRenderer.invoke('api:get-rpa-task-flow', taskId),
   saveRpaTaskFlow: (taskId: string, flowData: any): Promise<boolean> => ipcRenderer.invoke('api:save-rpa-task-flow', taskId, flowData),
   runRpaTask: (taskId: string, flowData: any): Promise<boolean> => ipcRenderer.invoke('api:run-rpa-task', taskId, flowData),
+  pauseRpaTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('api:pause-rpa-task', taskId),
+  resumeRpaTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('api:resume-rpa-task', taskId),
   stopRpaTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('api:stop-rpa-task', taskId),
   respondRpaManualConfirm: (taskId: string, updates?: any): Promise<boolean> => ipcRenderer.invoke('api:respond-rpa-manual-confirm', taskId, updates),
   onRpaLog: (callback: (data: { taskId: string; message: string; level: 'info' | 'warn' | 'error' }) => void): (() => void) => {
@@ -380,7 +384,7 @@ const api = {
     ipcRenderer.on('api:rpa-log', handler)
     return () => { ipcRenderer.removeListener('api:rpa-log', handler) }
   },
-  onRpaStatusEvent: (callback: (data: { taskId: string; status: 'running' | 'success' | 'failed'; errorMsg?: string }) => void): (() => void) => {
+  onRpaStatusEvent: (callback: (data: { taskId: string; status: 'idle' | 'running' | 'paused' | 'success' | 'failed'; errorMsg?: string }) => void): (() => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:rpa-status-event', handler)
     return () => { ipcRenderer.removeListener('api:rpa-status-event', handler) }
@@ -391,7 +395,10 @@ const api = {
     return () => { ipcRenderer.removeListener('api:rpa-step-event', handler) }
   },
   rpaPickElement: (url: string): Promise<string | null> => ipcRenderer.invoke('api:rpa-pick-element', url),
-  rpaRecordActions: (url: string): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', url),
+  listRpaDesktopWindows: (): Promise<Array<{ processId: number; processName: string; windowTitle: string }>> => ipcRenderer.invoke('api:list-rpa-desktop-windows'),
+  completeRpaRecordingProcessing: (): Promise<boolean> => ipcRenderer.invoke('api:complete-rpa-recording-processing'),
+  rpaRecordActions: (input: string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', input),
+  normalizeRpaRecordedActions: (actions: any[]): Promise<any[]> => ipcRenderer.invoke('api:normalize-rpa-recorded-actions', actions),
   listRpaSecrets: (): Promise<any[]> => ipcRenderer.invoke('api:list-rpa-secrets'),
   createRpaSecret: (input: any): Promise<any> => ipcRenderer.invoke('api:create-rpa-secret', input),
   rotateRpaSecret: (ref: string, plaintext: string): Promise<any> => ipcRenderer.invoke('api:rotate-rpa-secret', ref, plaintext),

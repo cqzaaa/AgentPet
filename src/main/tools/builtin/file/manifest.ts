@@ -85,6 +85,7 @@ export const fileManifest: ToolManifest = {
     {
       name: 'write_file',
       description: '向指定路径写入文件。',
+      humanIntervention: 'required',
       parameters: {
         type: 'object',
         properties: {
@@ -107,6 +108,7 @@ export const fileManifest: ToolManifest = {
     {
       name: 'edit_file',
       description: '编辑替换文件中的字符串（old_string -> new_string）。',
+      humanIntervention: 'required',
       parameters: {
         type: 'object',
         properties: {
@@ -133,6 +135,7 @@ export const fileManifest: ToolManifest = {
     {
       name: 'move_file',
       description: '重命名或移动文件/目录。',
+      humanIntervention: 'required',
       parameters: {
         type: 'object',
         properties: {
@@ -151,6 +154,7 @@ export const fileManifest: ToolManifest = {
     {
       name: 'delete_file',
       description: '删除文件或目录。',
+      humanIntervention: 'required',
       parameters: {
         type: 'object',
         properties: {

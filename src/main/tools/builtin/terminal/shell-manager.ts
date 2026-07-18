@@ -30,6 +30,12 @@ export interface ShellSession {
   command: string
 }
 
+export interface ShellExecResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
 export class ShellManager {
   private static instance: ShellManager
   private sessions = new Map<string, ShellSession>()
@@ -91,7 +97,7 @@ export class ShellManager {
   }
 
   // 同步执行命令。shell 由调用方显式指定；本机未指定时固定使用 PowerShell，避免猜测命令语法。
-  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd?: string; timeout?: number } = {}) {
+  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd?: string; timeout?: number; signal?: AbortSignal } = {}): Promise<ShellExecResult> {
     const bashPath = this.getBashPath()
     const cmd = command.trim()
 
@@ -100,12 +106,22 @@ export class ShellManager {
         const result: any = await execAsync(cmdStr, { ...execOptions, encoding: 'buffer' })
         return {
           stdout: decodeOutputBuffer(result.stdout),
-          stderr: decodeOutputBuffer(result.stderr)
+          stderr: decodeOutputBuffer(result.stderr),
+          exitCode: 0
         }
       } catch (err: any) {
-        if (err.stdout !== undefined && err.stderr !== undefined) {
-          err.stdout = decodeOutputBuffer(err.stdout)
-          err.stderr = decodeOutputBuffer(err.stderr)
+        const stdout = err.stdout !== undefined ? decodeOutputBuffer(err.stdout) : ''
+        const stderr = err.stderr !== undefined ? decodeOutputBuffer(err.stderr) : ''
+        if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') throw err
+        if (err?.killed || err?.code === 'ETIMEDOUT' || /timed?\s*out/i.test(String(err?.message || ''))) {
+          const timeoutError: any = new Error(`命令执行超时${execOptions.timeout ? `（限制 ${execOptions.timeout / 1000} 秒）` : ''}`)
+          timeoutError.code = 'ETIMEDOUT'
+          timeoutError.stdout = stdout
+          timeoutError.stderr = stderr
+          throw timeoutError
+        }
+        if (typeof err?.code === 'number') {
+          return { stdout, stderr, exitCode: err.code }
         }
         throw err
       }

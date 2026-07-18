@@ -68,7 +68,8 @@ export class UnifiedToolExecutor {
         command: approvalCommand,
         execCwd: args.cwd || context.workspacePath,
         sessionId: context.sessionId,
-        warning: auditResult.warning
+        warning: auditResult.warning,
+        sender: context.event?.sender
       })
 
       if (!approved) {

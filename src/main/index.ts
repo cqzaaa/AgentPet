@@ -22,6 +22,7 @@ import { mcpManager } from './tools/mcp/mcp-manager'
 import { permissionManager } from './tools/security/permission-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
+import { ModelRuntimeFactory } from './model-runtime'
 
 
 
@@ -102,7 +103,10 @@ import * as rpaStorage from './rpa/rpaStorage'
 import { PlaywrightRpaExecutor } from './rpa/playwrightExecutor'
 import { RpaElementPicker } from './rpa/rpaElementPicker'
 import { RpaBrowserRecorder } from './rpa/rpaBrowserRecorder'
-import { captureDesktopTarget } from './rpa/rpaDesktopPicker'
+import { captureDesktopTarget, focusDesktopWindow, listDesktopWindows, showWindowsDesktop } from './rpa/rpaDesktopPicker'
+import { startDesktopRecording } from './rpa/rpaDesktopRecorder'
+import { createRecordingController } from './rpa/rpaRecordingController'
+import { createRpaRunController } from './rpa/rpaRunController'
 import { getRpaSecretService } from './rpa/security/rpa-secret-service-provider'
 import type { RpaSecretRef, RpaSurface } from './rpa/domain/types'
 import {
@@ -115,6 +119,9 @@ import { DEFAULT_LLM_CONFIG, type RuntimeLlmConfig } from './security/llm-config
 let wechatBotManager: WechatBotManager | null = null
 let systemLlmConfig: RuntimeLlmConfig = { ...DEFAULT_LLM_CONFIG }
 let systemMcpConfig: any = { servers: [] }
+let isRpaRecordingActive = false
+let activeRpaRecordingController: Awaited<ReturnType<typeof createRecordingController>> | null = null
+const activeRpaRunControllers = new Map<string, Awaited<ReturnType<typeof createRpaRunController>>>()
 
 function loadSystemLlmConfig() {
   try {
@@ -185,6 +192,59 @@ const windowsAppUserModelId = 'com.electron.app'
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
+let rpaScheduleTimer: NodeJS.Timeout | null = null
+let isCheckingRpaSchedules = false
+
+function isRpaScheduleDue(task: rpaStorage.RpaTaskManifest, now: Date): boolean {
+  if (task.enabled === false || !task.schedule || task.schedule.type === 'manual') return false
+  const lastRunAt = task.lastScheduledRunAt ? new Date(task.lastScheduledRunAt).getTime() : 0
+
+  if (task.schedule.type === 'interval') {
+    const intervalMinutes = Math.max(1, Number(task.schedule.intervalMinutes) || 60)
+    const baseline = lastRunAt || new Date(task.createdAt || now.toISOString()).getTime()
+    return Number.isFinite(baseline) && now.getTime() - baseline >= intervalMinutes * 60_000
+  }
+
+  const [hour, minute] = String(task.schedule.dailyTime || '09:00').split(':').map(Number)
+  const target = new Date(now)
+  target.setHours(Number.isFinite(hour) ? hour : 9, Number.isFinite(minute) ? minute : 0, 0, 0)
+  return now.getTime() >= target.getTime() && lastRunAt < target.getTime()
+}
+
+async function runDueRpaSchedules(): Promise<void> {
+  if (isCheckingRpaSchedules || !agentWindow || agentWindow.isDestroyed()) return
+  isCheckingRpaSchedules = true
+  try {
+    const now = new Date()
+    const tasks = await rpaStorage.loadManifest()
+    for (const task of tasks) {
+      if (!isRpaScheduleDue(task, now) || PlaywrightRpaExecutor.getActive(task.id)) continue
+      const flow = await rpaStorage.loadTaskFlow(task.id)
+      if (!flow) {
+        await rpaStorage.updateManifestTask(task.id, { lastRunStatus: 'failed', lastRunTime: now.toLocaleString() })
+        continue
+      }
+      await rpaStorage.updateManifestTask(task.id, {
+        lastScheduledRunAt: now.toISOString(),
+        lastRunStatus: 'running'
+      })
+      try {
+        await PlaywrightRpaExecutor.run(task.id, flow.nodes, flow.edges, agentWindow.webContents)
+      } catch (error) {
+        console.error(`[RPA Scheduler] 启动任务 ${task.id} 失败`, error)
+        await rpaStorage.updateManifestTask(task.id, { lastRunStatus: 'failed', lastRunTime: new Date().toLocaleString() })
+      }
+    }
+  } finally {
+    isCheckingRpaSchedules = false
+  }
+}
+
+function startRpaScheduleMonitor(): void {
+  if (rpaScheduleTimer) clearInterval(rpaScheduleTimer)
+  setTimeout(() => void runDueRpaSchedules(), 15_000)
+  rpaScheduleTimer = setInterval(() => void runDueRpaSchedules(), 30_000)
+}
 let inputWindow: BrowserWindow | null = null
 let pendingAgentInput: string = '' // 缓存快捷输入框传递过来的待发送文本
 let tray: Tray | null = null
@@ -1193,8 +1253,156 @@ app.whenReady().then(() => {
   ipcMain.handle('api:rpa-pick-element', async (_, url: string) => {
     return await RpaElementPicker.pick(url)
   })
-  ipcMain.handle('api:rpa-record-actions', async (_, url: string) => {
-    return await RpaBrowserRecorder.record(url)
+  ipcMain.handle('api:list-rpa-desktop-windows', async () => {
+    const excludedProcessIds = new Set([process.pid, ...BrowserWindow.getAllWindows().map(window => window.webContents.getOSProcessId())])
+    return (await listDesktopWindows()).filter(window => !excludedProcessIds.has(window.processId))
+  })
+  ipcMain.handle('api:normalize-rpa-recorded-actions', async (_, actions: any[]) => {
+    if (!Array.isArray(actions) || actions.length === 0) return actions
+    const chineseInputLanguageIds = new Set([0x0804, 0x0404, 0x0c04, 0x1004, 0x1404])
+    const candidates = actions.map((action, index) => ({ action, index })).filter(({ action }) =>
+      action?.type === 'desktop_type' && !action?.sensitive && !action?.normalizationSource && typeof action?.value === 'string' &&
+      (
+        /[a-z][a-z']*[1-9 ]/i.test(action.value) ||
+        (chineseInputLanguageIds.has(Number(action.inputLanguage)) && /^[a-z][a-z']{1,}$/i.test(action.value.trim()))
+      )
+    )
+    if (candidates.length === 0) return actions
+    try {
+      const llmConfig = loadSecureSystemLlmConfig()
+      if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey) return actions
+      const provider = ModelRuntimeFactory.getProvider(llmConfig.provider, llmConfig.apiKey, llmConfig.baseUrl)
+      const payload = candidates.map(({ action, index }) => ({
+        index,
+        raw: action.value,
+        processName: action.processName || '',
+        windowTitle: action.windowTitle || ''
+      }))
+      const prompt = `你是中文输入法录制结果还原器。输入 raw 是用户录制时产生的物理按键序列：英文字母表示拼音，数字 1-9 表示选择对应序号的候选词，空格通常表示选择第一个候选词。请结合常见中文输入法候选顺序，将明确的序列还原成最终上屏文字。例如 niu1 通常还原为“牛”。如果无法高置信度确定，normalized 必须等于 raw，confidence 填 low。只返回严格 JSON 数组，不要 Markdown。格式：[{
+        "index": 0, "raw": "niu1", "normalized": "牛", "confidence": "high"
+      }]。待处理数据：${JSON.stringify(payload)}`
+      const result = await provider.chat([{ role: 'user', content: prompt }], {
+        model: llmConfig.model,
+        temperature: 0
+      })
+      const content = typeof result.content === 'string' ? result.content.trim() : ''
+      const jsonText = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+      const normalized = JSON.parse(jsonText)
+      if (!Array.isArray(normalized)) return actions
+      const replacements = new Map<number, { raw: string; normalized: string; confidence: string }>()
+      for (const item of normalized) {
+        const index = Number(item?.index)
+        const raw = String(item?.raw || '')
+        let value = String(item?.normalized || '')
+        if (/[㐀-鿿]/.test(value) && /[1-9]\s*$/.test(raw)) {
+          value = value.replace(/[1-9]\s*$/, '')
+        }
+        const confidence = String(item?.confidence || '').toLowerCase()
+        if (Number.isInteger(index) && value && value !== raw && ['high', 'medium'].includes(confidence)) {
+          replacements.set(index, { raw, normalized: value, confidence })
+        }
+      }
+      return actions.map((action, index) => {
+        const replacement = replacements.get(index)
+        return replacement ? {
+          ...action,
+          value: replacement.normalized,
+          rawRecordedValue: replacement.raw,
+          normalizationSource: 'model',
+          normalizationConfidence: replacement.confidence,
+          label: `桌面输入 ${replacement.normalized}`
+        } : action
+      })
+    } catch (error) {
+      console.warn('[RPA Recorder] 输入法文本模型还原失败，保留原始录制值:', error)
+      return actions
+    }
+  })
+  ipcMain.handle('api:complete-rpa-recording-processing', () => {
+    activeRpaRecordingController?.closeSilently()
+    activeRpaRecordingController = null
+    return true
+  })
+  ipcMain.handle('api:rpa-record-actions', async (_, input: string | {
+    url?: string
+    mode?: 'browser' | 'desktop'
+    desktopTarget?: { processId: number; processName?: string; windowTitle?: string }
+  }) => {
+    if (isRpaRecordingActive) throw new Error('已有录制会话正在进行')
+    isRpaRecordingActive = true
+
+    const options = typeof input === 'string' ? { url: input, mode: 'browser' as const } : input
+    const mode = options.mode || 'browser'
+    const url = options.url || (mode === 'desktop' ? 'about:blank' : 'https://')
+    const shortcut = 'CommandOrControl+Shift+F12'
+    const browserSessionId = `visual-${Date.now()}`
+    const recordingStartedAt = Date.now()
+    const targetLabel = mode === 'browser'
+      ? url
+      : options.desktopTarget?.windowTitle || options.desktopTarget?.processName || 'Windows 桌面'
+
+    let desktopRecording: ReturnType<typeof startDesktopRecording> | null = null
+    let recordingController: Awaited<ReturnType<typeof createRecordingController>> | null = null
+    let finishDesktopOnly: (() => void) | null = null
+    let finishRequested = false
+
+    const focusInitialDesktop = (): void => {
+      setTimeout(() => {
+        if (options.desktopTarget?.processId) void focusDesktopWindow(options.desktopTarget.processId)
+        else void showWindowsDesktop()
+      }, 220)
+    }
+
+    const requestFinish = (): void => {
+      finishRequested = true
+      recordingController?.setFinalizing()
+      if (mode === 'browser') void RpaBrowserRecorder.finish(browserSessionId)
+      else finishDesktopOnly?.()
+    }
+
+    try {
+      recordingController = await createRecordingController({ mode, targetLabel, onFinish: requestFinish })
+      activeRpaRecordingController?.closeSilently()
+      activeRpaRecordingController = recordingController
+      if (mode === 'desktop') {
+        const agentProcessIds = [process.pid, ...BrowserWindow.getAllWindows().map(window => window.webContents.getOSProcessId())]
+          .filter(pid => pid > 0)
+        desktopRecording = startDesktopRecording({
+          excludeProcessIds: agentProcessIds
+        })
+      }
+
+      const registered = globalShortcut.register(shortcut, () => {
+        requestFinish()
+      })
+      if (!registered) console.warn(`[RPA Recorder] 无法注册结束快捷键 ${shortcut}，仍可使用悬浮控制卡结束`)
+
+      let browserActions: any[] = []
+      if (mode === 'browser') {
+        const browserPromise = RpaBrowserRecorder.record(url, browserSessionId, {
+          showOverlay: false
+        })
+        if (finishRequested) void RpaBrowserRecorder.finish(browserSessionId)
+        browserActions = await browserPromise
+      } else {
+        focusInitialDesktop()
+        await new Promise<void>(resolve => {
+          finishDesktopOnly = resolve
+          if (finishRequested) resolve()
+        })
+      }
+
+      const desktopActions = desktopRecording ? await desktopRecording.stop() : []
+      recordingController.setFinalizing()
+      const initialDesktopActions = mode === 'desktop' && !options.desktopTarget
+        ? [{ type: 'desktop_focus', showDesktop: true, label: '显示 Windows 桌面', recordedAt: recordingStartedAt }]
+        : []
+      return [...initialDesktopActions, ...browserActions, ...desktopActions].sort((a, b) => Number(a.recordedAt || 0) - Number(b.recordedAt || 0))
+    } finally {
+      globalShortcut.unregister(shortcut)
+      if (desktopRecording) await desktopRecording.stop().catch(() => [])
+      isRpaRecordingActive = false
+    }
   })
 
   // 1. 初始化存储配置与动态目录管理
@@ -3412,6 +3620,35 @@ app.whenReady().then(() => {
     }
   })
 
+  // 导出单轮大模型工具调用过程，供失败诊断和提示词/工具策略调优。
+  ipcMain.handle('api:export-tool-trace', async (_, payload: { defaultFileName?: string; trace?: any }) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    if (!win) return { success: false, error: '没有可用窗口' }
+    if (!payload?.trace || typeof payload.trace !== 'object') {
+      return { success: false, error: '调用过程数据无效' }
+    }
+
+    const safeBaseName = String(payload.defaultFileName || 'agentpet-tool-trace.json')
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
+      .replace(/\.+$/g, '')
+      .slice(0, 120)
+    const defaultFileName = safeBaseName.toLowerCase().endsWith('.json') ? safeBaseName : `${safeBaseName}.json`
+    const result = await dialog.showSaveDialog(win, {
+      title: '导出调用过程',
+      defaultPath: defaultFileName,
+      filters: [{ name: 'JSON 调试文件', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { success: false }
+
+    try {
+      await fs.promises.writeFile(result.filePath, JSON.stringify(payload.trace, null, 2), 'utf8')
+      return { success: true, filePath: result.filePath }
+    } catch (error: any) {
+      console.error('导出调用过程失败', error)
+      return { success: false, error: error?.message || String(error) }
+    }
+  })
+
   // 删除已生成的文件
   ipcMain.handle('api:delete-generated-file', async (_, filePath: string, sessionId?: string) => {
     try {
@@ -3514,6 +3751,8 @@ app.whenReady().then(() => {
               type: 'think',
               name: '深度思考过程',
               detail: step.detail,
+              timestamp: Date.now(),
+              messageId: config.messageId,
               sessionId: config.sessionId
             })
           }
@@ -3526,6 +3765,8 @@ app.whenReady().then(() => {
               type: 'tool_call',
               name: step.name,
               args: step.args,
+              timestamp: Date.now(),
+              messageId: config.messageId,
               sessionId: config.sessionId
             })
           }
@@ -3538,6 +3779,8 @@ app.whenReady().then(() => {
               type: 'tool_result',
               name: step.name,
               result: step.result,
+              timestamp: Date.now(),
+              messageId: config.messageId,
               sessionId: config.sessionId
             })
           }
@@ -3549,6 +3792,8 @@ app.whenReady().then(() => {
             event.sender.send('api:llm-tool-event', {
               type: 'web_sources',
               sources: step.sources,
+              timestamp: Date.now(),
+              messageId: config.messageId,
               sessionId: config.sessionId
             })
           }
@@ -3817,6 +4062,12 @@ app.whenReady().then(() => {
 
     // 5. 中止所有运行中的 RPA 任务并释放浏览器资源
     PlaywrightRpaExecutor.cleanAll().catch(() => { })
+    activeRpaRunControllers.forEach(controller => controller.close())
+    activeRpaRunControllers.clear()
+    if (rpaScheduleTimer) {
+      clearInterval(rpaScheduleTimer)
+      rpaScheduleTimer = null
+    }
 
     // 6. 销毁所有可能遗留的全局快捷键
     try { globalShortcut.unregisterAll() } catch (_) { }
@@ -3851,7 +4102,57 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('api:run-rpa-task', async (event, taskId: string, flowData: { nodes: any[], edges: any[] }) => {
-    await PlaywrightRpaExecutor.run(taskId, flowData.nodes, flowData.edges, event.sender)
+    activeRpaRunControllers.get(taskId)?.close()
+    const task = (await rpaStorage.loadManifest()).find(item => item.id === taskId)
+    let controller: Awaited<ReturnType<typeof createRpaRunController>>
+    controller = await createRpaRunController({
+      taskName: task?.name || 'RPA 流程',
+      totalSteps: flowData.nodes.length,
+      onPause: () => PlaywrightRpaExecutor.getActive(taskId)?.pause(),
+      onResume: () => PlaywrightRpaExecutor.getActive(taskId)?.resume(),
+      onStop: async () => {
+        const executor = PlaywrightRpaExecutor.getActive(taskId)
+        if (executor) await executor.stop()
+        controller.setResult('stopped', '流程已由用户停止')
+        event.sender.send('api:rpa-status-event', { taskId, status: 'idle' })
+        setTimeout(() => {
+          controller.close()
+          activeRpaRunControllers.delete(taskId)
+        }, 1200)
+      }
+    })
+    activeRpaRunControllers.set(taskId, controller)
+    await PlaywrightRpaExecutor.run(taskId, flowData.nodes, flowData.edges, event.sender, {}, {
+      onStep: step => {
+        controller.updateStep(step)
+        if (step.state === 'paused') controller.setPaused(true, !step.requiresConfirmation)
+        else if (step.state === 'running') controller.setPaused(false)
+      },
+      onStatus: (status, errorMsg) => {
+        if (status === 'running') return
+        controller.setResult(status, status === 'success' ? '流程执行完成' : errorMsg || '流程执行失败')
+        setTimeout(() => {
+          controller.close()
+          activeRpaRunControllers.delete(taskId)
+        }, status === 'success' ? 1400 : 2600)
+      }
+    })
+    return true
+  })
+
+  ipcMain.handle('api:pause-rpa-task', async (_, taskId: string) => {
+    const executor = PlaywrightRpaExecutor.getActive(taskId)
+    if (!executor) return false
+    executor.pause()
+    activeRpaRunControllers.get(taskId)?.setPaused(true)
+    return true
+  })
+
+  ipcMain.handle('api:resume-rpa-task', async (_, taskId: string) => {
+    const executor = PlaywrightRpaExecutor.getActive(taskId)
+    if (!executor) return false
+    executor.resume()
+    activeRpaRunControllers.get(taskId)?.setPaused(false)
     return true
   })
 
@@ -3859,6 +4160,10 @@ app.whenReady().then(() => {
     const executor = PlaywrightRpaExecutor.getActive(taskId)
     if (executor) {
       await executor.stop()
+      const controller = activeRpaRunControllers.get(taskId)
+      controller?.setResult('stopped', '流程已停止')
+      setTimeout(() => controller?.close(), 900)
+      activeRpaRunControllers.delete(taskId)
       return true
     }
     return false
@@ -3905,6 +4210,7 @@ app.whenReady().then(() => {
 
   createTray()
   createWindow()
+  startRpaScheduleMonitor()
 
   // 启动后台物理内存和 V8 缓存垃圾清理定时器 (每 60 秒运行一次)
   setInterval(() => {

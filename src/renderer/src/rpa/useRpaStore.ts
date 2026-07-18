@@ -4,6 +4,13 @@ export interface RpaTask {
   id: string
   name: string
   description?: string
+  enabled?: boolean
+  schedule?: {
+    type: 'manual' | 'interval' | 'daily'
+    intervalMinutes?: number
+    dailyTime?: string
+  }
+  lastScheduledRunAt?: string
   lastRunStatus?: 'idle' | 'running' | 'paused' | 'success' | 'failed'
   lastRunTime?: string
   createdAt?: string
@@ -31,6 +38,7 @@ interface RpaStore {
   selectTask: (taskId: string | null) => Promise<void>
   createTask: (name: string, description?: string) => Promise<void>
   deleteTask: (taskId: string) => Promise<void>
+  updateTask: (taskId: string, updates: Partial<RpaTask>) => Promise<void>
   setNodes: (nodes: any[]) => void
   setEdges: (edges: any[]) => void
   onNodesChange: (changes: any) => void
@@ -38,6 +46,8 @@ interface RpaStore {
   
   // Execution Control
   runTask: () => Promise<void>
+  pauseTask: () => Promise<void>
+  resumeTask: () => Promise<void>
   stopTask: () => Promise<void>
   respondManualConfirm: (updates?: Record<string, any>) => Promise<void>
   clearLogs: () => void
@@ -122,6 +132,8 @@ export const useRpaStore = create<RpaStore>((set, get) => {
         id: newId,
         name,
         description,
+        enabled: true,
+        schedule: { type: 'manual' },
         lastRunStatus: 'idle',
         lastRunTime: '-',
         createdAt: new Date().toLocaleString()
@@ -159,6 +171,12 @@ export const useRpaStore = create<RpaStore>((set, get) => {
       } catch (e) {
         console.error('删除 RPA 任务失败', e)
       }
+    },
+
+    updateTask: async (taskId, updates) => {
+      const updatedTasks = get().tasks.map(task => task.id === taskId ? { ...task, ...updates } : task)
+      set({ tasks: updatedTasks })
+      await window.api.saveRpaManifest(updatedTasks)
     },
 
     setNodes: (nodes) => set({ nodes }),
@@ -214,6 +232,18 @@ export const useRpaStore = create<RpaStore>((set, get) => {
       await window.api.runRpaTask(taskId, flowData)
     },
 
+    pauseTask: async () => {
+      const taskId = get().activeTaskId
+      if (!taskId || get().executionState !== 'running') return
+      if (await window.api.pauseRpaTask(taskId)) set({ executionState: 'paused' })
+    },
+
+    resumeTask: async () => {
+      const taskId = get().activeTaskId
+      if (!taskId || get().executionState !== 'paused' || get().manualConfirmData) return
+      if (await window.api.resumeRpaTask(taskId)) set({ executionState: 'running' })
+    },
+
     stopTask: async () => {
       const taskId = get().activeTaskId
       if (!taskId) return
@@ -260,21 +290,14 @@ export const useRpaStore = create<RpaStore>((set, get) => {
 
       // 2. 状态监听
       statusCleanup = window.api.onRpaStatusEvent(async (data) => {
-        if (data.taskId !== get().activeTaskId) return
-        set({ executionState: data.status })
-        
-        // 当运行结束（成功或失败），更新任务清单中的最后运行状态和时间
-        if (data.status === 'success' || data.status === 'failed') {
-          const timestamp = new Date().toLocaleString()
-          const updatedTasks = get().tasks.map(t => {
-            if (t.id === data.taskId) {
-              return { ...t, lastRunStatus: data.status, lastRunTime: timestamp }
-            }
-            return t
-          })
-          set({ tasks: updatedTasks })
-          await window.api.saveRpaManifest(updatedTasks)
-        }
+        if (data.taskId === get().activeTaskId) set({ executionState: data.status })
+        const timestamp = new Date().toLocaleString()
+        const updatedTasks = get().tasks.map(task => task.id === data.taskId ? {
+          ...task,
+          lastRunStatus: data.status,
+          ...(data.status === 'running' ? {} : { lastRunTime: timestamp })
+        } : task)
+        set({ tasks: updatedTasks })
       })
 
       // 3. 节点步骤执行监听
@@ -285,6 +308,8 @@ export const useRpaStore = create<RpaStore>((set, get) => {
           currentNodeId: data.nodeId, 
           runContext: data.context || get().runContext 
         })
+        if (data.state === 'paused') set({ executionState: 'paused' })
+        else if (data.state === 'running' && !get().manualConfirmData) set({ executionState: 'running' })
         
         // 专门处理人工干预挂起事件
         if (data.state === 'paused' && data.data?.prompt) {

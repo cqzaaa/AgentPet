@@ -58,11 +58,14 @@ export function RpaPage(): React.JSX.Element {
     selectTask,
     createTask,
     deleteTask,
+    updateTask,
     setNodes,
     setEdges,
     onNodesChange,
     onEdgesChange,
     runTask,
+    pauseTask,
+    resumeTask,
     stopTask,
     respondManualConfirm,
     setupListeners
@@ -78,6 +81,7 @@ export function RpaPage(): React.JSX.Element {
 
   // 2. 状态：选中的节点（用于右侧属性编辑）
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [nodeCardPosition, setNodeCardPosition] = useState<{ x: number; y: number } | null>(null)
   const selectedNode = useMemo(() => {
     return nodes.find(n => n.id === selectedNodeId) || null
   }, [nodes, selectedNodeId])
@@ -88,6 +92,11 @@ export function RpaPage(): React.JSX.Element {
   const [newSecretRef, setNewSecretRef] = useState('secret.')
   const [newSecretLabel, setNewSecretLabel] = useState('')
   const [newSecretValue, setNewSecretValue] = useState('')
+  const [editingSecretRef, setEditingSecretRef] = useState<string | null>(null)
+  const [editingSecretValue, setEditingSecretValue] = useState('')
+  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   // 4. 状态：创建新任务 Modal
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -103,6 +112,12 @@ export function RpaPage(): React.JSX.Element {
   const [showPickerPrompt, setShowPickerPrompt] = useState(false)
   const [pickerUrl, setPickerUrl] = useState('')
   const [pendingPickNode, setPendingPickNode] = useState<any>(null)
+  const [pickerMode, setPickerMode] = useState<'pick' | 'record'>('pick')
+  const [recordingMode, setRecordingMode] = useState<'browser' | 'desktop'>('browser')
+  const [desktopWindows, setDesktopWindows] = useState<Array<{ processId: number; processName: string; windowTitle: string }>>([])
+  const [selectedDesktopProcessId, setSelectedDesktopProcessId] = useState('')
+  const [isLoadingDesktopWindows, setIsLoadingDesktopWindows] = useState(false)
+  const [recordingSetupError, setRecordingSetupError] = useState('')
 
   // 8. 状态：是否显示缩略图
   const [showMiniMap, setShowMiniMap] = useState(false)
@@ -110,13 +125,7 @@ export function RpaPage(): React.JSX.Element {
   // 9. 状态：是否显示右侧面板
   const [showPanel, setShowPanel] = useState(false)
 
-  // 10. 状态：右侧临时 AI 聊天框消息历史与输入管理
-  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([
-    { role: 'assistant', content: '你好！我是您的 RPA AI 助手。你可以问我关于如何设计流程，或者使用左侧打开网页节点的“录制操作”按钮让 AI 帮你生成后续节点！' }
-  ])
-  const [chatInput, setChatInput] = useState('')
   const [isChatSending, setIsChatSending] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
 
   // 11. 状态：右键菜单管理
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -159,13 +168,6 @@ export function RpaPage(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleUndo])
 
-  // 自动滚动到最新消息
-  useEffect(() => {
-    if (activeTab === 'chat') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [chatMessages, activeTab])
-
   // 点击外部关闭右键菜单
   useEffect(() => {
     if (!menu) return
@@ -195,50 +197,6 @@ export function RpaPage(): React.JSX.Element {
     }
   }, [edges, nodes, activeTaskId, saveToHistory])
 
-  // ── 新增自定义节点类型 ───────────────────────────────────────
-  const handleAddNode = (type: string) => {
-    saveToHistory()
-    const newId = `node_${Date.now()}`
-    let label = ''
-    let data: Record<string, any> = {}
-
-    switch (type) {
-      case 'open_url': label = '打开网页'; data = { url: 'https://' }; break
-      case 'click': label = '点击元素'; data = { selector: '' }; break
-      case 'fill': label = '输入文本'; data = { selector: '', value: '' }; break
-      case 'extract': label = '内容提取'; data = { selector: '', extractType: 'text', varName: 'extracted_var' }; break
-      case 'wait': label = '延时等待'; data = { ms: '2000' }; break
-      case 'manual_confirm': label = '人工干预'; data = { prompt: '确认继续操作' }; break
-      case 'ai_node': label = 'AI 处理'; data = { prompt: '分析以下内容: {{var}}', varName: 'ai_var' }; break
-      case 'condition': label = '条件判断'; data = { expression: 'output !== null' }; break
-      case 'desktop_focus': label = '聚焦窗口'; data = { windowAlias: 'desktop', windowTitle: '', processName: '' }; break
-      case 'desktop_click': label = '桌面点击'; data = { windowAlias: 'desktop', automationId: '', controlType: '', x: 0, y: 0, button: 'left', double: false }; break
-      case 'desktop_type': label = '桌面输入'; data = { windowAlias: 'desktop', value: '', requiresCredentialBinding: false }; break
-      case 'desktop_hotkey': label = '快捷键'; data = { windowAlias: 'desktop', keys: 'Ctrl+C' }; break
-      case 'desktop_scroll': label = '桌面滚轮'; data = { windowAlias: 'desktop', direction: 'down', amount: 3, x: 0, y: 0 }; break
-
-      default: return
-    }
-
-    const newNode = {
-      id: newId,
-      type,
-      position: { x: 150 + Math.random() * 80, y: 150 + Math.random() * 80 },
-      data: { label, ...data }
-    }
-
-    const updatedNodes = [...nodes, newNode]
-    setNodes(updatedNodes)
-
-    if (activeTaskId) {
-      window.api.saveRpaTaskFlow(activeTaskId, { id: activeTaskId, nodes: updatedNodes, edges })
-    }
-
-    setSelectedNodeId(newId)
-    setActiveTab('attr')
-    setShowPanel(true)
-  }
-
   // ── 属性编辑器修改事件 ──────────────────────────────────────
   const handleAttrChange = (key: string, val: any) => {
     if (!selectedNodeId) return
@@ -259,7 +217,7 @@ export function RpaPage(): React.JSX.Element {
 
   const captureDesktopTargetForNode = async () => {
     if (!selectedNodeId) return
-    store.appendLog('info', '[桌面拾取] 请在 1.5 秒内将鼠标移到目标控件上。')
+    store.appendLog('info', '[坐标拾取] 请在 1.5 秒内将鼠标移到目标位置。')
     const target = await window.api.captureRpaDesktopTarget(1500)
     const updatedNodes = nodes.map((node) => node.id === selectedNodeId ? {
       ...node,
@@ -287,12 +245,44 @@ export function RpaPage(): React.JSX.Element {
 
     setPickerUrl(testUrl)
     setPendingPickNode(node)
+    setPickerMode('pick')
+    setShowPickerPrompt(true)
+  }
+
+  const refreshDesktopWindows = () => {
+    setIsLoadingDesktopWindows(true)
+    void window.api.listRpaDesktopWindows()
+      .then(setDesktopWindows)
+      .catch(() => setDesktopWindows([]))
+      .finally(() => setIsLoadingDesktopWindows(false))
+  }
+
+  const handleRecordWorkflow = () => {
+    const openUrlNode = nodes.find(node => node.type === 'open_url')
+    setPickerUrl(openUrlNode?.data?.url || 'https://')
+    setPendingPickNode(null)
+    setPickerMode('record')
+    setRecordingMode('browser')
+    setSelectedDesktopProcessId('')
+    setRecordingSetupError('')
     setShowPickerPrompt(true)
   }
 
   const confirmPickElement = async () => {
+    if (pickerMode === 'record' && recordingMode === 'browser' && (!pickerUrl || pickerUrl === 'https://')) {
+      setRecordingSetupError('请输入要打开的网址。')
+      return
+    }
+    if (pickerMode !== 'record' && !pickerUrl) return
     setShowPickerPrompt(false)
-    if (!pickerUrl || !pendingPickNode) return
+
+    if (pickerMode === 'record') {
+      const selectedDesktopTarget = desktopWindows.find(item => String(item.processId) === selectedDesktopProcessId)
+      await handleRecordBrowser(recordingMode, selectedDesktopTarget)
+      return
+    }
+
+    if (!pendingPickNode) return
 
     try {
       const selectedCss = await window.api.rpaPickElement(pickerUrl)
@@ -520,123 +510,101 @@ export function RpaPage(): React.JSX.Element {
     }
   }, [activeTaskId, saveToHistory, setNodes, setEdges])
 
-  // ── 浏览器操作录制并发送到 AI 助手 ────────────────────────────────
-  const handleRecordBrowser = async (node: any) => {
-    let testUrl = node.data?.url || 'https://www.baidu.com'
-    if (!testUrl.startsWith('http://') && !testUrl.startsWith('https://')) {
+  // ── 浏览器 / Windows 桌面录制 ────────────────────────────────────
+  const handleRecordBrowser = async (
+    mode: 'browser' | 'desktop' = 'browser',
+    desktopTarget?: { processId: number; processName: string; windowTitle: string }
+  ) => {
+    let testUrl = mode === 'desktop' ? 'about:blank' : pickerUrl || 'https://www.baidu.com'
+    if (testUrl !== 'about:blank' && !testUrl.startsWith('http://') && !testUrl.startsWith('https://')) {
       testUrl = 'https://' + testUrl
     }
 
     try {
       setActiveTab('logs')
-      setShowPanel(true)
-      store.appendLog('info', `[录制] 正在启动浏览器录制：${testUrl}`)
+      const initialTargetLabel = mode === 'browser' ? testUrl : desktopTarget?.windowTitle || 'Windows 桌面'
+      store.appendLog('info', `[录制] 正在启动${mode === 'desktop' ? '桌面' : '浏览器'}录制：${initialTargetLabel}`)
+      if (mode !== 'browser') store.appendLog('info', '[录制] 操作完成后按 Ctrl+Shift+F12 结束录制。')
 
-      const recordedActions = await window.api.rpaRecordActions(testUrl)
+      const rawRecordedActions = await window.api.rpaRecordActions({ url: testUrl, mode, desktopTarget })
+      const recordedActions = await window.api.normalizeRpaRecordedActions(rawRecordedActions).catch(() => rawRecordedActions)
       if (!recordedActions || recordedActions.length === 0) {
         store.appendLog('warn', `[录制] 录制已取消或没有捕捉到有效操作`)
         return
       }
 
       store.appendLog('info', `[录制] 录制结束。共捕获到 ${recordedActions.length} 步操作。`)
+      recordedActions.filter((action: any) => action?.normalizationSource).forEach((action: any) => {
+        const source = action.normalizationSource === 'uia' ? '系统输入框' : '输入法模型'
+        store.appendLog('info', `[录制生成] ${source}内容已还原：${action.rawRecordedValue || '(组合输入)'} → ${action.value}`)
+      })
 
-      // 智能过滤第一步的打开网页/导航操作，因为当前节点已经代劳了
       let filteredActions = recordedActions.map((action: any) => {
         if (!action?.sensitive) return action
-        const { value: _discardedValue, ...safeAction } = action
+        const safeAction = { ...action }
+        delete safeAction.value
         return { ...safeAction, value: '', requiresCredentialBinding: true }
       })
-      if (filteredActions.length > 0) {
-        const first = filteredActions[0]
-        if (
-          first.type === 'open_url' ||
-          first.action === 'open_url' ||
-          first.type === 'goto' ||
-          first.action === 'goto' ||
-          first.label?.includes('打开') ||
-          first.label?.includes('导航')
-        ) {
-          filteredActions.shift()
-          store.appendLog('info', `[录制] 自动忽略第一步的打开网页/导航动作，仅生成后续流程步骤。`)
-        }
-      }
+      filteredActions = filteredActions.filter((action: any) => {
+        if (action.automationId === 'finish-button') return false
+        if (action.type !== 'open_url') return true
+        return action.url !== 'about:blank'
+      })
 
       if (filteredActions.length === 0) {
         store.appendLog('warn', `[录制] 录制未捕获到除打开网页之外的其他有效操作`)
         return
       }
 
-      store.appendLog('info', `[AI] 正在打开 AI 助手并自动发送录制步骤...`)
+      const startX = 250
+      const startY = 60
+      const stamp = Date.now()
+      const generatedNodes = filteredActions.map((action: any, index: number) => {
+        const previousRecordedAt = Number(filteredActions[index - 1]?.recordedAt || action.recordedAt || 0)
+        const recordedDelayMs = Math.max(0, Number(action.recordedAt || 0) - previousRecordedAt)
+        const common = {
+          id: `recorded_${stamp}_${index}`,
+          position: { x: startX, y: startY + (index + 1) * 120 },
+          recordedDelayMs
+        }
+        switch (action.type) {
+          case 'open_url': return { ...common, type: 'open_url', data: { label: action.label || '打开网页', url: action.url } }
+          case 'click': return { ...common, type: 'click', data: { label: action.label || '点击元素', selector: action.selector } }
+          case 'fill': return { ...common, type: 'fill', data: { label: action.label || '输入文本', selector: action.selector, value: action.value || '', requiresCredentialBinding: Boolean(action.requiresCredentialBinding) } }
+          case 'desktop_focus': return { ...common, type: 'desktop_focus', data: { label: action.label || '切换窗口', windowAlias: 'desktop', windowTitle: action.windowTitle || '', processName: action.processName || '', recordedPid: action.processId, showDesktop: Boolean(action.showDesktop) } }
+          case 'desktop_click': return { ...common, type: 'desktop_click', data: { label: action.label || '桌面点击', windowAlias: 'desktop', x: action.x, y: action.y, relativeX: action.relativeX, relativeY: action.relativeY, displayRelativeX: action.displayRelativeX, displayRelativeY: action.displayRelativeY, displayLeft: action.displayLeft, displayTop: action.displayTop, displayWidth: action.displayWidth, displayHeight: action.displayHeight, displayPrimary: action.displayPrimary, button: action.button || 'left', double: Boolean(action.double), name: action.name || '', automationId: action.automationId || '', controlType: action.controlType || '', processName: action.processName || '', windowTitle: action.windowTitle || '', recordedPid: action.processId } }
+          case 'desktop_type': return { ...common, type: 'desktop_type', data: { label: action.label || '桌面输入', windowAlias: 'desktop', value: action.value || '', rawRecordedValue: action.rawRecordedValue || '', normalizationSource: action.normalizationSource || '', normalizationConfidence: action.normalizationConfidence || '', requiresCredentialBinding: Boolean(action.requiresCredentialBinding), x: action.x, y: action.y, relativeX: action.relativeX, relativeY: action.relativeY, displayRelativeX: action.displayRelativeX, displayRelativeY: action.displayRelativeY, displayPrimary: action.displayPrimary, name: action.name || '', automationId: action.automationId || '', controlType: action.controlType || '', recordedPid: action.processId, processName: action.processName || '', windowTitle: action.windowTitle || '' } }
+          case 'desktop_hotkey': return { ...common, type: 'desktop_hotkey', data: { label: action.label || '快捷键', windowAlias: 'desktop', keys: action.keys, processName: action.processName || '', windowTitle: action.windowTitle || '' } }
+          case 'desktop_scroll': return { ...common, type: 'desktop_scroll', data: { label: action.label || '桌面滚动', windowAlias: 'desktop', x: action.x, y: action.y, relativeX: action.relativeX, relativeY: action.relativeY, displayRelativeX: action.displayRelativeX, displayRelativeY: action.displayRelativeY, displayLeft: action.displayLeft, displayTop: action.displayTop, displayWidth: action.displayWidth, displayHeight: action.displayHeight, displayPrimary: action.displayPrimary, processName: action.processName || '', windowTitle: action.windowTitle || '', direction: action.direction || 'down', amount: action.amount || 1 } }
+          default: return null
+        }
+      }).filter(Boolean) as any[]
 
-      // 打开面板，切到 AI 助手
-      setActiveTab('chat')
-      setShowPanel(true)
+      if (generatedNodes.length === 0) {
+        store.appendLog('warn', '[录制] 捕获到的动作暂时无法转换为流程节点。')
+        return
+      }
 
-      const promptText = `我完成了以下浏览器操作录制，请帮我生成后续流程节点并连接到当前节点（当前节点ID为 "${node.id}"，其坐标为 x=${node.position.x}, y=${node.position.y}）：
-
-\`\`\`json
-${JSON.stringify(filteredActions, null, 2)}
-\`\`\``
-
-      // 触发自动对话
-      handleRecordAutoChat(promptText, node.id)
+      const startNode = { id: 'start', type: 'start', position: { x: startX, y: startY }, data: { label: '开始' } }
+      const endNode = { id: 'end', type: 'end', position: { x: startX, y: startY + (generatedNodes.length + 1) * 120 }, data: { label: '结束' } }
+      const chainNodes = [startNode, ...generatedNodes, endNode]
+      const updatedEdges = chainNodes.slice(0, -1).map((sourceNode, index) => ({
+        id: `e_recorded_${stamp}_${index}`,
+        source: sourceNode.id,
+        target: chainNodes[index + 1].id
+      }))
+      const updatedNodes = chainNodes
+      saveToHistory()
+      setNodes(updatedNodes)
+      setEdges(updatedEdges)
+      if (activeTaskId) await window.api.saveRpaTaskFlow(activeTaskId, { id: activeTaskId, nodes: updatedNodes, edges: updatedEdges })
+      store.appendLog('info', `[录制] 已生成 ${generatedNodes.length} 个流程节点，其中桌面节点 ${generatedNodes.filter(item => item.type.startsWith('desktop_')).length} 个。`)
 
     } catch (e: any) {
       console.error(e)
       store.appendLog('error', `[录制生成] 失败: ${e.message}`)
-    }
-  }
-
-  // 录制自动发送并在 AI 助手端回复
-  const handleRecordAutoChat = async (promptText: string, recordNodeId: string) => {
-    setIsChatSending(true)
-    const userMsg = { role: 'user' as const, content: promptText }
-    setChatMessages(prev => [...prev, userMsg])
-
-    try {
-      const systemPrompt = `你是一个专业的 RPA 流程图设计助手。用户完成了网页操作录制，你需要根据录制的步骤，生成对应节点图。
-请务必返回完整的 RPA 流程节点图数据结构 (React Flow 格式) 作为 JSON 代码块。JSON 代码块之外你可以用自然语言解释你的设计。
-请确保 JSON 的格式为：
-\`\`\`json
-{
-  "nodes": [
-    { "id": "node_1", "type": "click", "position": { "x": 250, "y": 250 }, "data": { "label": "点击百度按钮", "selector": "#su" } }
-  ],
-  "edges": [
-    { "id": "e_open_1", "source": "CURRENT_NODE_ID", "target": "node_1" }
-  ]
-}
-\`\`\`
-其中首个连接边的 source 必须是当前节点的 ID（当前节点ID在 prompt 中已给出）。
-注意：用户录制的第一步动作通常是网页加载/导航，请勿为重复的导航动作生成新的节点。你只需要为列表中的点击、填充、等待等后续操作步骤生成流程图节点。
-支持的节点类型（type）规范：
-- "click"：点击元素。data 格式为 { "label": "点击xxx", "selector": "CSS 选择器" }
-- "fill"：输入文本。data 格式为 { "label": "输入xxx", "selector": "CSS 选择器", "value": "输入文本内容" }
-- 录制步骤标记 sensitive 或 requiresCredentialBinding 时，严禁猜测或生成原值；对应 fill 节点必须保留空 value，并设置 "requiresCredentialBinding": true，等待用户绑定 secretRef。
-- "wait"：延时等待。data 格式为 { "label": "延时", "ms": "延迟毫秒数" }
-按垂直向下排列的拓扑顺序为 position 赋值（y坐标以100为步长递增，从当前节点的 y 坐标开始递增）。`
-
-      const llmConfig = {
-        provider: appStore.llmConfig.provider,
-        apiKey: appStore.llmConfig.apiKey,
-        baseUrl: appStore.llmConfig.baseUrl,
-        model: appStore.llmConfig.model,
-        temperature: 0.1,
-        sessionId: (activeTaskId || 'rpa') + '-chat'
-      }
-
-      const response = await window.api.callLLM(llmConfig, [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: promptText }
-      ])
-
-      setChatMessages(prev => [...prev, { role: 'assistant', content: response }])
-      parseAndApplyCanvasJson(response, recordNodeId)
-    } catch (e: any) {
-      console.error(e)
-      setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ 自动生成失败: ${e.message}` }])
     } finally {
-      setIsChatSending(false)
+      await window.api.completeRpaRecordingProcessing().catch(() => false)
     }
   }
 
@@ -654,6 +622,14 @@ ${JSON.stringify(filteredActions, null, 2)}
     setSecrets(await window.api.listRpaSecrets())
   }
 
+  const updateCredentialValue = async () => {
+    if (!editingSecretRef || !editingSecretValue) return
+    await window.api.rotateRpaSecret(editingSecretRef, editingSecretValue)
+    setEditingSecretRef(null)
+    setEditingSecretValue('')
+    setSecrets(await window.api.listRpaSecrets())
+  }
+
   // 选中节点的表单渲染
   const renderAttrEditor = () => {
     if (!selectedNode) {
@@ -661,31 +637,11 @@ ${JSON.stringify(filteredActions, null, 2)}
     }
 
     return (
-      <div>
-        <div className="attr-title">配置 [{selectedNode.data?.label || selectedNode.type}]</div>
-
-        <div className="attr-group">
-          <label className="attr-label">节点名称</label>
-          <input
-            type="text"
-            className="attr-input"
-            value={selectedNode.data?.label || ''}
-            onChange={(e) => handleAttrChange('label', e.target.value)}
-          />
-        </div>
+      <div className="rpa-node-config-fields">
 
         {selectedNode.type === 'open_url' && (
           <div className="attr-group">
-            <label className="attr-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>网页 URL</span>
-              <button
-                onClick={() => handleRecordBrowser(selectedNode)}
-                disabled={isChatSending}
-                style={{ background: '#722ed1', color: 'white', border: 'none', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}
-              >
-                🎥 录制操作
-              </button>
-            </label>
+            <label className="attr-label">网页 URL</label>
             <input
               type="text"
               className="attr-input"
@@ -824,13 +780,13 @@ ${JSON.stringify(filteredActions, null, 2)}
 
         {selectedNode.type.startsWith('desktop_') && (
           <div className="rpa-desktop-inspector">
-            <div className="rpa-surface-note"><span />桌面操作优先使用窗口与控件语义定位；坐标仅作为降级。</div>
+            <div className="rpa-surface-note"><span />桌面点击使用窗口或显示器相对坐标；分辨率变化时自动按比例换算。</div>
             <div className="attr-group"><label className="attr-label">窗口锚点</label><input className="attr-input" value={selectedNode.data?.windowAlias || 'desktop'} onChange={(e) => handleAttrChange('windowAlias', e.target.value)} /></div>
             {selectedNode.type === 'desktop_focus' && <><div className="attr-group"><label className="attr-label">窗口标题</label><input className="attr-input" value={selectedNode.data?.windowTitle || ''} onChange={(e) => handleAttrChange('windowTitle', e.target.value)} placeholder="例如：ERP 客户端" /></div><div className="attr-group"><label className="attr-label">进程名</label><input className="attr-input" value={selectedNode.data?.processName || ''} onChange={(e) => handleAttrChange('processName', e.target.value)} /></div></>}
-            {selectedNode.type === 'desktop_click' && <><button className="btn-primary rpa-pick-desktop" onClick={captureDesktopTargetForNode}>◎ 悬停拾取 Windows 控件</button><div className="attr-group"><label className="attr-label">Automation ID</label><input className="attr-input" value={selectedNode.data?.automationId || ''} onChange={(e) => handleAttrChange('automationId', e.target.value)} placeholder="推荐：UI Automation 标识" /></div><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></>}
+            {selectedNode.type === 'desktop_click' && <><button className="btn-primary rpa-pick-desktop" onClick={captureDesktopTargetForNode}>◎ 拾取屏幕坐标</button><div className="attr-group"><label className="attr-label">点击方式</label><select className="attr-input" value={selectedNode.data?.double ? 'double' : 'single'} onChange={(e) => handleAttrChange('double', e.target.value === 'double')}><option value="single">单击</option><option value="double">双击</option></select></div><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></>}
             {selectedNode.type === 'desktop_type' && <><div className="attr-group"><label className="attr-label">输入内容</label><input className="attr-input" value={selectedNode.data?.value || ''} onChange={(e) => handleAttrChange('value', e.target.value)} /></div><div className="attr-group"><label className="attr-label">凭据绑定</label><select className="attr-input" value={String(selectedNode.data?.value || '').startsWith('${secret.') ? selectedNode.data.value : ''} onChange={(e) => handleAttrChange('value', e.target.value)}><option value="">不使用凭据</option>{secrets.filter((secret) => secret.status === 'active').map((secret) => <option key={secret.ref} value={`\${${secret.ref}}`}>{secret.label} · {secret.ref}</option>)}</select></div></>}
             {selectedNode.type === 'desktop_hotkey' && <div className="attr-group"><label className="attr-label">组合键</label><input className="attr-input" value={selectedNode.data?.keys || ''} onChange={(e) => handleAttrChange('keys', e.target.value)} placeholder="Ctrl+Shift+S" /></div>}
-            {selectedNode.type === 'desktop_scroll' && <><div className="attr-group"><label className="attr-label">方向</label><select className="attr-input" value={selectedNode.data?.direction || 'down'} onChange={(e) => handleAttrChange('direction', e.target.value)}><option value="down">向下</option><option value="up">向上</option></select></div><div className="attr-group"><label className="attr-label">滚动量</label><input className="attr-input" type="number" value={selectedNode.data?.amount || 3} onChange={(e) => handleAttrChange('amount', Number(e.target.value))} /></div></>}
+            {selectedNode.type === 'desktop_scroll' && <><div className="attr-group"><label className="attr-label">方向</label><select className="attr-input" value={selectedNode.data?.direction || 'down'} onChange={(e) => handleAttrChange('direction', e.target.value)}><option value="down">向下</option><option value="up">向上</option></select></div><div className="attr-group"><label className="attr-label">滚动量</label><input className="attr-input" type="number" value={selectedNode.data?.amount || 3} onChange={(e) => handleAttrChange('amount', Number(e.target.value))} /></div><div className="attr-group"><label className="attr-label">滚动位置</label><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></div></>}
           </div>
         )}
 
@@ -958,38 +914,88 @@ ${JSON.stringify(filteredActions, null, 2)}
       </div>
     )
   }
+  void renderChatTab
 
   // ── 第一级：任务列表主页 ─────────────────────────────────────
   if (activeTaskId === null) {
+    const statusLabels: Record<string, string> = {
+      idle: '待编排',
+      running: '运行中',
+      paused: '等待确认',
+      success: '已成功',
+      failed: '需处理'
+    }
+    const scheduleLabel = (task: typeof tasks[number]) => {
+      if (!task.schedule || task.schedule.type === 'manual') return '手动执行'
+      if (task.schedule.type === 'interval') return `每 ${task.schedule.intervalMinutes || 60} 分钟`
+      return `每天 ${task.schedule.dailyTime || '09:00'}`
+    }
+
     return (
       <div className="rpa-container">
         <div className="rpa-list-view">
-          <div className="rpa-list-header" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
-              + 新建 RPA 任务
-            </button>
+          <div className="rpa-command-hero">
+            <div className="rpa-hero-copy">
+              <div className="rpa-kicker">Hybrid automation console</div>
+              <h1>RPA 自动化任务清单</h1>
+              <p>把浏览器 DOM、桌面坐标操作、视觉定位和凭据注入编排成可审计的桌面流程。</p>
+            </div>
+
+            <div className="rpa-hero-actions">
+              <div className="rpa-hero-metric">
+                <strong>{tasks.length}</strong>
+                <span>工作流</span>
+              </div>
+              <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
+                <span>＋</span> 新建 RPA 任务
+              </button>
+            </div>
           </div>
 
           <div className="rpa-task-grid">
             {tasks.map(task => (
               <div key={task.id} className="glass-panel rpa-task-card" onClick={() => selectTask(task.id)}>
+                <div className="rpa-card-rail" aria-hidden="true">
+                  <span className="rpa-card-rail-node browser" />
+                  <span className="rpa-card-rail-line" />
+                  <span className="rpa-card-rail-node desktop" />
+                </div>
                 <div className="rpa-card-actions" onClick={e => e.stopPropagation()}>
-                  <button className="btn-card-action" style={{ color: '#ef4444' }} onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }} title="删除任务">
+                  <button className="btn-card-action danger" onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }} title="删除任务">
                     🗑️
                   </button>
                 </div>
-                <div className="rpa-card-name">📋 {task.name}</div>
-                <div className="rpa-card-desc">{task.description || '无任务说明'}</div>
-                <div className="rpa-card-footer">
-                  <span className={`status-badge ${task.lastRunStatus || 'idle'}`}>{task.lastRunStatus || '未运行'}</span>
-                  <span>创建: {task.createdAt?.split(' ')[0] || '-'}</span>
+                <div className="rpa-card-topline">
+                  <span className={`status-badge ${task.lastRunStatus || 'idle'}`}>{statusLabels[task.lastRunStatus || 'idle'] || task.lastRunStatus}</span>
+                  <span className="rpa-card-date">{task.createdAt?.split(' ')[0] || '-'}</span>
+                </div>
+                <div className="rpa-card-name">{task.name}</div>
+                <div className="rpa-card-desc">{task.description || '还没有说明。建议写清触发场景、输入来源和期望结果。'}</div>
+                <div className="rpa-task-policy" onClick={event => event.stopPropagation()}>
+                  <button
+                    className={`rpa-task-state ${task.enabled === false ? 'off' : task.lastRunStatus === 'failed' ? 'error' : 'on'}`}
+                    onClick={() => updateTask(task.id, { enabled: task.enabled === false })}
+                    title="切换任务是否允许自动执行"
+                  >
+                    {task.enabled === false ? '关闭' : task.lastRunStatus === 'failed' ? '异常' : '允许'}
+                  </button>
+                  <span>{scheduleLabel(task)}</span>
                 </div>
               </div>
             ))}
 
             {tasks.length === 0 && (
-              <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: '#94a3b8', fontSize: '14px' }}>
-                🫙 暂无 RPA 任务，点击右上方按钮开始创建！
+              <div className="rpa-empty-state">
+                <div className="rpa-empty-orbit" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <h3>还没有自动化流程</h3>
+                <p>可以先用一句话创建流程，再进入录制器补齐浏览器和桌面步骤。</p>
+                <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
+                  创建第一个 RPA 任务
+                </button>
               </div>
             )}
           </div>
@@ -1046,65 +1052,75 @@ ${JSON.stringify(filteredActions, null, 2)}
           <div style={{ fontSize: '16px', fontWeight: 700 }}>
             {currentTask?.name}
           </div>
-          <div className="rpa-surface-rail" aria-label="工作流执行面">
-            <span className="browser"><i />Browser {nodes.filter((node) => ['open_url', 'click', 'fill', 'extract'].includes(node.type)).length}</span>
-            <b>→</b>
-            <span className="desktop"><i />Desktop {nodes.filter((node) => node.type?.startsWith('desktop_')).length}</span>
-          </div>
         </div>
+        {currentTask && (
+          <div className="rpa-schedule-editor">
+            <button
+              className={`rpa-task-state ${currentTask.enabled === false ? 'off' : currentTask.lastRunStatus === 'failed' ? 'error' : 'on'}`}
+              onClick={() => updateTask(currentTask.id, { enabled: currentTask.enabled === false })}
+            >
+              {currentTask.enabled === false ? '关闭' : currentTask.lastRunStatus === 'failed' ? '异常' : '允许'}
+            </button>
+            <select
+              className="rpa-schedule-select"
+              value={currentTask.schedule?.type || 'manual'}
+              onChange={event => updateTask(currentTask.id, {
+                schedule: {
+                  ...currentTask.schedule,
+                  type: event.target.value as 'manual' | 'interval' | 'daily'
+                }
+              })}
+            >
+              <option value="manual">手动执行</option>
+              <option value="interval">固定间隔</option>
+              <option value="daily">每天定时</option>
+            </select>
+            {currentTask.schedule?.type === 'interval' && (
+              <label className="rpa-schedule-value">
+                每
+                <input
+                  type="number"
+                  min={1}
+                  value={currentTask.schedule.intervalMinutes || 60}
+                  onChange={event => updateTask(currentTask.id, {
+                    schedule: { ...currentTask.schedule!, intervalMinutes: Math.max(1, Number(event.target.value) || 1) }
+                  })}
+                />
+                分钟
+              </label>
+            )}
+            {currentTask.schedule?.type === 'daily' && (
+              <input
+                className="rpa-schedule-time"
+                type="time"
+                value={currentTask.schedule.dailyTime || '09:00'}
+                onChange={event => updateTask(currentTask.id, {
+                  schedule: { ...currentTask.schedule!, dailyTime: event.target.value }
+                })}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       <div className="rpa-detail-body">
         {/* 左侧 React Flow 编辑画布 */}
         <div className="rpa-canvas-container">
-          {/* 常用操作节点快捷添加悬浮栏 */}
+          {/* 普通用户主路径：录制 → 自动生成 → 运行 */}
           <div className="rpa-canvas-toolbar">
-            <button className="btn-back" onClick={() => handleAddNode('open_url')} title="添加网页节点 (打开网页)">🌐</button>
-            <button className="btn-back" onClick={() => handleAddNode('click')} title="添加点击节点 (点击元素)">🖱️</button>
-            <button className="btn-back" onClick={() => handleAddNode('fill')} title="添加输入节点 (输入文本)">✍️</button>
-            <button className="btn-back" onClick={() => handleAddNode('extract')} title="添加提取节点 (内容提取)">📋</button>
-            <button className="btn-back" onClick={() => handleAddNode('wait')} title="添加延时节点 (延时等待)">⏳</button>
-            <button className="btn-back" onClick={() => handleAddNode('manual_confirm')} title="添加人工确认节点 (人工干预)">⚠️</button>
-            <button className="btn-back" onClick={() => handleAddNode('condition')} title="添加条件判断节点 (条件分支)">❓</button>
-
-            <span className="rpa-toolbar-divider" />
-            <span className="rpa-surface-label desktop">DESKTOP</span>
-            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_focus')} title="聚焦 Windows 窗口">▣</button>
-            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_click')} title="点击桌面控件">◎</button>
-            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_type')} title="桌面输入">⌨</button>
-            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_hotkey')} title="快捷键">⌘</button>
-            <button className="btn-back desktop-action" onClick={() => handleAddNode('desktop_scroll')} title="滚轮">↕</button>
-
-
-
-            {/* 撤回按钮 */}
-            <button
-              className="btn-back"
-              style={{ marginLeft: '12px' }}
-              onClick={handleUndo}
-              disabled={history.length === 0}
-              title="撤回到上一步 (Undo, 支持 Ctrl+Z)"
-            >
-              ↩️
-            </button>
-
-            <button
-              className={`btn-back ${showPanel ? 'active-toggle' : ''}`}
-              style={{ marginLeft: 'auto', marginRight: '8px' }}
-              onClick={() => setShowPanel(prev => !prev)}
-              title={showPanel ? '隐藏操作面板' : '显示操作面板'}
-            >
-              💻
-            </button>
-
-            <button
-              className={`btn-back ${showMiniMap ? 'active-toggle' : ''}`}
-              style={{ marginLeft: 0 }}
-              onClick={() => setShowMiniMap(prev => !prev)}
-              title={showMiniMap ? '隐藏缩略图' : '显示缩略图'}
-            >
-              🗺️
-            </button>
+            <button className="rpa-toolbar-primary" onClick={handleRecordWorkflow} disabled={isChatSending}><span className="rpa-record-dot" />录制</button>
+            {executionState === 'running' ? (
+              <><button className="rpa-toolbar-action" onClick={pauseTask}>Ⅱ 暂停</button><button className="rpa-toolbar-action danger" onClick={stopTask}>■ 停止</button></>
+            ) : executionState === 'paused' ? (
+              <><button className="rpa-toolbar-action run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}>▶ 继续</button><button className="rpa-toolbar-action danger" onClick={stopTask}>■ 停止</button></>
+            ) : (
+              <button className="rpa-toolbar-action run" onClick={runTask}>▶ 运行</button>
+            )}
+            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'credentials' ? 'active' : ''}`} onClick={() => { setActiveTab('credentials'); setShowPanel(true); setNodeCardPosition(null) }}>◈ 凭证</button>
+            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'logs' ? 'active' : ''}`} onClick={() => { setActiveTab('logs'); setShowPanel(true); setNodeCardPosition(null) }}>≡ 运行记录</button>
+            <span className="rpa-toolbar-spacer" />
+            <button className="rpa-toolbar-icon" onClick={handleUndo} disabled={history.length === 0} title="撤回">↩</button>
+            <button className={`rpa-toolbar-icon ${showMiniMap ? 'active' : ''}`} onClick={() => setShowMiniMap(prev => !prev)} title="缩略图">⌗</button>
           </div>
 
           <ReactFlow
@@ -1122,18 +1138,16 @@ ${JSON.stringify(filteredActions, null, 2)}
             }}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => {
+            onNodeClick={(event, node) => {
               setSelectedNodeId(node.id)
-              setActiveTab('attr')
-              setShowPanel(true)
+              setNodeCardPosition({ x: Math.min(event.clientX + 28, window.innerWidth - 360), y: Math.max(92, Math.min(event.clientY - 36, window.innerHeight - 520)) })
+              setShowPanel(false)
               setMenu(null)
             }}
             onPaneClick={() => {
               setSelectedNodeId(null)
+              setNodeCardPosition(null)
               setMenu(null)
-              if (activeTab === 'attr') {
-                setShowPanel(false)
-              }
             }}
             onNodeDragStart={() => saveToHistory()}
             onNodeContextMenu={(event, node) => {
@@ -1174,58 +1188,53 @@ ${JSON.stringify(filteredActions, null, 2)}
               />
             )}
           </ReactFlow>
+          {selectedNode && nodeCardPosition && (
+            <div className="rpa-node-config-card" style={{ left: nodeCardPosition.x, top: nodeCardPosition.y }}>
+              <div className="rpa-node-config-head">
+                <div>
+                  <small>节点配置</small>
+                  <strong>{selectedNode.data?.label || selectedNode.type}</strong>
+                </div>
+                <button onClick={() => { setSelectedNodeId(null); setNodeCardPosition(null) }} title="关闭">×</button>
+              </div>
+              <div className="rpa-node-config-body">{renderAttrEditor()}</div>
+            </div>
+          )}
         </div>
 
-        {/* 右侧属性面板 / 运行日志与变量状态 */}
+        {/* 流程级面板：凭证与运行记录 */}
         {showPanel && (
           <div className="rpa-panel-container">
-            <div className="rpa-panel-tabs" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', flex: 1 }}>
-                <div className={`rpa-panel-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
-                  💻 控制台
-                </div>
-                <div className={`rpa-panel-tab ${activeTab === 'attr' ? 'active' : ''}`} onClick={() => setActiveTab('attr')}>
-                  ⚙️ 节点配置
-                </div>
-                <div className={`rpa-panel-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
-                  💬 AI 助手
-                </div>
-                <div className={`rpa-panel-tab ${activeTab === 'credentials' ? 'active' : ''}`} onClick={() => setActiveTab('credentials')}>
-                  ◈ 凭据
-                </div>
-              </div>
-              <button
-                onClick={() => setShowPanel(false)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  fontSize: '18px',
-                  color: 'var(--rpa-text-muted)',
-                  cursor: 'pointer',
-                  padding: '0 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  lineHeight: 1
-                }}
-                title="关闭面板"
-              >
-                ×
-              </button>
+            <div className="rpa-panel-simple-head">
+              <div><small>流程设置</small><strong>{activeTab === 'credentials' ? '凭证与节点绑定' : '运行记录'}</strong></div>
+              <button onClick={() => setShowPanel(false)} title="关闭面板">×</button>
             </div>
 
             <div className="rpa-panel-content">
-              {activeTab === 'attr' && renderAttrEditor()}
-              {activeTab === 'chat' && renderChatTab()}
               {activeTab === 'credentials' && (
                 <div className="rpa-credential-panel">
-                  <div className="attr-title">凭据绑定</div>
-                  <p className="rpa-panel-hint">真实值只在主进程执行动作时解密。流程、日志和 AI 仅能看到 secretRef。</p>
+                  <p className="rpa-panel-hint">凭据属于整个流程；只有输入节点保存引用，真实值不会写入流程文件、日志或 AI 上下文。</p>
+                  <div className="rpa-credential-bindings">
+                    <strong>节点绑定</strong>
+                    {nodes.filter(node => node.type === 'fill' || node.type === 'desktop_type').map(node => {
+                      const value = String(node.data?.value || '')
+                      const ref = value.startsWith('${secret.') ? value.slice(2, -1) : ''
+                      const secret = secrets.find(item => item.ref === ref)
+                      return <div key={node.id}><span>{node.data?.label || node.type}</span><code>{secret?.label || '未绑定'}</code></div>
+                    })}
+                    {nodes.every(node => node.type !== 'fill' && node.type !== 'desktop_type') && <div className="rpa-empty-compact">录制到账号或密码输入后，会在这里显示可绑定节点。</div>}
+                  </div>
                   <div className="rpa-credential-list">
                     {secrets.map((secret) => (
                       <div className="rpa-credential-row" key={secret.ref}>
                         <div><strong>{secret.label}</strong><code>{secret.ref}</code></div>
-                        <span className={`status-badge ${secret.status === 'active' ? 'success' : 'idle'}`}>{secret.status}</span>
+                        <button className="rpa-secret-edit" onClick={() => { setEditingSecretRef(secret.ref); setEditingSecretValue('') }}>更新值</button>
+                        {editingSecretRef === secret.ref && (
+                          <div className="rpa-secret-update">
+                            <input className="attr-input" type="password" value={editingSecretValue} onChange={event => setEditingSecretValue(event.target.value)} placeholder="输入新的敏感值" autoComplete="new-password" />
+                            <button className="btn-primary" onClick={updateCredentialValue} disabled={!editingSecretValue}>保存</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {secrets.length === 0 && <div className="rpa-empty-compact">还没有凭据。创建后可在输入节点中绑定。</div>}
@@ -1243,10 +1252,10 @@ ${JSON.stringify(filteredActions, null, 2)}
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                   {/* 运行控制 */}
                   <div className="rpa-control-section">
-                    {executionState === 'running' || executionState === 'paused' ? (
-                      <button className="btn-ctrl stop" onClick={stopTask}>
-                        🟥 停止运行
-                      </button>
+                    {executionState === 'running' ? (
+                      <><button className="btn-ctrl" onClick={pauseTask}>Ⅱ 暂停流程</button><button className="btn-ctrl stop" onClick={stopTask}>■ 停止运行</button></>
+                    ) : executionState === 'paused' ? (
+                      <><button className="btn-ctrl run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}>▶ 继续流程</button><button className="btn-ctrl stop" onClick={stopTask}>■ 停止运行</button></>
                     ) : (
                       <button className="btn-ctrl run" onClick={runTask}>
                         ▶️ 启动流程
@@ -1330,31 +1339,51 @@ ${JSON.stringify(filteredActions, null, 2)}
 
       {/* 元素拾取测试 URL 输入弹窗 */}
       {showPickerPrompt && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: 'var(--rpa-bg-panel)', padding: '24px', borderRadius: '8px', width: '420px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '15px', color: 'var(--rpa-text-main)' }}>启动可视化元素拾取器</h3>
-            <p style={{ margin: '0 0 16px 0', fontSize: '12.5px', color: '#64748b' }}>我们需要一个测试网址来启动真实浏览器，请确认或修改：</p>
-            <input
-              type="text"
-              value={pickerUrl}
-              onChange={e => setPickerUrl(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--rpa-border)', borderRadius: '4px', fontSize: '13px', marginBottom: '20px', background: 'var(--rpa-bg-layout)', color: 'var(--rpa-text-main)' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button
-                onClick={() => setShowPickerPrompt(false)}
-                style={{ padding: '6px 16px', border: '1px solid var(--rpa-border)', background: 'transparent', color: 'var(--rpa-text-main)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
-              >
-                取消
-              </button>
-              <button
-                onClick={confirmPickElement}
-                style={{ padding: '6px 16px', border: 'none', background: 'var(--rpa-primary)', color: 'white', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
-              >
-                🚀 启动浏览器拾取
-              </button>
-            </div>
-          </div>
+        <div className="rpa-recorder-backdrop">
+          {pickerMode === 'record' ? (
+            <section className="rpa-recorder-setup-card" role="dialog" aria-modal="true" aria-labelledby="rpa-recorder-title">
+              <header className="rpa-recorder-setup-head">
+                <div><span className="rpa-recorder-kicker">Record workflow</span><h3 id="rpa-recorder-title">从哪里开始？</h3></div>
+                <button onClick={() => setShowPickerPrompt(false)} aria-label="关闭">×</button>
+              </header>
+
+              <div className="rpa-recorder-mode-tabs" aria-label="录制模式">
+                <button className={recordingMode === 'browser' ? 'active' : ''} onClick={() => { setRecordingMode('browser'); setRecordingSetupError('') }}><strong>浏览器</strong><small>记录网页 DOM 操作</small></button>
+                <button className={recordingMode === 'desktop' ? 'active' : ''} onClick={() => { setRecordingMode('desktop'); setRecordingSetupError(''); refreshDesktopWindows() }}><strong>电脑</strong><small>记录 Windows 应用操作</small></button>
+              </div>
+
+              {recordingMode === 'browser' && (
+                <div className="rpa-recorder-section">
+                  <label htmlFor="rpa-start-url">打开网址</label>
+                  <input id="rpa-start-url" value={pickerUrl} onChange={event => { setPickerUrl(event.target.value); setRecordingSetupError('') }} placeholder="https://example.com" autoFocus />
+                  <p>系统会打开独立浏览器，只记录其中的网页 DOM 操作。</p>
+                </div>
+              )}
+
+              {recordingMode === 'desktop' && (
+                <div className="rpa-recorder-section">
+                  <div className="rpa-recorder-field-head"><label htmlFor="rpa-start-app">初始应用</label><button onClick={refreshDesktopWindows}>刷新</button></div>
+                  <select id="rpa-start-app" value={selectedDesktopProcessId} onChange={event => setSelectedDesktopProcessId(event.target.value)} disabled={isLoadingDesktopWindows}>
+                    <option value="">Windows 桌面（默认）</option>
+                    {desktopWindows.map(item => <option key={`${item.processId}-${item.windowTitle}`} value={item.processId}>{item.windowTitle} · {item.processName}</option>)}
+                  </select>
+                  <p>{isLoadingDesktopWindows ? '正在读取任务栏应用…' : `已找到 ${desktopWindows.length} 个可用窗口；不选择时先回到桌面。`}</p>
+                </div>
+              )}
+
+              {recordingSetupError && <div className="rpa-recorder-error">{recordingSetupError}</div>}
+              <footer className="rpa-recorder-setup-footer">
+                <span>开始后会显示全局悬浮控制卡</span>
+                <div><button className="secondary" onClick={() => setShowPickerPrompt(false)}>取消</button><button className="primary" onClick={confirmPickElement}>开始录制</button></div>
+              </footer>
+            </section>
+          ) : (
+            <section className="rpa-picker-card">
+              <h3>启动可视化元素拾取器</h3><p>输入测试网址后，在真实浏览器中选择目标元素。</p>
+              <input value={pickerUrl} onChange={event => setPickerUrl(event.target.value)} />
+              <footer><button onClick={() => setShowPickerPrompt(false)}>取消</button><button onClick={confirmPickElement}>启动浏览器拾取</button></footer>
+            </section>
+          )}
         </div>
       )}
       {menu && (
@@ -1381,7 +1410,7 @@ ${JSON.stringify(filteredActions, null, 2)}
               }
               if (selectedNodeId === menu.id) {
                 setSelectedNodeId(null)
-                if (activeTab === 'attr') setShowPanel(false)
+                setNodeCardPosition(null)
               }
               setMenu(null)
             }}
