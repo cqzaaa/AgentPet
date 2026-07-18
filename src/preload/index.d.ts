@@ -1,5 +1,14 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 
+type SessionMutation =
+  | { type: 'session-upsert'; session: any }
+  | { type: 'session-update'; sessionId: string; updates: any }
+  | { type: 'session-delete'; sessionId: string }
+  | { type: 'message-upsert'; sessionId: string; message: any; sessionTime?: string }
+  | { type: 'messages-upsert'; messages: any[] }
+  | { type: 'message-delete'; messageId: string }
+  | { type: 'refresh'; sessionId?: string }
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -51,13 +60,14 @@ declare global {
       getOllamaModels: (baseUrl: string) => Promise<string[]>
       getModels: (config: any) => Promise<string[]>
       getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string }) => Promise<any[] | null>
+      getMessagePromptInfo: (messageId: string | number) => Promise<any | null>
       createSession: (session: any) => Promise<boolean>
       updateSession: (sessionId: string, updates: any) => Promise<boolean>
       deleteSession: (sessionId: string) => Promise<boolean>
       saveMessage: (message: any) => Promise<boolean>
       saveMessages: (messages: any[]) => Promise<boolean>
       deleteMessage: (messageId: string) => Promise<boolean>
-      onSessionsUpdated: (callback: () => void) => () => void
+      onSessionsUpdated: (callback: (mutation?: SessionMutation) => void) => () => void
       appendMemorySummary: (sessionId: string, text: string) => Promise<boolean>
       getMemoryProfile: () => Promise<string>
       writeMemoryProfile: (text: string) => Promise<boolean>

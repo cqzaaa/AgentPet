@@ -741,19 +741,49 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }, [])
 
-  // 稳定 Virtuoso itemContent 回调，避免每次渲染重新创建
-  const itemContent = useCallback((index: number, msg: any) => (
-    <ChatMessageItem
-      key={msg.id}
-      msg={msg}
-      currentAvatarName={currentAvatarName}
-      requestMessage={msg.sender === 'agent'
-        ? activeSessMessages.slice(0, index).findLast((message: any) => message.sender === 'user')
-        : undefined}
-      highlightedMessageId={highlightedMessageId}
-      onPreviewFile={handlePreviewFile}
-    />
-  ), [activeSessMessages, currentAvatarName, highlightedMessageId, handlePreviewFile])
+  // Keep the virtual list data stable while only a message's streaming text is
+  // changing. Virtuoso now tracks lightweight IDs instead of full messages.
+  const messageIdsRef = useRef<Array<string | number>>([])
+  const messageIds = useMemo(() => {
+    const next = activeSessMessages.map((message: any) => message.id as string | number)
+    const previous = messageIdsRef.current
+    if (previous.length === next.length && previous.every((id, index) => id === next[index])) {
+      return previous
+    }
+    messageIdsRef.current = next
+    return next
+  }, [activeSessMessages])
+
+  // Build message and request relationships once per message update. This
+  // replaces the previous slice(0, index).findLast(...) work performed by
+  // every visible row during every streaming frame.
+  const { messageById, requestMessageById } = useMemo(() => {
+    const byId = new Map<string | number, any>()
+    const requestById = new Map<string | number, any>()
+    let latestUserMessage: any = undefined
+    for (const message of activeSessMessages) {
+      byId.set(message.id, message)
+      if (message.sender === 'user') latestUserMessage = message
+      else if (message.sender === 'agent' && latestUserMessage) requestById.set(message.id, latestUserMessage)
+    }
+    return { messageById: byId, requestMessageById: requestById }
+  }, [activeSessMessages])
+
+  const itemContent = useCallback((_index: number, messageId: string | number) => {
+    const message = messageById.get(messageId)
+    if (!message) return null
+    return (
+      <ChatMessageItem
+        msg={message}
+        currentAvatarName={currentAvatarName}
+        requestMessage={requestMessageById.get(messageId)}
+        highlightedMessageId={highlightedMessageId}
+        onPreviewFile={handlePreviewFile}
+      />
+    )
+  }, [messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile])
+
+  const computeMessageKey = useCallback((_index: number, messageId: string | number) => messageId, [])
 
   const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
   const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
@@ -827,7 +857,8 @@ function ChatPageImpl(): React.JSX.Element {
               key={activeSessionId}
               ref={virtuosoRef}
               style={{ height: '100%' }}
-              data={activeSessMessages}
+              data={messageIds}
+              computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
               followOutput={(isAtBottom) => isAtBottom ? 'auto' : false}
               initialTopMostItemIndex={999999}

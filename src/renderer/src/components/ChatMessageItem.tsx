@@ -1143,7 +1143,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [traceExportState, setTraceExportState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showPromptModal, setShowPromptModal] = useState(false)
+  const [loadedPromptInfo, setLoadedPromptInfo] = useState<any | null>(null)
+  const [promptInfoLoading, setPromptInfoLoading] = useState(false)
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
+  const promptInfo = msg.promptInfo || loadedPromptInfo
 
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const deferredStreamingText = useDeferredValue(msg.isThinking ? msg.text : null)
@@ -1236,6 +1239,26 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     } catch (error) {
       console.error('导出调用过程失败', error)
       setTraceExportState('error')
+    }
+  }
+
+  const handleOpenPromptInfo = async () => {
+    if (promptInfo) {
+      setShowPromptModal(true)
+      return
+    }
+    if (!window.api?.getMessagePromptInfo || promptInfoLoading) return
+    setPromptInfoLoading(true)
+    try {
+      const storedPromptInfo = await window.api.getMessagePromptInfo(msg.id)
+      if (storedPromptInfo) {
+        setLoadedPromptInfo(storedPromptInfo)
+        setShowPromptModal(true)
+      }
+    } catch (error) {
+      console.error('读取消息 prompt_info 失败', error)
+    } finally {
+      setPromptInfoLoading(false)
     }
   }
 
@@ -1551,10 +1574,11 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : '⇩ 导出调用过程'}
             </button>
           )}
-          {msg.sender === 'user' && msg.promptInfo && (
+          {msg.sender === 'user' && (msg.promptInfo || msg.hasPromptInfo) && (
             <button
               className="msg-prompt-btn"
-              onClick={() => setShowPromptModal(true)}
+              onClick={handleOpenPromptInfo}
+              disabled={promptInfoLoading}
               title="查看传给 Agent 的完整内容"
             >
               🔍
@@ -1564,7 +1588,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       )}
 
       {/* 提示词弹框 */}
-      {showPromptModal && msg.promptInfo && (
+      {showPromptModal && promptInfo && (
         <div
           style={{
             position: 'fixed',
@@ -1674,7 +1698,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             >
               {/* Tab 1: 知识召回与图谱可视化 */}
               {activePromptTab === 'recall' && (() => {
-                const debug = msg.promptInfo.recallDebug
+                const debug = promptInfo.recallDebug
                 const candidates = debug?.allScored || []
                 return (
                   <div>
@@ -1829,7 +1853,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         color: 'var(--color-text-primary, #333)'
                       }}
                     >
-                      {msg.promptInfo.systemPrompt}
+                      {promptInfo.systemPrompt}
                     </pre>
                   </div>
                 </div>
@@ -1852,10 +1876,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     >
                       <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>📊 模型配置参数</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div><strong>模型:</strong> {msg.promptInfo.model || '未知'}</div>
-                        <div><strong>服务商:</strong> {msg.promptInfo.provider || '未知'}</div>
-                        <div><strong>采样温度:</strong> {msg.promptInfo.temperature ?? '默认 (1.0)'}</div>
-                        <div><strong>最大生成 Token:</strong> {msg.promptInfo.maxTokens ?? '默认 (不限)'}</div>
+                        <div><strong>模型:</strong> {promptInfo.model || '未知'}</div>
+                        <div><strong>服务商:</strong> {promptInfo.provider || '未知'}</div>
+                        <div><strong>采样温度:</strong> {promptInfo.temperature ?? '默认 (1.0)'}</div>
+                        <div><strong>最大生成 Token:</strong> {promptInfo.maxTokens ?? '默认 (不限)'}</div>
                       </div>
                     </div>
 
@@ -1871,14 +1895,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     >
                       <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', color: '#10b981', borderBottom: '1px solid rgba(16,185,129,0.15)', paddingBottom: '6px' }}>📏 Token 估算与占比</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div><strong>系统预设:</strong> ~{formatTokens(estimateTokens(msg.promptInfo.systemPrompt || ''))}</div>
-                        <div><strong>历史上下文:</strong> ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))))}</div>
-                        <div><strong>工具定义:</strong> ~{formatTokens(estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || [])))}</div>
+                        <div><strong>系统预设:</strong> ~{formatTokens(estimateTokens(promptInfo.systemPrompt || ''))}</div>
+                        <div><strong>历史上下文:</strong> ~{formatTokens(estimateTokens(JSON.stringify((promptInfo.chatMessages || []).slice(1))))}</div>
+                        <div><strong>工具定义:</strong> ~{formatTokens(estimateTokens(JSON.stringify(promptInfo.toolsDefinition || [])))}</div>
                         <div style={{ borderTop: '1px dashed rgba(16,185,129,0.2)', paddingTop: '4px', marginTop: '4px', fontWeight: 'bold' }}>
                           总计输入估算: ~{formatTokens(
-                            estimateTokens(msg.promptInfo.systemPrompt || '') +
-                            estimateTokens(JSON.stringify(msg.promptInfo.chatMessages.slice(1))) +
-                            estimateTokens(JSON.stringify(msg.promptInfo.toolsDefinition || []))
+                            estimateTokens(promptInfo.systemPrompt || '') +
+                            estimateTokens(JSON.stringify((promptInfo.chatMessages || []).slice(1))) +
+                            estimateTokens(JSON.stringify(promptInfo.toolsDefinition || []))
                           )}
                         </div>
                       </div>
@@ -1888,9 +1912,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                   {/* 携带的工具定义 */}
                   <div>
                     <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px', color: 'var(--color-text-primary, #333)' }}>🛠️ 注入模型工具库 (Tools Schema)</div>
-                    {msg.promptInfo.toolsDefinition && msg.promptInfo.toolsDefinition.length > 0 ? (
+                    {promptInfo.toolsDefinition && promptInfo.toolsDefinition.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {msg.promptInfo.toolsDefinition.map((tool: any, idx: number) => {
+                        {promptInfo.toolsDefinition.map((tool: any, idx: number) => {
                           const func = tool.function || tool
                           return (
                             <div key={idx} style={{ padding: '12px', border: '1px solid var(--color-border, #e0e0e0)', borderRadius: '8px', backgroundColor: 'var(--color-bg-secondary, #fafafa)' }}>

@@ -879,10 +879,6 @@ function createWindow(): void {
       if (inputWindow && !inputWindow.isDestroyed()) {
         inputWindow.webContents.send('pet-reply-response', responseText)
       }
-      // 同步通知 Agent 窗口刷新会话（回复已写入数据库）
-      if (agentWindow && !agentWindow.isDestroyed()) {
-        agentWindow.webContents.send('api:wechat-session-updated')
-      }
     })
 
     // 从快捷输入框向完整对话窗口传递待发送文本的通知（数据在 localStorage 中）
@@ -2788,67 +2784,48 @@ app.whenReady().then(() => {
     try {
       await migrateOldSessionsIfExist()
 
-      const activeSessionId = options?.activeSessionId
-
-      const isToday = (timeStr: string): boolean => {
-        if (!timeStr) return false
-        try {
-          const d = new Date(timeStr.replace(/-/g, '/'))
-          if (isNaN(d.getTime())) return false
-          const now = new Date()
-          return d.getFullYear() === now.getFullYear() &&
-                 d.getMonth() === now.getMonth() &&
-                 d.getDate() === now.getDate()
-        } catch (e) {
-          return false
-        }
-      }
-
       const database = await getDB()
-      const dbSessions = await database.all('SELECT * FROM sessions ORDER BY created_at DESC')
-
-      // 区分主要会话（今日有更新的会话、置顶会话、当前正在激活的会话）
-      const majorSessions = dbSessions.filter((s: any) => {
-        const isPinned = s.id.startsWith('wechat:') ? true : (s.pinned === 1)
-        const isActive = s.id === activeSessionId
-        const isCurrentDay = isToday(s.time)
-        return isPinned || isActive || isCurrentDay
-      })
-
-      // 确定最终返回哪些 sessions
-      const targetSessions = dbSessions
-
-      const majorSessionIds = new Set(majorSessions.map((s: any) => s.id))
-      const targetSessionIds = targetSessions.map((s: any) => s.id)
-
-      const group20 = targetSessionIds.filter(id => majorSessionIds.has(id))
-      const group1 = targetSessionIds.filter(id => !majorSessionIds.has(id))
+      const dbSessions = await database.all(`
+        SELECT id, name, time, pinned, user_id, context_summary, created_at
+        FROM sessions
+        ORDER BY created_at DESC
+      `)
+      const fallbackActiveSession = dbSessions.find((s: any) => s.pinned !== 1 && !s.id.startsWith('wechat:')) || dbSessions[0]
+      const activeSessionId = options?.activeSessionId || fallbackActiveSession?.id
 
       let dbMessages: any[] = []
-      if (targetSessionIds.length > 0) {
-        const placeholdersTarget = targetSessionIds.map(() => '?').join(',')
-        
-        let sql = `
-          SELECT * FROM (
-            SELECT rowid as msg_rowid, *, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY rowid DESC) as rn
-            FROM messages
-            WHERE session_id IN (${placeholdersTarget})
-          )
+      if (dbSessions.length > 0) {
+        const activeMessageColumns = `
+          m.rowid AS msg_rowid, m.id, m.session_id, m.sender, m.text, m.time,
+          m.is_thinking, m.tool_steps, m.file_info, m.file_infos, m.is_error,
+          m.user_id, m.is_summarized,
+          CASE WHEN m.prompt_info IS NOT NULL THEN 1 ELSE 0 END AS has_prompt_info
         `
-        const params: any[] = [...targetSessionIds]
-
-        if (group20.length > 0 && group1.length > 0) {
-          const placeholders20 = group20.map(() => '?').join(',')
-          const placeholders1 = group1.map(() => '?').join(',')
-          sql += ` WHERE (session_id IN (${placeholders20}) AND rn <= 20) OR (session_id IN (${placeholders1}) AND rn <= 1)`
-          params.push(...group20, ...group1)
-        } else if (group20.length > 0) {
-          sql += ` WHERE rn <= 20`
-        } else if (group1.length > 0) {
-          sql += ` WHERE rn <= 1`
-        }
-
-        dbMessages = await database.all(sql, ...params)
+        const previewMessageColumns = `
+          m.rowid AS msg_rowid, m.id, m.session_id, m.sender, m.text, m.time,
+          m.is_thinking, m.is_error, m.user_id, m.is_summarized,
+          CASE WHEN m.prompt_info IS NOT NULL THEN 1 ELSE 0 END AS has_prompt_info
+        `
+        const activeMessages = activeSessionId
+          ? await database.all(`
+              SELECT ${activeMessageColumns}
+              FROM messages m
+              WHERE m.session_id = ?
+              ORDER BY m.rowid DESC
+              LIMIT 20
+            `, activeSessionId)
+          : []
+        const previewMessages = await database.all(`
+          SELECT ${previewMessageColumns}
+          FROM messages m
+          INNER JOIN (
+            SELECT session_id, MAX(rowid) AS msg_rowid
+            FROM messages
+            ${activeSessionId ? 'WHERE session_id <> ?' : ''}
+            GROUP BY session_id
+          ) latest ON latest.msg_rowid = m.rowid
+        `, ...(activeSessionId ? [activeSessionId] : []))
+        dbMessages = [...activeMessages, ...previewMessages]
       }
 
       // 将消息按 session_id 分组
@@ -2873,11 +2850,6 @@ app.whenReady().then(() => {
             fileInfos = arr.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest })
           } catch (e) { console.error(e) }
         }
-        let promptInfo = undefined
-        if (m.prompt_info) {
-          try { promptInfo = JSON.parse(m.prompt_info) } catch (e) { console.error(e) }
-        }
-
         let restoredId: string | number = m.id
         if (/^\d+$/.test(m.id)) {
           const num = Number(m.id)
@@ -2899,7 +2871,7 @@ app.whenReady().then(() => {
           isError: m.is_error === 1,
           userId: m.user_id || 'system',
           isSummarized: m.is_summarized === 1,
-          promptInfo
+          hasPromptInfo: m.has_prompt_info === 1
         }
 
         if (!messagesBySession[m.session_id]) {
@@ -2909,7 +2881,7 @@ app.whenReady().then(() => {
       }
 
       const result: any[] = []
-      for (const s of targetSessions as any[]) {
+      for (const s of dbSessions as any[]) {
         const msgs = messagesBySession[s.id] || []
         // 重新恢复正常的时间升序排列
         msgs.sort((a, b) => a.msg_rowid - b.msg_rowid)
@@ -2932,20 +2904,38 @@ app.whenReady().then(() => {
     return null
   })
 
-  const broadcastSessionsUpdated = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('api:sessions-updated')
+  ipcMain.handle('api:get-message-prompt-info', async (_, messageId: string | number) => {
+    try {
+      const database = await getDB()
+      const row = await database.get('SELECT prompt_info FROM messages WHERE id = ?', String(messageId))
+      if (!row?.prompt_info) return null
+      return JSON.parse(row.prompt_info)
+    } catch (e) {
+      console.error('读取消息 prompt_info 失败', e)
+      return null
     }
-    if (agentWindow && !agentWindow.isDestroyed()) {
-      agentWindow.webContents.send('api:sessions-updated')
-    }
-    if (inputWindow && !inputWindow.isDestroyed()) {
-      inputWindow.webContents.send('api:sessions-updated')
+  })
+
+  type SessionMutation =
+    | { type: 'session-upsert'; session: any }
+    | { type: 'session-update'; sessionId: string; updates: any }
+    | { type: 'session-delete'; sessionId: string }
+    | { type: 'message-upsert'; sessionId: string; message: any; sessionTime?: string }
+    | { type: 'messages-upsert'; messages: any[] }
+    | { type: 'message-delete'; messageId: string }
+    | { type: 'refresh'; sessionId?: string }
+
+  const broadcastSessionMutation = (sourceWebContentsId: number | undefined, mutation: SessionMutation) => {
+    const windows = [mainWindow, agentWindow, inputWindow]
+    for (const window of windows) {
+      if (!window || window.isDestroyed() || window.webContents.isDestroyed()) continue
+      if (sourceWebContentsId !== undefined && window.webContents.id === sourceWebContentsId) continue
+      window.webContents.send('api:sessions-updated', mutation)
     }
   }
 
   // 创建会话
-  ipcMain.handle('api:create-session', async (_, session: any) => {
+  ipcMain.handle('api:create-session', async (event, session: any) => {
     try {
       const database = await getDB()
       const isWechat = session.id?.startsWith('wechat:')
@@ -2959,7 +2949,16 @@ app.whenReady().then(() => {
         session.userId || 'system',
         createdAt
       )
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, {
+        type: 'session-upsert',
+        session: {
+          ...session,
+          createdAt,
+          messages: Array.isArray(session.messages) ? session.messages : [],
+          pinned: Boolean(session.pinned || isWechat),
+          userId: session.userId || 'system'
+        }
+      })
       return true
     } catch (e) {
       console.error('创建会话失败', e)
@@ -2968,7 +2967,7 @@ app.whenReady().then(() => {
   })
 
   // 更新会话
-  ipcMain.handle('api:update-session', async (_, sessionId: string, updates: any) => {
+  ipcMain.handle('api:update-session', async (event, sessionId: string, updates: any) => {
     try {
       const database = await getDB()
       const keys = Object.keys(updates)
@@ -2989,7 +2988,16 @@ app.whenReady().then(() => {
       values.push(sessionId)
       const sql = `UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`
       await database.run(sql, ...values)
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, {
+        type: 'session-update',
+        sessionId,
+        updates: {
+          ...updates,
+          ...(Object.prototype.hasOwnProperty.call(updates, 'pinned')
+            ? { pinned: Boolean(updates.pinned || sessionId.startsWith('wechat:')) }
+            : {})
+        }
+      })
       return true
     } catch (e) {
       console.error('更新会话失败', e)
@@ -2998,11 +3006,11 @@ app.whenReady().then(() => {
   })
 
   // 确保微信会话存在（使用 INSERT OR IGNORE 避开级联删除，并且默认置顶）
-  ipcMain.handle('api:ensure-wechat-session', async (_, sessionId: string, nickname: string) => {
+  ipcMain.handle('api:ensure-wechat-session', async (event, sessionId: string, nickname: string) => {
     try {
       const database = await getDB()
       const timeStr = new Date().toLocaleString('zh-CN', { hour12: false })
-      await database.run(
+      const insertResult = await database.run(
         'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id, created_at) VALUES (?, ?, ?, 1, ?, ?)',
         sessionId,
         nickname,
@@ -3015,7 +3023,26 @@ app.whenReady().then(() => {
         'UPDATE sessions SET pinned = 1 WHERE id = ?',
         sessionId
       )
-      broadcastSessionsUpdated()
+      if ((insertResult.changes || 0) > 0) {
+        broadcastSessionMutation(event.sender.id, {
+          type: 'session-upsert',
+          session: {
+            id: sessionId,
+            name: nickname,
+            time: timeStr,
+            createdAt: timeStr,
+            pinned: true,
+            userId: sessionId.replace('wechat:', ''),
+            messages: []
+          }
+        })
+      } else {
+        broadcastSessionMutation(event.sender.id, {
+          type: 'session-update',
+          sessionId,
+          updates: { pinned: true }
+        })
+      }
       return true
     } catch (e) {
       console.error('确保微信会话存在失败', e)
@@ -3024,7 +3051,7 @@ app.whenReady().then(() => {
   })
 
   // 删除会话
-  ipcMain.handle('api:delete-session', async (_, sessionId: string) => {
+  ipcMain.handle('api:delete-session', async (event, sessionId: string) => {
     try {
       const database = await getDB()
       await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
@@ -3053,7 +3080,7 @@ app.whenReady().then(() => {
         console.error(`删除会话附件目录失败 (${sessionId}):`, err)
       }
 
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, { type: 'session-delete', sessionId })
       return true
     } catch (e) {
       console.error('删除会话失败', e)
@@ -3061,46 +3088,77 @@ app.whenReady().then(() => {
     }
   })
 
+  const messageUpsertSql = `
+    INSERT INTO messages
+      (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      session_id = excluded.session_id,
+      sender = excluded.sender,
+      text = excluded.text,
+      time = excluded.time,
+      is_thinking = excluded.is_thinking,
+      tool_steps = excluded.tool_steps,
+      file_info = excluded.file_info,
+      file_infos = excluded.file_infos,
+      is_error = excluded.is_error,
+      user_id = excluded.user_id,
+      is_summarized = excluded.is_summarized,
+      prompt_info = COALESCE(excluded.prompt_info, messages.prompt_info)
+  `
+
+  const serializeMessageForDb = (m: any) => {
+    const msgId = String(m.id)
+    const sender = m.sender || 'system'
+    const text = m.text || ''
+    const time = m.time || ''
+    const isThinking = m.isThinking ? 1 : 0
+    const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
+    const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
+    const fileInfos = m.fileInfos
+      ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
+      : null
+    const isError = m.isError ? 1 : 0
+    const userId = m.userId || 'system'
+    const isSummarized = m.isSummarized ? 1 : 0
+    const promptInfo = m.promptInfo ? JSON.stringify(m.promptInfo) : null
+    return {
+      msgId,
+      sender,
+      text,
+      time,
+      userId,
+      values: [msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo]
+    }
+  }
+
   // 保存消息
-  ipcMain.handle('api:save-message', async (_, m: any) => {
+  ipcMain.handle('api:save-message', async (event, m: any) => {
     try {
       const database = await getDB()
-      const msgId = String(m.id)
-      const sender = m.sender || 'system'
-      const text = m.text || ''
-      const time = m.time || ''
-      const isThinking = m.isThinking ? 1 : 0
-      const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
-      const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
-      const fileInfos = m.fileInfos
-        ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
-        : null
-      const isError = m.isError ? 1 : 0
-      const userId = m.userId || 'system'
-      const isSummarized = m.isSummarized ? 1 : 0
-      const promptInfo = m.promptInfo ? JSON.stringify(m.promptInfo) : null
-
-      const existing = await database.get('SELECT id FROM messages WHERE id = ?', msgId)
-      if (existing) {
-        await database.run(`
-          UPDATE messages SET
-            session_id = ?, sender = ?, text = ?, time = ?, is_thinking = ?,
-            tool_steps = ?, file_info = ?, file_infos = ?, is_error = ?,
-            user_id = ?, is_summarized = ?, prompt_info = ?
-          WHERE id = ?
-        `, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo, msgId)
-      } else {
-        await database.run(`
-          INSERT INTO messages
-          (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo)
-      }
+      const serialized = serializeMessageForDb(m)
+      const { sender, text, time, userId } = serialized
+      await database.run(messageUpsertSql, ...serialized.values)
 
       // 每次保存消息时，同步更新会话的最后活跃时间以维持正确的最近会话列表排序
       await database.run('UPDATE sessions SET time = ? WHERE id = ?', time, m.sessionId)
 
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, {
+        type: 'message-upsert',
+        sessionId: m.sessionId,
+        sessionTime: time,
+        message: {
+          ...m,
+          id: m.id,
+          sender,
+          text,
+          time,
+          isThinking: Boolean(m.isThinking),
+          isError: Boolean(m.isError),
+          userId,
+          isSummarized: Boolean(m.isSummarized)
+        }
+      })
       return true
     } catch (e) {
       console.error('保存消息失败', e)
@@ -3109,48 +3167,31 @@ app.whenReady().then(() => {
   })
 
   // 批量保存消息 (使用事务优化，合并通知以消除频繁 IPC/渲染带来的卡顿)
-  ipcMain.handle('api:save-messages', async (_, messages: any[]) => {
+  ipcMain.handle('api:save-messages', async (event, messages: any[]) => {
     try {
       if (!Array.isArray(messages) || messages.length === 0) return true
       const database = await getDB()
+      const latestSessionTimes = new Map<string, string>()
       
       await database.run('BEGIN TRANSACTION')
       for (const m of messages) {
-        const msgId = String(m.id)
-        const sender = m.sender || 'system'
-        const text = m.text || ''
-        const time = m.time || ''
-        const isThinking = m.isThinking ? 1 : 0
-        const toolSteps = m.toolSteps ? JSON.stringify(m.toolSteps) : null
-        const fileInfo = m.fileInfo ? JSON.stringify(m.fileInfo) : null
-        const fileInfos = m.fileInfos
-          ? JSON.stringify(m.fileInfos.map((f: any) => { const { objectUrl: _o, ...rest } = f; return rest }))
-          : null
-        const isError = m.isError ? 1 : 0
-        const userId = m.userId || 'system'
-        const isSummarized = m.isSummarized ? 1 : 0
-        const promptInfo = m.promptInfo ? JSON.stringify(m.promptInfo) : null
-
-        const existing = await database.get('SELECT id FROM messages WHERE id = ?', msgId)
-        if (existing) {
-          await database.run(`
-            UPDATE messages SET
-              session_id = ?, sender = ?, text = ?, time = ?, is_thinking = ?,
-              tool_steps = ?, file_info = ?, file_infos = ?, is_error = ?,
-              user_id = ?, is_summarized = ?, prompt_info = ?
-            WHERE id = ?
-          `, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo, msgId)
-        } else {
-          await database.run(`
-            INSERT INTO messages
-            (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, msgId, m.sessionId, sender, text, time, isThinking, toolSteps, fileInfo, fileInfos, isError, userId, isSummarized, promptInfo)
-        }
-        await database.run('UPDATE sessions SET time = ? WHERE id = ?', time, m.sessionId)
+        const serialized = serializeMessageForDb(m)
+        await database.run(messageUpsertSql, ...serialized.values)
+        if (m.sessionId) latestSessionTimes.set(m.sessionId, serialized.time)
+      }
+      for (const [sessionId, time] of latestSessionTimes) {
+        await database.run('UPDATE sessions SET time = ? WHERE id = ?', time, sessionId)
       }
       await database.run('COMMIT')
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, {
+        type: 'messages-upsert',
+        messages: messages.map(message => ({
+          ...message,
+          isThinking: Boolean(message.isThinking),
+          isError: Boolean(message.isError),
+          isSummarized: Boolean(message.isSummarized)
+        }))
+      })
       return true
     } catch (e) {
       console.error('批量保存消息失败', e)
@@ -3163,11 +3204,11 @@ app.whenReady().then(() => {
   })
 
   // 删除消息
-  ipcMain.handle('api:delete-message', async (_, messageId: string) => {
+  ipcMain.handle('api:delete-message', async (event, messageId: string) => {
     try {
       const database = await getDB()
       await database.run('DELETE FROM messages WHERE id = ?', messageId)
-      broadcastSessionsUpdated()
+      broadcastSessionMutation(event.sender.id, { type: 'message-delete', messageId })
       return true
     } catch (e) {
       console.error('删除消息失败', e)

@@ -40,6 +40,87 @@ export interface Session {
   contextSummary?: string
 }
 
+type SessionMutation =
+  | { type: 'session-upsert'; session: Session }
+  | { type: 'session-update'; sessionId: string; updates: Partial<Session> }
+  | { type: 'session-delete'; sessionId: string }
+  | { type: 'message-upsert'; sessionId: string; message: any; sessionTime?: string }
+  | { type: 'messages-upsert'; messages: Array<any & { sessionId: string }> }
+  | { type: 'message-delete'; messageId: string }
+  | { type: 'refresh'; sessionId?: string }
+
+function upsertSessionMessages(messages: any[], updates: any[]): any[] {
+  if (updates.length === 0) return messages
+  const next = [...messages]
+  for (const update of updates) {
+    const index = next.findIndex(message => String(message.id) === String(update.id))
+    if (index >= 0) next[index] = { ...next[index], ...update }
+    else next.push(update)
+  }
+  return next
+}
+
+function applySessionMutation(sessions: Session[], mutation: SessionMutation): Session[] {
+  switch (mutation.type) {
+    case 'session-upsert': {
+      const index = sessions.findIndex(session => session.id === mutation.session.id)
+      if (index < 0) return [mutation.session, ...sessions]
+      const current = sessions[index]
+      const incomingMessages = mutation.session.messages || []
+      const next = [...sessions]
+      next[index] = {
+        ...current,
+        ...mutation.session,
+        messages: incomingMessages.length > 0 ? incomingMessages : current.messages
+      }
+      return next
+    }
+    case 'session-update':
+      return sessions.map(session =>
+        session.id === mutation.sessionId ? { ...session, ...mutation.updates } : session
+      )
+    case 'session-delete':
+      return sessions.filter(session => session.id !== mutation.sessionId)
+    case 'message-upsert':
+      return sessions.map(session => {
+        if (session.id !== mutation.sessionId) return session
+        return {
+          ...session,
+          ...(mutation.sessionTime ? { time: mutation.sessionTime } : {}),
+          messages: upsertSessionMessages(session.messages || [], [mutation.message])
+        }
+      })
+    case 'messages-upsert': {
+      const updatesBySession = new Map<string, any[]>()
+      for (const message of mutation.messages) {
+        if (!message.sessionId) continue
+        const updates = updatesBySession.get(message.sessionId) || []
+        updates.push(message)
+        updatesBySession.set(message.sessionId, updates)
+      }
+      return sessions.map(session => {
+        const updates = updatesBySession.get(session.id)
+        if (!updates) return session
+        const latestTime = updates.reduce((time, message) => message.time || time, session.time)
+        return {
+          ...session,
+          time: latestTime,
+          messages: upsertSessionMessages(session.messages || [], updates)
+        }
+      })
+    }
+    case 'message-delete':
+      return sessions.map(session => {
+        const messages = (session.messages || []).filter(
+          message => String(message.id) !== String(mutation.messageId)
+        )
+        return messages.length === session.messages.length ? session : { ...session, messages }
+      })
+    case 'refresh':
+      return sessions
+  }
+}
+
 export interface TokenLog {
   id: string
   model: string
@@ -871,7 +952,7 @@ export function useAppStore() {
     try {
       const currentActiveId = useAppStoreRaw.getState().activeSessionId
       const localSess = await window.api.getLocalSessions({
-        activeSessionId: currentActiveId
+        activeSessionId: clearThinking ? undefined : currentActiveId
       })
       if (localSess && localSess.length > 0) {
         if (clearThinking) {
@@ -1214,9 +1295,12 @@ export function useAppStore() {
   // 监听原子接口引发的数据修改通知（跨窗口或其它事件）
   useEffect(() => {
     if (!window.api.onSessionsUpdated) return
-    const unsubscribe = window.api.onSessionsUpdated(() => {
-      // 保持静默数据重新拉取以同步状态
-      refreshSessions()
+    const unsubscribe = window.api.onSessionsUpdated((mutation?: SessionMutation) => {
+      if (!mutation || mutation.type === 'refresh') {
+        refreshSessions()
+        return
+      }
+      setSessions(previous => applySessionMutation(previous, mutation))
     })
     return () => unsubscribe()
   }, [])

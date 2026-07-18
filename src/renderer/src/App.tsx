@@ -1,13 +1,22 @@
-import { useEffect, useState } from 'react'
-import * as PIXI from 'pixi.js'
-import { AgentWindow } from './components/AgentWindow'
-import { PetWidget } from './components/PetWidget'
-import { ChatInputWindow } from './components/ChatInputWindow'
-import { ScreenshotWindow } from './components/ScreenshotWindow'
+import { lazy, Suspense, useEffect, useState } from 'react'
 
-// pixi-live2d-display@0.4 + pixi.js@6 需要全局暴露 PIXI 以驱动 Ticker
-// 必须在模块作用域最外层执行（不是在函数/useEffect 里）
-;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
+// Each Electron window loads only the renderer code required by its hash route.
+const AgentWindow = lazy(() =>
+  import('./components/AgentWindow').then(module => ({ default: module.AgentWindow }))
+)
+const PetWidget = lazy(() =>
+  import('./components/PetWidget').then(module => ({ default: module.PetWidget }))
+)
+const ChatInputWindow = lazy(() =>
+  import('./components/ChatInputWindow').then(module => ({ default: module.ChatInputWindow }))
+)
+const ScreenshotWindow = lazy(() =>
+  import('./components/ScreenshotWindow').then(module => ({ default: module.ScreenshotWindow }))
+)
+
+function WindowLoadingFallback(): React.JSX.Element {
+  return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
+}
 
 function App(): React.JSX.Element {
   const [currentHash, setCurrentHash] = useState(window.location.hash)
@@ -50,7 +59,7 @@ function App(): React.JSX.Element {
         ? <ScreenshotWindow />
         : <PetWidget />
 
-  return page
+  return <Suspense fallback={<WindowLoadingFallback />}>{page}</Suspense>
 }
 
 export default App

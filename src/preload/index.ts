@@ -1,6 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+type SessionMutation =
+  | { type: 'session-upsert'; session: any }
+  | { type: 'session-update'; sessionId: string; updates: any }
+  | { type: 'session-delete'; sessionId: string }
+  | { type: 'message-upsert'; sessionId: string; message: any; sessionTime?: string }
+  | { type: 'messages-upsert'; messages: any[] }
+  | { type: 'message-delete'; messageId: string }
+  | { type: 'refresh'; sessionId?: string }
+
 // Custom APIs for renderer
 const api = {
   moveWindow: (dx: number, dy: number): void => {
@@ -117,6 +126,8 @@ const api = {
     ipcRenderer.invoke('api:get-models', config),
   getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string }): Promise<any[] | null> =>
     ipcRenderer.invoke('api:get-local-sessions', options),
+  getMessagePromptInfo: (messageId: string | number): Promise<any | null> =>
+    ipcRenderer.invoke('api:get-message-prompt-info', messageId),
   createSession: (session: any): Promise<boolean> =>
     ipcRenderer.invoke('api:create-session', session),
   updateSession: (sessionId: string, updates: any): Promise<boolean> =>
@@ -129,8 +140,8 @@ const api = {
     ipcRenderer.invoke('api:save-messages', messages),
   deleteMessage: (messageId: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-message', messageId),
-  onSessionsUpdated: (callback: () => void): (() => void) => {
-    const subscription = () => callback()
+  onSessionsUpdated: (callback: (mutation?: SessionMutation) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, mutation?: SessionMutation) => callback(mutation)
     ipcRenderer.on('api:sessions-updated', subscription)
     return () => {
       ipcRenderer.removeListener('api:sessions-updated', subscription)

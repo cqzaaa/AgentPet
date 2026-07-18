@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react'
 import * as PIXI from 'pixi.js'
-import { Live2DModel } from 'pixi-live2d-display/cubism4'
+
+type Live2DModelClass = typeof import('pixi-live2d-display/cubism4')['Live2DModel']
+type Live2DModelInstance = InstanceType<Live2DModelClass>
+
+// Keep Pixi/Live2D initialization inside the pet-only renderer chunk.
+;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
 // 尺寸自适应配置
 const SIZE_CONFIG = {
@@ -38,19 +43,99 @@ function isCubismReady(): boolean {
   return typeof (window as unknown as { Live2DCubismCore?: unknown }).Live2DCubismCore !== 'undefined'
 }
 
+let cubismCoreLoadPromise: Promise<void> | null = null
+
+function ensureCubismCore(): Promise<void> {
+  if (isCubismReady()) return Promise.resolve()
+  if (cubismCoreLoadPromise) return cubismCoreLoadPromise
+
+  const loadPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-agentpet-cubism-core]')
+    const script = existing || document.createElement('script')
+
+    const handleLoad = (): void => {
+      if (isCubismReady()) resolve()
+      else reject(new Error('Cubism Core 加载完成但未能初始化'))
+    }
+    const handleError = (): void => reject(new Error('Cubism Core 加载失败'))
+
+    script.addEventListener('load', handleLoad, { once: true })
+    script.addEventListener('error', handleError, { once: true })
+
+    if (!existing) {
+      script.src = 'live2d://live2d/core/live2dcubismcore.min.js'
+      script.dataset.agentpetCubismCore = 'true'
+      document.head.appendChild(script)
+    }
+  }).catch(error => {
+    cubismCoreLoadPromise = null
+    throw error
+  })
+
+  cubismCoreLoadPromise = loadPromise
+  return loadPromise
+}
+
+function findWeightedPercentile(counts: Uint32Array, percentile: number): number {
+  let total = 0
+  for (const count of counts) total += count
+  if (total === 0) return 0
+  const target = total * percentile
+  let accumulated = 0
+  for (let index = 0; index < counts.length; index++) {
+    accumulated += counts[index]
+    if (accumulated >= target) return index
+  }
+  return counts.length - 1
+}
+
+function captureModelVisibleRight(
+  app: PIXI.Application,
+  logicalWidth: number,
+  logicalHeight: number
+): number | null {
+  try {
+    // Keep the later quick-chat positioning fix: this snapshot is used only to
+    // anchor the button near the model's visible right edge.
+    const canvas = app.renderer.plugins.extract.canvas(
+      app.stage,
+      new PIXI.Rectangle(0, 0, logicalWidth, logicalHeight)
+    )
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context || canvas.width === 0 || canvas.height === 0) return null
+    const image = context.getImageData(0, 0, canvas.width, canvas.height)
+    const columnCounts = new Uint32Array(canvas.width)
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const alpha = image.data[(y * canvas.width + x) * 4 + 3]
+        if (alpha < 24) continue
+        columnCounts[x]++
+      }
+    }
+    const scaleX = canvas.width / logicalWidth
+    // Percentiles ignore isolated particles or decorative pixels that would
+    // otherwise push the chat button to the window edge.
+    return findWeightedPercentile(columnCounts, 0.97) / scaleX
+  } catch (error) {
+    console.warn('[Live2D] Failed to locate the visible model edge:', error)
+    return null
+  }
+}
+
 export function PetWidget(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const [modelReady, setModelReady] = useState(false)
-  const [_isHoveringBody, setIsHoveringBody] = useState(false)
   const [widgetHeight, setWidgetHeight] = useState(SIZE_CONFIG.targetHeight)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [isModelHovered, setIsModelHovered] = useState(false)
+  const [chatButtonPosition, setChatButtonPosition] = useState<{ bottom: number; left: number } | null>(null)
 
 
   const isDraggingRef = useRef(false)
   const lastXRef = useRef(0)
   const lastYRef = useRef(0)
-  const modelRef = useRef<InstanceType<typeof Live2DModel> | null>(null)
+  const modelRef = useRef<Live2DModelInstance | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
 
   // ── 快捷聊天与大模型/TTS 相关状态 ──────────────────────────
@@ -608,18 +693,9 @@ ${memoryContext}
     if (!containerRef.current) return
     let destroyed = false
 
-    const waitForCubism = (retries = 20, interval = 100): Promise<void> =>
-      new Promise((resolve, reject) => {
-        const check = (n: number): void => {
-          if (isCubismReady()) { resolve(); return }
-          if (n <= 0) { reject(new Error('Cubism Core 未加载，请检查 live2dcubismcore.min.js 路径')); return }
-          setTimeout(() => check(n - 1), interval)
-        }
-        check(retries)
-      })
-
     const init = async (): Promise<void> => {
-      await waitForCubism()
+      await ensureCubismCore()
+      const { Live2DModel } = await import('pixi-live2d-display/cubism4')
       if (destroyed) return
 
       // 直接从主进程获取最新的配置信息，避免 React 状态更新延迟
@@ -648,7 +724,7 @@ ${memoryContext}
         resolution: Math.min(window.devicePixelRatio || 1, 1.5),
         autoDensity: true,
         powerPreference: 'low-power',
-        preserveDrawingBuffer: true // 开启绘图缓冲保留，用于 readPixels 检测不规则碰撞
+        preserveDrawingBuffer: true // Keep the framebuffer available for per-pointer pixel hit testing.
       })
       app.ticker.maxFPS = 30
       appRef.current = app
@@ -657,7 +733,7 @@ ${memoryContext}
       canvas.style.cssText = 'width:100%;height:100%;display:block;'
       containerRef.current!.appendChild(canvas)
 
-      let model: InstanceType<typeof Live2DModel>
+      let model: Live2DModelInstance
       try {
         const modelUrl = await window.api.getModelUrl()
         model = await Live2DModel.from(modelUrl, { autoInteract: false })
@@ -691,7 +767,9 @@ ${memoryContext}
       const bodyH = boundsH * finalScale
 
       // 动态推导最包裹身体的窗口宽度和高度（给动作摆动留出空间）
-      const computedWidth = Math.max(160, Math.min(480, Math.round(bodyW + 50)))
+      // Reserve enough transparent, click-through space on the right for the
+      // quick-chat button so it does not overlap the avatar.
+      const computedWidth = Math.max(190, Math.min(480, Math.round(bodyW + 100)))
       const targetHeight = Math.max(220, Math.min(500, Math.round(bodyH + 60)))
 
       console.log(`[Live2D] 窗口自适应尺寸设置: 宽=${computedWidth}, 高=${targetHeight}, 缩放=${finalScale}`)
@@ -712,6 +790,16 @@ ${memoryContext}
       model.y = targetHeight - 10 - (boundsY + boundsH) * finalScale + (customYOffset * finalScale)
 
       await model.motion('Idle')
+      app.render()
+      const visibleRight = captureModelVisibleRight(app, computedWidth, targetHeight)
+      if (visibleRight !== null) {
+        setChatButtonPosition({
+          left: Math.max(8, Math.min(computedWidth - 36, Math.round(visibleRight + 68))),
+          bottom: 10
+        })
+      } else {
+        setChatButtonPosition(null)
+      }
       setModelReady(true)
       console.log('[Live2D] 模型就绪！')
     }
@@ -745,11 +833,9 @@ ${memoryContext}
     const x = clientX - rect.left
     const y = clientY - rect.top
 
-    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
-      return false
-    }
+    if (x < 0 || x > rect.width || y < 0 || y > rect.height) return false
 
-    // 1. 高精度的 WebGL 像素级碰撞检测 (Alpha 过滤)
+    // Restore the original high-precision WebGL pixel hit test.
     try {
       const renderer = appRef.current.renderer
       const resolution = renderer.resolution || 1
@@ -758,37 +844,43 @@ ${memoryContext}
       const gl = (renderer as any).gl
       if (gl) {
         const pixels = new Uint8Array(4)
-          ; (renderer as any).framebuffer.bind()
+        ;(renderer as any).framebuffer.bind()
         gl.readPixels(canvasX, canvasY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
-        const alpha = pixels[3]
-        return alpha > 10 // 大于 10 则判定鼠标触及有颜色的身体部分
+        return pixels[3] > 10
       }
-    } catch (err) {
-      console.warn('[Live2D] WebGL readPixels 失败，降级至包围盒检测:', err)
+    } catch (error) {
+      console.warn('[Live2D] WebGL readPixels failed, falling back to model bounds:', error)
     }
 
-    // 2. 降级方案 A: 角色内置 hitTest
     const hitAreas = modelRef.current.hitTest(x, y)
-    if (hitAreas && hitAreas.length > 0) {
-      return true
-    }
+    if (hitAreas && hitAreas.length > 0) return true
 
-    // 3. 降级方案 B: 精确的物理可见部分 AABB 盒子检测
     try {
       const localBounds = modelRef.current.getLocalBounds()
       const finalScale = modelRef.current.scale.x
-
       const modelX = modelRef.current.x + localBounds.x * finalScale
       const modelY = modelRef.current.y + localBounds.y * finalScale
       const modelW = localBounds.width * finalScale
       const modelH = localBounds.height * finalScale
 
-      if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) {
-        return true
-      }
-    } catch (e) { }
+      if (x >= modelX && x <= modelX + modelW && y >= modelY && y <= modelY + modelH) return true
+    } catch { /* Fall through. */ }
 
     return false
+  }
+
+  const updatePointerInteraction = (clientX: number, clientY: number): void => {
+    const element = document.elementFromPoint(clientX, clientY)
+    const isChatButton = Boolean(element?.closest('.pet-chat-icon-btn'))
+    const isBubble = Boolean(element?.closest('.pet-toast-bubble'))
+    const isOnModel = checkHoveringModel(clientX, clientY)
+    setIsModelHovered(isOnModel || isChatButton)
+
+    if (isOnModel || isChatButton || isBubble) {
+      window.api.setIgnoreMouseEvents(false)
+    } else {
+      window.api.setIgnoreMouseEvents(true, { forward: true })
+    }
   }
 
   const handleMouseDown = (e: React.MouseEvent): void => {
@@ -801,43 +893,19 @@ ${memoryContext}
 
   const handleMouseEnter = (e: React.MouseEvent): void => {
     if (!modelRef.current) return
-
-    // 检查鼠标下方是不是交互式 HTML 元素（气泡或快捷聊天按钮）
-    const element = document.elementFromPoint(e.clientX, e.clientY)
-    const isInteractive = element && (element.closest('.pet-chat-icon-btn') || element.closest('.pet-toast-bubble'))
-
-    const isHovering = isInteractive ? true : checkHoveringModel(e.clientX, e.clientY)
-    setIsHoveringBody(isHovering)
-    if (isHovering) {
-      window.api.setIgnoreMouseEvents(false)
-    } else {
-      window.api.setIgnoreMouseEvents(true, { forward: true })
-    }
+    updatePointerInteraction(e.clientX, e.clientY)
   }
 
   const handleMouseLeave = (): void => {
-    setIsHoveringBody(false)
+    setIsModelHovered(false)
     window.api.setIgnoreMouseEvents(true, { forward: true })
   }
 
   const handleMouseMove = (e: React.MouseEvent): void => {
     if (isDraggingRef.current || !containerRef.current || !modelRef.current) return
     const rect = containerRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    modelRef.current.focus(x, y)
-
-    // 检查鼠标下方是不是交互式 HTML 元素（气泡或快捷聊天按钮）
-    const element = document.elementFromPoint(e.clientX, e.clientY)
-    const isInteractive = element && (element.closest('.pet-chat-icon-btn') || element.closest('.pet-toast-bubble'))
-
-    const isHovering = isInteractive ? true : checkHoveringModel(e.clientX, e.clientY)
-    setIsHoveringBody(isHovering)
-    if (isHovering) {
-      window.api.setIgnoreMouseEvents(false)
-    } else {
-      window.api.setIgnoreMouseEvents(true, { forward: true })
-    }
+    modelRef.current.focus(e.clientX - rect.left, e.clientY - rect.top)
+    updatePointerInteraction(e.clientX, e.clientY)
   }
 
   const handleClick = (e: React.MouseEvent): void => {
@@ -905,7 +973,7 @@ ${memoryContext}
           transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
 
-        .widget-container:hover .pet-chat-icon-btn {
+        .pet-chat-icon-btn.visible {
           opacity: 1;
           transform: scale(1);
         }
@@ -1029,8 +1097,13 @@ ${memoryContext}
       {/* 快捷输入聊天悬浮按钮 */}
       {modelReady && (
         <div
-          className="pet-chat-icon-btn"
+          className={`pet-chat-icon-btn ${isModelHovered ? 'visible' : ''}`}
           onClick={handleOpenInput}
+          style={chatButtonPosition ? {
+            bottom: `${chatButtonPosition.bottom}px`,
+            left: `${chatButtonPosition.left}px`,
+            right: 'auto'
+          } : undefined}
           title="快捷聊天"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

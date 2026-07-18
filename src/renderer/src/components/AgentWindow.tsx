@@ -1,19 +1,26 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { FilePreviewPanel } from './FilePreviewPanel'
+import React, { Suspense, lazy, useState, useRef, useEffect, useMemo } from 'react'
 import { useAppStore, useAppStoreRaw } from '../hooks/useAppStore'
 import type { Session } from '../hooks/useAppStore'
-import { ChatPage } from '../pages/ChatPage'
 import { ChatControllerProvider } from '../hooks/useChatController'
-import { ControlPage } from '../pages/ControlPage'
-import { AgentPage } from '../pages/AgentPage'
-import { SettingsPage } from '../pages/SettingsPage'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
-import { LogsPage } from '../pages/LogsPage'
-import { RpaPage } from '../rpa/RpaPage'
 import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
+
+const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
+const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
+const AgentPage = lazy(() => import('../pages/AgentPage').then(module => ({ default: module.AgentPage })))
+const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
+const RpaPage = lazy(() => import('../rpa/RpaPage').then(module => ({ default: module.RpaPage })))
+const FilePreviewPanel = lazy(() =>
+  import('./FilePreviewPanel').then(module => ({ default: module.FilePreviewPanel }))
+)
+
+function PageLoadingFallback(): React.JSX.Element {
+  return <div className="page-loading-placeholder" aria-hidden="true" />
+}
 
 function LogsIcon(): React.JSX.Element {
   return (
@@ -436,15 +443,17 @@ export function AgentWindow(): React.JSX.Element {
   const userMessages = activeSessMessages?.filter(m => m.sender === 'user') || []
 
   const renderPage = (): React.JSX.Element => {
+    let page: React.JSX.Element
     switch (activeTab) {
-      case 'chat': return <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>
-      case 'control': return <ControlPage store={store} />
-      case 'agent': return <AgentPage store={store} />
-      case 'logs': return <LogsPage store={store} />
-      case 'settings': return <SettingsPage store={store} />
-      case 'rpa': return <RpaPage />
-      default: return <div>Overview</div>
+      case 'chat': page = <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
+      case 'control': page = <ControlPage store={store} />; break
+      case 'agent': page = <AgentPage store={store} />; break
+      case 'logs': page = <LogsPage store={store} />; break
+      case 'settings': page = <SettingsPage store={store} />; break
+      case 'rpa': page = <RpaPage />; break
+      default: page = <div>Overview</div>
     }
+    return <Suspense fallback={<PageLoadingFallback />}>{page}</Suspense>
   }
 
   const hiddenTabKeySet = new Set(hiddenTabKeys)
@@ -760,7 +769,9 @@ export function AgentWindow(): React.JSX.Element {
 
           {/* 右侧文件面板 */}
           {showFilePanel && activeTab === 'chat' && (
-            <FilePreviewPanel store={store} />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <FilePreviewPanel store={store} />
+            </Suspense>
           )}
         </div>
       </div>
