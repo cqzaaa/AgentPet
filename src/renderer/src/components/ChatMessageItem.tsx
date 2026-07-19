@@ -5,6 +5,30 @@ import iconSvg from '../assets/icon_from_image.svg'
 import { ClarificationCard } from './ClarificationCard'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  BarChart3,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clipboard,
+  Copy,
+  Download,
+  FileText,
+  Hourglass,
+  Lightbulb,
+  LoaderCircle,
+  MessageSquare,
+  Monitor,
+  Network,
+  Orbit,
+  Ruler,
+  Search,
+  Wrench,
+  X
+} from 'lucide-react'
 
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
@@ -116,17 +140,12 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           >
             {copied ? (
               <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
+                <Check size={13} strokeWidth={2.5} style={{ marginRight: '4px', color: '#10b981' }} aria-hidden="true" />
                 <span style={{ color: '#10b981' }}>已复制</span>
               </>
             ) : (
               <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
+                <Copy size={13} strokeWidth={2} style={{ marginRight: '4px' }} aria-hidden="true" />
                 <span>复制</span>
               </>
             )}
@@ -158,22 +177,15 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
             }}
             title={isCollapsed ? '展开代码' : '折叠代码'}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            <ChevronDown
+              size={13}
+              strokeWidth={2}
+              aria-hidden="true"
               style={{
                 transition: 'transform 0.2s ease',
                 transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)'
               }}
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
+            />
           </button>
         </div>
       </div>
@@ -224,7 +236,7 @@ function parseInlineMarkdown(text: string): string {
   // 2. 内联代码 `code`
   html = html.replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
   // 3. 图片 ![alt](url)
-  html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>⚠️ 已被删除 (\'+this.alt+\')</div>\'" />')
+  html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
   // 4. 链接 [text](url)
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
   // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
@@ -387,7 +399,7 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
           backgroundColor: 'rgba(0,0,0,0.02)'
         }}
       >
-        ⚠️ 已被删除 ({alt || '微信图片'})
+        已被删除 ({alt || '微信图片'})
       </div>
     )
   }
@@ -609,14 +621,11 @@ export function ToolCallItem({ step, isThinking, isWaiting }: { step: any; isThi
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
           {isWaiting ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '12px', height: '12px', animation: 'tool-spin 1s linear infinite' }}>
-              <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-              <style>{`@keyframes tool-spin { 100% { transform: rotate(360deg); } }`}</style>
-            </svg>
-          ) : '✓'}
+            <LoaderCircle size={12} strokeWidth={2.5} className="icon-spin" aria-hidden="true" />
+          ) : <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
         </span>
         <span>调用系统工具: {step.name}</span>
-        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
       </div>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
@@ -645,10 +654,10 @@ export function ToolThinkItem({ step, isThinking }: { step: any; isThinking: boo
         title="点击展开/收起思考详情"
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: 'var(--text-muted)', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" /></svg>
+          <Brain size={13} strokeWidth={2} aria-hidden="true" />
         </span>
         <span>已深度思考</span>
-        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
       </div>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
@@ -680,9 +689,9 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
         title="点击展开/收起详情"
       >
-        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
         <span>工具返回结果: {step.name}</span>
-        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
       </div>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
@@ -701,7 +710,7 @@ function renderSvgGraph(debug: any) {
   if (!debug) {
     return (
       <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--color-text-muted, #999)', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '8px', border: '1px dashed rgba(0,0,0,0.1)' }}>
-        <div style={{ fontSize: '24px', marginBottom: '8px' }}>🌌</div>
+        <div style={{ fontSize: '24px', marginBottom: '8px' }}><Orbit size={24} strokeWidth={1.8} aria-hidden="true" /></div>
         <div style={{ fontSize: '12px' }}>未触发避坑经验库的检索召回（如闲聊、问候等）</div>
       </div>
     )
@@ -714,7 +723,7 @@ function renderSvgGraph(debug: any) {
   if (firstOrder.length === 0 && secondOrder.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--color-text-muted, #999)', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '8px', border: '1px dashed rgba(0,0,0,0.1)' }}>
-        <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔍</div>
+        <div style={{ fontSize: '24px', marginBottom: '8px' }}><Search size={24} strokeWidth={1.8} aria-hidden="true" /></div>
         <div style={{ fontSize: '12px' }}>当前输入未提取到匹配的图谱实体词，未触发实体联想。</div>
       </div>
     )
@@ -986,14 +995,11 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: step.isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
           {step.isWaiting ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width: '12px', height: '12px', animation: 'tool-spin-item 1s linear infinite' }}>
-              <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-              <style>{`@keyframes tool-spin-item { 100% { transform: rotate(360deg); } }`}</style>
-            </svg>
-          ) : '✓'}
+            <LoaderCircle size={12} strokeWidth={2.5} className="icon-spin" aria-hidden="true" />
+          ) : <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
         </span>
         <span>调用 {toolDisplayName} 工具</span>
-        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? '▶' : '▼'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
       </div>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1004,8 +1010,9 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
                 onClick={() => setIsReqCollapsed(!isReqCollapsed)}
                 title="点击展开/折叠参数"
               >
-                <span>📥 请求参数 / 命令:</span>
-                <span style={{ fontSize: '9px', opacity: 0.7 }}>{isReqCollapsed ? '▶' : '▼'}</span>
+                <ArrowDownToLine size={13} strokeWidth={2} aria-hidden="true" />
+                <span>请求参数 / 命令:</span>
+                <span style={{ fontSize: '9px', opacity: 0.7 }}>{isReqCollapsed ? <ChevronRight size={12} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />}</span>
               </div>
               {!isReqCollapsed && (
                 <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
@@ -1016,15 +1023,16 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
           )}
           {step.resultDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600 }}>📤 返回结果:</div>
+              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><ArrowUpFromLine size={13} strokeWidth={2} aria-hidden="true" />返回结果:</div>
               <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
                 {displayResult}
               </div>
             </div>
           )}
           {step.isWaiting && (
-            <div style={{ fontSize: '11px', color: '#60a5fa', fontStyle: 'italic', paddingLeft: '4px' }}>
-              ⏳ 正在等待工具返回结果...
+            <div style={{ fontSize: '11px', color: '#60a5fa', fontStyle: 'italic', paddingLeft: '4px', display: 'flex', alignItems: 'center' }}>
+              <Hourglass size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+              正在等待工具返回结果...
             </div>
           )}
         </div>
@@ -1376,7 +1384,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 }
               }}
             >
-              <span className="file-badge-icon">📄</span>
+              <span className="file-badge-icon"><FileText size={17} strokeWidth={2} aria-hidden="true" /></span>
               <div className="file-badge-info">
                 <span className="file-badge-name" title={f.name}>{f.name}</span>
               </div>
@@ -1417,7 +1425,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     }
                   }}
                 >
-                  <span className="file-badge-icon">📄</span>
+                  <span className="file-badge-icon"><FileText size={17} strokeWidth={2} aria-hidden="true" /></span>
                   <div className="file-badge-info">
                     <span className="file-badge-name" title={f.name}>{f.name}</span>
                   </div>
@@ -1452,9 +1460,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 }}
                 onClick={() => setUserCollapsed(false)}
               >
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
                 <span style={{ flex: 1 }}>{headerText}</span>
-                <span style={{ fontSize: '10px', opacity: 0.7 }}>▶</span>
+                <span style={{ fontSize: '10px', opacity: 0.7 }}><ChevronRight size={13} strokeWidth={2} aria-hidden="true" /></span>
               </div>
             ) : (
               <>
@@ -1477,9 +1485,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     }}
                     onClick={() => setUserCollapsed(true)}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>✓</span>
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
                     <span style={{ flex: 1 }}>{collapseText}</span>
-                    <span style={{ fontSize: '10px', opacity: 0.7 }}>▼</span>
+                    <span style={{ fontSize: '10px', opacity: 0.7 }}><ChevronDown size={13} strokeWidth={2} aria-hidden="true" /></span>
                   </div>
                 )}
                 <div
@@ -1562,7 +1570,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       {(msg.text || msg.fileInfo || msg.fileInfos) && !msg.isThinking && (
         <div className="message-action-row">
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
-            {copied ? '✓' : '📋'}
+            {copied
+              ? <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+              : <Clipboard size={14} strokeWidth={2} aria-hidden="true" />}
           </button>
           {msg.sender === 'agent' && !msg.isThinking && toolSteps.some((step: any) => step.type === 'call' || step.type === 'result') && (
             <button
@@ -1571,7 +1581,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               disabled={traceExportState === 'saving'}
               title="原样导出本轮模型回复的全部工具调用参数和返回结果"
             >
-              {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : '⇩ 导出调用过程'}
+              {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : <><Download size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />导出调用过程</>}
             </button>
           )}
           {msg.sender === 'user' && (msg.promptInfo || msg.hasPromptInfo) && (
@@ -1581,7 +1591,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               disabled={promptInfoLoading}
               title="查看传给 Agent 的完整内容"
             >
-              🔍
+              <Search size={14} strokeWidth={2} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -1632,7 +1642,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               }}
             >
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                🔍 Agent 提问参数与调试分析面板
+                <Search size={18} strokeWidth={2} aria-hidden="true" />
+                Agent 提问参数与调试分析面板
               </h3>
               <button
                 onClick={() => setShowPromptModal(false)}
@@ -1646,7 +1657,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                   color: 'var(--color-text-primary, #333)'
                 }}
               >
-                ✕
+                <X size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
 
@@ -1660,9 +1671,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               }}
             >
               {[
-                { id: 'recall', label: '🧠 知识召回与图谱可视化' },
-                { id: 'context', label: '💬 系统提示词 (System Prompt)' },
-                { id: 'tools', label: '🛠️ 模型参数与工具集' }
+                { id: 'recall', label: '知识召回与图谱可视化' },
+                { id: 'context', label: '系统提示词 (System Prompt)' },
+                { id: 'tools', label: '模型参数与工具集' }
               ].map(tab => {
                 const isActive = activePromptTab === tab.id
                 return (
@@ -1682,6 +1693,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       marginBottom: '-1px'
                     }}
                   >
+                    {tab.id === 'recall' && <Brain size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
+                    {tab.id === 'context' && <MessageSquare size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
+                    {tab.id === 'tools' && <Wrench size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
                     {tab.label}
                   </button>
                 )
@@ -1713,18 +1727,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         color: '#8b5cf6'
                       }}
                     >
-                      💡 本面板展示基于仿 SAG 机制的本地关系图谱与多路混合检索打分结果。最终排名前三且总分大于 0.05 的经验事实将被召回并注入系统提示词尾部。
+                      <Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      本面板展示基于仿 SAG 机制的本地关系图谱与多路混合检索打分结果。最终排名前三且总分大于 0.05 的经验事实将被召回并注入系统提示词尾部。
                     </div>
 
                     {/* SVG 拓扑网络图 */}
                     <div style={{ marginBottom: '20px' }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: 'var(--color-text-primary, #333)' }}>🕸️ 动态图谱实体联想路径：</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: 'var(--color-text-primary, #333)' }}><Network size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />动态图谱实体联想路径：</div>
                       {renderSvgGraph(debug)}
                     </div>
 
                     {/* 评分进度条候选列表 */}
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--color-text-primary, #333)' }}>📝 候选避坑经验打分细节：</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--color-text-primary, #333)' }}><FileText size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />候选避坑经验打分细节：</div>
                       {candidates.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           {candidates.slice(0, 5).map((c: any, idx: number) => {
@@ -1753,7 +1768,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                         fontWeight: 'bold',
                                         verticalAlign: 'middle'
                                       }}>
-                                        ✓ 召回注入
+                                        <Check size={12} strokeWidth={2.5} className="ui-icon-leading" aria-hidden="true" />
+                                        召回注入
                                       </span>
                                     )}
                                     {c.fact}
@@ -1769,7 +1785,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '11px', color: 'var(--color-text-secondary, #666)' }}>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span>🧬 向量分 (40%):</span>
+                                      <span><Orbit size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />向量分 (40%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.vectorScore.toFixed(3)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1778,7 +1794,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span>🕸️ 图谱分 (30%):</span>
+                                      <span><Network size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />图谱分 (30%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.graphScore.toFixed(2)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1787,7 +1803,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span>📝 文本分 (20%):</span>
+                                      <span><FileText size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />文本分 (20%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.jaccardScore.toFixed(3)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1796,7 +1812,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span>⏳ 遗忘强度 (10%):</span>
+                                      <span><Hourglass size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />遗忘强度 (10%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.sNow.toFixed(2)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1832,12 +1848,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       color: '#3b82f6'
                     }}
                   >
-                    💡 本面板展示大模型系统提示词（System Prompt）。避坑经验与全局画像已被拼装在系统人设最末尾，以实现首尾增强引用效果。
+                    <Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    本面板展示大模型系统提示词（System Prompt）。避坑经验与全局画像已被拼装在系统人设最末尾，以实现首尾增强引用效果。
                   </div>
 
                   <div style={{ border: '1px solid var(--color-border, #e0e0e0)', borderRadius: '8px', overflow: 'hidden' }}>
                     <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border, #e0e0e0)', backgroundColor: 'var(--color-bg-secondary, #f5f5f5)', fontWeight: 600, fontSize: '12px' }}>
-                      🖥️ System Prompt 拼接详情
+                      <Monitor size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      System Prompt 拼接详情
                     </div>
                     <pre
                       style={{
@@ -1874,7 +1892,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         fontSize: '13px'
                       }}
                     >
-                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>📊 模型配置参数</div>
+                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}><BarChart3 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />模型配置参数</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <div><strong>模型:</strong> {promptInfo.model || '未知'}</div>
                         <div><strong>服务商:</strong> {promptInfo.provider || '未知'}</div>
@@ -1893,7 +1911,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         fontSize: '13px'
                       }}
                     >
-                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', color: '#10b981', borderBottom: '1px solid rgba(16,185,129,0.15)', paddingBottom: '6px' }}>📏 Token 估算与占比</div>
+                      <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', color: '#10b981', borderBottom: '1px solid rgba(16,185,129,0.15)', paddingBottom: '6px' }}><Ruler size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />Token 估算与占比</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <div><strong>系统预设:</strong> ~{formatTokens(estimateTokens(promptInfo.systemPrompt || ''))}</div>
                         <div><strong>历史上下文:</strong> ~{formatTokens(estimateTokens(JSON.stringify((promptInfo.chatMessages || []).slice(1))))}</div>
@@ -1911,7 +1929,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
                   {/* 携带的工具定义 */}
                   <div>
-                    <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px', color: 'var(--color-text-primary, #333)' }}>🛠️ 注入模型工具库 (Tools Schema)</div>
+                    <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px', color: 'var(--color-text-primary, #333)' }}><Wrench size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />注入模型工具库 (Tools Schema)</div>
                     {promptInfo.toolsDefinition && promptInfo.toolsDefinition.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {promptInfo.toolsDefinition.map((tool: any, idx: number) => {

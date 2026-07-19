@@ -21,6 +21,24 @@ import {
   DesktopScrollNode
 } from './nodes/CustomNodes'
 import './rpa.css'
+import {
+  ArrowLeft,
+  Bot,
+  Crosshair,
+  Eraser,
+  KeyRound,
+  List,
+  Map as MapIcon,
+  Pause,
+  Play,
+  Plus,
+  Square,
+  Target,
+  Trash2,
+  TriangleAlert,
+  Undo2,
+  X
+} from 'lucide-react'
 
 // 注册 React Flow 自定义节点类型
 const nodeTypes = {
@@ -660,7 +678,8 @@ export function RpaPage(): React.JSX.Element {
                 onClick={() => handlePickElement(selectedNode)}
                 style={{ background: 'var(--rpa-primary)', color: 'white', border: 'none', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}
               >
-                🎯 从网页拾取
+                <Target size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                从网页拾取
               </button>
             </label>
             <input
@@ -783,7 +802,7 @@ export function RpaPage(): React.JSX.Element {
             <div className="rpa-surface-note"><span />桌面点击使用窗口或显示器相对坐标；分辨率变化时自动按比例换算。</div>
             <div className="attr-group"><label className="attr-label">窗口锚点</label><input className="attr-input" value={selectedNode.data?.windowAlias || 'desktop'} onChange={(e) => handleAttrChange('windowAlias', e.target.value)} /></div>
             {selectedNode.type === 'desktop_focus' && <><div className="attr-group"><label className="attr-label">窗口标题</label><input className="attr-input" value={selectedNode.data?.windowTitle || ''} onChange={(e) => handleAttrChange('windowTitle', e.target.value)} placeholder="例如：ERP 客户端" /></div><div className="attr-group"><label className="attr-label">进程名</label><input className="attr-input" value={selectedNode.data?.processName || ''} onChange={(e) => handleAttrChange('processName', e.target.value)} /></div></>}
-            {selectedNode.type === 'desktop_click' && <><button className="btn-primary rpa-pick-desktop" onClick={captureDesktopTargetForNode}>◎ 拾取屏幕坐标</button><div className="attr-group"><label className="attr-label">点击方式</label><select className="attr-input" value={selectedNode.data?.double ? 'double' : 'single'} onChange={(e) => handleAttrChange('double', e.target.value === 'double')}><option value="single">单击</option><option value="double">双击</option></select></div><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></>}
+            {selectedNode.type === 'desktop_click' && <><button className="btn-primary rpa-pick-desktop" onClick={captureDesktopTargetForNode}><Crosshair size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />拾取屏幕坐标</button><div className="attr-group"><label className="attr-label">点击方式</label><select className="attr-input" value={selectedNode.data?.double ? 'double' : 'single'} onChange={(e) => handleAttrChange('double', e.target.value === 'double')}><option value="single">单击</option><option value="double">双击</option></select></div><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></>}
             {selectedNode.type === 'desktop_type' && <><div className="attr-group"><label className="attr-label">输入内容</label><input className="attr-input" value={selectedNode.data?.value || ''} onChange={(e) => handleAttrChange('value', e.target.value)} /></div><div className="attr-group"><label className="attr-label">凭据绑定</label><select className="attr-input" value={String(selectedNode.data?.value || '').startsWith('${secret.') ? selectedNode.data.value : ''} onChange={(e) => handleAttrChange('value', e.target.value)}><option value="">不使用凭据</option>{secrets.filter((secret) => secret.status === 'active').map((secret) => <option key={secret.ref} value={`\${${secret.ref}}`}>{secret.label} · {secret.ref}</option>)}</select></div></>}
             {selectedNode.type === 'desktop_hotkey' && <div className="attr-group"><label className="attr-label">组合键</label><input className="attr-input" value={selectedNode.data?.keys || ''} onChange={(e) => handleAttrChange('keys', e.target.value)} placeholder="Ctrl+Shift+S" /></div>}
             {selectedNode.type === 'desktop_scroll' && <><div className="attr-group"><label className="attr-label">方向</label><select className="attr-input" value={selectedNode.data?.direction || 'down'} onChange={(e) => handleAttrChange('direction', e.target.value)}><option value="down">向下</option><option value="up">向上</option></select></div><div className="attr-group"><label className="attr-label">滚动量</label><input className="attr-input" type="number" value={selectedNode.data?.amount || 3} onChange={(e) => handleAttrChange('amount', Number(e.target.value))} /></div><div className="attr-group"><label className="attr-label">滚动位置</label><div className="rpa-coordinate-grid"><input className="attr-input" type="number" value={selectedNode.data?.x || 0} onChange={(e) => handleAttrChange('x', Number(e.target.value))} /><input className="attr-input" type="number" value={selectedNode.data?.y || 0} onChange={(e) => handleAttrChange('y', Number(e.target.value))} /></div></div></>}
@@ -850,7 +869,7 @@ export function RpaPage(): React.JSX.Element {
       parseAndApplyCanvasJson(response)
     } catch (e: any) {
       console.error(e)
-      setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ 发送失败: ${e.message}` }])
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `发送失败: ${e.message}` }])
     } finally {
       setIsChatSending(false)
     }
@@ -883,7 +902,8 @@ export function RpaPage(): React.JSX.Element {
           {isChatSending && (
             <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
               <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'var(--rpa-bg-layout)', color: 'var(--rpa-text-muted)', fontSize: '12px', border: '1px solid var(--rpa-border)' }}>
-                🤖 AI 正在输入中...
+                <Bot size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                AI 正在输入中...
               </div>
             </div>
           )}
@@ -947,7 +967,8 @@ export function RpaPage(): React.JSX.Element {
                 <span>工作流</span>
               </div>
               <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
-                <span>＋</span> 新建 RPA 任务
+                <Plus size={17} strokeWidth={2} aria-hidden="true" />
+                新建 RPA 任务
               </button>
             </div>
           </div>
@@ -962,7 +983,7 @@ export function RpaPage(): React.JSX.Element {
                 </div>
                 <div className="rpa-card-actions" onClick={e => e.stopPropagation()}>
                   <button className="btn-card-action danger" onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }} title="删除任务">
-                    🗑️
+                    <Trash2 size={15} strokeWidth={2} aria-hidden="true" />
                   </button>
                 </div>
                 <div className="rpa-card-topline">
@@ -1007,7 +1028,7 @@ export function RpaPage(): React.JSX.Element {
             <div className="mcp-modal-card" style={{ maxWidth: '400px', width: '90%' }}>
               <div className="mcp-modal-header">
                 <div className="mcp-modal-title">新建 RPA 任务</div>
-                <button className="mcp-modal-close-btn" onClick={() => setShowCreateModal(false)}>×</button>
+                <button className="mcp-modal-close-btn" onClick={() => setShowCreateModal(false)} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
               </div>
               <div className="mcp-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
@@ -1047,7 +1068,8 @@ export function RpaPage(): React.JSX.Element {
       <div className="rpa-detail-header">
         <div className="rpa-header-left">
           <button className="btn-back" onClick={() => selectTask(null)}>
-            ⬅ 返回列表
+            <ArrowLeft size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+            返回列表
           </button>
           <div style={{ fontSize: '16px', fontWeight: 700 }}>
             {currentTask?.name}
@@ -1110,17 +1132,17 @@ export function RpaPage(): React.JSX.Element {
           <div className="rpa-canvas-toolbar">
             <button className="rpa-toolbar-primary" onClick={handleRecordWorkflow} disabled={isChatSending}><span className="rpa-record-dot" />录制</button>
             {executionState === 'running' ? (
-              <><button className="rpa-toolbar-action" onClick={pauseTask}>Ⅱ 暂停</button><button className="rpa-toolbar-action danger" onClick={stopTask}>■ 停止</button></>
+              <><button className="rpa-toolbar-action" onClick={pauseTask}><Pause size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />暂停</button><button className="rpa-toolbar-action danger" onClick={stopTask}><Square size={13} strokeWidth={2} fill="currentColor" className="ui-icon-leading" aria-hidden="true" />停止</button></>
             ) : executionState === 'paused' ? (
-              <><button className="rpa-toolbar-action run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}>▶ 继续</button><button className="rpa-toolbar-action danger" onClick={stopTask}>■ 停止</button></>
+              <><button className="rpa-toolbar-action run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}><Play size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />继续</button><button className="rpa-toolbar-action danger" onClick={stopTask}><Square size={13} strokeWidth={2} fill="currentColor" className="ui-icon-leading" aria-hidden="true" />停止</button></>
             ) : (
-              <button className="rpa-toolbar-action run" onClick={runTask}>▶ 运行</button>
+              <button className="rpa-toolbar-action run" onClick={runTask}><Play size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />运行</button>
             )}
-            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'credentials' ? 'active' : ''}`} onClick={() => { setActiveTab('credentials'); setShowPanel(true); setNodeCardPosition(null) }}>◈ 凭证</button>
-            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'logs' ? 'active' : ''}`} onClick={() => { setActiveTab('logs'); setShowPanel(true); setNodeCardPosition(null) }}>≡ 运行记录</button>
+            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'credentials' ? 'active' : ''}`} onClick={() => { setActiveTab('credentials'); setShowPanel(true); setNodeCardPosition(null) }}><KeyRound size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />凭证</button>
+            <button className={`rpa-toolbar-action ${showPanel && activeTab === 'logs' ? 'active' : ''}`} onClick={() => { setActiveTab('logs'); setShowPanel(true); setNodeCardPosition(null) }}><List size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />运行记录</button>
             <span className="rpa-toolbar-spacer" />
-            <button className="rpa-toolbar-icon" onClick={handleUndo} disabled={history.length === 0} title="撤回">↩</button>
-            <button className={`rpa-toolbar-icon ${showMiniMap ? 'active' : ''}`} onClick={() => setShowMiniMap(prev => !prev)} title="缩略图">⌗</button>
+            <button className="rpa-toolbar-icon" onClick={handleUndo} disabled={history.length === 0} title="撤回"><Undo2 size={15} strokeWidth={2} aria-hidden="true" /></button>
+            <button className={`rpa-toolbar-icon ${showMiniMap ? 'active' : ''}`} onClick={() => setShowMiniMap(prev => !prev)} title="缩略图"><MapIcon size={15} strokeWidth={2} aria-hidden="true" /></button>
           </div>
 
           <ReactFlow
@@ -1195,7 +1217,7 @@ export function RpaPage(): React.JSX.Element {
                   <small>节点配置</small>
                   <strong>{selectedNode.data?.label || selectedNode.type}</strong>
                 </div>
-                <button onClick={() => { setSelectedNodeId(null); setNodeCardPosition(null) }} title="关闭">×</button>
+                <button onClick={() => { setSelectedNodeId(null); setNodeCardPosition(null) }} title="关闭"><X size={15} strokeWidth={2} aria-hidden="true" /></button>
               </div>
               <div className="rpa-node-config-body">{renderAttrEditor()}</div>
             </div>
@@ -1207,7 +1229,7 @@ export function RpaPage(): React.JSX.Element {
           <div className="rpa-panel-container">
             <div className="rpa-panel-simple-head">
               <div><small>流程设置</small><strong>{activeTab === 'credentials' ? '凭证与节点绑定' : '运行记录'}</strong></div>
-              <button onClick={() => setShowPanel(false)} title="关闭面板">×</button>
+              <button onClick={() => setShowPanel(false)} title="关闭面板"><X size={16} strokeWidth={2} aria-hidden="true" /></button>
             </div>
 
             <div className="rpa-panel-content">
@@ -1253,16 +1275,18 @@ export function RpaPage(): React.JSX.Element {
                   {/* 运行控制 */}
                   <div className="rpa-control-section">
                     {executionState === 'running' ? (
-                      <><button className="btn-ctrl" onClick={pauseTask}>Ⅱ 暂停流程</button><button className="btn-ctrl stop" onClick={stopTask}>■ 停止运行</button></>
+                      <><button className="btn-ctrl" onClick={pauseTask}><Pause size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />暂停流程</button><button className="btn-ctrl stop" onClick={stopTask}><Square size={13} strokeWidth={2} fill="currentColor" className="ui-icon-leading" aria-hidden="true" />停止运行</button></>
                     ) : executionState === 'paused' ? (
-                      <><button className="btn-ctrl run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}>▶ 继续流程</button><button className="btn-ctrl stop" onClick={stopTask}>■ 停止运行</button></>
+                      <><button className="btn-ctrl run" onClick={resumeTask} disabled={Boolean(manualConfirmData)}><Play size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />继续流程</button><button className="btn-ctrl stop" onClick={stopTask}><Square size={13} strokeWidth={2} fill="currentColor" className="ui-icon-leading" aria-hidden="true" />停止运行</button></>
                     ) : (
                       <button className="btn-ctrl run" onClick={runTask}>
-                        ▶️ 启动流程
+                        <Play size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                        启动流程
                       </button>
                     )}
                     <button className="btn-back" style={{ flex: 'none', padding: '0 12px' }} onClick={store.clearLogs}>
-                      🧹 清空
+                      <Eraser size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      清空
                     </button>
                   </div>
 
@@ -1275,7 +1299,7 @@ export function RpaPage(): React.JSX.Element {
                   {/* 人工干预操作抽屉 */}
                   {manualConfirmData && (
                     <div style={{ padding: '12px', border: '1px solid #fde68a', background: '#fffdf5', borderRadius: '4px', marginBottom: '12px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#b45309', marginBottom: '6px' }}>⚠️ 等待人工确认 / 手动干预</div>
+                      <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#b45309', marginBottom: '6px', display: 'flex', alignItems: 'center' }}><TriangleAlert size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />等待人工确认 / 手动干预</div>
                       <div style={{ fontSize: '12px', color: '#78350f', marginBottom: '10px', lineHeight: '1.4' }}>
                         {manualConfirmData.prompt}
                       </div>
@@ -1344,7 +1368,7 @@ export function RpaPage(): React.JSX.Element {
             <section className="rpa-recorder-setup-card" role="dialog" aria-modal="true" aria-labelledby="rpa-recorder-title">
               <header className="rpa-recorder-setup-head">
                 <div><span className="rpa-recorder-kicker">Record workflow</span><h3 id="rpa-recorder-title">从哪里开始？</h3></div>
-                <button onClick={() => setShowPickerPrompt(false)} aria-label="关闭">×</button>
+                <button onClick={() => setShowPickerPrompt(false)} aria-label="关闭"><X size={16} strokeWidth={2} aria-hidden="true" /></button>
               </header>
 
               <div className="rpa-recorder-mode-tabs" aria-label="录制模式">
@@ -1415,7 +1439,8 @@ export function RpaPage(): React.JSX.Element {
               setMenu(null)
             }}
           >
-            🗑️ 删除节点
+            <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+            删除节点
           </button>
         </div>
       )}

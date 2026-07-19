@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { Check, X } from 'lucide-react'
 
 export function ScreenshotWindow(): React.JSX.Element {
   const [screenshotData, setScreenshotData] = useState<string>('')
@@ -216,14 +217,10 @@ export function ScreenshotWindow(): React.JSX.Element {
       {showToolbar && (
         <div style={toolbarStyle} onMouseDown={(e) => e.stopPropagation()}>
           <button className="tb-btn tb-cancel" onClick={handleCancel} title="取消 (ESC)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+            <X size={15} strokeWidth={2.5} aria-hidden="true" />
           </button>
           <button className="tb-btn tb-confirm" onClick={handleConfirm} title="确定">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
+            <Check size={15} strokeWidth={2.5} aria-hidden="true" />
           </button>
         </div>
       )}

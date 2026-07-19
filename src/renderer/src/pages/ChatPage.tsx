@@ -5,6 +5,31 @@ import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
 import { getModelIcon } from '../utils/modelIcons'
+import {
+  ArrowDown,
+  ArrowUp,
+  BarChart3,
+  Check,
+  ChevronDown,
+  Code2,
+  FileKey2,
+  FileText,
+  FolderOpen,
+  Globe2,
+  KeyRound,
+  Link,
+  Monitor,
+  Palette,
+  Plug,
+  Plus,
+  Puzzle,
+  Server,
+  Settings2,
+  ShieldAlert,
+  Square,
+  TriangleAlert,
+  X
+} from 'lucide-react'
 
 
 // ── 模块级样式常量（避免每次渲染分配临时对象） ─────────────
@@ -197,7 +222,10 @@ function ChatPageImpl(): React.JSX.Element {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🧩 已装载的技能包</span>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+            <Puzzle size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+            已装载的技能包
+          </span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>勾选在会话中启用</span>
         </div>
         {/* 搜索框：仅在列表溢出时显示 */}
@@ -299,7 +327,8 @@ function ChatPageImpl(): React.JSX.Element {
               setAgentSubTab('skills')
             }}
           >
-            ⚙️ 前往管理技能包
+            <Settings2 size={14} strokeWidth={2} aria-hidden="true" />
+            前往管理技能包
           </button>
         </div>
       </div>
@@ -334,7 +363,10 @@ function ChatPageImpl(): React.JSX.Element {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>🔗 MCP 服务</span>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+            <Link size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+            MCP 服务
+          </span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>勾选启用服务</span>
         </div>
         {/* 搜索框：仅在列表溢出时显示 */}
@@ -433,7 +465,8 @@ function ChatPageImpl(): React.JSX.Element {
               setAgentSubTab('mcp')
             }}
           >
-            ⚙️ 前往管理 MCP 服务
+            <Settings2 size={14} strokeWidth={2} aria-hidden="true" />
+            前往管理 MCP 服务
           </button>
         </div>
       </div>
@@ -572,7 +605,7 @@ function ChatPageImpl(): React.JSX.Element {
                     </span>
                   </div>
                   {isSelected && (
-                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>✓</span>
+                    <Check size={14} strokeWidth={2} aria-hidden="true" />
                   )}
                 </div>
               )
@@ -596,7 +629,7 @@ function ChatPageImpl(): React.JSX.Element {
 
   const handleSendIntercept = () => {
     if (currentContextTokens >= contextLimit) {
-      showToast('⚠️ 上下文额度已用满，请创建新会话以继续对话！', 'error')
+      showToast('上下文额度已用满，请创建新会话以继续对话！', 'error')
       return
     }
     handleSendChat()
@@ -839,16 +872,16 @@ function ChatPageImpl(): React.JSX.Element {
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
                 <div className="suggestion-chip" onClick={() => setInputValue('帮我处理一下这份文档的内容，提取关键信息')}>
-                  <span className="chip-icon">📄</span>文档处理
+                  <FileText size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />文档处理
                 </div>
                 <div className="suggestion-chip" onClick={() => setInputValue('帮我分析这组数据并生成一份可视化报告')}>
-                  <span className="chip-icon">📊</span>数据分析与可视化
+                  <BarChart3 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />数据分析与可视化
                 </div>
                 <div className="suggestion-chip" onClick={() => setInputValue('请为我构思一个独特的UI设计方案')}>
-                  <span className="chip-icon">🎨</span>设计创意
+                  <Palette size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />设计创意
                 </div>
                 <div className="suggestion-chip" onClick={() => setInputValue('用最佳实践编写这段代码功能')}>
-                  <span className="chip-icon">💻</span>代码开发
+                  <Code2 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />代码开发
                 </div>
               </div>
             </div>
@@ -868,9 +901,7 @@ function ChatPageImpl(): React.JSX.Element {
           )}
           {showScrollToBottom && (
             <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
               回到最新
             </button>
           )}
@@ -889,10 +920,12 @@ function ChatPageImpl(): React.JSX.Element {
                     onClick={() => setPreviewImageSrc(file.objectUrl || null)}
                   />
                 ) : (
-                  <span className="preview-icon" style={{ marginRight: '6px' }}>📄</span>
+                  <FileText size={17} strokeWidth={2} className="preview-icon" style={{ marginRight: '6px' }} aria-hidden="true" />
                 )}
                 <span className="preview-name" title={file.name} style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>{file.name}</span>
-                <button className="preview-remove-btn" onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} title="移除文件" style={{ marginLeft: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '2px' }}>✕</button>
+                <button className="preview-remove-btn" onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} title="移除文件" style={{ marginLeft: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '2px' }}>
+                  <X size={14} strokeWidth={2} aria-hidden="true" />
+                </button>
               </div>
             ))}
           </div>
@@ -920,7 +953,8 @@ function ChatPageImpl(): React.JSX.Element {
               backgroundColor: 'var(--bg-card-sub, rgba(128,128,128,0.03))'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 700, color: 'var(--text-color)' }}>
-                <span>🛡️ 问题</span>
+                <ShieldAlert size={17} strokeWidth={2} aria-hidden="true" />
+                <span>问题</span>
               </div>
               <span className="approval-status-pulse" style={{ fontSize: '12px', color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}>
                 等待核对审批...
@@ -932,12 +966,13 @@ function ChatPageImpl(): React.JSX.Element {
               <div style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-color)' }}>
                 {(activePermissionRequest as any).warning ? (
                   <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'flex-start', gap: '4px' }}>
-                    <span style={{ transform: 'translateY(1px)' }}>⚠️</span>
+                    <TriangleAlert size={15} strokeWidth={2} style={{ transform: 'translateY(1px)' }} aria-hidden="true" />
                     <span>{(activePermissionRequest as any).warning}</span>
                   </div>
                 ) : (
-                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px' }}>
-                    ⚠️ 检测到文件删除等敏感指令，系统默认不授予自动执行权限：
+                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <TriangleAlert size={15} strokeWidth={2} aria-hidden="true" />
+                    检测到文件删除等敏感指令，系统默认不授予自动执行权限：
                   </div>
                 )}
 
@@ -957,7 +992,8 @@ function ChatPageImpl(): React.JSX.Element {
 
                 {activePermissionRequest.execCwd && (
                   <div style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>📁 执行路径:</span>
+                    <FolderOpen size={14} strokeWidth={2} aria-hidden="true" />
+                    <span>执行路径:</span>
                     <span style={{ fontFamily: 'monospace' }}>{activePermissionRequest.execCwd}</span>
                   </div>
                 )}
@@ -1116,7 +1152,7 @@ function ChatPageImpl(): React.JSX.Element {
                       aria-label="更多允许选项"
                       aria-expanded={approvalMenuOpen}
                     >
-                      ▾
+                      <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
                     </button>
                     {approvalMenuOpen && (
                       <div className="approval-menu">
@@ -1139,7 +1175,7 @@ function ChatPageImpl(): React.JSX.Element {
             rows={2}
             placeholder={
               currentContextTokens >= contextLimit
-                ? '⚠️ 上下文额度已用满，请创建新会话以继续对话！'
+                ? '上下文额度已用满，请创建新会话以继续对话！'
                 : isSending
                   ? `${currentAvatarName} 正在思考中...`
                   : `输入指令并发送给 ${currentAvatarName} ...`
@@ -1235,7 +1271,7 @@ function ChatPageImpl(): React.JSX.Element {
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85px' }}>
                       {llmConfig.model || '选择模型'}
                     </span>
-                    <span style={{ fontSize: '9px', transform: 'scale(0.8)', opacity: 0.7 }}>▼</span>
+                    <ChevronDown size={13} strokeWidth={2} style={{ opacity: 0.7 }} aria-hidden="true" />
                   </span>
                 </div>
                 {showModelPopover && renderModelPopover()}
@@ -1256,9 +1292,9 @@ function ChatPageImpl(): React.JSX.Element {
                   }}
                   title={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
                 >
-                  <span style={{ fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {executionDevice === 'ssh' ? '🌐' : '💻'}
-                  </span>
+                  {executionDevice === 'ssh'
+                    ? <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
+                    : <Monitor size={17} strokeWidth={2} aria-hidden="true" />}
                 </div>
 
                 {showDeviceMenu && (
@@ -1291,9 +1327,9 @@ function ChatPageImpl(): React.JSX.Element {
                       onMouseEnter={handleMenuItemMouseEnter}
                       onMouseLeave={handleMenuItemMouseLeave}
                     >
-                      <span style={{ marginRight: '8px' }}>💻</span>
+                      <Monitor size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                       <span>本机执行</span>
-                      {executionDevice === 'local' && <span style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)', fontWeight: 'bold' }}>✓</span>}
+                      {executionDevice === 'local' && <Check size={16} strokeWidth={2} style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }} aria-hidden="true" />}
                     </div>
 
                     {sshConnected ? (
@@ -1307,11 +1343,11 @@ function ChatPageImpl(): React.JSX.Element {
                         onMouseEnter={handleMenuItemMouseEnter}
                         onMouseLeave={handleMenuItemMouseLeave}
                       >
-                        <span style={{ marginRight: '8px' }}>🌐</span>
+                        <Globe2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '110px' }} title={`${sshUsername}@${sshHost}`}>
                           SSH: {sshUsername}@${sshHost}
                         </span>
-                        {executionDevice === 'ssh' && <span style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)', fontWeight: 'bold' }}>✓</span>}
+                        {executionDevice === 'ssh' && <Check size={16} strokeWidth={2} style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }} aria-hidden="true" />}
                       </div>
                     ) : null}
 
@@ -1325,7 +1361,7 @@ function ChatPageImpl(): React.JSX.Element {
                       onMouseEnter={handleMenuItemMouseEnter}
                       onMouseLeave={handleMenuItemMouseLeave}
                     >
-                      <span style={{ marginRight: '8px' }}>⚙️</span>
+                      <Settings2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                       <span>{sshConnected ? '配置其它 SSH...' : '配置远程 SSH...'}</span>
                     </div>
 
@@ -1353,7 +1389,7 @@ function ChatPageImpl(): React.JSX.Element {
                           onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
                           onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                         >
-                          <span style={{ marginRight: '8px' }}>🔌</span>
+                          <Plug size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                           <span>断开连接</span>
                         </div>
                       </>
@@ -1425,7 +1461,7 @@ function ChatPageImpl(): React.JSX.Element {
                 )}
               </div>
 
-              {/* 🧩 技能快捷开关按钮与 Popover */}
+              {/* 技能快捷开关按钮与 Popover */}
               <div style={{ position: 'relative' }}>
                 <div
                   className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
@@ -1439,18 +1475,12 @@ function ChatPageImpl(): React.JSX.Element {
                   }}
                   title={`管理与启用技能扩展包 (当前启用: ${skillsList.filter(s => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m15 12-8.37 8.37a1 1 0 1 1-1.41-1.41L13.59 10.6" />
-                    <path d="m9 5 3 3-2.69 2.69a.5.5 0 0 1-.7 0L5.31 7.37a.5.5 0 0 1 0-.7L9 5Z" fill="currentColor" fillOpacity="0.15" />
-                    <path d="m14 2 8 8" />
-                    <path d="M19 1.5l.3.9.9.3-.9.3-.3.9-.3-.9-.9-.3.9-.3z" fill="currentColor" stroke="none" />
-                    <path d="M21.5 5.5l.2.6.6.2-.6.2-.2.6-.2-.6-.6-.2.6-.2z" fill="currentColor" stroke="none" />
-                  </svg>
+                  <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
                 </div>
                 {showSkillsPopover && renderSkillsPopover()}
               </div>
 
-              {/* 🔗 MCP 快捷查看按钮与 Popover */}
+              {/* MCP 快捷查看按钮与 Popover */}
               <div style={{ position: 'relative' }}>
                 <div
                   className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
@@ -1464,25 +1494,19 @@ function ChatPageImpl(): React.JSX.Element {
                   }}
                   title={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`}
                 >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                  </svg>
+                  <Link size={17} strokeWidth={2} aria-hidden="true" />
                 </div>
                 {showMcpPopover && renderMcpPopover()}
               </div>
 
-              {/* ➕ 上传文件按钮 */}
+              {/* 上传文件按钮 */}
               <button
                 className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}
                 disabled={isSending || currentContextTokens >= contextLimit}
                 title={currentContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
+                <Plus size={18} strokeWidth={2} aria-hidden="true" />
               </button>
 
               {isSending ? (
@@ -1491,9 +1515,7 @@ function ChatPageImpl(): React.JSX.Element {
                   onClick={handleAbortLlm}
                   title="停止生成"
                 >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="4" y="4" width="16" height="16" rx="2" />
-                  </svg>
+                  <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
                 </button>
               ) : (
                 <button
@@ -1502,10 +1524,7 @@ function ChatPageImpl(): React.JSX.Element {
                   title="发送消息"
                   disabled={(!inputValue.trim() && attachedFiles.length === 0) || currentContextTokens >= contextLimit}
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="20" x2="12" y2="4"></line>
-                    <polyline points="5 11 12 4 19 11"></polyline>
-                  </svg>
+                  <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                 </button>
               )}
             </div>
@@ -1539,8 +1558,13 @@ function ChatPageImpl(): React.JSX.Element {
             overflow: 'hidden', padding: '24px'
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-color)' }}>🌐 远程 SSH 连接配置</span>
-              <button disabled={connectSshLoading} onClick={() => { setShowSshModal(false); setTestSshStatus({ type: 'idle', message: '' }) }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+                <Server size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                远程 SSH 连接配置
+              </span>
+              <button disabled={connectSshLoading} onClick={() => { setShowSshModal(false); setTestSshStatus({ type: 'idle', message: '' }) }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-muted)' }} title="关闭">
+                <X size={18} strokeWidth={2} aria-hidden="true" />
+              </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1563,8 +1587,12 @@ function ChatPageImpl(): React.JSX.Element {
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>认证方式</label>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'password' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'password' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'password' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'password' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>🔑 密码认证</button>
-                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'privateKey' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'privateKey' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'privateKey' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'privateKey' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>📝 私钥认证</button>
+                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'password' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'password' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'password' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'password' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                    <KeyRound size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />密码认证
+                  </button>
+                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'privateKey' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'privateKey' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'privateKey' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'privateKey' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                    <FileKey2 size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />私钥认证
+                  </button>
                 </div>
               </div>
 
@@ -1600,7 +1628,7 @@ function ChatPageImpl(): React.JSX.Element {
                     setTestSshStatus({ type: 'error', message: '主机和用户名不能为空' })
                     return
                   }
-                  setTestSshStatus({ type: 'testing', message: '🔌 正在测试 SSH 连接...' })
+                  setTestSshStatus({ type: 'testing', message: '正在测试 SSH 连接...' })
                   try {
                     const res = await window.api.testSshConnection({
                       host: sshForm.host.trim(),
@@ -1610,12 +1638,12 @@ function ChatPageImpl(): React.JSX.Element {
                       privateKey: sshForm.privateKey || undefined
                     })
                     if (res.success) {
-                      setTestSshStatus({ type: 'success', message: '✅ 连接测试成功！' })
+                      setTestSshStatus({ type: 'success', message: '连接测试成功！' })
                     } else {
-                      setTestSshStatus({ type: 'error', message: `❌ 测试失败: ${res.message || '未知错误'}` })
+                      setTestSshStatus({ type: 'error', message: `测试失败: ${res.message || '未知错误'}` })
                     }
                   } catch (e: any) {
-                    setTestSshStatus({ type: 'error', message: `❌ 异常: ${e.message || String(e)}` })
+                    setTestSshStatus({ type: 'error', message: `异常: ${e.message || String(e)}` })
                   }
                 }}
                 className="btn-secondary"
@@ -1631,7 +1659,7 @@ function ChatPageImpl(): React.JSX.Element {
                     return
                   }
                   setConnectSshLoading(true)
-                  setTestSshStatus({ type: 'testing', message: '🔌 正在建立 SSH 连接...' })
+                  setTestSshStatus({ type: 'testing', message: '正在建立 SSH 连接...' })
                   try {
                     const res = await handleConnectSsh({
                       host: sshForm.host.trim(),
@@ -1642,14 +1670,14 @@ function ChatPageImpl(): React.JSX.Element {
                     })
                     if (res.success) {
                       localStorage.setItem('agentpet_last_ssh_config', JSON.stringify(sshForm))
-                      showToast('🌐 成功连接远程服务器，已启用 SSH 执行！', 'success')
+                      showToast('成功连接远程服务器，已启用 SSH 执行！', 'success')
                       setShowSshModal(false)
                       setTestSshStatus({ type: 'idle', message: '' })
                     } else {
-                      setTestSshStatus({ type: 'error', message: `❌ 连接失败: ${res.message || '连接超时'}` })
+                      setTestSshStatus({ type: 'error', message: `连接失败: ${res.message || '连接超时'}` })
                     }
                   } catch (e: any) {
-                    setTestSshStatus({ type: 'error', message: `❌ 异常: ${e.message || String(e)}` })
+                    setTestSshStatus({ type: 'error', message: `异常: ${e.message || String(e)}` })
                   } finally {
                     setConnectSshLoading(false)
                   }

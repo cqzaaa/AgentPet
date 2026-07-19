@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import * as PIXI from 'pixi.js'
+import { MessageSquare } from 'lucide-react'
 
 type Live2DModelClass = typeof import('pixi-live2d-display/cubism4')['Live2DModel']
 type Live2DModelInstance = InstanceType<Live2DModelClass>
@@ -497,7 +498,7 @@ ${memoryContext}
       // 先清理上一次可能残留的 isThinking 状态（异常退出或工具调用失败时可能遗留）
       const cleanedMessages = (activeSession.messages || []).map(m =>
         m.isThinking
-          ? { ...m, isThinking: false, text: m.text || '⚠️ 对话生成被中断。' }
+          ? { ...m, isThinking: false, text: m.text || '对话生成被中断。' }
           : m
       )
       const updatedMessages = [...cleanedMessages, userMsg, agentPlaceholderMsg]
@@ -582,8 +583,8 @@ ${memoryContext}
       console.error('[PetWidget] 对话生成失败:', e)
       const isAbort = e.message?.includes('UserAborted') || e.message?.includes('aborted')
       const errMsg = isAbort
-        ? '⚠️ 对话生成已被中断。'
-        : `⚠️ 哎呀，出错了（${e.message || e}）。请检查你的模型 API Key 是否正确配置。`
+        ? '对话生成已被中断。'
+        : `哎呀，出错了（${e.message || e}）。请检查你的模型 API Key 是否正确配置。`
       if (window.api.sendPetReplyToInput) {
         window.api.sendPetReplyToInput(errMsg)
       }
@@ -1106,9 +1107,7 @@ ${memoryContext}
           } : undefined}
           title="快捷聊天"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          </svg>
+          <MessageSquare size={15} strokeWidth={2} aria-hidden="true" />
         </div>
       )}
 

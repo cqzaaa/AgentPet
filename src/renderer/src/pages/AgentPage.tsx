@@ -2,6 +2,38 @@ import React from 'react'
 import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
 import { ChatMessageItem, MarkdownText } from '../components/ChatMessageItem'
+import {
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  CircleX,
+  Clock3,
+  Clipboard,
+  ClipboardList,
+  ExternalLink,
+  Eye,
+  FileJson2,
+  FileText,
+  FolderOpen,
+  Ghost,
+  Lightbulb,
+  LoaderCircle,
+  Network,
+  Pause,
+  Pencil,
+  Play,
+  Plug,
+  Plus,
+  Save,
+  Search,
+  Settings2,
+  Siren,
+  Store,
+  Trash2,
+  Upload,
+  Wrench,
+  X
+} from 'lucide-react'
 
 interface AgentPageProps {
   store: AppStore
@@ -125,13 +157,15 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 onClick={handleSkillsPathClick}
                 title="点击选择新的存放路径"
               >
-                📁 存放路径: {skillsPath || '正在加载技能目录...'}
+                <FolderOpen size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                存放路径: {skillsPath || '正在加载技能目录...'}
               </span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn-secondary" onClick={() => window.api.openSkillsFolder()}>
                   打开目录
                 </button>
                 <button className="btn-primary" onClick={handleImportSkill}>
+                  <Upload size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                   导入技能包 (.zip)
                 </button>
               </div>
@@ -158,7 +192,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         <td>{new Date(skill.mtime).toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button className="delete-btn" onClick={() => handleDeleteSkill(skill.name)}>
-                            🗑️ 卸载
+                            <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            卸载
                           </button>
                         </td>
                       </tr>
@@ -241,7 +276,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   }
                 }}
               >
-                🚨 清除当前
+                <Siren size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                清除当前
               </button>
             </div>
 
@@ -266,7 +302,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   }
                 }}
               >
-                🚨 清空所有
+                <Siren size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                清空所有
               </button>
             </div>
 
@@ -284,7 +321,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   setShowProfileModal(true)
                 }}
               >
-                🔍 查看并编辑
+                <Search size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                查看并编辑
               </button>
             </div>
           </div>
@@ -311,7 +349,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 }}
                 style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
-                ➕ 新增任务
+                <Plus size={15} strokeWidth={2} aria-hidden="true" />
+                新增任务
               </button>
             </div>
 
@@ -349,7 +388,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             setSelectedTaskForLog(latestTask || task)
                           }}
                         >
-                          📋 日志
+                          <ClipboardList size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                          日志
                         </button>
                         {!task.isSystem && (
                           <button
@@ -361,7 +401,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               setOpenDropdownId(openDropdownId === task.id ? null : task.id)
                             }}
                           >
-                            ⚙️ 操作 ▾
+                            <Settings2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            操作
+                            <ChevronDown size={13} strokeWidth={2} className="ui-icon-trailing" aria-hidden="true" />
                           </button>
                         )}
 
@@ -399,7 +441,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 setOpenDropdownId(null)
                               }}
                             >
-                              ✏️ 编辑
+                              <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+                              编辑
                             </div>
                             <div
                               style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', textAlign: 'left', display: 'flex', gap: '8px', alignItems: 'center' }}
@@ -410,7 +453,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 setOpenDropdownId(null)
                               }}
                             >
-                              {task.isActive ? '⏸ 暂停' : '▶ 启动'}
+                              {task.isActive
+                                ? <><Pause size={14} strokeWidth={2} aria-hidden="true" />暂停</>
+                                : <><Play size={14} strokeWidth={2} aria-hidden="true" />启动</>}
                             </div>
                             {task.name !== '系统画像提纯与经验沉淀' && (
                               <div
@@ -422,7 +467,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   setOpenDropdownId(null)
                                 }}
                               >
-                                🗑 移除
+                                <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+                                移除
                               </div>
                             )}
                           </div>
@@ -463,7 +509,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   {/* Modal Header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-card)', paddingBottom: '12px' }}>
                     <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                      ⏰ 定时任务日志: {selectedTaskForLog.name}
+                      <Clock3 size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      定时任务日志: {selectedTaskForLog.name}
                     </h3>
                     <button
                       onClick={() => {
@@ -472,7 +519,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       }}
                       style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '18px' }}
                     >
-                      ✕
+                      <X size={18} strokeWidth={2} aria-hidden="true" />
                     </button>
                   </div>
 
@@ -484,18 +531,24 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       <strong>动作指令</strong>：<code style={{ background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '4px' }}>{selectedTaskForLog.action || '无'}</code>
                     </div>
 
-                    <h4 style={{ margin: '16px 0 8px 0', fontSize: '13px', fontWeight: '600' }}>📄 执行历史日志</h4>
+                    <h4 style={{ margin: '16px 0 8px 0', fontSize: '13px', fontWeight: '600' }}>
+                      <FileText size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      执行历史日志
+                    </h4>
 
                     {selectedTaskForLog.logs && selectedTaskForLog.logs.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {selectedTaskForLog.logs.map((log: any) => {
-                          let statusText = '🟢 成功'
+                          let statusText = '成功'
+                          let StatusIcon = CheckCircle2
                           let borderLeftColor = '#10b981'
                           if (log.status === 'failed') {
-                            statusText = '🔴 失败'
+                            statusText = '失败'
+                            StatusIcon = CircleX
                             borderLeftColor = '#ef4444'
                           } else if (log.status === 'running') {
-                            statusText = '⏳ 执行中'
+                            statusText = '执行中'
+                            StatusIcon = LoaderCircle
                             borderLeftColor = '#3b82f6'
                           }
 
@@ -512,7 +565,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             }}>
                               <div style={{ flex: 1, marginRight: '16px' }}>
                                 <div style={{ display: 'flex', gap: '8px', color: 'var(--text-secondary)', marginBottom: '4px', fontSize: '11px' }}>
-                                  <span style={{ fontWeight: '600' }}>{statusText}</span>
+                                  <span style={{ fontWeight: '600', display: 'inline-flex', alignItems: 'center' }}>
+                                    <StatusIcon size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                                    {statusText}
+                                  </span>
                                   <span>•</span>
                                   <span>{log.time}</span>
                                 </div>
@@ -526,7 +582,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 disabled={!log.messages || log.messages.length === 0}
                                 title={(!log.messages || log.messages.length === 0) ? "该日志未记录详细执行交互" : "查看执行详情"}
                               >
-                                📋 详情
+                                <ClipboardList size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                                详情
                               </button>
                             </div>
                           )
@@ -553,7 +610,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       }}
                       disabled={!selectedTaskForLog.logs || selectedTaskForLog.logs.length === 0 || selectedTaskForLog.isSystem}
                     >
-                      🗑 清空日志
+                      <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      清空日志
                     </button>
                     <button
                       className="btn-primary"
@@ -600,13 +658,14 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   {/* Header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-card)', paddingBottom: '12px' }}>
                     <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                      📋 任务执行详情 ({selectedCronLogDetails.time})
+                      <ClipboardList size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      任务执行详情 ({selectedCronLogDetails.time})
                     </h3>
                     <button
                       onClick={() => setSelectedCronLogDetails(null)}
                       style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '18px' }}
                     >
-                      ✕
+                      <X size={18} strokeWidth={2} aria-hidden="true" />
                     </button>
                   </div>
 
@@ -652,9 +711,12 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 <div className="mcp-modal-card" onClick={e => e.stopPropagation()} style={{ width: '450px' }}>
                   <div className="mcp-modal-header">
                     <div className="mcp-modal-title">
-                      <span>{editingCron ? '✏️ 编辑定时任务' : '➕ 新增定时任务'}</span>
+                      {editingCron
+                        ? <Pencil size={17} strokeWidth={2} aria-hidden="true" />
+                        : <Plus size={17} strokeWidth={2} aria-hidden="true" />}
+                      <span>{editingCron ? '编辑定时任务' : '新增定时任务'}</span>
                     </div>
-                    <button className="mcp-modal-close-btn" onClick={() => setShowCronModal(false)}>×</button>
+                    <button className="mcp-modal-close-btn" onClick={() => setShowCronModal(false)} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
                   </div>
                   <div className="mcp-modal-body">
                     <div style={{ marginBottom: '12px' }}>
@@ -761,16 +823,23 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
 
             <div style={{ background: 'var(--bg-card-sub, rgba(128,128,128,0.02))', padding: '14px 18px', borderRadius: '8px', border: '1px solid var(--border-color, rgba(128,128,128,0.1))', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '2px', color: 'var(--text-color-strong)' }}>💡 发现更多外部 MCP 服务</div>
+                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '2px', color: 'var(--text-color-strong)', display: 'flex', alignItems: 'center' }}>
+                  <Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  发现更多外部 MCP 服务
+                </div>
                 <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>探索由开发者社区提供的丰富工具包</div>
               </div>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <a href="https://mcpmarket.cn/" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
-                  🇨🇳 MCP 中文市场 ↗
+                  <Store size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  MCP 中文市场
+                  <ExternalLink size={12} strokeWidth={2} className="ui-icon-trailing" aria-hidden="true" />
                 </a>
                 <span style={{ color: 'rgba(128,128,128,0.3)', fontSize: '12px' }}>|</span>
                 <a href="https://www.modelscope.cn/mcp" target="_blank" rel="noreferrer" style={{ fontSize: '12.5px', color: '#3b82f6', textDecoration: 'none', fontWeight: 500 }}>
-                  🔮 魔塔 ↗
+                  <Network size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  魔塔
+                  <ExternalLink size={12} strokeWidth={2} className="ui-icon-trailing" aria-hidden="true" />
                 </a>
               </div>
             </div>
@@ -786,14 +855,16 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 onClick={() => setShowAddMcpForm(true)}
                 style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
-                ➕ 添加自定义
+                <Plus size={15} strokeWidth={2} aria-hidden="true" />
+                添加自定义
               </button>
             </div>
 
             <div className="mcp-glass-card">
               {(mcpConfig?.servers || []).length === 0 ? (
                 <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: '13px' }}>
-                  👻 暂无已添加的服务，请通过右上角"添加自定义"按钮添加。
+                  <Ghost size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  暂无已添加的服务，请通过右上角“添加自定义”按钮添加。
                 </div>
               ) : (
                 <div className="mcp-table-container">
@@ -861,11 +932,12 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                     setTestResultServerName(server.name)
                                     setShowTestResultModal(true)
                                   } catch (err: any) {
-                                    alert(`❌ 测试异常：\n${err.message || err}`)
+                                    alert(`测试异常：\n${err.message || err}`)
                                   }
                                 }}
                               >
-                                🔌 测试
+                                <Plug size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                                测试
                               </button>
                               <button
                                 type="button"
@@ -880,7 +952,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   setShowEditModal(true)
                                 }}
                               >
-                                ✏️ 编辑
+                                <Pencil size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                                编辑
                               </button>
                               <button
                                 type="button"
@@ -893,7 +966,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   }
                                 }}
                               >
-                                🗑️ 删除
+                                <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                                删除
                               </button>
                             </div>
                           </td>
@@ -914,9 +988,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
           <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
             <div className="mcp-modal-header">
               <div className="mcp-modal-title">
-                <span>✏️ 编辑 MCP 服务</span>
+                <Pencil size={17} strokeWidth={2} aria-hidden="true" />
+                <span>编辑 MCP 服务</span>
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => { setShowEditModal(false); setEditingServer(null); }}>×</button>
+              <button className="mcp-modal-close-btn" onClick={() => { setShowEditModal(false); setEditingServer(null); }} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
             </div>
             <div className="mcp-modal-body">
               <div>
@@ -1026,7 +1101,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
           <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
             <div className="mcp-modal-header">
               <div className="mcp-modal-title">
-                <span>➕ 新增 MCP 服务配置</span>
+                <Plus size={17} strokeWidth={2} aria-hidden="true" />
+                <span>新增 MCP 服务配置</span>
               </div>
               <button className="mcp-modal-close-btn" onClick={() => {
                 setShowAddMcpForm(false)
@@ -1034,7 +1110,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 setMcpNewUrl('')
                 setMcpNewApiKey('')
                 setMcpNewType('stream')
-              }}>×</button>
+              }} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
             </div>
             <div className="mcp-modal-body">
               <div>
@@ -1179,7 +1255,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               }}
             >
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
-                🔌 MCP 测试结果 - {testResultServerName}
+                <Plug size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                MCP 测试结果 - {testResultServerName}
               </h3>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <button
@@ -1198,7 +1275,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     cursor: 'pointer'
                   }}
                 >
-                  📋 复制全部
+                  <Clipboard size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  复制全部
                 </button>
                 <button
                   onClick={() => setShowTestResultModal(false)}
@@ -1212,7 +1290,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     color: 'var(--color-text-primary, #333)'
                   }}
                 >
-                  ✕
+                  <X size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1236,8 +1314,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   fontSize: '13px'
                 }}
               >
-                <div style={{ fontWeight: 600, marginBottom: '8px', color: testResultData.success ? '#10b981' : '#ef4444' }}>
-                  {testResultData.success ? '✅ 测试成功' : '❌ 测试失败'}
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: testResultData.success ? '#10b981' : '#ef4444', display: 'flex', alignItems: 'center' }}>
+                  {testResultData.success
+                    ? <CheckCircle2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    : <CircleX size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
+                  {testResultData.success ? '测试成功' : '测试失败'}
                 </div>
                 {testResultData.protocol && <div>协议: {testResultData.protocol}</div>}
                 {testResultData.error && <div>错误: {testResultData.error}</div>}
@@ -1260,7 +1341,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       color: 'var(--color-text-primary, #333)'
                     }}
                   >
-                    🔧 工具列表 (共 {testResultData.tools.length} 个)
+                    <Wrench size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    工具列表 (共 {testResultData.tools.length} 个)
                   </div>
                   <div
                     style={{
@@ -1330,7 +1412,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     color: 'var(--color-text-primary, #333)'
                   }}
                 >
-                  📄 完整 JSON 响应
+                  <FileJson2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  完整 JSON 响应
                 </div>
                 <pre
                   style={{
@@ -1376,9 +1459,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
           <div className="mcp-modal-card" onClick={e => e.stopPropagation()} style={{ width: '850px', maxWidth: '90%', maxHeight: '90%', display: 'flex', flexDirection: 'column' }}>
             <div className="mcp-modal-header" style={{ flexShrink: 0 }}>
               <div className="mcp-modal-title">
-                <span>🧠 长期人物画像 (profile.md)</span>
+                <Brain size={18} strokeWidth={2} aria-hidden="true" />
+                <span>长期人物画像 (profile.md)</span>
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => setShowProfileModal(false)}>×</button>
+              <button className="mcp-modal-close-btn" onClick={() => setShowProfileModal(false)} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
             </div>
 
             <div className="mcp-modal-body" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '450px' }}>
@@ -1392,7 +1476,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   style={{ padding: '4px 10px', fontSize: '11.5px', height: '26px' }}
                   onClick={() => setIsEditingProfile(!isEditingProfile)}
                 >
-                  {isEditingProfile ? '👁️ 切换预览' : '📝 切换编辑'}
+                  {isEditingProfile
+                    ? <><Eye size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />切换预览</>
+                    : <><Pencil size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />切换编辑</>}
                 </button>
               </div>
 
@@ -1431,7 +1517,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     <MarkdownText rawText={tempProfileText} />
                   ) : (
                     <div style={{ color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
-                      👻 当前画像为空。可在此处输入 Markdown 格式进行编辑保存。
+                      <Ghost size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      当前画像为空。可在此处输入 Markdown 格式进行编辑保存。
                     </div>
                   )}
                 </div>
@@ -1466,7 +1553,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 }}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >
-                💾 保存修改
+                <Save size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                保存修改
               </button>
             </div>
           </div>

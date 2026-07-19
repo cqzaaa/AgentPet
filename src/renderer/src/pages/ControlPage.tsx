@@ -2,6 +2,23 @@ import React, { useState, useEffect, useRef } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { DEFAULT_MODELS } from '../utils/helpers'
 import { getModelIcon } from '../utils/modelIcons'
+import {
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Info,
+  LockKeyhole,
+  MessageCircle,
+  Plug,
+  QrCode,
+  RefreshCw,
+  Save,
+  Sparkles,
+  TriangleAlert
+} from 'lucide-react'
 
 // ── 官方标准 SVG 图标组件 ──────────────────────────────────────────────────
 
@@ -353,20 +370,21 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                 disabled={isLoading}
                 style={{ fontSize: '12.5px', padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', height: '32px', whiteSpace: 'nowrap' }}
               >
-                🔲 通过二维码重新绑定
+                <QrCode size={16} strokeWidth={2} aria-hidden="true" />
+                通过二维码重新绑定
               </button>
             </div>
             
             {/* 蓝色警告通知框 */}
             <div style={{ display: 'flex', gap: '8px', padding: '12px 16px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.15)', borderRadius: '8px', color: '#3b82f6', fontSize: '12px', marginTop: '12px', lineHeight: '1.4' }}>
-              <span style={{ fontSize: '14px', display: 'inline-block', lineHeight: 1, marginTop: '1px' }}>ℹ️</span>
+              <Info size={16} strokeWidth={2} style={{ marginTop: '1px' }} aria-hidden="true" />
               <span>如果超过 7 天没有用户发送消息，此连接将自动暂停。要恢复，请点击“通过二维码重新绑定”。</span>
             </div>
 
             {/* 橙色未启用自动回复警告框 */}
             {!enableAutoReply && (
               <div style={{ display: 'flex', gap: '8px', padding: '12px 16px', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '8px', color: '#f59e0b', fontSize: '12px', marginTop: '12px', lineHeight: '1.4', fontWeight: 500 }}>
-                <span style={{ fontSize: '14px', display: 'inline-block', lineHeight: 1, marginTop: '1px' }}>⚠️</span>
+                <TriangleAlert size={16} strokeWidth={2} style={{ marginTop: '1px' }} aria-hidden="true" />
                 <span>微信已连接，但右上角“已启用”开关未开启。当前处于非托管状态，智能助手不会自动回复好友消息。</span>
               </div>
             )}
@@ -375,7 +393,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
           <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-card-sub, rgba(128,128,128,0.02))', border: '1px solid var(--border-color, rgba(128,128,128,0.1))', borderRadius: '8px', padding: '24px 16px', alignItems: 'center', justifyContent: 'center', minHeight: '200px' }}>
             {wechatState.status === 'disconnected' && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', textAlign: 'center' }}>
-                <div style={{ fontSize: '40px' }}>🤖</div>
+                <div style={{ fontSize: '40px', display: 'flex' }}><Bot size={40} strokeWidth={1.6} aria-hidden="true" /></div>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '14.5px', color: 'var(--text-primary)' }}>个人号智能助理未激活</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '300px', lineHeight: 1.4 }}>
@@ -383,7 +401,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                   </div>
                 </div>
                 <button className="btn-primary" onClick={handleStartLogin} disabled={isLoading} style={{ marginTop: '8px', padding: '8px 24px', borderRadius: '6px', fontSize: '13px' }}>
-                  {isLoading ? '正在初始化...' : '🔌 扫码连接微信'}
+                  {isLoading
+                    ? '正在初始化...'
+                    : <><Plug size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />扫码连接微信</>}
                 </button>
               </div>
             )}
@@ -400,7 +420,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                       <img src={qrSrc} alt="微信登录二维码" style={{ width: '130px', height: '130px', display: 'block' }} />
                       {wechatState.status === 'scanned' && (
                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(255, 255, 255, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }}>
-                          <span style={{ fontSize: '24px', marginBottom: '8px' }}>✅</span>
+                          <CheckCircle2 size={24} strokeWidth={2} style={{ marginBottom: '8px', color: '#10b981' }} aria-hidden="true" />
                           <span style={{ fontSize: '12px', color: '#1f2937', fontWeight: 600 }}>手机微信已扫描</span>
                           <span style={{ fontSize: '11px', color: '#4b5563', marginTop: '2px' }}>请在手机上点击确认登录</span>
                         </div>
@@ -445,13 +465,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card-sub, rgba(128,128,128,0.03))'}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '13.5px', color: 'var(--text-primary)' }}>
-              <span style={{ 
-                transform: isAdvancedOpen ? 'rotate(90deg)' : 'rotate(0deg)', 
-                transition: 'transform 0.2s', 
-                display: 'inline-block', 
-                fontSize: '10px',
-                color: 'var(--text-muted)' 
-              }}>▶</span>
+              {isAdvancedOpen
+                ? <ChevronDown size={15} strokeWidth={2} color="var(--text-muted)" aria-hidden="true" />
+                : <ChevronRight size={15} strokeWidth={2} color="var(--text-muted)" aria-hidden="true" />}
               <span>高级设置</span>
             </div>
           </div>
@@ -532,15 +548,16 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                           placeholder={DEFAULT_MODELS[localLlmConfig.provider] ? `例如: ${DEFAULT_MODELS[localLlmConfig.provider]}` : '请输入模型名称'}
                           style={{ height: '30px', padding: '0 8px', paddingRight: '24px', fontSize: '12px', width: '100%', flex: 1 }}
                         />
-                        <span
-                          style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.6, fontSize: '10px', userSelect: 'none', color: 'var(--text-muted)' }}
+                        <button
+                          type="button"
+                          style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.6, fontSize: '10px', userSelect: 'none', color: 'var(--text-muted)', border: 0, background: 'transparent', padding: 0, lineHeight: 0 }}
                           onClick={(e) => {
                             e.stopPropagation()
                             if (showWechatModelDropdown) { setShowWechatModelDropdown(false) } else { handleFetchWechatModels() }
                           }}
                         >
-                          ▼
-                        </span>
+                          <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+                        </button>
                       </div>
 
                       {showWechatModelDropdown && (
@@ -590,12 +607,16 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                           placeholder={localLlmConfig.hasApiKey ? '密钥已安全保存；留空表示保持不变' : '输入微信助手专属大模型密钥'}
                           style={{ height: '30px', padding: '0 8px', fontSize: '12px', flex: 1, paddingRight: '30px' }}
                         />
-                        <span
-                          style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', fontSize: '12px', opacity: 0.6 }}
+                        <button
+                          type="button"
+                          style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', fontSize: '12px', opacity: 0.6, border: 0, background: 'transparent', padding: 0, lineHeight: 0, color: 'currentColor' }}
                           onClick={() => setShowApiKey(!showApiKey)}
+                          aria-label={showApiKey ? '隐藏密钥' : '显示密钥'}
                         >
-                          {showApiKey ? '👁' : '🙈'}
-                        </span>
+                          {showApiKey
+                            ? <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
+                            : <Eye size={15} strokeWidth={2} aria-hidden="true" />}
+                        </button>
                       </div>
                       {localLlmConfig.hasApiKey && (
                         <button
@@ -625,7 +646,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                 </div>
               ) : (
                 <div style={{ padding: '16px', background: 'var(--bg-card-sub, rgba(128,128,128,0.015))', border: '1px dashed var(--border-color, rgba(128,128,128,0.12))', borderRadius: '6px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'center', height: '80px' }}>
-                  <span>🔒 已同步使用系统全局模型配置</span>
+                  <span><LockKeyhole size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />已同步使用系统全局模型配置</span>
                   <span style={{ fontSize: '11px', opacity: 0.8 }}>微信消息回复将直接调用“设置-模型配置”里的主模型。</span>
                 </div>
               )}
@@ -687,7 +708,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
                   title="点击跳转到该微信会话"
                 >
                   <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '12px', flexShrink: 0 }}>
-                    💬
+                    <MessageCircle size={15} strokeWidth={2} aria-hidden="true" />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '12.5px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -722,7 +743,8 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
               onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-menu-hover, rgba(128,128,128,0.05))'}
               onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card, #fff)'}
             >
-              🔄 测试连接
+              <RefreshCw size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+              测试连接
             </button>
             <button 
               className="btn-primary" 
@@ -741,7 +763,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
               onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
               onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
-              {isLoading ? '正在保存...' : '💾 保存配置'}
+              {isLoading
+                ? '正在保存...'
+                : <><Save size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />保存配置</>}
             </button>
           </div>
         </div>
@@ -796,7 +820,8 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
           fontWeight: 600,
           letterSpacing: '0.05em'
         }}>
-          ✨ 敬请期待 • 正在研发中
+          <Sparkles size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          敬请期待 • 正在研发中
         </div>
       </div>
     )

@@ -2,6 +2,27 @@ import React from 'react'
 import { DEFAULT_MODELS } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
 import { getProviderIcon, getModelIcon } from '../utils/modelIcons'
+import {
+  AudioLines,
+  Cat,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  MessageSquare,
+  Pencil,
+  Plug,
+  RotateCcw,
+  Save,
+  Settings2,
+  Sparkles,
+  Trash2,
+  Upload,
+  Volume2,
+  X
+} from 'lucide-react'
 
 interface SettingsPageProps {
   store: AppStore
@@ -145,13 +166,17 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                       }}
                       style={{ flex: 1, paddingRight: '40px' }}
                     />
-                    <span
-                      style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', userSelect: 'none', fontSize: '14px', opacity: 0.6 }}
+                    <button
+                      type="button"
+                      style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', userSelect: 'none', fontSize: '14px', opacity: 0.6, border: 'none', background: 'transparent', padding: 0, lineHeight: 0, color: 'currentColor' }}
                       onClick={() => setShowApiKey(!showApiKey)}
                       title={showApiKey ? '隐藏密钥' : '显示密钥'}
+                      aria-label={showApiKey ? '隐藏密钥' : '显示密钥'}
                     >
-                      {showApiKey ? '👁️' : '🙈'}
-                    </span>
+                      {showApiKey
+                        ? <EyeOff size={16} strokeWidth={2} aria-hidden="true" />
+                        : <Eye size={16} strokeWidth={2} aria-hidden="true" />}
+                    </button>
                   </div>
                   <button
                     className="btn-primary"
@@ -164,7 +189,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   </button>
                 </div>
                 <div style={{ marginTop: '6px', fontSize: '11px', opacity: 0.65 }}>
-                  {llmConfig.hasApiKey ? '✓ 已保存到系统加密凭据库，页面不会回显密钥。' : '密钥不会写入 localStorage 或普通配置文件。'}
+                  {llmConfig.hasApiKey && <CheckCircle2 size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
+                  {llmConfig.hasApiKey ? '已保存到系统加密凭据库，页面不会回显密钥。' : '密钥不会写入 localStorage 或普通配置文件。'}
                 </div>
               </div>
             )}
@@ -204,15 +230,16 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   onClick={() => { if (!showModelDropdown) handleFetchModels() }}
                   style={{ flex: 1, paddingRight: '30px' }}
                 />
-                <span
-                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.6, fontSize: '11px', userSelect: 'none', color: 'var(--text-muted)' }}
+                <button
+                  type="button"
+                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.6, fontSize: '11px', userSelect: 'none', color: 'var(--text-muted)', border: 0, background: 'transparent', padding: 0, lineHeight: 0 }}
                   onClick={(e) => {
                     e.stopPropagation()
                     if (showModelDropdown) { setShowModelDropdown(false) } else { handleFetchModels() }
                   }}
                 >
-                  ▼
-                </span>
+                  <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
               </div>
 
               {showModelDropdown && (
@@ -267,7 +294,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
             {/* Actions row */}
             <div className="action-row">
               <button className="btn-primary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
-                {testStatus === 'testing' ? '正在连通测试...' : '🔌 测试大模型连接'}
+                {testStatus === 'testing'
+                  ? '正在连通测试...'
+                  : <><Plug size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />测试大模型连接</>}
               </button>
             </div>
 
@@ -327,13 +356,17 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   }}
                   style={{ whiteSpace: 'nowrap', padding: '0 14px', height: '38px', borderRadius: '6px', fontSize: '12.5px' }}
                 >
-                  📂 选择文件夹
+                  <FolderOpen size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  选择文件夹
                 </button>
               </div>
             </div>
 
             <div className="action-row">
-              <button className="btn-primary" onClick={handleSaveStoragePath}>💾 保存路径并迁移技能包</button>
+              <button className="btn-primary" onClick={handleSaveStoragePath}>
+                <Save size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                保存路径并迁移技能包
+              </button>
             </div>
 
             {storageSaveStatus.type !== 'idle' && (
@@ -348,7 +381,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
         {settingsSubTab === 'avatar' && (
           <div className="settings-sub-panel">
             <div className="form-desc-text">
-              在这里更换挂件的 Live2D 形象。您可以点击"🎭 导入虚拟体"将外部模型拷贝归档到统一存储包中，系统会自动在此页面生成卡片列表供您一键切换。
+              在这里更换挂件的 Live2D 形象。您可以点击“导入虚拟体”将外部模型拷贝归档到统一存储包中，系统会自动在此页面生成卡片列表供您一键切换。
             </div>
 
             {/* TTS 语音开关 */}
@@ -358,7 +391,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
               background: 'var(--bg-secondary, #f8f9fa)',
               borderRadius: '8px', border: '1px solid var(--border-color, #e9ecef)'
             }}>
-              <span style={{ fontSize: '14px' }}>🔊</span>
+              <Volume2 size={17} strokeWidth={2} aria-hidden="true" />
               <span style={{ fontSize: '13px', fontWeight: 500 }}>语音朗读</span>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', flex: 1 }}>
                 开启后 LLM 回复将自动朗读，声音在下方虚拟体卡片中设置
@@ -403,7 +436,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   }
                 }}
               >
-                🎭 导入并启用新虚拟体
+                <Upload size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                导入并启用新虚拟体
               </button>
               {(customModelDir || customModelFile) && (
                 <button
@@ -418,7 +452,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     }
                   }}
                 >
-                  🔄 恢复默认形象
+                  <RotateCcw size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                  恢复默认形象
                 </button>
               )}
             </div>
@@ -444,7 +479,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                       <tr key={avatar.id} className="mcp-table-row">
                         <td style={{ textAlign: 'center' }}>
                           {avatar.isDefault ? (
-                            <div className="avatar-avatar-box default-avatar" style={{ width: '32px', height: '32px', fontSize: '18px', margin: '0 auto' }}>🐱</div>
+                            <div className="avatar-avatar-box default-avatar" style={{ width: '32px', height: '32px', fontSize: '18px', margin: '0 auto' }}>
+                              <Cat size={18} strokeWidth={2} aria-hidden="true" />
+                            </div>
                           ) : (
                             <div className="avatar-avatar-box custom-avatar" style={{ width: '32px', height: '32px', fontSize: '14px', margin: '0 auto' }}>
                               {avatar.name.substring(0, 2).toUpperCase()}
@@ -459,23 +496,25 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                           </div>
                         </td>
                         <td>
-                          {avatar.languageStyle === 'cute' ? '🎀 可爱风格' : '📝 常规风格'}
+                          {avatar.languageStyle === 'cute'
+                            ? <><Sparkles size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />可爱风格</>
+                            : <><MessageSquare size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />常规风格</>}
                         </td>
                         <td style={{ fontSize: '12px' }}>
                           {(() => {
                             const voiceMap: Record<string, string> = {
-                              'zh-CN-XiaoxiaoNeural': '🎀 萝莉甜妹',
-                              'zh-CN-XiaoyiNeural': '🌸 活泼少女',
-                              'zh-CN-XiaoxuanNeural': '💖 可爱萌妹',
-                              'zh-CN-XiaomoNeural': '👑 温柔御姐',
-                              'zh-CN-XiaohanNeural': '🌺 知性御姐',
-                              'zh-CN-XiaoruiNeural': '🎭 成熟女王',
-                              'zh-CN-XiaozhenNeural': '💼 专业女声',
-                              'zh-CN-YunxiNeural': '🧢 活力少年',
-                              'zh-CN-YunjianNeural': '🎤 磁性男声',
-                              'zh-CN-YunyangNeural': '📺 新闻播音'
+                              'zh-CN-XiaoxiaoNeural': '萝莉甜妹',
+                              'zh-CN-XiaoyiNeural': '活泼少女',
+                              'zh-CN-XiaoxuanNeural': '可爱萌妹',
+                              'zh-CN-XiaomoNeural': '温柔御姐',
+                              'zh-CN-XiaohanNeural': '知性御姐',
+                              'zh-CN-XiaoruiNeural': '成熟女王',
+                              'zh-CN-XiaozhenNeural': '专业女声',
+                              'zh-CN-YunxiNeural': '活力少年',
+                              'zh-CN-YunjianNeural': '磁性男声',
+                              'zh-CN-YunyangNeural': '新闻播音'
                             }
-                            return voiceMap[avatar.voice] || avatar.voice || '🎀 萝莉甜妹'
+                            return voiceMap[avatar.voice] || avatar.voice || '萝莉甜妹'
                           })()}
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -506,7 +545,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                               }
                             }}
                           >
-                            ⚙️ 设置 ▾
+                            <Settings2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            设置
+                            <ChevronDown size={13} strokeWidth={2} className="ui-icon-trailing" aria-hidden="true" />
                           </button>
 
                           {openAvatarDropdownId === avatar.id && (
@@ -551,7 +592,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                     setOpenAvatarDropdownId(null)
                                   }}
                                 >
-                                  ✅ 启用
+                                  <Check size={14} strokeWidth={2} aria-hidden="true" />
+                                  启用
                                 </div>
                               )}
                               <div
@@ -570,7 +612,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                   setOpenAvatarDropdownId(null)
                                 }}
                               >
-                                ✏️ 编辑
+                                <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+                                编辑
                               </div>
                               {!avatar.isDefault && (
                                 <div
@@ -590,7 +633,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                     setOpenAvatarDropdownId(null)
                                   }}
                                 >
-                                  🗑️ 删除
+                                  <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+                                  删除
                                 </div>
                               )}
                             </div>
@@ -613,9 +657,12 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
           <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
             <div className="mcp-modal-header">
               <div className="mcp-modal-title">
-                <span>✏️ 编辑虚拟体参数</span>
+                <Pencil size={17} strokeWidth={2} aria-hidden="true" />
+                <span>编辑虚拟体参数</span>
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => { setShowEditAvatarModal(false); setEditingAvatar(null); }}>×</button>
+              <button className="mcp-modal-close-btn" onClick={() => { setShowEditAvatarModal(false); setEditingAvatar(null); }} title="关闭">
+                <X size={18} strokeWidth={2} aria-hidden="true" />
+              </button>
             </div>
             <div className="mcp-modal-body">
               <div>
@@ -654,16 +701,16 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     onChange={e => setEditAvatarVoice(e.target.value)}
                     style={{ cursor: 'pointer', flex: 1 }}
                   >
-                    <option value="zh-CN-XiaoxiaoNeural">🎀 萝莉甜妹 (Xiaoxiao)</option>
-                    <option value="zh-CN-XiaoyiNeural">🌸 活泼少女 (Xiaoyi)</option>
-                    <option value="zh-CN-XiaoxuanNeural">💖 可爱萌妹 (Xiaoxuan)</option>
-                    <option value="zh-CN-XiaomoNeural">👑 温柔御姐 (Xiaomo)</option>
-                    <option value="zh-CN-XiaohanNeural">🌺 知性御姐 (Xiaohan)</option>
-                    <option value="zh-CN-XiaoruiNeural">🎭 成熟女王 (Xiaorui)</option>
-                    <option value="zh-CN-XiaozhenNeural">💼 专业女声 (Xiaozhen)</option>
-                    <option value="zh-CN-YunxiNeural">🧢 活力少年 (Yunxi)</option>
-                    <option value="zh-CN-YunjianNeural">🎤 磁性男声 (Yunjian)</option>
-                    <option value="zh-CN-YunyangNeural">📺 新闻播音 (Yunyang)</option>
+                    <option value="zh-CN-XiaoxiaoNeural">萝莉甜妹 (Xiaoxiao)</option>
+                    <option value="zh-CN-XiaoyiNeural">活泼少女 (Xiaoyi)</option>
+                    <option value="zh-CN-XiaoxuanNeural">可爱萌妹 (Xiaoxuan)</option>
+                    <option value="zh-CN-XiaomoNeural">温柔御姐 (Xiaomo)</option>
+                    <option value="zh-CN-XiaohanNeural">知性御姐 (Xiaohan)</option>
+                    <option value="zh-CN-XiaoruiNeural">成熟女王 (Xiaorui)</option>
+                    <option value="zh-CN-XiaozhenNeural">专业女声 (Xiaozhen)</option>
+                    <option value="zh-CN-YunxiNeural">活力少年 (Yunxi)</option>
+                    <option value="zh-CN-YunjianNeural">磁性男声 (Yunjian)</option>
+                    <option value="zh-CN-YunyangNeural">新闻播音 (Yunyang)</option>
                   </select>
                   <button
                     type="button"
@@ -684,7 +731,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                     }}
                     style={{ fontSize: '12px', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   >
-                    🔊 试听
+                    <AudioLines size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    试听
                   </button>
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>

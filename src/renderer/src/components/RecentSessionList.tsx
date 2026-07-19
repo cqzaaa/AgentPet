@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import type { Session } from '../hooks/useAppStore'
+import { ChevronDown, ChevronRight, Pencil, Pin, PinOff, Trash2, X } from 'lucide-react'
 
 // ── 分组定义 ──────────────────────────────────────────────────
 type GroupKey = 'pinned' | 'today' | 'yesterday' | 'thisWeek' | 'earlier'
@@ -184,7 +185,11 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           className="recent-group-header"
           onClick={() => toggleGroup(row.groupKey)}
         >
-          <span className="recent-group-arrow">{isCollapsed ? '▸' : '▾'}</span>
+          <span className="recent-group-arrow">
+            {isCollapsed
+              ? <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />
+              : <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />}
+          </span>
           <span>{row.label}</span>
         </div>
       )
@@ -203,7 +208,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
         title={s.name}
       >
         <span className="recent-dot"></span>
-        {s.pinned && <span className="recent-pin-icon" title="已置顶">📌</span>}
+        {s.pinned && <span className="recent-pin-icon" title="已置顶"><Pin size={12} strokeWidth={2} aria-hidden="true" /></span>}
         <div className="recent-meta">
           {isRenaming ? (
             <input
@@ -250,7 +255,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
             onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}
             title="删除会话"
           >
-            🗑️
+            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
           </button>
         )}
       </div>
@@ -268,7 +273,9 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           onChange={(e) => setSearchQuery(e.target.value)}
         />
         {searchQuery && (
-          <button className="recent-search-clear" onClick={() => setSearchQuery('')} title="清除搜索">×</button>
+          <button className="recent-search-clear" onClick={() => setSearchQuery('')} title="清除搜索">
+            <X size={13} strokeWidth={2} aria-hidden="true" />
+          </button>
         )}
       </div>
       <div className="sidebar-recent-container">
@@ -303,6 +310,9 @@ export function RecentSessionList(props: Props): React.JSX.Element {
                     className="recent-context-item"
                     onClick={() => { onTogglePin(target.id); setContextMenu(null) }}
                   >
+                    {target.pinned
+                      ? <PinOff size={14} strokeWidth={2} aria-hidden="true" />
+                      : <Pin size={14} strokeWidth={2} aria-hidden="true" />}
                     {target.pinned ? '取消置顶' : '置顶'}
                   </div>
                 )}
@@ -310,6 +320,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
                   className="recent-context-item"
                   onClick={() => startRename(target)}
                 >
+                  <Pencil size={14} strokeWidth={2} aria-hidden="true" />
                   重命名
                 </div>
                 <div className="recent-context-divider"></div>
@@ -317,6 +328,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
                   className="recent-context-item danger"
                   onClick={() => { onDelete(target.id); setContextMenu(null) }}
                 >
+                  <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
                   删除
                 </div>
               </>

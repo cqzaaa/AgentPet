@@ -2,9 +2,55 @@ import React, { useState, useRef, useEffect } from 'react'
 import { createViewer, imagePlugin, pdfPlugin, officePlugin, textPlugin } from '@open-file-viewer/core'
 import '@open-file-viewer/core/style.css'
 import { AppStore } from '../hooks/useAppStore'
+import {
+  File,
+  FileArchive,
+  FileCode2,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Maximize2,
+  Minimize2,
+  Presentation,
+  RotateCw,
+  Save,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 interface FilePreviewPanelProps {
   store: AppStore
+}
+
+function FileTypeIcon({ fileName, size = 18 }: { fileName: string; size?: number }): React.JSX.Element {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  let Icon: LucideIcon = File
+  let color = '#6b7280'
+
+  if (['doc', 'docx', 'txt', 'md', 'pdf'].includes(ext)) {
+    Icon = FileText
+    color = ext === 'pdf' ? '#dc2626' : '#2563eb'
+  } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
+    Icon = FileSpreadsheet
+    color = '#15803d'
+  } else if (['ppt', 'pptx'].includes(ext)) {
+    Icon = Presentation
+    color = '#c2410c'
+  } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+    Icon = FileImage
+    color = '#7c3aed'
+  } else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+    Icon = FileArchive
+  } else if (['html', 'css', 'scss', 'js', 'jsx', 'ts', 'tsx', 'py', 'json', 'xml'].includes(ext)) {
+    Icon = FileCode2
+    color = '#d97706'
+  }
+
+  return <Icon size={size} strokeWidth={2} color={color} aria-hidden="true" />
 }
 
 export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.Element {
@@ -243,11 +289,14 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
       <div style={panelStyle}>
         {/* 面板头部 */}
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: '13px', fontWeight: 600 }}>📁 已生成的文件 ({generatedFiles.length})</span>
+          <span style={{ fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center' }}>
+            <FolderOpen size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+            已生成的文件 ({generatedFiles.length})
+          </span>
           <button
             onClick={() => { setShowFilePanel(false); setPreviewFile(null); setOpenTabs([]) }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
-          >✕</button>
+          ><X size={15} strokeWidth={2} aria-hidden="true" /></button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -267,16 +316,6 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
               }}>
                 {openTabs.map((f) => {
                   const isActive = previewFile?.path === f.path
-                  const ext = f.name.split('.').pop()?.toLowerCase() || ''
-                  const extColors: Record<string, string> = {
-                    docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
-                    pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
-                    html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
-                    png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
-                    zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
-                  }
-                  const color = extColors[ext] || '#6B7280'
-                  const label = ext.toUpperCase().slice(0, 4)
                   return (
                     <div
                       key={f.path}
@@ -308,12 +347,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
                     >
                       <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                        <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
-                          <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1" />
-                          <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB" />
-                          <rect x="0" y="12" width="16" height="6" rx="0" fill={color} />
-                          <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
-                        </svg>
+                        <FileTypeIcon fileName={f.name} size={17} />
                       </span>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
                       <span
@@ -341,7 +375,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                         }}
                         onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
                         onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
-                      >✕</span>
+                      ><X size={11} strokeWidth={2} aria-hidden="true" /></span>
                     </div>
                   )
                 })}
@@ -403,7 +437,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                         onMouseEnter={e => { if (canZoomOut) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
                         onMouseLeave={e => e.currentTarget.style.background = 'none'}
                       >
-                        ➖
+                        <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
                       </button>
                       <span style={{
                         fontSize: '9px',
@@ -437,7 +471,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                         onMouseEnter={e => { if (canZoomIn) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
                         onMouseLeave={e => e.currentTarget.style.background = 'none'}
                       >
-                        ➕
+                        <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
                       </button>
                       <div style={{ width: '1px', height: '10px', background: 'var(--border-color)', margin: '0 2px' }} />
                       <button
@@ -460,7 +494,9 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                         onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'none'}
                       >
-                        {isFakeFullscreen ? "🗗" : "⛶"}
+                        {isFakeFullscreen
+                          ? <Minimize2 size={14} strokeWidth={2} aria-hidden="true" />
+                          : <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />}
                       </button>
                       {canRotate && (
                         <button
@@ -484,15 +520,15 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                           onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
                           onMouseLeave={e => e.currentTarget.style.background = 'none'}
                         >
-                          ↩️
+                          <RotateCw size={14} strokeWidth={2} aria-hidden="true" />
                         </button>
                       )}
                     </div>
                   )}
 
                   <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}>💾</button>
-                    <button onClick={() => handleDeleteFileLocal(previewFile!)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}>🗑</button>
+                    <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}><Save size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    <button onClick={() => handleDeleteFileLocal(previewFile!)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></button>
                     <button onClick={() => {
                       const remaining = openTabs.filter(t => t.path !== previewFile!.path)
                       setOpenTabs(remaining)
@@ -502,7 +538,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                         const next = remaining[remaining.length - 1]
                         handlePreviewFileLocal(next)
                       }
-                    }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}>✕</button>
+                    }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}><X size={14} strokeWidth={2} aria-hidden="true" /></button>
                   </div>
                 </div>
 
@@ -519,16 +555,6 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
             /* 无预览文件时：垂直文件列表 */
             <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
               {generatedFiles.map((f, i) => {
-                const ext = f.name.split('.').pop()?.toLowerCase() || ''
-                const extColors: Record<string, string> = {
-                  docx: '#2B579A', doc: '#2B579A', pdf: '#D04423', xlsx: '#217346', xls: '#217346', csv: '#217346',
-                  pptx: '#D24726', ppt: '#D24726', txt: '#6B7280', md: '#6B7280', json: '#F59E0B', xml: '#F59E0B',
-                  html: '#E34C26', css: '#264DE4', js: '#F7DF1E', ts: '#3178C6', py: '#3776AB',
-                  png: '#8B5CF6', jpg: '#8B5CF6', jpeg: '#8B5CF6', gif: '#8B5CF6', webp: '#8B5CF6', svg: '#8B5CF6',
-                  zip: '#6B7280', rar: '#6B7280', '7z': '#6B7280'
-                }
-                const color = extColors[ext] || '#6B7280'
-                const label = ext.toUpperCase().slice(0, 4)
                 return (
                   <div
                     key={i}
@@ -547,12 +573,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
                     <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                      <svg width="20" height="22" viewBox="0 0 16 18" fill="none">
-                        <path d="M1 1C1 0.447715 1.44772 0 2 0H10L15 5V17C15 17.5523 14.5523 18 14 18H2C1.44772 18 1 17.5523 1 17V1Z" fill="#fff" stroke="#D1D5DB" strokeWidth="1" />
-                        <path d="M10 0L15 5H11C10.4477 5 10 4.55228 10 4V0Z" fill="#E5E7EB" />
-                        <rect x="0" y="12" width="16" height="6" rx="0" fill={color} />
-                        <text x="8" y="16.5" textAnchor="middle" fill="#fff" fontSize="5" fontWeight="700" fontFamily="Arial,sans-serif">{label}</text>
-                      </svg>
+                      <FileTypeIcon fileName={f.name} size={21} />
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
@@ -576,7 +597,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                       }}
                       onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; e.currentTarget.style.color = '#ef4444' }}
                       onMouseLeave={e => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                    >🗑</span>
+                    ><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></span>
                   </div>
                 )
               })}

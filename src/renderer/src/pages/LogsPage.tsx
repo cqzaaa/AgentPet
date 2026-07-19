@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { type AppStore } from '../hooks/useAppStore'
+import { BarChart3, Search, Trash2 } from 'lucide-react'
 
 interface LogsPageProps {
   store: AppStore
@@ -211,7 +212,7 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     return (
       <div className="logs-empty-state">
         <div className="empty-glow-box">
-          <span className="empty-icon">📊</span>
+          <span className="empty-icon"><BarChart3 size={34} strokeWidth={1.8} aria-hidden="true" /></span>
         </div>
         <h3 className="empty-title">暂无 Token 消耗日志</h3>
         <p className="empty-desc">
@@ -454,7 +455,8 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
           <span className="table-card-title">Token 历史调用明细记录</span>
           <div className="table-card-actions">
             <button className="btn-clear-logs" onClick={handleClearTokenLogs}>
-              🗑️ 清空日志
+              <Trash2 size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+              清空日志
             </button>
           </div>
         </div>
@@ -492,7 +494,8 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
                           onClick={() => handleLocateChat(log.sessionId!, log.messageId!)}
                           title="跳转并定位至具体聊天消息"
                         >
-                          🔍 定位对话
+                          <Search size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                          定位对话
                         </button>
                       ) : (
                         <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>未绑定消息</span>

@@ -4,6 +4,28 @@ import { useAppStore, useAppStoreRaw } from '../hooks/useAppStore'
 import type { Session } from '../hooks/useAppStore'
 import { ChatControllerProvider } from '../hooks/useChatController'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleX,
+  Copy,
+  FileStack,
+  KeyRound,
+  Lightbulb,
+  List,
+  Minus,
+  Moon,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  ScrollText,
+  Square,
+  Sun,
+  Workflow,
+  X
+} from 'lucide-react'
 import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
@@ -20,43 +42,6 @@ const FilePreviewPanel = lazy(() =>
 
 function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
-}
-
-function LogsIcon(): React.JSX.Element {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
-    </svg>
-  )
-}
-
-function RpaIcon(): React.JSX.Element {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <rect x="3" y="3" width="6" height="6" rx="1" />
-      <rect x="15" y="3" width="6" height="6" rx="1" />
-      <rect x="9" y="15" width="6" height="6" rx="1" />
-      <path d="M6 9v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9" />
-      <path d="M12 14v1" />
-    </svg>
-  )
-}
-
-function HistoryListIcon(): React.JSX.Element {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <line x1="8" y1="6" x2="21" y2="6"></line>
-      <line x1="8" y1="12" x2="21" y2="12"></line>
-      <line x1="8" y1="18" x2="21" y2="18"></line>
-      <line x1="3" y1="6" x2="3.01" y2="6"></line>
-      <line x1="3" y1="12" x2="3.01" y2="12"></line>
-      <line x1="3" y1="18" x2="3.01" y2="18"></line>
-    </svg>
-  )
 }
 
 type FunctionPageId = 'control' | 'agent' | 'rpa' | 'logs' | 'settings'
@@ -483,14 +468,17 @@ export function AgentWindow(): React.JSX.Element {
               )}
             </div>
             <button className="brand-collapse-btn" onClick={() => setIsCollapsed(!isCollapsed)}>
-              {isCollapsed ? '▶' : '◀'}
+              {isCollapsed
+                ? <PanelLeftOpen size={16} strokeWidth={2} aria-hidden="true" />
+                : <PanelLeftClose size={16} strokeWidth={2} aria-hidden="true" />}
             </button>
           </div>
 
           {/* + 新会话 */}
           <div className="new-chat-btn-wrapper">
             <button className="new-chat-btn" onClick={handleCreateNewSession} title="创建新会话">
-              {isCollapsed ? <span>+</span> : <span>+ 新会话</span>}
+              <Plus size={17} strokeWidth={2} aria-hidden="true" />
+              {!isCollapsed && <span>新会话</span>}
             </button>
           </div>
 
@@ -520,34 +508,38 @@ export function AgentWindow(): React.JSX.Element {
             onClick={() => setMenuCollapsed(!menuCollapsed)}
             title={menuCollapsed ? '展开菜单' : '收起菜单'}
           >
-            <span className="sidebar-menu-arrow">{menuCollapsed ? '▸' : '▾'}</span>
+            <span className="sidebar-menu-arrow">
+              {menuCollapsed
+                ? <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+                : <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />}
+            </span>
             <span>菜单</span>
           </div>
           {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
               <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="订阅频道">
                 <div className="menu-item-left"><OverviewIcon /><span>订阅频道</span></div>
-                <span className="menu-item-arrow">&gt;</span>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
                 <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
-                <span className="menu-item-arrow">&gt;</span>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div
                 className={`menu-item ${activeTab === 'rpa' ? 'active' : ''}`}
                 onClick={() => { void selectRpaTask(null).then(() => setActiveTab('rpa')) }}
                 title="RPA 任务"
               >
-                <div className="menu-item-left"><RpaIcon /><span>RPA 任务</span></div>
-                <span className="menu-item-arrow">&gt;</span>
+                <div className="menu-item-left"><Workflow size={18} strokeWidth={2} aria-hidden="true" /><span>RPA 任务</span></div>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
-                <div className="menu-item-left"><LogsIcon /><span>日志</span></div>
-                <span className="menu-item-arrow">&gt;</span>
+                <div className="menu-item-left"><ScrollText size={18} strokeWidth={2} aria-hidden="true" /><span>日志</span></div>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} title="设置">
                 <div className="menu-item-left"><SettingsIcon /><span>设置</span></div>
-                <span className="menu-item-arrow">&gt;</span>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
             </div>
           )}
@@ -556,7 +548,9 @@ export function AgentWindow(): React.JSX.Element {
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
           <button className="theme-toggle-icon-btn" onClick={handleThemeToggle} title="切换主题">
-            {theme === 'dark' ? '☀️' : '🌙'}
+            {theme === 'dark'
+              ? <Sun size={18} strokeWidth={2} aria-hidden="true" />
+              : <Moon size={18} strokeWidth={2} aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -592,7 +586,7 @@ export function AgentWindow(): React.JSX.Element {
                     onClick={(e) => handleCloseTab(tab.key, e)}
                     title="关闭标签页"
                   >
-                    ✕
+                    <X size={12} strokeWidth={2} aria-hidden="true" />
                   </span>
                 </div>
               )
@@ -603,7 +597,7 @@ export function AgentWindow(): React.JSX.Element {
               onClick={() => handleCreateNewSession()}
               title="新建会话"
             >
-              +
+              <Plus size={15} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
           {hiddenTabs.length > 0 && (
@@ -615,7 +609,7 @@ export function AgentWindow(): React.JSX.Element {
                 aria-label="显示更多标签"
                 aria-expanded={showTabOverflowMenu}
               >
-                •••
+                <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
               </button>
               {showTabOverflowMenu && (
                 <div className="titlebar-tab-overflow-menu">
@@ -637,7 +631,7 @@ export function AgentWindow(): React.JSX.Element {
                         }}
                         title="关闭标签页"
                       >
-                        ✕
+                        <X size={12} strokeWidth={2} aria-hidden="true" />
                       </span>
                     </div>
                   ))}
@@ -654,9 +648,7 @@ export function AgentWindow(): React.JSX.Element {
               onClick={() => window.api?.minimizeAgentWindow()}
               title="最小化"
             >
-              <svg width="10" height="1" viewBox="0 0 10 1" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <line x1="0" y1="0.5" x2="10" y2="0.5" />
-              </svg>
+              <Minus size={12} strokeWidth={1.8} aria-hidden="true" />
             </button>
             <button
               className="titlebar-control-btn"
@@ -666,26 +658,16 @@ export function AgentWindow(): React.JSX.Element {
               }}
               title={isMaximized ? '向下还原' : '最大化'}
             >
-              {isMaximized ? (
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
-                  <rect x="1.5" y="3.5" width="5" height="5" />
-                  <path d="M3.5 1.5H8.5V6.5" />
-                </svg>
-              ) : (
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
-                  <rect x="1.5" y="1.5" width="7" height="7" />
-                </svg>
-              )}
+              {isMaximized
+                ? <Copy size={11} strokeWidth={1.6} aria-hidden="true" />
+                : <Square size={10} strokeWidth={1.6} aria-hidden="true" />}
             </button>
             <button
               className="titlebar-control-btn close"
               onClick={() => window.api?.closeAgentWindow()}
               title="关闭"
             >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M1.5 1.5L8.5 8.5" />
-                <path d="M8.5 1.5L1.5 8.5" />
-              </svg>
+              <X size={12} strokeWidth={1.6} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -720,7 +702,8 @@ export function AgentWindow(): React.JSX.Element {
                     onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setOpenTabs([]) } }}
                     title="查看已生成的文件"
                   >
-                    📁 {generatedFiles.length}
+                    <FileStack size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    {generatedFiles.length}
                   </button>
                 )}
                 <button
@@ -728,7 +711,7 @@ export function AgentWindow(): React.JSX.Element {
                   onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}
                   title="查看历史提问"
                 >
-                  <HistoryListIcon />
+                  <List size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
 
@@ -784,7 +767,9 @@ export function AgentWindow(): React.JSX.Element {
               <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--text-primary)' }}>
                 删除
               </div>
-              <button className="mcp-modal-close-btn" style={{ fontSize: '20px' }} onClick={() => setSessionToDeleteId(null)}>×</button>
+              <button className="mcp-modal-close-btn" onClick={() => setSessionToDeleteId(null)} title="关闭">
+                <X size={18} strokeWidth={2} aria-hidden="true" />
+              </button>
             </div>
             <div className="mcp-modal-body" style={{ padding: '24px 20px', fontSize: '13px', color: 'var(--text-secondary, #666)', lineHeight: '1.6' }}>
               您即将删除此话题，此操作无法撤销。
@@ -875,14 +860,15 @@ export function AgentWindow(): React.JSX.Element {
           >
             <div className="mcp-modal-header" style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                <span>🔑 缺少大模型配置</span>
+                <KeyRound size={18} strokeWidth={2} aria-hidden="true" />
+                <span>缺少大模型配置</span>
               </div>
               <button
                 className="mcp-modal-close-btn"
                 style={{ fontSize: '20px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                 onClick={() => setShowApiKeyModal(false)}
               >
-                ×
+                <X size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
             <div className="mcp-modal-body" style={{ padding: '24px', fontSize: '13.5px', color: 'var(--text-secondary, #4b5563)', lineHeight: '1.6' }}>
@@ -966,9 +952,9 @@ export function AgentWindow(): React.JSX.Element {
           }}
         >
           <span className="toast-icon">
-            {toast.type === 'success' && '✨'}
-            {toast.type === 'error' && '❌'}
-            {toast.type === 'info' && '💡'}
+            {toast.type === 'success' && <CheckCircle2 size={18} strokeWidth={2} aria-hidden="true" />}
+            {toast.type === 'error' && <CircleX size={18} strokeWidth={2} aria-hidden="true" />}
+            {toast.type === 'info' && <Lightbulb size={18} strokeWidth={2} aria-hidden="true" />}
           </span>
           <span className="toast-message">{toast.message}</span>
         </div>

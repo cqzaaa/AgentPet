@@ -1,4 +1,30 @@
 import React, { useEffect, useState, useRef } from 'react'
+import {
+  Bot,
+  Camera,
+  ChevronDown,
+  ExternalLink,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  Globe2,
+  GripVertical,
+  History,
+  Lightbulb,
+  MessageSquare,
+  Plus,
+  Presentation,
+  Send,
+  Settings2,
+  Trash2,
+  User,
+  X
+} from 'lucide-react'
 
 export function ChatInputWindow(): React.JSX.Element {
   const [text, setText] = useState('')
@@ -403,22 +429,21 @@ export function ChatInputWindow(): React.JSX.Element {
   }
 
   // 辅助：根据文件扩展名返回分类图标
-  const getFileIcon = (name: string): string => {
+  const getFileIcon = (name: string): React.JSX.Element => {
     const ext = name.split('.').pop()?.toLowerCase() || ''
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
-    if (imageExts.includes(ext)) return '🖼️'
-    if (['pdf'].includes(ext)) return '📕'
-    if (['doc', 'docx'].includes(ext)) return '📘'
-    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📗'
-    if (['ppt', 'pptx'].includes(ext)) return '📙'
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '📦'
-    if (['mp3', 'wav', 'flac', 'ogg'].includes(ext)) return '🎵'
-    if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return '🎬'
-    if (['txt', 'md', 'log'].includes(ext)) return '📝'
-    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs'].includes(ext)) return '💻'
-    if (['json', 'xml', 'yaml', 'yml', 'ini', 'toml'].includes(ext)) return '⚙️'
-    if (['html', 'css', 'scss'].includes(ext)) return '🌐'
-    return '📄'
+    const iconProps = { size: 18, strokeWidth: 2, 'aria-hidden': true } as const
+    if (imageExts.includes(ext)) return <FileImage {...iconProps} />
+    if (['pdf', 'doc', 'docx', 'txt', 'md', 'log'].includes(ext)) return <FileText {...iconProps} />
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileSpreadsheet {...iconProps} />
+    if (['ppt', 'pptx'].includes(ext)) return <Presentation {...iconProps} />
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return <FileArchive {...iconProps} />
+    if (['mp3', 'wav', 'flac', 'ogg'].includes(ext)) return <FileAudio {...iconProps} />
+    if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return <FileVideo {...iconProps} />
+    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs'].includes(ext)) return <FileCode2 {...iconProps} />
+    if (['json', 'xml', 'yaml', 'yml', 'ini', 'toml'].includes(ext)) return <Settings2 {...iconProps} />
+    if (['html', 'css', 'scss'].includes(ext)) return <Globe2 {...iconProps} />
+    return <File {...iconProps} />
   }
 
   // 辅助：将文件添加到粘贴文件预览列表（图片自动加载缩略图）
@@ -664,7 +689,7 @@ export function ChatInputWindow(): React.JSX.Element {
                 }}
                 title="移除图片"
               >
-                ×
+                <X size={13} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -687,7 +712,7 @@ export function ChatInputWindow(): React.JSX.Element {
                 }}
                 title="移除文件"
               >
-                ×
+                <X size={13} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -697,7 +722,8 @@ export function ChatInputWindow(): React.JSX.Element {
               onClick={() => window.api.startScreenshot()}
               title="继续截图"
             >
-              ＋ 继续截图
+              <Plus size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+              继续截图
             </button>
           )}
         </div>
@@ -1388,21 +1414,12 @@ export function ChatInputWindow(): React.JSX.Element {
           title="按住拖拽窗口"
           onMouseDown={handleMouseDown}
         >
-          <svg width="10" height="14" viewBox="0 0 12 18" fill="none">
-            <circle cx="3" cy="3" r="1.5" fill="rgba(0,0,0,0.35)" />
-            <circle cx="3" cy="9" r="1.5" fill="rgba(0,0,0,0.35)" />
-            <circle cx="3" cy="15" r="1.5" fill="rgba(0,0,0,0.35)" />
-            <circle cx="9" cy="3" r="1.5" fill="rgba(0,0,0,0.35)" />
-            <circle cx="9" cy="9" r="1.5" fill="rgba(0,0,0,0.35)" />
-            <circle cx="9" cy="15" r="1.5" fill="rgba(0,0,0,0.35)" />
-          </svg>
+          <GripVertical size={15} strokeWidth={2} aria-hidden="true" />
         </div>
 
         {/* 精致聊天泡泡图标 */}
         <div className="icon-wrapper">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="chat-bubble-icon">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          </svg>
+          <MessageSquare size={18} strokeWidth={2} className="chat-bubble-icon" aria-hidden="true" />
         </div>
 
         {/* 历史下拉菜单触发按钮 */}
@@ -1414,11 +1431,8 @@ export function ChatInputWindow(): React.JSX.Element {
           }}
           title="历史会话"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-          <span className="dropdown-arrow">▾</span>
+          <History size={14} strokeWidth={2} aria-hidden="true" />
+          <span className="dropdown-arrow"><ChevronDown size={11} strokeWidth={2} aria-hidden="true" /></span>
         </button>
 
         {/* 输入框 */}
@@ -1439,10 +1453,7 @@ export function ChatInputWindow(): React.JSX.Element {
           onClick={() => window.api.startScreenshot()}
           title="屏幕截图区域提问"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-            <circle cx="12" cy="13" r="4"></circle>
-          </svg>
+          <Camera size={16} strokeWidth={2} aria-hidden="true" />
         </button>
 
         {/* 发送按钮 */}
@@ -1451,18 +1462,12 @@ export function ChatInputWindow(): React.JSX.Element {
           onClick={handleSend}
           disabled={!text.trim() && screenshotImages.length === 0 && pastedFiles.length === 0}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
+          <Send size={16} strokeWidth={2} aria-hidden="true" />
         </button>
 
         {/* 关闭窗口按钮 */}
         <button className="close-window-btn" onClick={() => window.api.closeInputWindow()} title="关闭">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <polygon points="18 6 6 18 6 6 18 18"></polygon>
-          </svg>
+          <X size={15} strokeWidth={2} aria-hidden="true" />
         </button>
       </div>
 
@@ -1470,7 +1475,7 @@ export function ChatInputWindow(): React.JSX.Element {
       {showDropdown && (
         <div className="history-dropdown-menu" onClick={(e) => e.stopPropagation()}>
           <div className="dropdown-item new-session-item" onClick={handleCreateNewSession}>
-            <span className="item-icon">＋</span> 新建会话
+            <span className="item-icon"><Plus size={14} strokeWidth={2} aria-hidden="true" /></span> 新建会话
           </div>
           {sessions.length === 0 ? (
             <div style={{ padding: '10px 0', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>
@@ -1497,7 +1502,7 @@ export function ChatInputWindow(): React.JSX.Element {
       {showChat && (
         <div className="mini-chat-panel">
           <div className="mini-panel-header">
-            <span className="mini-panel-title">💡 快捷会话</span>
+            <span className="mini-panel-title"><Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />快捷会话</span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 className="action-btn chat-link-btn"
@@ -1512,19 +1517,12 @@ export function ChatInputWindow(): React.JSX.Element {
                 }}
                 title="在主窗口中打开该对话"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                  <polyline points="15 3 21 3 21 9"></polyline>
-                  <line x1="10" y1="14" x2="21" y2="3"></line>
-                </svg>
+                <ExternalLink size={13} strokeWidth={2} aria-hidden="true" />
                 完整对话
               </button>
 
               <button className="clear-chat-btn" onClick={handleClearAll} title="清空当前对话并收起">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
+                <Trash2 size={12} strokeWidth={2} aria-hidden="true" />
                 收起
               </button>
             </div>
@@ -1549,14 +1547,18 @@ export function ChatInputWindow(): React.JSX.Element {
             ) : (
               messages.map((m, idx) => (
                 <div key={idx} className={`mini-chat-msg ${m.sender}`}>
-                  <div className="msg-avatar">{m.sender === 'user' ? '👤' : '🤖'}</div>
+                  <div className="msg-avatar">
+                    {m.sender === 'user'
+                      ? <User size={16} strokeWidth={2} aria-hidden="true" />
+                      : <Bot size={16} strokeWidth={2} aria-hidden="true" />}
+                  </div>
                   <div className="msg-content">{renderMessageText(m.text)}</div>
                 </div>
               ))
             )}
             {isThinking && (
               <div className="mini-chat-msg agent">
-                <div className="msg-avatar">🤖</div>
+                <div className="msg-avatar"><Bot size={16} strokeWidth={2} aria-hidden="true" /></div>
                 <div className="msg-content">
                   <div className="thinking-dots">
                     <span></span>
