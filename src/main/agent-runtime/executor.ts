@@ -67,6 +67,28 @@ export class AgentExecutor {
     return blocks
   }
 
+  private stripImageBlocksForCompatibility(messages: ChatMessage[]): number {
+    let removedImages = 0
+    for (const message of messages) {
+      if (!Array.isArray(message.content)) continue
+      const images = message.content.filter((block: any) => block?.type === 'image_url')
+      if (images.length === 0) continue
+      removedImages += images.length
+      const text = message.content
+        .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block: any) => block.text)
+        .filter((value: string) => value.trim())
+        .join('\n\n')
+      message.content = [
+        text,
+        '[系统提示] 当前模型接口不接受图片输入，图片已自动跳过。请基于工具返回的结构化检查、行数、单元格和验证结果继续完成任务，并明确说明视觉检查已降级。'
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    }
+    return removedImages
+  }
+
   /**
    * Web citations are transient during an agent run. Before persisting a memory,
    * turn its stable source ids into links and retain a small source index so the
@@ -443,6 +465,7 @@ export class AgentExecutor {
     let loopCount = 0
     const maxLoops = 100
     let totalToolCallsCount = 0
+    let imageCompatibilityFallbackUsed = false
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
     const effectiveTools = this.getFormattedTools(isFrontend, true)
@@ -488,6 +511,24 @@ export class AgentExecutor {
         }
       } catch (err: any) {
         const errorText = err.message || String(err)
+        const mayRejectImages =
+          /HTTP\s*(400|415|422)\b/i.test(errorText) ||
+          /image|vision|multimodal|multi-modal|upstream request failed/i.test(errorText)
+        if (!imageCompatibilityFallbackUsed && mayRejectImages) {
+          const removedImages = this.stripImageBlocksForCompatibility(chatHistory)
+          if (removedImages > 0) {
+            imageCompatibilityFallbackUsed = true
+            console.warn(
+              `[AgentExecutor] 模型接口拒绝图片，已移除 ${removedImages} 张图片并降级为文本验证。`,
+              errorText
+            )
+            yield {
+              type: 'think',
+              detail: '当前模型接口不支持本次图片输入，已自动跳过视觉截图，改用结构化文件校验结果继续。'
+            }
+            continue
+          }
+        }
         // 优雅降级：如果是第一次带 tools 失败（如接口不支持 tools 参数），自动删除降级
         // 排除因 API 密钥无效（如 400 Please pass a valid API key）引发的错误，防止误判
         const isApiKeyError = errorText.includes('API key') || errorText.includes('api_key') || errorText.includes('api-key') || errorText.includes('API Key') || errorText.includes('valid API key') || errorText.includes('INVALID_ARGUMENT')
@@ -822,7 +863,7 @@ export class AgentExecutor {
           }
         }
 
-        if (toolImagePathsForNextTurn.length > 0) {
+        if (toolImagePathsForNextTurn.length > 0 && !imageCompatibilityFallbackUsed) {
           const imageBlocks = this.buildToolImageBlocks(toolImagePathsForNextTurn)
           if (imageBlocks.length > 0) {
             chatHistory.push({

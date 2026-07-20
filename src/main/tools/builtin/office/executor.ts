@@ -282,14 +282,18 @@ export class OfficeExecutor implements IToolExecutor {
             stream.on('finish', resolve)
             stream.on('error', reject)
           })
-        } else if (file_type === 'pptx') {
+        } else if (file_type === 'powerpoint' || file_type === 'pptx') {
           const PptxGenJS = require('pptxgenjs')
           const pptx = new PptxGenJS()
           pptx.layout = 'LAYOUT_16x9'
           const lines = content.split('\n')
-          let currentSlide = pptx.addSlide()
+          let currentSlide: any = null
           let lineCount = 0
           const maxLinesPerSlide = 12
+          const ensureSlide = () => {
+            if (!currentSlide) currentSlide = pptx.addSlide()
+            return currentSlide
+          }
           for (const line of lines) {
             if (line.startsWith('# ')) {
               currentSlide = pptx.addSlide()
@@ -312,13 +316,14 @@ export class OfficeExecutor implements IToolExecutor {
                 currentSlide = pptx.addSlide()
                 lineCount = 0
               }
-              currentSlide.addText(line, {
+              ensureSlide().addText(line, {
                 x: 0.5, y: 1.0 + lineCount * 0.45, w: '90%', h: 0.4,
                 fontSize: 14, color: '333333'
               })
               lineCount++
             }
           }
+          ensureSlide()
           const buffer = await pptx.write({ outputType: 'nodebuffer' })
           await fs.promises.writeFile(filePath, buffer)
         } else {

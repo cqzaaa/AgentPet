@@ -40,6 +40,20 @@ export class AuditPipeline {
       }
     }
 
+    // Office skills preserve the existing policy: read-only inspection is automatic,
+    // while creating or modifying a file uses the regular approval flow.
+    if (toolName === 'run_office_skill') {
+      const action = typeof args.action === 'string' ? args.action.toLowerCase() : ''
+      if (action === 'create' || action === 'modify') {
+        return {
+          blocked: false,
+          requireApproval: true,
+          warning: `Office Skill ${String(args.skill || '')} 将生成新的文档文件，请核对参数后确认。`
+        }
+      }
+      return { blocked: false, requireApproval: false }
+    }
+
     if (toolName === 'run_terminal_command' || toolName === 'run_command') {
       const command = typeof args.command === 'string' ? args.command : ''
 

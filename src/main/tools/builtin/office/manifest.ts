@@ -11,6 +11,7 @@ export const officeManifest: ToolManifest = {
   api: [
     {
       name: 'generate_file',
+      hidden: true,
       humanIntervention: 'required',
       description: '从零生成新文件。支持 txt、md、js、xlsx、docx、pdf、pptx 等格式。对于 Excel/Word 等，内容支持结构化 JSON。',
       parameters: {
@@ -35,6 +36,7 @@ export const officeManifest: ToolManifest = {
     },
     {
       name: 'modify_docx_file',
+      hidden: true,
       humanIntervention: 'required',
       description: '修改已有的 Word 文档，进行段落/文本精准替换，或插入图片，并保留原有样式。',
       parameters: {
@@ -92,6 +94,7 @@ export const officeManifest: ToolManifest = {
     },
     {
       name: 'modify_xlsx_file',
+      hidden: true,
       humanIntervention: 'required',
       description: '修改已有的 Excel 电子表格，支持更新单元格、批量追加新行、数据验证、多 Sheet 插入等，使用 worker 线程隔离防止崩溃。',
       parameters: {

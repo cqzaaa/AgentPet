@@ -68,7 +68,7 @@ export class ToolRegistry {
       for (const toolName of cat.tools) {
         const manifest = this.getManifest(toolName)
         const api = manifest?.api.find(a => a.name === toolName)
-        if (api) {
+        if (api && !api.hidden) {
           summary += `### ${api.name}\n`
           summary += `${api.description}\n\n`
         }
@@ -104,7 +104,7 @@ export class ToolRegistry {
     const result: Record<string, any> = {}
     for (const [apiName, manifest] of this.manifestMap.entries()) {
       const api = manifest.api.find(a => a.name === apiName)
-      if (api) {
+      if (api && !api.hidden) {
         result[apiName] = {
           name: api.name,
           category: manifest.category,
@@ -128,7 +128,8 @@ export class ToolRegistry {
 
     for (const [apiName, manifest] of this.manifestMap.entries()) {
       const cat = manifest.category
-      if (categories[cat] && !categories[cat].tools.includes(apiName)) {
+      const api = manifest.api.find(item => item.name === apiName)
+      if (categories[cat] && api && !api.hidden && !categories[cat].tools.includes(apiName)) {
         categories[cat].tools.push(apiName)
       }
     }
@@ -136,7 +137,12 @@ export class ToolRegistry {
   }
 
   public getToolCount(): number {
-    return this.manifestMap.size
+    let count = 0
+    for (const [apiName, manifest] of this.manifestMap.entries()) {
+      const api = manifest.api.find(item => item.name === apiName)
+      if (api && !api.hidden) count++
+    }
+    return count
   }
 
   public reload(): void {

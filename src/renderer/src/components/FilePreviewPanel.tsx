@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createViewer, imagePlugin, pdfPlugin, officePlugin, textPlugin } from '@open-file-viewer/core'
 import '@open-file-viewer/core/style.css'
+import JSZip from 'jszip'
 import { AppStore } from '../hooks/useAppStore'
 import {
   File,
@@ -24,6 +25,169 @@ import type { LucideIcon } from 'lucide-react'
 
 interface FilePreviewPanelProps {
   store: AppStore
+}
+
+interface SpreadsheetValidation {
+  ranges: Array<{ startRow: number; endRow: number; startColumn: number; endColumn: number }>
+  options: string[]
+}
+
+interface SpreadsheetSheetMetadata {
+  hiddenRows: Set<number>
+  validations: SpreadsheetValidation[]
+}
+
+type SpreadsheetMetadata = Map<string, SpreadsheetSheetMetadata>
+
+function xmlElements(root: Document | Element, localName: string): Element[] {
+  return Array.from(root.getElementsByTagNameNS('*', localName))
+}
+
+function parseCellAddress(address: string): { row: number; column: number } | null {
+  const match = address.replace(/\$/g, '').match(/^([A-Z]+)(\d+)$/i)
+  if (!match) return null
+  let column = 0
+  for (const char of match[1].toUpperCase()) column = column * 26 + char.charCodeAt(0) - 64
+  return { row: Number(match[2]), column }
+}
+
+function parseCellRange(range: string): SpreadsheetValidation['ranges'][number] | null {
+  const [startValue, endValue = startValue] = range.split(':')
+  const start = parseCellAddress(startValue)
+  const end = parseCellAddress(endValue)
+  if (!start || !end) return null
+  return {
+    startRow: Math.min(start.row, end.row),
+    endRow: Math.max(start.row, end.row),
+    startColumn: Math.min(start.column, end.column),
+    endColumn: Math.max(start.column, end.column)
+  }
+}
+
+function normalizeWorksheetTarget(target: string): string {
+  const normalized = target.replace(/\\/g, '/')
+  return normalized.startsWith('/') ? normalized.slice(1) : `xl/${normalized.replace(/^\.\.\//, '')}`
+}
+
+async function loadSpreadsheetMetadata(fileUrl: string): Promise<SpreadsheetMetadata> {
+  const response = await fetch(fileUrl)
+  if (!response.ok) throw new Error(`无法读取表格预览元数据（${response.status}）`)
+  const arrayBuffer = await response.arrayBuffer()
+  const [zip, XLSX] = await Promise.all([JSZip.loadAsync(arrayBuffer), import('xlsx')])
+  const workbookXml = await zip.file('xl/workbook.xml')?.async('string')
+  const relationshipsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('string')
+  if (!workbookXml || !relationshipsXml) return new Map()
+
+  const parser = new DOMParser()
+  const workbookDocument = parser.parseFromString(workbookXml, 'application/xml')
+  const relationshipsDocument = parser.parseFromString(relationshipsXml, 'application/xml')
+  const relationshipTargets = new Map(
+    xmlElements(relationshipsDocument, 'Relationship').map(element => [
+      element.getAttribute('Id') || '',
+      normalizeWorksheetTarget(element.getAttribute('Target') || '')
+    ])
+  )
+  const definedNames = new Map(
+    xmlElements(workbookDocument, 'definedName').map(element => [
+      element.getAttribute('name') || '',
+      element.textContent?.trim() || ''
+    ])
+  )
+  const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true })
+  const metadata: SpreadsheetMetadata = new Map()
+
+  const resolveOptions = (formula: string): string[] => {
+    const trimmed = formula.trim().replace(/^=/, '')
+    if (/^".*"$/.test(trimmed)) {
+      return trimmed.slice(1, -1).split(',').map(value => value.trim()).filter(Boolean)
+    }
+    const reference = definedNames.get(trimmed) || trimmed
+    const match = reference.match(/^'?((?:[^']|'')+)'?!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/i)
+    if (!match) return []
+    const sheetName = match[1].replace(/''/g, "'")
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) return []
+    const start = parseCellAddress(`${match[2]}${match[3]}`)
+    const end = parseCellAddress(`${match[4] || match[2]}${match[5] || match[3]}`)
+    if (!start || !end) return []
+    const values: string[] = []
+    for (let row = start.row; row <= end.row && values.length < 200; row++) {
+      for (let column = start.column; column <= end.column && values.length < 200; column++) {
+        const address = XLSX.utils.encode_cell({ r: row - 1, c: column - 1 })
+        const value = sheet[address]?.w ?? sheet[address]?.v
+        if (value !== undefined && value !== null && String(value).trim()) values.push(String(value).trim())
+      }
+    }
+    return [...new Set(values)]
+  }
+
+  for (const sheetElement of xmlElements(workbookDocument, 'sheet')) {
+    const sheetName = sheetElement.getAttribute('name') || ''
+    const relationshipId = sheetElement.getAttribute('r:id') ||
+      sheetElement.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || ''
+    const sheetPath = relationshipTargets.get(relationshipId)
+    const sheetXml = sheetPath ? await zip.file(sheetPath)?.async('string') : undefined
+    if (!sheetName || !sheetXml) continue
+    const sheetDocument = parser.parseFromString(sheetXml, 'application/xml')
+    const hiddenRows = new Set(
+      xmlElements(sheetDocument, 'row')
+        .filter(element => element.getAttribute('hidden') === '1' || element.getAttribute('hidden') === 'true')
+        .map(element => Number(element.getAttribute('r')))
+        .filter(Number.isFinite)
+    )
+    const validations = xmlElements(sheetDocument, 'dataValidation')
+      .filter(element => element.getAttribute('type') === 'list')
+      .map(element => {
+        const ranges = (element.getAttribute('sqref') || '')
+          .split(/\s+/)
+          .map(parseCellRange)
+          .filter((range): range is NonNullable<ReturnType<typeof parseCellRange>> => Boolean(range))
+        const formula = xmlElements(element, 'formula1')[0]?.textContent || ''
+        return { ranges, options: resolveOptions(formula) }
+      })
+      .filter(validation => validation.ranges.length > 0)
+    metadata.set(sheetName, { hiddenRows, validations })
+  }
+  return metadata
+}
+
+function enhanceSpreadsheetPreview(container: HTMLElement, metadata: SpreadsheetMetadata): void {
+  const sheetPanel = container.querySelector<HTMLElement>('.ofv-sheet')
+  const sheetName = sheetPanel?.getAttribute('aria-label') || ''
+  const sheetMetadata = metadata.get(sheetName)
+  const table = sheetPanel?.querySelector<HTMLTableElement>('.ofv-workbook-table')
+  if (!sheetMetadata || !table) return
+
+  for (const row of Array.from(table.rows)) {
+    const firstAddress = row.querySelector<HTMLElement>('[data-cell]')?.dataset.cell
+    const parsed = firstAddress ? parseCellAddress(firstAddress) : null
+    if (parsed && sheetMetadata.hiddenRows.has(parsed.row)) {
+      row.hidden = true
+      row.setAttribute('aria-hidden', 'true')
+    }
+  }
+  const firstVisibleRow = Array.from(table.rows).find(row => !row.hidden)
+  firstVisibleRow?.classList.add('spreadsheet-visible-header')
+
+  for (const cell of Array.from(table.querySelectorAll<HTMLElement>('[data-cell]'))) {
+    const address = parseCellAddress(cell.dataset.cell || '')
+    if (!address || sheetMetadata.hiddenRows.has(address.row)) continue
+    const validation = sheetMetadata.validations.find(item => item.ranges.some(range =>
+      address.row >= range.startRow && address.row <= range.endRow &&
+      address.column >= range.startColumn && address.column <= range.endColumn
+    ))
+    if (!validation || cell.querySelector('.spreadsheet-dropdown-indicator')) continue
+    cell.classList.add('spreadsheet-dropdown-cell')
+    const indicator = document.createElement('span')
+    indicator.className = 'spreadsheet-dropdown-indicator'
+    indicator.textContent = '⌄'
+    indicator.setAttribute('aria-label', '下拉选择字段')
+    const optionSummary = validation.options.slice(0, 12).join('、')
+    indicator.title = validation.options.length > 0
+      ? `下拉选项：${optionSummary}${validation.options.length > 12 ? ` 等 ${validation.options.length} 项` : ''}`
+      : '下拉选择字段'
+    cell.append(indicator)
+  }
 }
 
 function FileTypeIcon({ fileName, size = 18 }: { fileName: string; size?: number }): React.JSX.Element {
@@ -63,6 +227,8 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
     setPreviewFile,
     previewLoading,
     setPreviewLoading,
+    officePreviewRequest,
+    setOfficePreviewRequest,
     handlePreviewFile,
     handleDeleteFile,
     isCollapsed
@@ -76,11 +242,23 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
 
   const viewerRef = useRef<any>(null)
   const [viewerNode, setViewerNode] = useState<HTMLDivElement | null>(null)
+  const viewerNodeRef = useRef<HTMLDivElement | null>(null)
+  const handleViewerNode = useCallback((node: HTMLDivElement | null): void => {
+    viewerNodeRef.current = node
+    setViewerNode(node)
+  }, [])
+  const [viewerReady, setViewerReady] = useState<{ path: string; requestId: string } | null>(null)
+  const [viewerError, setViewerError] = useState<{ path: string; message: string } | null>(null)
+  const [spreadsheetMetadata, setSpreadsheetMetadata] = useState<SpreadsheetMetadata | null>(null)
+  const captureRequestRef = useRef<string | null>(null)
+  const officePreviewRequestRef = useRef<any>(officePreviewRequest)
+  officePreviewRequestRef.current = officePreviewRequest
 
   const toolbarContextRef = useRef<any>(null)
   const [zoomLabel, setZoomLabel] = useState('100%')
   const [canZoomIn, setCanZoomIn] = useState(false)
   const [canZoomOut, setCanZoomOut] = useState(false)
+  const visibleFileCount = new Set([...generatedFiles, ...openTabs].map(file => file.path)).size
   const [canRotate, setCanRotate] = useState(false)
   const [hasToolbarCtx, setHasToolbarCtx] = useState(false)
 
@@ -148,6 +326,8 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
     if (!previewFile || !viewerNode) return
 
     setPreviewLoading(true)
+    setViewerReady(null)
+    setViewerError(null)
 
     try {
       const formattedPath = previewFile.path.replace(/\\/g, '/')
@@ -177,11 +357,19 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
         ],
         onLoad: () => {
           setPreviewLoading(false)
+          setViewerReady({
+            path: previewFile.path,
+            requestId: officePreviewRequestRef.current?.requestId || ''
+          })
           setTimeout(syncZoomStatus, 100)
         },
         onError: (err) => {
           console.error('[open-file-viewer] preview error:', err)
           setPreviewLoading(false)
+          setViewerError({
+            path: previewFile.path,
+            message: err instanceof Error ? err.message : String(err)
+          })
         }
       })
 
@@ -206,6 +394,225 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
       setIsFakeFullscreen(false)
     }
   }, [previewFile, viewerNode, setPreviewLoading])
+
+  useEffect(() => {
+    let cancelled = false
+    setSpreadsheetMetadata(null)
+    if (!previewFile || !/\.xlsx$/i.test(previewFile.name)) return
+    const formattedPath = previewFile.path.replace(/\\/g, '/')
+    void loadSpreadsheetMetadata(`local-file:///${formattedPath}`)
+      .then(metadata => {
+        if (!cancelled) setSpreadsheetMetadata(metadata)
+      })
+      .catch(error => {
+        console.warn('[FilePreviewPanel] spreadsheet metadata unavailable:', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [previewFile])
+
+  useEffect(() => {
+    if (!viewerNode || !spreadsheetMetadata) return
+    let scheduled = false
+    const enhance = () => {
+      scheduled = false
+      enhanceSpreadsheetPreview(viewerNode, spreadsheetMetadata)
+    }
+    const observer = new MutationObserver(() => {
+      if (scheduled) return
+      scheduled = true
+      requestAnimationFrame(enhance)
+    })
+    observer.observe(viewerNode, { childList: true, subtree: true })
+    enhance()
+    return () => observer.disconnect()
+  }, [spreadsheetMetadata, viewerNode])
+
+  // The visible preview is also the AI visual-QA source. Capture evenly sampled
+  // viewports so users can watch the exact render that the model will inspect.
+  useEffect(() => {
+    const request = officePreviewRequest
+    if (!request?.requestId || !previewFile || request.file?.path !== previewFile.path) return
+    if (captureRequestRef.current === request.requestId) return
+
+    if (viewerError && viewerError.path === previewFile.path) {
+      captureRequestRef.current = request.requestId
+      window.api.completeOfficePreviewCapture({
+        requestId: request.requestId,
+        error: viewerError.message
+      })
+      setOfficePreviewRequest(null)
+      return
+    }
+
+    if (
+      !viewerNode ||
+      !viewerReady ||
+      viewerReady.path !== previewFile.path ||
+      viewerReady.requestId !== request.requestId
+    ) {
+      return
+    }
+    const captureNode = viewerNodeRef.current
+    if (!captureNode || captureNode !== viewerNode) return
+
+    captureRequestRef.current = request.requestId
+    let cancelled = false
+    let completed = false
+    const capture = async (): Promise<void> => {
+      const imagePaths: string[] = []
+      const originalScrollTop = captureNode.scrollTop
+      try {
+        await new Promise(resolve => setTimeout(resolve, 350))
+        if (cancelled) return
+
+        const focus = request.focus || { mode: 'overview' }
+        const maxFrames = Math.max(1, Math.min(Number(request.maxFrames) || 8, 12))
+        if (focus.mode === 'changes' && Array.isArray(focus.sheets) && focus.sheets.length > 0) {
+          const targetSheet = String(focus.sheets[0]).trim().toLocaleLowerCase()
+          const sheetTab = Array.from(
+            captureNode.querySelectorAll<HTMLButtonElement>('.ofv-tabs [role="tab"]')
+          ).find(button => (button.textContent || '').trim().toLocaleLowerCase() === targetSheet)
+          if (sheetTab && sheetTab.getAttribute('aria-selected') !== 'true') {
+            sheetTab.click()
+            await new Promise<void>(resolve =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            )
+          }
+        }
+
+        const viewportHeight = Math.max(1, captureNode.clientHeight)
+        const maxScroll = Math.max(0, captureNode.scrollHeight - viewportHeight)
+        const availableFrames = Math.max(1, Math.ceil(captureNode.scrollHeight / viewportHeight))
+        const focusedPositions: number[] = []
+        const addTarget = (element: Element | null): void => {
+          if (!element || !captureNode.contains(element)) return
+          const containerBounds = captureNode.getBoundingClientRect()
+          const targetBounds = element.getBoundingClientRect()
+          const targetTop =
+            captureNode.scrollTop + targetBounds.top - containerBounds.top -
+            Math.max(0, (viewportHeight - Math.min(targetBounds.height, viewportHeight)) / 2)
+          const position = Math.max(0, Math.min(maxScroll, Math.round(targetTop)))
+          if (!focusedPositions.some(existing => Math.abs(existing - position) < 48)) {
+            focusedPositions.push(position)
+          }
+        }
+
+        if (focus.mode === 'changes') {
+          for (const address of Array.isArray(focus.cells) ? focus.cells : []) {
+            const normalizedAddress = String(address).trim().toUpperCase()
+            const cell = Array.from(captureNode.querySelectorAll<HTMLElement>('[data-cell]'))
+              .find(element => element.dataset.cell?.toUpperCase() === normalizedAddress)
+            if (cell) {
+              cell.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' })
+              addTarget(cell)
+              break
+            }
+          }
+
+          const pageElements = Array.from(
+            captureNode.querySelectorAll(
+              '.ofv-pdf-page-wrapper, .ofv-docx-page-frame, .ofv-pptx-viewer > [data-slide-index]'
+            )
+          )
+          for (const rawPage of Array.isArray(focus.pages) ? focus.pages : []) {
+            const page = Number(rawPage)
+            if (Number.isInteger(page) && page > 0) addTarget(pageElements[page - 1] || null)
+          }
+
+          const focusTexts = [
+            ...(Array.isArray(focus.texts) ? focus.texts : []),
+            ...(Array.isArray(focus.cells) ? focus.cells : []),
+            ...(Array.isArray(focus.sheets) ? focus.sheets : [])
+          ]
+            .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+            .slice(0, 24)
+          if (focusTexts.length > 0) {
+            const walker = document.createTreeWalker(captureNode, NodeFilter.SHOW_TEXT)
+            let node = walker.nextNode()
+            while (node && focusedPositions.length < maxFrames * 3) {
+              const value = node.textContent || ''
+              const normalized = value.toLocaleLowerCase()
+              if (focusTexts.some(text => normalized.includes(text.trim().toLocaleLowerCase()))) {
+                const parent = node.parentElement
+                addTarget(parent?.closest('td, th, [data-slide-index], .ofv-pdf-page-wrapper, .ofv-docx-page-frame') || parent)
+              }
+              node = walker.nextNode()
+            }
+          }
+        }
+
+        focusedPositions.sort((a, b) => a - b)
+        const focusMatched = focus.mode === 'changes' && focusedPositions.length > 0
+        const fallbackFrameCount = Math.min(availableFrames, maxFrames)
+        const overviewPositions = Array.from({ length: fallbackFrameCount }, (_, index) =>
+          fallbackFrameCount === 1 ? 0 : Math.round((maxScroll * index) / (fallbackFrameCount - 1))
+        )
+        const candidatePositions = focusMatched ? focusedPositions : overviewPositions
+        const positions = candidatePositions.slice(0, maxFrames)
+
+        for (let index = 0; index < positions.length; index++) {
+          if (cancelled) return
+          captureNode.scrollTop = positions[index]
+          await new Promise<void>(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+          await new Promise(resolve => setTimeout(resolve, 180))
+
+          const bounds = captureNode.getBoundingClientRect()
+          const result = await window.api.captureOfficePreviewFrame({
+            requestId: request.requestId,
+            index,
+            rect: {
+              x: Math.round(bounds.x),
+              y: Math.round(bounds.y),
+              width: Math.round(bounds.width),
+              height: Math.round(bounds.height)
+            }
+          })
+          if (!result.success || !result.path) {
+            throw new Error(result.error || `Preview screenshot ${index + 1} failed`)
+          }
+          imagePaths.push(result.path)
+        }
+
+        window.api.completeOfficePreviewCapture({
+          requestId: request.requestId,
+          imagePaths,
+          truncated: candidatePositions.length > positions.length,
+          focusMatched: focus.mode !== 'changes' || focusMatched
+        })
+      } catch (error) {
+        window.api.completeOfficePreviewCapture({
+          requestId: request.requestId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      } finally {
+        captureNode.scrollTop = originalScrollTop
+        if (!cancelled) {
+          completed = true
+          setOfficePreviewRequest(null)
+        }
+      }
+    }
+
+    void capture()
+    return () => {
+      cancelled = true
+      if (!completed && captureRequestRef.current === request.requestId) {
+        captureRequestRef.current = null
+        window.setTimeout(() => {
+          if (captureRequestRef.current === request.requestId) return
+          window.api.completeOfficePreviewCapture({
+            requestId: request.requestId,
+            error: 'The visible preview was closed or changed before screenshots finished'
+          })
+          setOfficePreviewRequest(null)
+        }, 300)
+      }
+    }
+  }, [officePreviewRequest, previewFile, setOfficePreviewRequest, viewerError, viewerNode, viewerReady])
 
   // 监听全屏状态变化（包括原生全屏和应用内全屏），自动 resize 预览组件以填充屏幕
   useEffect(() => {
@@ -291,7 +698,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center' }}>
             <FolderOpen size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-            已生成的文件 ({generatedFiles.length})
+            已生成的文件 ({visibleFileCount})
           </span>
           <button
             onClick={() => { setShowFilePanel(false); setPreviewFile(null); setOpenTabs([]) }}
@@ -402,6 +809,20 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                     flex: 1,
                     marginRight: '8px'
                   }}>{previewFile!.name}</span>
+
+                  {officePreviewRequest?.file?.path === previewFile!.path && (
+                    <span style={{
+                      fontSize: '10px',
+                      color: 'var(--accent-color, #4f8cff)',
+                      marginRight: '10px',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}>
+                      {officePreviewRequest.focus?.mode === 'changes'
+                        ? 'AI 正在检查改动位置…'
+                        : 'AI 正在检查文档预览…'}
+                    </span>
+                  )}
 
                   {/* 自定义预览控制（放大、缩小、适应宽度、旋转） */}
                   {hasToolbarCtx && (
@@ -547,7 +968,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                   {previewLoading && (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
                   )}
-                  <div ref={setViewerNode} className="file-preview-viewer-container" style={{ position: 'absolute', inset: 0, overflow: 'auto' }} />
+                  <div ref={handleViewerNode} className="file-preview-viewer-container" style={{ position: 'absolute', inset: 0, overflow: 'auto' }} />
                 </div>
               </div>
             </>

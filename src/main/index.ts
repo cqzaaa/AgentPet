@@ -1231,7 +1231,6 @@ app.whenReady().then(() => {
       const ext = extname(filePath).toLowerCase()
       const contentType = mimeTypes[ext] || 'application/octet-stream'
       
-      console.log('[local-file protocol debug] request.url:', request.url, 'parsed pathname:', parsedUrl.pathname, 'filePath:', filePath, 'inferred Content-Type:', contentType)
       const buffer = await fs.promises.readFile(filePath)
       const headers = new Headers()
       headers.set('Access-Control-Allow-Origin', '*')
@@ -2940,8 +2939,8 @@ app.whenReady().then(() => {
       const database = await getDB()
       const isWechat = session.id?.startsWith('wechat:')
       const createdAt = session.createdAt || session.time || new Date().toLocaleString('zh-CN', { hour12: false })
-      await database.run(
-        'INSERT OR REPLACE INTO sessions (id, name, time, pinned, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      const insertResult = await database.run(
+        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         session.id,
         session.name || '(未命名)',
         session.time,
@@ -2949,6 +2948,10 @@ app.whenReady().then(() => {
         session.userId || 'system',
         createdAt
       )
+      if (!insertResult?.changes) {
+        console.warn('[Session] 拒绝创建重复会话 ID:', session.id)
+        return false
+      }
       broadcastSessionMutation(event.sender.id, {
         type: 'session-upsert',
         session: {

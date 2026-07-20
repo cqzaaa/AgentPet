@@ -44,6 +44,31 @@ declare global {
       exportToolTrace: (payload: { defaultFileName?: string; trace: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void
+      onOfficePreviewRequest: (callback: (request: {
+        requestId: string
+        sessionId?: string
+        file: { name: string; path: string; size: number; time: string }
+        maxFrames: number
+        focus?: {
+          mode: 'overview' | 'changes'
+          texts?: string[]
+          pages?: number[]
+          cells?: string[]
+          sheets?: string[]
+        }
+      }) => void) => () => void
+      captureOfficePreviewFrame: (payload: {
+        requestId: string
+        index: number
+        rect: { x: number; y: number; width: number; height: number }
+      }) => Promise<{ success: boolean; path?: string; error?: string }>
+      completeOfficePreviewCapture: (payload: {
+        requestId: string
+        imagePaths?: string[]
+        truncated?: boolean
+        focusMatched?: boolean
+        error?: string
+      }) => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
       copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>

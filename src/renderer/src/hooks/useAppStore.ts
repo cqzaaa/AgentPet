@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
+import { createSessionId, DEFAULT_MODELS, formatDateTime } from '../utils/helpers'
 import { useChatStreamEvents } from './useChatStreamEvents'
 import { useChatToolEvents } from './useChatToolEvents'
 import { useChatReplyRuntime } from './useChatReplyRuntime'
@@ -378,6 +378,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   openTabs: [],
   previewFile: null,
   previewLoading: false,
+  officePreviewRequest: null,
   skillsList: [],
   skillsPath: '',
   disabledSkillNames: (() => {
@@ -461,6 +462,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   })),
   setPreviewFile: (val: any) => set({ previewFile: val }),
   setPreviewLoading: (val: any) => set({ previewLoading: val }),
+  setOfficePreviewRequest: (val: any) => set({ officePreviewRequest: val }),
   setSkillsList: (val: any) => set({ skillsList: val }),
   setSkillsPath: (val: any) => set({ skillsPath: val }),
   setDisabledSkillNames: (val: any) => set((state: any) => ({
@@ -538,6 +540,7 @@ export function useAppStore() {
     openTabs, setOpenTabs,
     previewFile, setPreviewFile,
     previewLoading, setPreviewLoading,
+    officePreviewRequest, setOfficePreviewRequest,
     skillsList, setSkillsList,
     skillsPath, setSkillsPath,
     disabledSkillNames, setDisabledSkillNames,
@@ -662,13 +665,19 @@ export function useAppStore() {
   }, [activeSessionId])
 
   const handlePreviewFile = useCallback(async (f: { name: string; path: string; size: number }) => {
+    if (/[\\/]generated_files[\\/]/i.test(f.path)) {
+      setGeneratedFiles(previous =>
+        previous.some(item => item.path === f.path) ? previous : [...previous, f]
+      )
+      void loadGeneratedFiles()
+    }
     setPreviewFile(f)
     setOpenTabs(prev => {
       if (prev.some(t => t.path === f.path)) return prev
       const fullFile = generatedFiles.find(g => g.path === f.path)
       return [...prev, fullFile || { ...f, time: '' }]
     })
-  }, [generatedFiles, setPreviewFile, setOpenTabs])
+  }, [generatedFiles, loadGeneratedFiles, setGeneratedFiles, setPreviewFile, setOpenTabs])
 
   const handleDeleteFile = useCallback(async (f: { path: string }) => {
     await window.api.deleteGeneratedFile(f.path, activeSessionId)
@@ -684,6 +693,44 @@ export function useAppStore() {
       }
     }
   }, [activeSessionId, openTabs, previewFile, loadGeneratedFiles, handlePreviewFile, setOpenTabs, setPreviewFile])
+
+  useEffect(() => {
+    const disposeGeneratedFiles = window.api.onGeneratedFileUpdated(() => {
+      void loadGeneratedFiles()
+    })
+    const disposeOfficePreview = window.api.onOfficePreviewRequest(async request => {
+      if (!request?.requestId || !request.file?.path) return
+      if (request.sessionId && request.sessionId !== activeSessionId) {
+        window.api.completeOfficePreviewCapture({
+          requestId: request.requestId,
+          error: 'The document was generated for a chat that is not currently visible'
+        })
+        return
+      }
+
+      try {
+        const files = await window.api.getGeneratedFiles(request.sessionId || activeSessionId)
+        setGeneratedFiles(files)
+        const file = files.find(item => item.path === request.file.path) || request.file
+        setOfficePreviewRequest(request)
+        setActiveTab('chat')
+        setShowFilePanel(true)
+        setPreviewFile(file)
+        setOpenTabs((tabs: any[]) =>
+          tabs.some(tab => tab.path === file.path) ? tabs : [...tabs, file]
+        )
+      } catch (error) {
+        window.api.completeOfficePreviewCapture({
+          requestId: request.requestId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    })
+    return () => {
+      disposeGeneratedFiles()
+      disposeOfficePreview()
+    }
+  }, [activeSessionId, loadGeneratedFiles, setActiveTab, setGeneratedFiles, setOfficePreviewRequest, setOpenTabs, setPreviewFile, setShowFilePanel])
 
   // ── 打字机流式效果控制 ──────────────────────────────────────────
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -1388,15 +1435,22 @@ export function useAppStore() {
 
   const handleCreateNewSession = async (): Promise<void> => {
     const currentSessions = useAppStoreRaw.getState().sessions as Session[]
-    if (currentSessions.length > 0 && currentSessions[currentSessions.length - 1].name === '(未命名)') {
-      setActiveSessionId(currentSessions[currentSessions.length - 1].id)
+    const currentActiveId = useAppStoreRaw.getState().activeSessionId
+    const currentActiveSession = currentSessions.find(session => session.id === currentActiveId)
+    const canReuseCurrentDraft =
+      currentActiveSession &&
+      (currentActiveSession.name === '(未命名)' || currentActiveSession.name === '新会话') &&
+      (currentActiveSession.messages?.length || 0) === 0 &&
+      !currentActiveSession.contextSummary &&
+      !useAppStoreRaw.getState().sendingSessionIds[currentActiveSession.id]
+    if (canReuseCurrentDraft) {
       setAttachedFiles([])
       setInputValue('')
       setActiveTab('chat')
       return
     }
-    const randNum = Math.floor(1000 + Math.random() * 9000)
-    const newId = `agent:main:dashboard:${randNum}`
+    let newId = createSessionId()
+    while (currentSessions.some(session => session.id === newId)) newId = createSessionId()
     const timeStr = formatDateTime()
     const newSess: Session = {
       id: newId,
@@ -1970,6 +2024,7 @@ ${skillsContext}`
     openTabs, setOpenTabs,
     previewFile, setPreviewFile,
     previewLoading, setPreviewLoading,
+    officePreviewRequest, setOfficePreviewRequest,
     loadGeneratedFiles,
     handlePreviewFile,
     handleDeleteFile,

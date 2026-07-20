@@ -3,6 +3,8 @@ productName: agentpet
 directories:
   buildResources: build
 files:
+  - '!**/*.map'
+  - '!dist*/**'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
@@ -11,6 +13,9 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+electronLanguages:
+  - zh-CN
+  - en-US
 win:
   executableName: agentpet
 nsis:

@@ -3278,8 +3278,8 @@ body {
 /* 全局 Toast 提示 */
 .global-toast-notification {
   position: fixed;
-  left: 24px;
-  bottom: 24px;
+  top: 72px;
+  left: 50%;
   width: min(360px, calc(100vw - 48px));
   min-height: 48px;
   background: color-mix(in srgb, var(--bg-card, #ffffff) 94%, transparent);
@@ -3300,7 +3300,7 @@ body {
 }
 
 .global-toast-notification:hover {
-  transform: translateY(-1px);
+  transform: translateX(-50%) translateY(-1px);
   box-shadow: 0 22px 54px rgba(15, 23, 42, 0.2);
 }
 
@@ -3310,18 +3310,18 @@ body {
 }
 
 .global-toast-notification.has-approval {
-  bottom: 340px;
+  top: 72px;
 }
 
 @keyframes toastSlideIn {
   from {
     opacity: 0;
-    transform: translateX(-10px) translateY(12px) scale(0.98);
+    transform: translateX(-50%) translateY(-12px) scale(0.98);
   }
 
   to {
     opacity: 1;
-    transform: translateX(0) translateY(0) scale(1);
+    transform: translateX(-50%) translateY(0) scale(1);
   }
 }
 
@@ -3361,13 +3361,13 @@ body {
 
 @media (max-width: 640px) {
   .global-toast-notification {
-    left: 12px;
-    bottom: 12px;
+    top: 16px;
+    left: 50%;
     width: calc(100vw - 24px);
   }
 
   .global-toast-notification.has-approval {
-    bottom: 300px;
+    top: 16px;
   }
 }
 
@@ -5483,6 +5483,77 @@ body {
 /* 覆盖文件预览面板的默认内边距 */
 .file-preview-viewer-container .ofv-panel {
   padding: 0 !important;
+}
+
+/* Spreadsheet templates often keep machine field names in hidden rows. */
+.file-preview-viewer-container .ofv-workbook-table tr[hidden] {
+  display: none !important;
+}
+
+.file-preview-viewer-container .ofv-workbook-table .spreadsheet-visible-header > td {
+  background: color-mix(in srgb, var(--bg-card, #ffffff) 88%, var(--accent-color, #4f8cff) 12%);
+  color: var(--text-color, #111827);
+  font-weight: 700;
+}
+
+.file-preview-viewer-container .spreadsheet-dropdown-cell {
+  position: relative;
+  padding-right: 24px !important;
+}
+
+.file-preview-viewer-container .spreadsheet-dropdown-indicator {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 12%, transparent);
+  color: var(--accent-color, #4f8cff);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+}
+
+.chat-local-file-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-color, #4f8cff) 28%, var(--border-color, #dbe3ef));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 7%, var(--bg-card, #ffffff));
+  color: var(--text-color, #111827);
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-local-file-button:hover {
+  border-color: var(--accent-color, #4f8cff);
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 12%, var(--bg-card, #ffffff));
+}
+
+.chat-local-file-button > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-local-file-action {
+  flex: none;
+  margin-left: 8px;
+  color: var(--accent-color, #4f8cff);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .chat-skeleton-container {

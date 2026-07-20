@@ -10,7 +10,6 @@ import {
   ChevronRight,
   CircleX,
   Copy,
-  FileStack,
   KeyRound,
   Lightbulb,
   List,
@@ -19,6 +18,8 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   ScrollText,
   Square,
@@ -143,6 +144,7 @@ export function AgentWindow(): React.JSX.Element {
   const toast = useAppStoreRaw(state => state.toast)
   const activePermissionRequest = useAppStoreRaw(state => state.activePermissionRequest)
   const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
+  const openTabs = useAppStoreRaw(state => state.openTabs)
   const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
   const isSessionsInitialized = useAppStoreRaw(state => state.isSessionsInitialized)
   const rpaTasks = useRpaStore(state => state.tasks)
@@ -155,6 +157,10 @@ export function AgentWindow(): React.JSX.Element {
   const rpaTasksById = useMemo(
     () => new Map(rpaTasks.map(task => [task.id, task])),
     [rpaTasks]
+  )
+  const visibleFileCount = useMemo(
+    () => new Set([...generatedFiles, ...openTabs].map(file => file.path)).size,
+    [generatedFiles, openTabs]
   )
 
   // 派生状态从 Zustand 中获取
@@ -696,16 +702,23 @@ export function AgentWindow(): React.JSX.Element {
           {activeTab === 'chat' && (
             <div style={{ position: 'relative' }} ref={historyDropdownRef}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {generatedFiles.length > 0 && (
-                  <button
-                    className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                    onClick={() => { setShowFilePanel(!showFilePanel); if (showFilePanel) { setPreviewFile(null); setOpenTabs([]) } }}
-                    title="查看已生成的文件"
-                  >
-                    <FileStack size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                    {generatedFiles.length}
-                  </button>
-                )}
+                <button
+                  className={`history-btn ${showFilePanel ? 'active' : ''}`}
+                  onClick={() => {
+                    setShowFilePanel(!showFilePanel)
+                    if (showFilePanel) {
+                      setPreviewFile(null)
+                      setOpenTabs([])
+                    }
+                  }}
+                  title={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
+                  aria-label={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
+                >
+                  {showFilePanel
+                    ? <PanelRightClose size={18} strokeWidth={2} aria-hidden="true" />
+                    : <PanelRightOpen size={18} strokeWidth={2} aria-hidden="true" />}
+                  {visibleFileCount > 0 && <span>{visibleFileCount}</span>}
+                </button>
                 <button
                   className="history-btn"
                   onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}

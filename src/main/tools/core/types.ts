@@ -2,8 +2,10 @@ export interface ToolApi {
   name: string
   description: string
   parameters: Record<string, any>
-  timeout?: number           // 默认 30s
+  timeout?: number
   humanIntervention?: 'never' | 'required' | 'auto'
+  /** Compatibility APIs remain executable but can be omitted from the model prompt. */
+  hidden?: boolean
 }
 
 export interface SecurityPolicy {
@@ -14,21 +16,21 @@ export interface SecurityPolicy {
 }
 
 export interface ToolManifest {
-  identifier: string         // 唯一标识
-  category: string           // 分类
+  identifier: string
+  category: string
   meta: {
     title: string
     description: string
-    avatar?: string          // emoji
+    avatar?: string
   }
-  api: ToolApi[]             // 支持的 API 列表
+  api: ToolApi[]
   systemRole?: string | ((context: ToolContext) => string)
   security?: SecurityPolicy
 }
 
 export interface ToolResult {
-  content: string            // LLM 可读的结果文本
-  state?: any                // 结构化数据（供 UI 使用）
+  content: string
+  state?: any
   success: boolean
   error?: { message: string; name?: string }
 }

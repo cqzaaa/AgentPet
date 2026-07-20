@@ -98,14 +98,20 @@ export class FileExecutor implements IToolExecutor {
           if (!content.trim()) content = '[Word 文档已加载，但内容为空]'
         } else if (ext === 'xlsx' || ext === 'xls') {
           const XLSX = require('xlsx')
-          const workbook = XLSX.readFile(file_path)
+          // Row/column visibility metadata is only populated by SheetJS when
+          // styles are read. Without it, skipHidden silently includes template
+          // helper rows and machine-only field identifiers.
+          const workbook = XLSX.readFile(file_path, { cellStyles: true })
           const sheets: string[] = []
           const requestedSheets = args.sheet_name ? [args.sheet_name] : workbook.SheetNames
           const rowLimit = Math.min(Math.max(Number(args.max_rows) || 500, 1), MAX_ROWS)
           for (const sheetName of requestedSheets) {
             const sheet = workbook.Sheets[sheetName]
             if (!sheet) return { content: `错误：未找到工作表 ${sheetName}`, success: false }
-            const csv = XLSX.utils.sheet_to_csv(sheet, args.cell_range ? { range: args.cell_range } : undefined)
+            const csv = XLSX.utils.sheet_to_csv(sheet, {
+              skipHidden: true,
+              ...(args.cell_range ? { range: args.cell_range } : {})
+            })
             if (csv.trim()) {
               const cleaned = csv.split(/\r?\n/).slice(0, rowLimit).join('\n').replace(/\$\{[^}]*\}/g, '').replace(/,{2,}/g, ',').replace(/^,+|,+$/gm, '')
               sheets.push(`[工作表: ${sheetName}]\n${cleaned}`)

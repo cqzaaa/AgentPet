@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
+import { createSessionId } from '../utils/helpers'
 import {
   Bot,
   Camera,
@@ -304,7 +305,7 @@ export function ChatInputWindow(): React.JSX.Element {
 
   // 新建会话
   const handleCreateNewSession = () => {
-    const newId = 'agent:session:' + Date.now()
+    const newId = createSessionId('agent:session')
     localStorage.setItem('agentself_active_session_id', newId)
     localStorage.setItem('agentpet_active_session_id', newId)
     if (window.electron && window.electron.ipcRenderer) {

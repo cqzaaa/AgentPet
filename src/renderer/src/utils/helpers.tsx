@@ -20,6 +20,12 @@ export function formatDateTime(date: Date = new Date()): string {
   return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
 }
 
+export function createSessionId(prefix = 'agent:main:dashboard'): string {
+  const randomId = globalThis.crypto?.randomUUID?.()
+  if (randomId) return `${prefix}:${randomId}`
+  return `${prefix}:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 
 // ── 字节格式化 ───────────────────────────────────────────────
 export const formatBytes = (bytes: number): string => {

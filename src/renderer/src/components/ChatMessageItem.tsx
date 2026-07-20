@@ -244,6 +244,81 @@ function parseInlineMarkdown(text: string): string {
   return html
 }
 
+function normalizeLocalFileUrl(value: string): string {
+  if (value.startsWith('file:///')) return value.replace('file:///', 'local-file:///')
+  if (/^[A-Za-z]:[/\\]/.test(value)) return `local-file:///${value.replace(/\\/g, '/')}`
+  return value
+}
+
+function localFileDisplayName(value: string): string {
+  const withoutScheme = decodeURIComponent(
+    value.replace(/^local-file:\/\/\/?/i, '').replace(/^file:\/\/\/?/i, '')
+  )
+  return withoutScheme.replace(/\\/g, '/').split('/').filter(Boolean).pop() || value
+}
+
+function localFileSystemPath(value: string): string {
+  let path = decodeURIComponent(value.trim())
+  path = path.replace(/^local-file:\/\/\/?/i, '').replace(/^file:\/\/\/?/i, '')
+  if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1)
+  return path.replace(/\//g, '\\')
+}
+
+type PreviewFileHandler = (file: { name: string; path: string; size: number }) => void
+
+function isStandaloneLocalFilePath(value: string): boolean {
+  const trimmed = value.trim()
+  return (
+    (/^[A-Za-z]:[\\/].+\.[A-Za-z0-9]{1,12}$/s.test(trimmed) ||
+      /^local-file:\/\/\/.+\.[A-Za-z0-9]{1,12}$/is.test(trimmed) ||
+      /^file:\/\/\/.+\.[A-Za-z0-9]{1,12}$/is.test(trimmed)) &&
+    !trimmed.includes('\n')
+  )
+}
+
+function LocalFileButton({
+  path,
+  onPreviewFile
+}: {
+  path: string
+  onPreviewFile?: PreviewFileHandler
+}): React.JSX.Element {
+  const normalizedPath = normalizeLocalFileUrl(path.trim())
+  const fileName = localFileDisplayName(normalizedPath)
+  const [opening, setOpening] = useState(false)
+
+  const handleOpen = async (): Promise<void> => {
+    if (opening) return
+    if (onPreviewFile) {
+      onPreviewFile({ name: fileName, path: localFileSystemPath(normalizedPath), size: 0 })
+      return
+    }
+    if (!window.api?.openLocalFile) return
+    setOpening(true)
+    try {
+      const result = await window.api.openLocalFile(normalizedPath)
+      if (result && !result.success) alert(result.error || '无法打开此文件')
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="chat-local-file-button"
+      title={path.trim()}
+      onClick={() => void handleOpen()}
+    >
+      <FileText size={18} strokeWidth={2} aria-hidden="true" />
+      <span>{fileName}</span>
+      <span className="chat-local-file-action">
+        {opening ? '打开中…' : onPreviewFile ? '点击预览' : '点击打开'}
+      </span>
+    </button>
+  )
+}
+
 function parseMarkdownToHtml(markdown: string): string {
   if (!markdown) return ''
   // 移除 HTML 注释（包括多行），防止被 escapeHtml 转义后作为纯文本显示
@@ -435,17 +510,14 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
 }
 
 // 渲染包含图片和链接的普通文本部分
-export function renderPlainOrImageText(text: string, keyIdxStart: { val: number }): React.ReactNode[] {
+export function renderPlainOrImageText(
+  text: string,
+  keyIdxStart: { val: number },
+  onPreviewFile?: PreviewFileHandler
+): React.ReactNode[] {
   const linkOrImgRegex = /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/)[^\s\])<>"'`*，。！？；：（）]+)|([a-zA-Z]:[\\\/](?:[^<>:"|?*\s，。！？；：、\[\]()]*[^<>:"|?*\s，。！？；：、\[\]().,!?;'"`])?)/g
   let match
   let lastIndex = 0
-
-  const normalizeLocalSrc = (url: string): string => {
-    if (!url) return url
-    if (url.startsWith('file:///')) return url.replace('file:///', 'local-file:///')
-    if (/^[A-Za-z]:[/\\]/.test(url)) return `local-file:///${url.replace(/\\/g, '/')}`
-    return url
-  }
 
   const isImageSrc = (url: string) => {
     if (!url) return false
@@ -476,7 +548,7 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
         const isExplicitImg = mdMatch[1] === '!'
         const alt = mdMatch[2]
         const rawSrc = mdMatch[3]
-        const src = normalizeLocalSrc(rawSrc)
+        const src = normalizeLocalFileUrl(rawSrc)
         const shouldRenderAsImg = isExplicitImg || (isImageSrc(src) && !src.startsWith('local-file://'))
         if (shouldRenderAsImg) {
           processedText += `![${alt}](${src})`
@@ -488,12 +560,12 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
       }
     } else if (match[2] || match[3]) {
       const rawUrl = match[2] || match[3]
-      const src = normalizeLocalSrc(rawUrl)
+      const src = normalizeLocalFileUrl(rawUrl)
       const shouldRenderAsImg = isImageSrc(src) && !src.startsWith('local-file://')
       if (shouldRenderAsImg) {
         processedText += `![image](${src})`
       } else {
-        processedText += `[${rawUrl}](${src})`
+        processedText += `[${localFileDisplayName(rawUrl)}](${src})`
       }
     }
 
@@ -503,12 +575,24 @@ export function renderPlainOrImageText(text: string, keyIdxStart: { val: number 
   processedText += text.substring(lastIndex)
 
   if (processedText.trim()) {
-    return [<MarkdownText key={`text-${keyIdxStart.val++}`} rawText={processedText} />]
+    return [
+      <MarkdownText
+        key={`text-${keyIdxStart.val++}`}
+        rawText={processedText}
+        onPreviewFile={onPreviewFile}
+      />
+    ]
   }
   return []
 }
 
-export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Element {
+export function MarkdownText({
+  rawText,
+  onPreviewFile
+}: {
+  rawText: string
+  onPreviewFile?: PreviewFileHandler
+}): React.JSX.Element {
   const html = React.useMemo(() => parseMarkdownToHtml(rawText), [rawText])
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
@@ -518,6 +602,14 @@ export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Elemen
       const href = a.getAttribute('href')
       if (href && (href.startsWith('local-file://') || href.startsWith('wechat-file://'))) {
         e.preventDefault()
+        if (onPreviewFile && href.startsWith('local-file://')) {
+          onPreviewFile({
+            name: localFileDisplayName(href),
+            path: localFileSystemPath(href),
+            size: 0
+          })
+          return
+        }
         if (window.api && typeof window.api.openLocalFile === 'function') {
           window.api.openLocalFile(href).then((res: any) => {
             if (res && !res.success) alert(res.error || '无法打开此本地文件')
@@ -568,7 +660,10 @@ export function MarkdownText({ rawText }: { rawText: string }): React.JSX.Elemen
   )
 }
 
-export function renderAdvancedMessage(text: string): React.ReactNode {
+export function renderAdvancedMessage(
+  text: string,
+  onPreviewFile?: PreviewFileHandler
+): React.ReactNode {
   if (!text) return ''
   const parts: React.ReactNode[] = []
   const keyIdx = { val: 0 }
@@ -580,13 +675,15 @@ export function renderAdvancedMessage(text: string): React.ReactNode {
   while ((match = codeRegex.exec(text)) !== null) {
     const textBefore = text.substring(lastIndex, match.index)
     if (textBefore.trim()) {
-      parts.push(...renderPlainOrImageText(textBefore, keyIdx))
+      parts.push(...renderPlainOrImageText(textBefore, keyIdx, onPreviewFile))
     }
 
     const lang = match[1] || 'code'
     const codeContent = match[2]
     parts.push(
-      <CodeBlock key={`code-${keyIdx.val++}`} code={codeContent} lang={lang} />
+      isStandaloneLocalFilePath(codeContent)
+        ? <LocalFileButton key={`file-${keyIdx.val++}`} path={codeContent} onPreviewFile={onPreviewFile} />
+        : <CodeBlock key={`code-${keyIdx.val++}`} code={codeContent} lang={lang} />
     )
 
     lastIndex = codeRegex.lastIndex
@@ -594,10 +691,12 @@ export function renderAdvancedMessage(text: string): React.ReactNode {
 
   const textAfter = text.substring(lastIndex)
   if (textAfter.trim()) {
-    parts.push(...renderPlainOrImageText(textAfter, keyIdx))
+    parts.push(...renderPlainOrImageText(textAfter, keyIdx, onPreviewFile))
   }
 
-  return parts.length > 0 ? <>{parts}</> : <>{renderPlainOrImageText(text, keyIdx)}</>
+  return parts.length > 0
+    ? <>{parts}</>
+    : <>{renderPlainOrImageText(text, keyIdx, onPreviewFile)}</>
 }
 
 // ── 可独立折叠的工具调用子组件 ─────────────────────────────────
@@ -1181,8 +1280,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       const source = sourceId ? sourceById.get(sourceId) as any : undefined
       return source ? `[${label}](${source.url})` : citation
     })
-    return renderAdvancedMessage(displayText)
-  }, [textForRender, currentAvatarName, msg.toolSteps])
+    return renderAdvancedMessage(displayText, onPreviewFile)
+  }, [textForRender, currentAvatarName, msg.toolSteps, onPreviewFile])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()

@@ -86,6 +86,19 @@ export function useChatReplyRuntime({
     discardPendingMessageSave()
     const message = error instanceof Error ? error.message : String(error)
     const isAbort = message.includes('UserAborted') || message.toLowerCase().includes('aborted')
+    const isAuthError = /HTTP\s*(401|403)\b|api[_ -]?key|鉴权|unauthorized|forbidden/i.test(message)
+    const isRateLimit = /HTTP\s*429\b|rate.?limit|限流/i.test(message)
+    const isServerError = /HTTP\s*5\d\d\b|upstream|service unavailable/i.test(message)
+    const isBadRequest = /HTTP\s*(400|415|422)\b/i.test(message)
+    const failureText = isAuthError
+      ? '模型服务鉴权失败，请检查『设置 -> 模型配置』中的 API Key 和代理路径。'
+      : isRateLimit
+        ? '模型服务当前请求过于频繁，请稍后重试。'
+        : isBadRequest
+          ? '当前模型服务未接受这次请求，可能不支持图片、工具调用或当前消息格式。已完成的文件操作仍会保留，请重试或切换兼容模型。'
+          : isServerError
+            ? '模型上游服务暂时不可用。已完成的文件操作仍会保留，请稍后重试。'
+            : '本次回复未能继续完成。已完成的工具操作仍会保留，请重试；若持续失败，再检查模型配置。'
     let savedMessage: any = null
 
     setSessions(previous => previous.map(session => {
@@ -98,7 +111,7 @@ export function useChatReplyRuntime({
         }
         const suffix = isAbort
           ? '\n\n⚠️ 对话生成已被用户手动中断。'
-          : `\n\n系统错误：调用智能代理接口失败（${message}）。请检查『设置 -> 模型配置』中的代理路径或 API Key。`
+          : `\n\n⚠️ ${failureText}`
         savedMessage = withoutClarificationSteps({
           ...item,
           text: currentText + suffix,

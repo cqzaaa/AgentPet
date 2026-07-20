@@ -79,7 +79,12 @@ process.parentPort.on('message', async (e) => {
 
     // 添加新工作表
     if (add_sheet) {
-      workbook.addWorksheet(add_sheet)
+      const sheetNames = Array.isArray(add_sheet) ? add_sheet : [add_sheet]
+      for (const sheetName of sheetNames) {
+        if (typeof sheetName === 'string' && sheetName && !workbook.getWorksheet(sheetName)) {
+          workbook.addWorksheet(sheetName)
+        }
+      }
     }
 
     // 应用单元格修改
@@ -142,8 +147,33 @@ process.parentPort.on('message', async (e) => {
           : workbook.worksheets[0]
         if (!ws) continue
 
-        if (Array.isArray(rowData.values)) {
-          const processedValues = rowData.values.map((val) => {
+        let rowValues = rowData.values
+        if (!Array.isArray(rowValues)) {
+          const cells = Array.isArray(rowData.row)
+            ? rowData.row
+            : Array.isArray(rowData.cells)
+              ? rowData.cells
+              : null
+          if (cells) {
+            const indexedValues = cells
+              .map((cell) => {
+                const match = String(cell && cell.cell || '').trim().match(/^([A-Z]+)(?:\d+)?$/i)
+                if (!match) return null
+                let index = 0
+                for (const character of match[1].toUpperCase()) {
+                  index = index * 26 + character.charCodeAt(0) - 64
+                }
+                return { index: index - 1, value: cell.value }
+              })
+              .filter(Boolean)
+            const maxIndex = indexedValues.reduce((maximum, cell) => Math.max(maximum, cell.index), -1)
+            rowValues = Array.from({ length: maxIndex + 1 }, () => null)
+            for (const cell of indexedValues) rowValues[cell.index] = cell.value
+          }
+        }
+
+        if (Array.isArray(rowValues)) {
+          const processedValues = rowValues.map((val) => {
             if (typeof val === 'string' && val.startsWith('=')) {
               return { formula: val.substring(1) }
             }

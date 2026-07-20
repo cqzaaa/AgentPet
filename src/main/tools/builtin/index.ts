@@ -14,6 +14,8 @@ import { webExecutor } from './web/executor'
 
 import { officeManifest } from './office/manifest'
 import { officeExecutor } from './office/executor'
+import { officeSkillManifest } from './office/skills/manifest'
+import { officeSkillExecutor } from './office/skills/executor'
 
 import { systemManifest } from './system/manifest'
 import { systemExecutor } from './system/executor'
@@ -30,6 +32,7 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(searchManifest, searchExecutor)
   toolRegistry.register(webManifest, webExecutor)
   toolRegistry.register(officeManifest, officeExecutor)
+  toolRegistry.register(officeSkillManifest, officeSkillExecutor)
   toolRegistry.register(systemManifest, systemExecutor)
   toolRegistry.register(computerManifest, computerExecutor)
   toolRegistry.register(rpaManifest, rpaToolExecutor)

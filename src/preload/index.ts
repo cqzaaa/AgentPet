@@ -83,6 +83,24 @@ const api = {
       ipcRenderer.removeListener('api:generated-file-updated', subscription)
     }
   },
+  onOfficePreviewRequest: (callback: (request: any) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, request: any) => callback(request)
+    ipcRenderer.on('api:office-preview-request', subscription)
+    return () => ipcRenderer.removeListener('api:office-preview-request', subscription)
+  },
+  captureOfficePreviewFrame: (payload: {
+    requestId: string
+    index: number
+    rect: { x: number; y: number; width: number; height: number }
+  }): Promise<{ success: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('api:capture-office-preview-frame', payload),
+  completeOfficePreviewCapture: (payload: {
+    requestId: string
+    imagePaths?: string[]
+    truncated?: boolean
+    focusMatched?: boolean
+    error?: string
+  }): void => ipcRenderer.send('api:complete-office-preview-capture', payload),
   saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>
     ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
   copyToChatFile: (sessionId: string, sourcePath: string): Promise<{ path: string; exists: boolean }> =>

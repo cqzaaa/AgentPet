@@ -96,6 +96,9 @@ export const terminalManifest: ToolManifest = {
   systemRole: `<tool_instructions>
 你有一组终端工具可以执行系统命令。
 <rules>
+- 创建、读取、修改或验证 DOCX、XLSX、PDF、PPTX 时，必须先使用 load_office_skill，再使用 run_office_skill；除非用户明确要求 Python 或终端脚本实现，否则禁止用 pandas、openpyxl 或自写脚本替代 Office Skill
+- 禁止把多行程序或较长程序塞进 python -c、node -e 等单行命令；用户明确要求脚本实现时，应先写入脚本文件，再执行并检查产物
+- 命令 exit_code 为 0 但预期输出或文件不存在时仍视为失败；应检查 stderr、目标路径和文件存在性并改变方案，不要重复执行近似命令
 - 对于 ≤2分钟的快速命令，优先使用 run_terminal_command
 - 对于长时间运行的命令（如服务器启动、打包编译），必须使用 run_command 异步执行
 - 启动数据库、Web 服务、开发服务器、守护进程等常驻进程时，即使命令本身看似很短，也必须使用 run_command；禁止使用 run_terminal_command 等待常驻进程
