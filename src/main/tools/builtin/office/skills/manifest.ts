@@ -41,7 +41,7 @@ export const officeSkillManifest: ToolManifest = {
           },
           action: {
             type: 'string',
-            enum: ['create', 'inspect', 'modify', 'validate', 'render']
+            enum: ['create', 'inspect', 'modify', 'validate', 'render', 'convert']
           },
           input: {
             type: 'object',

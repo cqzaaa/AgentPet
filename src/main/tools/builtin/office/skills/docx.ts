@@ -4,6 +4,7 @@ import * as fs from 'fs'
 
 import type { ToolContext, ToolResult } from '../../../core/types'
 import { officeExecutor } from '../executor'
+import { convertDocumentText, convertOfficeToPdf } from './conversion'
 import { renderOfficeArtifact } from './rendering'
 import type { OfficeSkill, OfficeSkillAction, OfficeSkillDescriptor } from './types'
 import {
@@ -80,6 +81,19 @@ const descriptor: OfficeSkillDescriptor = {
         type: 'object',
         properties: { source_path: { type: 'string' } },
         required: ['source_path']
+      }
+    },
+    convert: {
+      description: 'DOCX 与 Markdown/HTML/TXT 进行结构化转换，或通过 Microsoft Word 原生导出完整、可搜索的 PDF。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source_path: { type: 'string' },
+          target_format: { type: 'string', enum: ['pdf', 'docx', 'markdown', 'html', 'txt'] },
+          output_name: { type: 'string' },
+          timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
+        },
+        required: ['source_path', 'target_format']
       }
     },
     render: {
@@ -188,7 +202,14 @@ export const docxSkill: OfficeSkill = {
         return addDocxValidation(result, context)
       }
 
+      if (action === 'convert') {
+        return input.target_format === 'pdf'
+          ? convertOfficeToPdf('docx', input, context)
+          : convertDocumentText(input, context)
+      }
+
       if (action === 'modify') {
+        const sourcePath = resolveRequiredSource(input, '.docx', context)
         const rawModifications = input.modifications || input.operations
         const modifications = Array.isArray(rawModifications)
           ? rawModifications.map((modification) => ({
@@ -215,7 +236,7 @@ export const docxSkill: OfficeSkill = {
         const result = await officeExecutor.execute(
           'modify_docx_file',
           {
-            source_path: input.source_path || input.file_path,
+            source_path: sourcePath,
             output_name: normalizeOutputName(input.output_name, 'modified.docx', '.docx'),
             modifications,
             images
@@ -231,7 +252,7 @@ export const docxSkill: OfficeSkill = {
         return addDocxValidation(result, context, { mode: 'changes', texts: focusTexts })
       }
 
-      const sourcePath = resolveRequiredSource(input, '.docx')
+      const sourcePath = resolveRequiredSource(input, '.docx', context)
       if (action === 'render') return renderOfficeArtifact('docx', sourcePath, input, context)
       const summary = await inspectDocx(sourcePath)
       if (action === 'validate') {

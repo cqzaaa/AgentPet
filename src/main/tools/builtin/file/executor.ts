@@ -1,8 +1,8 @@
 import * as fs from 'fs'
-import { dirname, basename, join, isAbsolute, extname, relative } from 'path'
+import { dirname, basename, join, extname, relative } from 'path'
 import { shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath, getActiveStorageDir, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
+import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024
 const MAX_ROWS = 2000
@@ -30,7 +30,7 @@ async function assertAllowedPath(filePath: string, context: ToolContext, allowMi
 }
 
 function resolveFilePath(filePath: string, context: ToolContext): string {
-  let resolved = resolveLocalPath(filePath)
+  const resolved = resolveLocalPath(filePath)
   if (!resolved || typeof resolved !== 'string') return resolved
 
   // 1. 处理 web_fetch 生成的相对缓存路径
@@ -41,12 +41,9 @@ function resolveFilePath(filePath: string, context: ToolContext): string {
     return join(cacheDir, fileName)
   }
 
-  // 2. 兼容普通相对路径：如果非绝对路径，且不含盘符，则拼接当前工作空间路径
-  if (!isAbsolute(resolved) && !resolved.includes(':')) {
-    resolved = join(context.workspacePath || process.cwd(), resolved)
-  }
-
-  return resolved
+  // 2. All relative file-tool paths share the same base as list_directory:
+  // the current conversation directory. Explicit paths and aliases remain available.
+  return resolveSessionPath(resolved, context.sessionId)
 }
 
 export class FileExecutor implements IToolExecutor {

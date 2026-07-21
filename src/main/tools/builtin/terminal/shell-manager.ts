@@ -97,7 +97,7 @@ export class ShellManager {
   }
 
   // 同步执行命令。shell 由调用方显式指定；本机未指定时固定使用 PowerShell，避免猜测命令语法。
-  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd?: string; timeout?: number; signal?: AbortSignal } = {}): Promise<ShellExecResult> {
+  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd: string; timeout?: number; signal?: AbortSignal }): Promise<ShellExecResult> {
     const bashPath = this.getBashPath()
     const cmd = command.trim()
 
@@ -160,7 +160,7 @@ export class ShellManager {
   }
 
   // 启动异步 shell 会话
-  public startSession(command: string, shell: ShellKind = 'powershell', cwd?: string): ShellSession {
+  public startSession(command: string, shell: ShellKind = 'powershell', cwd: string): ShellSession {
     const shellId = `shell_${this.nextShellId++}`
     const bashPath = this.getBashPath()
 
@@ -171,7 +171,7 @@ export class ShellManager {
         throw new Error('未找到 Git Bash。请安装 Git for Windows，或改用 shell=powershell。')
       }
       proc = spawn(bashExecutable, ['-lc', command], {
-        cwd: cwd || process.cwd(),
+        cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else if (shell === 'powershell') {
@@ -179,7 +179,7 @@ export class ShellManager {
         ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
         : command
       proc = spawn(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
-        cwd: cwd || process.cwd(),
+        cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else {
@@ -188,7 +188,7 @@ export class ShellManager {
       }
       const finalCommand = process.platform === 'win32' ? `chcp 65001 >nul && ${command}` : command
       proc = spawn(process.platform === 'win32' ? 'cmd.exe' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', finalCommand] : ['-c', finalCommand], {
-        cwd: cwd || process.cwd(),
+        cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     }

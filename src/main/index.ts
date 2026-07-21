@@ -18,7 +18,7 @@ import ExcelJS from 'exceljs'
 
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
-import { mcpManager } from './tools/mcp/mcp-manager'
+import { mcpManager, PADDLEOCR_MCP_VERSION } from './tools/mcp/mcp-manager'
 import { permissionManager } from './tools/security/permission-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
@@ -3960,10 +3960,16 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:test-mcp-server', async (_, config) => {
     try {
-      const [{ Client }, { StreamableHTTPClientTransport }, { SSEClientTransport }] = await Promise.all([
+      const [
+        { Client },
+        { StreamableHTTPClientTransport },
+        { SSEClientTransport },
+        { StdioClientTransport, getDefaultEnvironment }
+      ] = await Promise.all([
         import('@modelcontextprotocol/sdk/client/index.js'),
         import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
         import('@modelcontextprotocol/sdk/client/sse.js'),
+        import('@modelcontextprotocol/sdk/client/stdio.js')
       ])
 
       const runtimeServer = systemMcpConfig.servers.find((server: any) => server.id === config.id)
@@ -3978,7 +3984,25 @@ app.whenReady().then(() => {
       let usedProtocol = 'Streamable HTTP'
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stream') {
+      if (mcpType === 'stdio') {
+        if (config.preset !== 'paddleocr-aistudio') {
+          throw new Error('不允许测试未知的本地 MCP 预设')
+        }
+        if (!apiKey) throw new Error('请先填写 AI Studio Access Token')
+        const transport = new StdioClientTransport({
+          command: 'uvx',
+          args: ['--from', `paddleocr-mcp==${PADDLEOCR_MCP_VERSION}`, 'paddleocr_mcp'],
+          env: {
+            ...getDefaultEnvironment(),
+            PADDLEOCR_MCP_MODEL: config.model || 'PaddleOCR-VL-1.6',
+            PADDLEOCR_MCP_PPOCR_SOURCE: 'aistudio',
+            PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN: apiKey
+          },
+          stderr: 'ignore'
+        })
+        await client.connect(transport)
+        usedProtocol = 'stdio (uvx)'
+      } else if (mcpType === 'stream') {
         const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
         await client.connect(transport)
         usedProtocol = 'Streamable HTTP'

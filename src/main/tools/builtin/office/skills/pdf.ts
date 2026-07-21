@@ -6,8 +6,9 @@ import fontkit from '@pdf-lib/fontkit'
 import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib'
 
 import type { ToolContext, ToolResult } from '../../../core/types'
-import { resolveLocalPath } from '../../../utils/paths'
+import { resolveSessionPath } from '../../../utils/paths'
 import { officeExecutor } from '../executor'
+import { convertPdfOrImages } from './conversion'
 import { renderOfficeArtifact } from './rendering'
 import type { OfficeSkill, OfficeSkillAction, OfficeSkillDescriptor } from './types'
 import {
@@ -107,6 +108,32 @@ const descriptor: OfficeSkillDescriptor = {
         type: 'object',
         properties: { source_path: { type: 'string' } },
         required: ['source_path']
+      }
+    },
+    convert: {
+      description:
+        '在 PDF、图片和 Office 之间转换。目标为 DOCX/PPTX 时固定使用 PaddleOCR 生成可编辑内容；目标为 PNG/JPG 时导出页面图片。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source_path: { type: 'string', minLength: 1 },
+          image_paths: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: { type: 'string', minLength: 1 }
+          },
+          target_format: { type: 'string', enum: ['pdf', 'png', 'jpg', 'pptx', 'docx'] },
+          output_name: { type: 'string', minLength: 1 },
+          pages: { type: 'string', minLength: 1, description: '例如 1-3,5；仅用于 PDF 转图片' },
+          dpi: { type: 'number', minimum: 36, maximum: 300 },
+          quality: { type: 'number', minimum: 1, maximum: 100 },
+          page_size: { type: 'string', enum: ['original', 'a4'] },
+          input_dpi: { type: 'number', minimum: 36, maximum: 600 },
+          margin: { type: 'number', minimum: 0, maximum: 144 },
+          timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
+        },
+        required: ['target_format']
       }
     },
     render: {
@@ -218,7 +245,9 @@ async function applyPdfOperations(
     const text = String(operation.text ?? '')
     const hasNonAsciiText = [...text].some((character) => character.charCodeAt(0) > 127)
     let fontPath =
-      typeof operation.font_path === 'string' ? resolveLocalPath(operation.font_path) : ''
+      typeof operation.font_path === 'string'
+        ? resolveSessionPath(operation.font_path, context.sessionId)
+        : ''
     if (!fontPath && hasNonAsciiText && process.platform === 'win32') {
       const windowsCjkFont = 'C:/Windows/Fonts/simhei.ttf'
       if (fs.existsSync(windowsCjkFont)) fontPath = windowsCjkFont
@@ -256,7 +285,7 @@ async function applyPdfOperations(
       }
       case 'add_image': {
         const page = getPage(document, operation.page)
-        const imagePath = resolveLocalPath(String(operation.image_path || ''))
+        const imagePath = resolveSessionPath(String(operation.image_path || ''), context.sessionId)
         if (!imagePath || !fs.existsSync(imagePath)) throw new Error(`图片不存在：${imagePath}`)
         const imageBytes = await fs.promises.readFile(imagePath)
         const extension = extname(imagePath).toLowerCase()
@@ -292,7 +321,7 @@ async function applyPdfOperations(
         break
       }
       case 'append_pdf': {
-        const appendPath = resolveLocalPath(String(operation.pdf_path || ''))
+        const appendPath = resolveSessionPath(String(operation.pdf_path || ''), context.sessionId)
         if (!appendPath || !fs.existsSync(appendPath))
           throw new Error(`追加 PDF 不存在：${appendPath}`)
         const appendDocument = await PDFDocument.load(await fs.promises.readFile(appendPath))
@@ -381,7 +410,16 @@ export const pdfSkill: OfficeSkill = {
         return addPdfValidation(result, context)
       }
 
-      const sourcePath = resolveRequiredSource(input, '.pdf')
+      if (action === 'convert') {
+        const result = await convertPdfOrImages(input, context)
+        const state = readToolResultState(result)
+        if (state.conversion?.target_format === 'pdf') {
+          return addPdfValidation(result, context)
+        }
+        return result
+      }
+
+      const sourcePath = resolveRequiredSource(input, '.pdf', context)
       if (action === 'render') return renderOfficeArtifact('pdf', sourcePath, input, context)
       if (action === 'modify') {
         if (!Array.isArray(input.operations) || input.operations.length === 0) {

@@ -442,7 +442,23 @@ export const useAppStoreRaw = create<any>((set) => ({
       contextTokenUsageBySession: syncContextTokenUsage(state.sessions, sessions, state.contextTokenUsageBySession)
     }
   }),
-  setActiveSessionId: (val: any) => set({ activeSessionId: val }),
+  setActiveSessionId: (val: any) => set((state: any) => {
+    const nextSessionId = typeof val === 'function' ? val(state.activeSessionId) : val
+    if (nextSessionId === state.activeSessionId) return { activeSessionId: nextSessionId }
+
+    // File previews and generated-file tabs belong to the conversation that opened
+    // them. Clear them atomically with the session id so files from conversation A
+    // are never rendered for even one frame after switching to conversation B.
+    return {
+      activeSessionId: nextSessionId,
+      generatedFiles: [],
+      showFilePanel: false,
+      openTabs: [],
+      previewFile: null,
+      previewLoading: false,
+      officePreviewRequest: null
+    }
+  }),
   setInputValue: (val: any) => set((state: any) => ({
     inputValue: typeof val === 'function' ? val(state.inputValue) : val
   })),

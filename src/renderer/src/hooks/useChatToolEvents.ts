@@ -12,13 +12,20 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, detail, sources, requestId, questions, timestamp: eventTimestamp } of events) {
+  for (const { type, name, args, result, detail, progress, sources, requestId, questions, timestamp: eventTimestamp } of events) {
     const timestamp = Number(eventTimestamp) || Date.now()
     const id = `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
     if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
     else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result })
     else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
+    else if (type === 'tool_progress') {
+      const progressDetail = detail || `${Number(progress) || 0}%`
+      const existing = toolSteps.findLastIndex(step => step.type === 'think' && step.name === name)
+      const progressStep = { id, sequence, timestamp, type: 'think', name, detail: progressDetail }
+      if (existing >= 0) toolSteps[existing] = progressStep
+      else toolSteps.push(progressStep)
+    }
     else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
     else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, sequence, timestamp, type: 'clarification', requestId, questions })
   }

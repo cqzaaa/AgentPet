@@ -5,16 +5,20 @@ import * as fs from 'fs'
 import { extname, join } from 'path'
 
 import type { ToolContext, ToolResult } from '../../../core/types'
-import { getGeneratedFilesDir, resolveLocalPath } from '../../../utils/paths'
+import { getGeneratedFilesDir, resolveSessionPath } from '../../../utils/paths'
 import { requestVisibleOfficePreview, type OfficePreviewFocus } from '../preview-capture'
 
-export function resolveRequiredSource(input: Record<string, any>, extension: string): string {
+export function resolveRequiredSource(
+  input: Record<string, any>,
+  extension: string,
+  context: ToolContext
+): string {
   const rawPath = input.source_path || input.file_path
   if (!rawPath || typeof rawPath !== 'string') {
     throw new Error(`缺少 source_path（需要 ${extension} 文件）`)
   }
 
-  const sourcePath = resolveLocalPath(rawPath)
+  const sourcePath = resolveSessionPath(rawPath, context.sessionId)
   if (!fs.existsSync(sourcePath)) throw new Error(`源文件不存在：${sourcePath}`)
   if (extname(sourcePath).toLowerCase() !== extension) {
     throw new Error(

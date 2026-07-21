@@ -1,10 +1,7 @@
-import * as fs from 'fs'
-import * as os from 'os'
-import { join } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { ShellKind, shellManager } from './shell-manager'
 import { sshManager } from './ssh-manager'
-import { getActiveStorageDir } from '../../utils/paths'
+import { getSessionFilesDir, resolveSessionPath } from '../../utils/paths'
 
 function resolveShell(value: unknown, fallback: ShellKind): ShellKind {
   if (value === undefined || value === null) return fallback
@@ -39,7 +36,7 @@ export class TerminalExecutor implements IToolExecutor {
           }
         }
 
-        const execCwd = this.resolveCwd(context.sessionId, context.workspacePath)
+        const execCwd = getSessionFilesDir(context.sessionId)
         // run_terminal_command 同步执行，传入动态超时与中止信号
         const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
           cwd: execCwd,
@@ -76,7 +73,7 @@ export class TerminalExecutor implements IToolExecutor {
         if (isSsh) {
           // 过滤 Windows 本地物理路径，非 Windows 物理路径才被视作远程路径带给 SSH
           let remoteCwd: string | undefined = undefined
-          if (cwd && !cwd.includes(':\\') && !cwd.includes(':/') && cwd !== context.workspacePath) {
+          if (cwd && !cwd.includes(':\\') && !cwd.includes(':/')) {
             remoteCwd = cwd
           }
           const session = sshManager.startSshShellSession(context.sessionId!, command, remoteCwd)
@@ -87,7 +84,9 @@ export class TerminalExecutor implements IToolExecutor {
           }
         }
 
-        const execCwd = cwd || this.resolveCwd(context.sessionId, context.workspacePath)
+        const execCwd = cwd
+          ? resolveSessionPath(cwd, context.sessionId)
+          : getSessionFilesDir(context.sessionId)
         const session = shellManager.startSession(command, shell, execCwd)
         return {
           content: `[命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
@@ -138,19 +137,6 @@ export class TerminalExecutor implements IToolExecutor {
     return ['run_command', 'get_command_output', 'kill_command', 'run_terminal_command']
   }
 
-  private resolveCwd(sessionId?: string, workspacePath?: string): string {
-    let execCwd = os.homedir()
-    if (sessionId) {
-      const sessionDir = join(getActiveStorageDir(), 'chat', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'))
-      if (fs.existsSync(sessionDir)) {
-        execCwd = sessionDir
-      }
-    }
-    if (execCwd === os.homedir() && workspacePath && fs.existsSync(workspacePath)) {
-      execCwd = workspacePath
-    }
-    return execCwd
-  }
 }
 
 export const terminalExecutor = new TerminalExecutor()

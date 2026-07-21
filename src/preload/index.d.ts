@@ -60,6 +60,7 @@ declare global {
       captureOfficePreviewFrame: (payload: {
         requestId: string
         index: number
+        total?: number
         rect: { x: number; y: number; width: number; height: number }
       }) => Promise<{ success: boolean; path?: string; error?: string }>
       completeOfficePreviewCapture: (payload: {
@@ -67,6 +68,8 @@ declare global {
         imagePaths?: string[]
         truncated?: boolean
         focusMatched?: boolean
+        pageCount?: number
+        capturedPages?: number[]
         error?: string
       }) => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>

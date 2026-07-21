@@ -767,6 +767,7 @@ export class AgentExecutor {
                   const ctx = {
                     workspacePath: workspacePath || '',
                     sessionId,
+                    messageId: config.messageId,
                     isFrontend,
                     sandboxMode: !!sandboxMode,
                     event,
@@ -782,6 +783,7 @@ export class AgentExecutor {
               const ctx = {
                 workspacePath: workspacePath || '',
                 sessionId,
+                messageId: config.messageId,
                 isFrontend,
                 sandboxMode: !!sandboxMode,
                 event,

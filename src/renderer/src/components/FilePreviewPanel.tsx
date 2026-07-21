@@ -468,7 +468,11 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
         if (cancelled) return
 
         const focus = request.focus || { mode: 'overview' }
-        const maxFrames = Math.max(1, Math.min(Number(request.maxFrames) || 8, 12))
+        const captureMode = request.captureMode === 'pages' ? 'pages' : 'overview'
+        const maxFrames = Math.max(
+          1,
+          Math.min(Number(request.maxFrames) || (captureMode === 'pages' ? 500 : 8), captureMode === 'pages' ? 500 : 12)
+        )
         if (focus.mode === 'changes' && Array.isArray(focus.sheets) && focus.sheets.length > 0) {
           const targetSheet = String(focus.sheets[0]).trim().toLocaleLowerCase()
           const sheetTab = Array.from(
@@ -543,6 +547,36 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
           }
         }
 
+        const findPageElements = (): HTMLElement[] => {
+          if (captureMode !== 'pages') return []
+          const selectors = [
+            '.ofv-pdf-page-wrapper',
+            '.ofv-docx-page-frame',
+            '.ofv-msdoc-page',
+            '.ofv-pptx-viewer > [data-slide-index]'
+          ]
+          for (const selector of selectors) {
+            const matches = Array.from(captureNode.querySelectorAll<HTMLElement>(selector))
+            if (matches.length > 0) return matches
+          }
+          return []
+        }
+        let pageElements = findPageElements()
+        if (pageElements.length > 0) {
+          const firstBounds = pageElements[0].getBoundingClientRect()
+          const availableWidth = Math.max(1, captureNode.clientWidth - 16)
+          const availableHeight = Math.max(1, captureNode.clientHeight - 16)
+          const currentZoom = Number(toolbarContextRef.current?.zoom) || 1
+          const fitScale = Math.min(availableWidth / firstBounds.width, availableHeight / firstBounds.height, 1)
+          if (fitScale < 0.98 && toolbarContextRef.current?.setZoom) {
+            toolbarContextRef.current.setZoom(Math.max(0.1, currentZoom * fitScale * 0.96))
+            await new Promise<void>(resolve =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            )
+            pageElements = findPageElements()
+          }
+        }
+
         focusedPositions.sort((a, b) => a - b)
         const focusMatched = focus.mode === 'changes' && focusedPositions.length > 0
         const fallbackFrameCount = Math.min(availableFrames, maxFrames)
@@ -550,20 +584,44 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
           fallbackFrameCount === 1 ? 0 : Math.round((maxScroll * index) / (fallbackFrameCount - 1))
         )
         const candidatePositions = focusMatched ? focusedPositions : overviewPositions
-        const positions = candidatePositions.slice(0, maxFrames)
+        const positions = captureMode === 'pages' && pageElements.length === 0
+          ? Array.from({ length: Math.min(availableFrames, maxFrames) }, (_, index) =>
+            Math.min(maxScroll, index * viewportHeight)
+          )
+          : candidatePositions.slice(0, maxFrames)
+        const pageTargets = captureMode === 'pages' ? pageElements.slice(0, maxFrames) : []
+        const captureCount = pageTargets.length || positions.length
 
-        for (let index = 0; index < positions.length; index++) {
+        for (let index = 0; index < captureCount; index++) {
           if (cancelled) return
-          captureNode.scrollTop = positions[index]
+          const pageTarget = pageTargets[index]
+          if (pageTarget) {
+            const containerBounds = captureNode.getBoundingClientRect()
+            const targetBounds = pageTarget.getBoundingClientRect()
+            const targetTop = captureNode.scrollTop + targetBounds.top - containerBounds.top
+            captureNode.scrollTop = Math.max(0, Math.min(maxScroll,
+              targetTop - Math.max(0, (captureNode.clientHeight - targetBounds.height) / 2)))
+          }
+          else captureNode.scrollTop = positions[index]
           await new Promise<void>(resolve =>
             requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
           )
           await new Promise(resolve => setTimeout(resolve, 180))
 
-          const bounds = captureNode.getBoundingClientRect()
+          const containerBounds = captureNode.getBoundingClientRect()
+          const targetBounds = pageTarget?.getBoundingClientRect()
+          const bounds = targetBounds && targetBounds.width > 0 && targetBounds.height > 0
+            ? {
+                x: Math.max(containerBounds.x, targetBounds.x),
+                y: Math.max(containerBounds.y, targetBounds.y),
+                width: Math.min(containerBounds.right, targetBounds.right) - Math.max(containerBounds.x, targetBounds.x),
+                height: Math.min(containerBounds.bottom, targetBounds.bottom) - Math.max(containerBounds.y, targetBounds.y)
+              }
+            : containerBounds
           const result = await window.api.captureOfficePreviewFrame({
             requestId: request.requestId,
             index,
+            total: captureCount,
             rect: {
               x: Math.round(bounds.x),
               y: Math.round(bounds.y),
@@ -580,7 +638,11 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
         window.api.completeOfficePreviewCapture({
           requestId: request.requestId,
           imagePaths,
-          truncated: candidatePositions.length > positions.length,
+          truncated: pageTargets.length > 0
+            ? pageElements.length > pageTargets.length
+            : candidatePositions.length > positions.length,
+          pageCount: pageTargets.length > 0 ? pageElements.length : availableFrames,
+          capturedPages: Array.from({ length: captureCount }, (_, index) => index + 1),
           focusMatched: focus.mode !== 'changes' || focusMatched
         })
       } catch (error) {

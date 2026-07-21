@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import * as fs from 'fs'
-import { join, parse, relative, resolve } from 'path'
+import { isAbsolute, join, parse, relative, resolve } from 'path'
 import type { ToolContext } from '../core/types'
 
 export function readConfig(): any {
@@ -100,6 +100,17 @@ export function getSessionFilesDir(sessionId?: string): string {
   const dir = join(getActiveStorageDir(), 'chat', safeSessionId)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/**
+ * Resolve a tool-provided path against the current conversation directory.
+ * Explicit paths and supported aliases/URIs remain unchanged.
+ */
+export function resolveSessionPath(filePath: string, sessionId?: string): string {
+  const localPath = resolveLocalPath(filePath)
+  if (!localPath || typeof localPath !== 'string') return localPath
+  if (isAbsolute(localPath) || localPath.includes(':')) return localPath
+  return join(getSessionFilesDir(sessionId), localPath)
 }
 
 /** Paths the user has explicitly placed in scope for this conversation. */

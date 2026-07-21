@@ -19,6 +19,8 @@ export interface OfficePreviewCaptureResult {
   imagePaths: string[]
   frames?: number
   truncated?: boolean
+  pageCount?: number
+  capturedPages?: number[]
   message?: string
 }
 
@@ -37,11 +39,15 @@ interface PendingCapture {
   imagePaths: string[]
   resolve: (result: OfficePreviewCaptureResult) => void
   timer: NodeJS.Timeout
+  abortSignal?: AbortSignal
+  abortHandler?: () => void
+  messageId?: number
 }
 
 interface CaptureFramePayload {
   requestId: string
   index: number
+  total?: number
   rect: Rectangle
 }
 
@@ -50,6 +56,8 @@ interface CompleteCapturePayload {
   imagePaths?: string[]
   truncated?: boolean
   focusMatched?: boolean
+  pageCount?: number
+  capturedPages?: number[]
   error?: string
 }
 
@@ -60,6 +68,9 @@ function finishCapture(requestId: string, result: OfficePreviewCaptureResult): v
   const pending = pendingCaptures.get(requestId)
   if (!pending) return
   clearTimeout(pending.timer)
+  if (pending.abortSignal && pending.abortHandler) {
+    pending.abortSignal.removeEventListener('abort', pending.abortHandler)
+  }
   pendingCaptures.delete(requestId)
   pending.resolve(result)
 }
@@ -112,6 +123,17 @@ async function captureFrame(
     const outputPath = join(outputDirectory, `viewport-${String(index + 1).padStart(2, '0')}.png`)
     await fs.promises.writeFile(outputPath, image.toPNG())
     pending.imagePaths[index] = outputPath
+    const total = Math.max(1, Math.floor(Number(payload.total) || 1))
+    const completed = Math.min(index + 1, total)
+    event.sender.send('api:llm-tool-event', {
+      type: 'tool_progress',
+      name: 'Office 页面捕获',
+      detail: `已捕获 ${completed}/${total} 页`,
+      progress: Math.round((completed / total) * 100),
+      timestamp: Date.now(),
+      messageId: pending.messageId,
+      sessionId: pending.sessionId
+    })
     return { success: true, path: outputPath }
   } catch (error) {
     return {
@@ -145,6 +167,8 @@ function completeCapture(event: IpcMainEvent, payload: CompleteCapturePayload): 
     imagePaths,
     frames: imagePaths.length,
     truncated: Boolean(payload.truncated),
+    pageCount: Number(payload.pageCount) || imagePaths.length,
+    capturedPages: Array.isArray(payload.capturedPages) ? payload.capturedPages : undefined,
     message:
       imagePaths.length === 0
         ? 'Preview loaded, but no screenshots were produced'
@@ -164,7 +188,12 @@ function ensurePreviewCaptureHandlers(): void {
 export async function requestVisibleOfficePreview(
   filePath: string,
   context: ToolContext,
-  options: { maxFrames?: number; timeoutMs?: number; focus?: OfficePreviewFocus } = {}
+  options: {
+    maxFrames?: number
+    timeoutMs?: number
+    focus?: OfficePreviewFocus
+    captureMode?: 'overview' | 'pages'
+  } = {}
 ): Promise<OfficePreviewCaptureResult> {
   ensurePreviewCaptureHandlers()
   const sender = context.event?.sender
@@ -186,8 +215,12 @@ export async function requestVisibleOfficePreview(
   }
 
   const requestId = randomUUID()
-  const timeoutMs = Math.max(10_000, Math.min(options.timeoutMs || 60_000, 120_000))
-  const maxFrames = Math.max(1, Math.min(options.maxFrames || 8, 12))
+  const captureMode = options.captureMode || 'overview'
+  const timeoutMs = Math.max(10_000, Math.min(options.timeoutMs || 60_000, 300_000))
+  const maxFrames = Math.max(
+    1,
+    Math.min(options.maxFrames || (captureMode === 'pages' ? 500 : 8), captureMode === 'pages' ? 500 : 12)
+  )
 
   return new Promise<OfficePreviewCaptureResult>((resolve) => {
     const timer = setTimeout(() => {
@@ -199,14 +232,31 @@ export async function requestVisibleOfficePreview(
       })
     }, timeoutMs)
 
-    pendingCaptures.set(requestId, {
+    const pending: PendingCapture = {
       sender,
       sessionId: context.sessionId,
       filePath,
       imagePaths: [],
       resolve,
-      timer
-    })
+      timer,
+      abortSignal: context.abortSignal,
+      messageId: context.messageId
+    }
+    pendingCaptures.set(requestId, pending)
+    if (context.abortSignal) {
+      pending.abortHandler = () => {
+        finishCapture(requestId, {
+          status: 'error',
+          renderer: 'open-file-viewer',
+          imagePaths: [],
+          message: 'Preview capture was cancelled'
+        })
+      }
+      context.abortSignal.addEventListener('abort', pending.abortHandler, { once: true })
+      if (context.abortSignal.aborted) pending.abortHandler()
+    }
+
+    if (!pendingCaptures.has(requestId)) return
 
     sender.send('api:office-preview-request', {
       requestId,
@@ -218,6 +268,7 @@ export async function requestVisibleOfficePreview(
         time: new Date().toISOString()
       },
       maxFrames,
+      captureMode,
       focus: options.focus || { mode: 'overview' }
     })
   })

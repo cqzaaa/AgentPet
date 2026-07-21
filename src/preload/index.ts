@@ -91,6 +91,7 @@ const api = {
   captureOfficePreviewFrame: (payload: {
     requestId: string
     index: number
+    total?: number
     rect: { x: number; y: number; width: number; height: number }
   }): Promise<{ success: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('api:capture-office-preview-frame', payload),
@@ -99,6 +100,8 @@ const api = {
     imagePaths?: string[]
     truncated?: boolean
     focusMatched?: boolean
+    pageCount?: number
+    capturedPages?: number[]
     error?: string
   }): void => ipcRenderer.send('api:complete-office-preview-capture', payload),
   saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>

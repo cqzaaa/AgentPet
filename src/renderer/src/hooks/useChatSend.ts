@@ -47,16 +47,15 @@ function toLlmMessage(message: any): { role: string; content: any } {
   const imageBlocks: any[] = []
 
   if (message.fileInfo) {
-    const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(message.fileInfo.name || '')
-    const pathNote = needsPath && message.fileInfo.path ? `\n[源文件路径: ${message.fileInfo.path}]` : ''
+    const pathNote = message.fileInfo.path ? `\n[源文件路径: ${message.fileInfo.path}]` : ''
     textContent = `${message.text}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}\n${message.fileInfo.content}`
   } else if (message.fileInfos?.length) {
     const attachmentsText = message.fileInfos
-      .filter((file: any) => file.content)
+      .filter((file: any) => file.content || file.path)
       .map((file: any) => {
-        const needsPath = /\.(docx|xlsx|xls|csv|pdf)$/i.test(file.name || '')
-        const pathNote = needsPath && file.path ? `\n[源文件路径: ${file.path}]` : ''
-        return `--- [附带文件: ${file.name}]${pathNote}\n${file.content}`
+        const pathNote = file.path ? `\n[源文件路径: ${file.path}]` : ''
+        const content = file.content ? `\n${file.content}` : ''
+        return `--- [附带文件: ${file.name}]${pathNote}${content}`
       })
       .join('\n\n')
     if (attachmentsText) textContent = `${message.text}\n\n${attachmentsText}`

@@ -80,7 +80,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [mcpNewName, setMcpNewName] = React.useState('')
   const [mcpNewUrl, setMcpNewUrl] = React.useState('')
   const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
-  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto' | 'stdio'>('stream')
   const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
 
   // 编辑弹窗相关状态
@@ -90,7 +90,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
   const [editClearApiKey, setEditClearApiKey] = React.useState(false)
-  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto' | 'stdio'>('stream')
 
   // MCP 测试结果弹框状态
   const [showTestResultModal, setShowTestResultModal] = React.useState(false)
@@ -849,15 +849,31 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               <div className="settings-section-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>
                 已连接的服务列表 ({(mcpConfig?.servers || []).length})
               </div>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => setShowAddMcpForm(true)}
-                style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                <Plus size={15} strokeWidth={2} aria-hidden="true" />
-                添加自定义
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setMcpNewName('PaddleOCR 官方解析')
+                    setMcpNewUrl('')
+                    setMcpNewApiKey('')
+                    setMcpNewType('stdio')
+                    setShowAddMcpForm(true)
+                  }}
+                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  配置 PaddleOCR
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => setShowAddMcpForm(true)}
+                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Plus size={15} strokeWidth={2} aria-hidden="true" />
+                  添加自定义
+                </button>
+              </div>
             </div>
 
             <div className="mcp-glass-card">
@@ -886,13 +902,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             {server.name}
                           </td>
                           <td>
-                            <span className="mcp-url-text" title={server.url}>
-                              {server.url}
+                            <span className="mcp-url-text" title={server.url || 'uvx:paddleocr-mcp'}>
+                              {server.type === 'stdio' ? 'uvx:paddleocr-mcp' : server.url}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <span className={`mcp-badge ${server.type === 'sse' ? 'none' : 'configured'}`}>
-                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : 'Stream'}
+                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : server.type === 'stdio' ? 'stdio' : 'Stream'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -926,7 +942,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                     const res = await window.api.testMcpServer({
                                       id: server.id,
                                       url: server.url,
-                                      type: server.type || 'stream'
+                                      type: server.type || 'stream',
+                                      preset: server.preset,
+                                      model: server.model
                                     })
                                     setTestResultData(res)
                                     setTestResultServerName(server.name)
@@ -1005,16 +1023,18 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              <div>
-                <label className="mcp-form-label">SSE Endpoint 地址</label>
-                <input
-                  type="text"
-                  className="mcp-input-fancy"
-                  placeholder="https://mcpmarket.cn/mcp/..."
-                  value={editUrl}
-                  onChange={e => setEditUrl(e.target.value)}
-                />
-              </div>
+              {editType !== 'stdio' && (
+                <div>
+                  <label className="mcp-form-label">MCP Endpoint 地址</label>
+                  <input
+                    type="text"
+                    className="mcp-input-fancy"
+                    placeholder="https://mcpmarket.cn/mcp/..."
+                    value={editUrl}
+                    onChange={e => setEditUrl(e.target.value)}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
@@ -1048,6 +1068,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   <option value="stream">Streamable HTTP (推荐)</option>
                   <option value="sse">Server-Sent Events</option>
                   <option value="auto">自动探测</option>
+                  {editingServer.preset === 'paddleocr-aistudio' && (
+                    <option value="stdio">PaddleOCR 官方服务 (stdio/uvx)</option>
+                  )}
                 </select>
               </div>
             </div>
@@ -1064,7 +1087,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  if (!editName.trim() || !editUrl.trim()) {
+                  if (!editName.trim() || (editType !== 'stdio' && !editUrl.trim())) {
                     showToast('请完整填写服务名称和地址！', 'error')
                     return
                   }
@@ -1124,19 +1147,31 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              <div>
-                <label className="mcp-form-label">SSE Endpoint 地址</label>
-                <input
-                  type="text"
-                  className="mcp-input-fancy"
-                  placeholder="https://mcpmarket.cn/mcp/..."
-                  value={mcpNewUrl}
-                  onChange={e => setMcpNewUrl(e.target.value)}
-                />
-              </div>
+              {mcpNewType === 'stdio' ? (
+                <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                  可编辑 PDF 转换将统一使用百度官方 PaddleOCR-VL-1.6 解析。请先在{' '}
+                  <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noreferrer">
+                    百度 AI Studio PaddleOCR
+                  </a>{' '}
+                  注册并获取 Access Token，然后粘贴到下方。Token 会使用系统加密安全保存。
+                </div>
+              ) : (
+                <div>
+                  <label className="mcp-form-label">MCP Endpoint 地址</label>
+                  <input
+                    type="text"
+                    className="mcp-input-fancy"
+                    placeholder="https://mcpmarket.cn/mcp/..."
+                    value={mcpNewUrl}
+                    onChange={e => setMcpNewUrl(e.target.value)}
+                  />
+                </div>
+              )}
 
               <div>
-                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                <label className="mcp-form-label">
+                  {mcpNewType === 'stdio' ? 'AI Studio Access Token' : 'API 鉴权密钥 (Token) - 可选'}
+                </label>
                 <input
                   type="password"
                   className="mcp-input-fancy"
@@ -1157,6 +1192,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   <option value="stream">Streamable HTTP (推荐)</option>
                   <option value="sse">Server-Sent Events</option>
                   <option value="auto">自动探测</option>
+                  {mcpNewType === 'stdio' && <option value="stdio">PaddleOCR 官方服务 (stdio/uvx)</option>}
                 </select>
               </div>
             </div>
@@ -1179,7 +1215,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  if (!mcpNewName.trim() || !mcpNewUrl.trim()) {
+                  if (
+                    !mcpNewName.trim() ||
+                    (mcpNewType !== 'stdio' && !mcpNewUrl.trim()) ||
+                    (mcpNewType === 'stdio' && !mcpNewApiKey.trim())
+                  ) {
                     showToast('请完整填写服务名称和地址！', 'error')
                     return
                   }
@@ -1190,6 +1230,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     url: mcpNewUrl.trim(),
                     apiKey: mcpNewApiKey.trim(),
                     type: mcpNewType,
+                    ...(mcpNewType === 'stdio'
+                      ? { preset: 'paddleocr-aistudio', model: 'PaddleOCR-VL-1.6' }
+                      : {}),
                     enabled: true
                   }]
                   saveMcpConfig({ servers: newServers })

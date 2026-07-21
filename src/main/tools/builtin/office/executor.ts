@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import { join } from 'path'
 
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath, getGeneratedFilesDir, sessionLastXlsxMap } from '../../utils/paths'
+import { resolveSessionPath, getGeneratedFilesDir, sessionLastXlsxMap } from '../../utils/paths'
 
 export class OfficeExecutor implements IToolExecutor {
   public async execute(
@@ -180,7 +180,7 @@ export class OfficeExecutor implements IToolExecutor {
             const trimmed = line.trim()
             const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)/)
             if (imgMatch) {
-              const imgPath = resolveLocalPath(imgMatch[2].trim())
+              const imgPath = resolveSessionPath(imgMatch[2].trim(), context.sessionId)
               if (fs.existsSync(imgPath)) {
                 try {
                   const imgBuffer = fs.readFileSync(imgPath)
@@ -349,7 +349,7 @@ export class OfficeExecutor implements IToolExecutor {
       // 2. modify_docx_file
       if (api === 'modify_docx_file') {
         let { source_path, output_name, modifications, images } = args
-        source_path = resolveLocalPath(source_path)
+        source_path = resolveSessionPath(source_path, context.sessionId)
         if (!source_path || !output_name) {
           return { content: '错误：缺少必要参数 source_path 或 output_name', success: false }
         }
@@ -606,7 +606,7 @@ export class OfficeExecutor implements IToolExecutor {
 
           for (const img of images) {
             if (!img.search_text || !img.image_path) continue
-            const resolvedPath = resolveLocalPath(img.image_path)
+            const resolvedPath = resolveSessionPath(img.image_path, context.sessionId)
             if (!fs.existsSync(resolvedPath)) {
               return { content: `错误：图片文件未找到，路径：${img.image_path}`, success: false }
             }
@@ -710,7 +710,7 @@ export class OfficeExecutor implements IToolExecutor {
       // 3. modify_xlsx_file
       if (api === 'modify_xlsx_file') {
         let { source_path, output_name, modifications, append_rows, merge_cells, add_sheet, column_widths, data_validations } = args
-        source_path = resolveLocalPath(source_path)
+        source_path = resolveSessionPath(source_path, context.sessionId)
         if (!source_path || !output_name) {
           return { content: '错误：缺少必要参数 source_path 或 output_name', success: false }
         }

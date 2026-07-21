@@ -4,6 +4,7 @@ import * as fs from 'fs'
 
 import type { ToolContext, ToolResult } from '../../../core/types'
 import { officeExecutor } from '../executor'
+import { convertOfficeToPdf } from './conversion'
 import { renderOfficeArtifact } from './rendering'
 import type { OfficeSkill, OfficeSkillAction, OfficeSkillDescriptor } from './types'
 import {
@@ -81,6 +82,19 @@ const descriptor: OfficeSkillDescriptor = {
         type: 'object',
         properties: { source_path: { type: 'string' } },
         required: ['source_path']
+      }
+    },
+    convert: {
+      description: '通过 Microsoft PowerPoint 原生导出完整 PDF，不依赖 LibreOffice。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source_path: { type: 'string' },
+          target_format: { type: 'string', enum: ['pdf'] },
+          output_name: { type: 'string' },
+          timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
+        },
+        required: ['source_path', 'target_format']
       }
     },
     render: {
@@ -321,7 +335,9 @@ export const pptxSkill: OfficeSkill = {
         return addPptxValidation(result, context)
       }
 
-      const sourcePath = resolveRequiredSource(input, '.pptx')
+      if (action === 'convert') return convertOfficeToPdf('pptx', input, context)
+
+      const sourcePath = resolveRequiredSource(input, '.pptx', context)
       if (action === 'render') return renderOfficeArtifact('pptx', sourcePath, input, context)
       if (action === 'modify') {
         if (!Array.isArray(input.operations) || input.operations.length === 0) {

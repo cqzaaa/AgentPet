@@ -47,6 +47,7 @@ export interface WebSource {
 export interface ToolContext {
   workspacePath: string
   sessionId?: string
+  messageId?: number
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean

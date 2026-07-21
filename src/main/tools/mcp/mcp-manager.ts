@@ -1,5 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import {
+  getDefaultEnvironment,
+  StdioClientTransport
+} from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { app } from 'electron'
 import * as fs from 'fs'
@@ -18,22 +22,74 @@ export interface McpServerConfig {
   url: string
   apiKey: string
   hasApiKey?: boolean
-  type?: 'sse' | 'stream' | 'auto'
+  type?: 'sse' | 'stream' | 'auto' | 'stdio'
+  preset?: 'paddleocr-aistudio'
+  model?: 'PaddleOCR-VL-1.6' | 'PP-StructureV3' | 'PP-OCRv6'
   enabled: boolean
   description?: string
   tools?: any[] // 工具定义缓存字段
   timeout?: number // 超时时间（秒），可选
 }
 
+export const PADDLEOCR_MCP_VERSION = '0.8.5'
+
+type McpClientTransport =
+  | SSEClientTransport
+  | StreamableHTTPClientTransport
+  | StdioClientTransport
+
 export class McpManager {
   private static instance: McpManager
-  private connections: Map<string, { client: Client; transport: SSEClientTransport | StreamableHTTPClientTransport; tools: any[]; config: McpServerConfig }> = new Map()
+  private connections: Map<
+    string,
+    { client: Client; transport: McpClientTransport; tools: any[]; config: McpServerConfig }
+  > = new Map()
   private pendingConfigs: McpServerConfig[] = []
   public systemMcpConfig: { servers: McpServerConfig[] } = { servers: [] }
   private toolsCache: Record<string, any[]> = {}
 
 
   private constructor() {}
+
+  private isRunnable(config: McpServerConfig): boolean {
+    return config.type === 'stdio'
+      ? config.preset === 'paddleocr-aistudio'
+      : Boolean(config.url)
+  }
+
+  private displayEndpoint(config: McpServerConfig): string {
+    return config.type === 'stdio' ? 'uvx:paddleocr-mcp' : config.url
+  }
+
+  private createTransport(config: McpServerConfig): McpClientTransport {
+    if (config.type === 'stdio') {
+      if (config.preset !== 'paddleocr-aistudio') {
+        throw new Error('不允许启动未知的本地 MCP 预设')
+      }
+      return new StdioClientTransport({
+        command: 'uvx',
+        args: ['--from', `paddleocr-mcp==${PADDLEOCR_MCP_VERSION}`, 'paddleocr_mcp'],
+        env: {
+          ...getDefaultEnvironment(),
+          PADDLEOCR_MCP_MODEL: config.model || 'PaddleOCR-VL-1.6',
+          PADDLEOCR_MCP_PPOCR_SOURCE: 'aistudio',
+          PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN: config.apiKey
+        },
+        stderr: 'ignore'
+      })
+    }
+
+    const headers: Record<string, string> = {}
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
+    if (config.type === 'sse') {
+      return new SSEClientTransport(new URL(config.url), {
+        eventSourceInitDict: { headers }
+      } as any)
+    }
+    return new StreamableHTTPClientTransport(new URL(config.url), {
+      requestInit: { headers }
+    })
+  }
 
   public static getInstance(): McpManager {
     if (!McpManager.instance) {
@@ -52,7 +108,9 @@ export class McpManager {
       return s
     })
 
-    this.pendingConfigs = this.systemMcpConfig.servers.filter(c => c.enabled && c.url)
+    this.pendingConfigs = this.systemMcpConfig.servers.filter(
+      c => c.enabled && this.isRunnable(c)
+    )
     console.log(`[MCP] 已加载 ${this.pendingConfigs.length} 个 MCP 服务配置（懒加载模式，将在首次使用时连接）`)
 
     // 同时断开已不再启用的旧连接
@@ -69,7 +127,7 @@ export class McpManager {
   // 仅在首次加载、且发现有启用服务未缓存工具 Schema 时，才进行后台连接以拉取定义
   public async ensureConnected(): Promise<void> {
     const configsToConnect = this.systemMcpConfig.servers.filter(
-      s => s.enabled && s.url && (!s.tools || s.tools.length === 0)
+      s => s.enabled && this.isRunnable(s) && (!s.tools || s.tools.length === 0)
     )
     if (configsToConnect.length === 0) return
 
@@ -81,7 +139,7 @@ export class McpManager {
   }
 
   public async connectAll(configs: McpServerConfig[]) {
-    const configsToConnect = configs.filter(c => c.enabled && c.url)
+    const configsToConnect = configs.filter(c => c.enabled && this.isRunnable(c))
     const activeIds = configsToConnect.map(c => c.id)
 
     // 1. 关闭不再活动或被禁用的连接
@@ -102,7 +160,14 @@ export class McpManager {
       const existing = this.connections.get(config.id)
       
       // 如果已存在连接，且参数没有变化，则无需重连
-      if (existing && existing.config.url === config.url && existing.config.apiKey === config.apiKey && existing.config.type === config.type) {
+      if (
+        existing &&
+        existing.config.url === config.url &&
+        existing.config.apiKey === config.apiKey &&
+        existing.config.type === config.type &&
+        existing.config.preset === config.preset &&
+        existing.config.model === config.model
+      ) {
         return
       }
 
@@ -115,14 +180,9 @@ export class McpManager {
         this.connections.delete(config.id)
       }
 
-      console.log(`[MCP] 正在建立服务连接: ${config.name} -> ${config.url}`)
+      console.log(`[MCP] 正在建立服务连接: ${config.name} -> ${this.displayEndpoint(config)}`)
       try {
-        const headers: Record<string, string> = {}
-        if (config.apiKey) {
-          headers['Authorization'] = `Bearer ${config.apiKey}`
-        }
-
-        let transport: StreamableHTTPClientTransport | SSEClientTransport
+        let transport: McpClientTransport
         let client = new Client(
           { name: 'AgentPet-Client', version: '1.0.0' },
           { capabilities: {} }
@@ -134,18 +194,22 @@ export class McpManager {
 
         const mcpType = config.type || 'stream'
 
-        if (mcpType === 'stream') {
-          transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+        if (mcpType === 'stdio') {
+          transport = this.createTransport(config)
+          await Promise.race([client.connect(transport), connectTimeout(60000)])
+          console.log(`[MCP] 服务 ${config.name} 使用本地 stdio 协议连接成功`)
+        } else if (mcpType === 'stream') {
+          transport = this.createTransport(config)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
         } else if (mcpType === 'sse') {
-          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+          transport = this.createTransport(config)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功`)
         } else {
           // auto 模式
           try {
-            transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+            transport = this.createTransport({ ...config, type: 'stream' })
             await Promise.race([client.connect(transport), connectTimeout(5000)])
             console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
           } catch (httpErr: any) {
@@ -154,7 +218,7 @@ export class McpManager {
               { name: 'AgentPet-Client', version: '1.0.0' },
               { capabilities: {} }
             )
-            transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+            transport = this.createTransport({ ...config, type: 'sse' })
             await Promise.race([client.connect(transport), connectTimeout(5000)])
             console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
           }
@@ -174,14 +238,11 @@ export class McpManager {
 
   // 针对单个服务进行单独连接（被呼叫时按需触发）
   public async connectSingleServer(config: McpServerConfig): Promise<boolean> {
-    console.log(`[MCP] 正在建立单体服务连接: ${config.name} -> ${config.url}`)
+    console.log(
+      `[MCP] 正在建立单体服务连接: ${config.name} -> ${this.displayEndpoint(config)}`
+    )
     try {
-      const headers: Record<string, string> = {}
-      if (config.apiKey) {
-        headers['Authorization'] = `Bearer ${config.apiKey}`
-      }
-
-      let transport: StreamableHTTPClientTransport | SSEClientTransport
+      let transport: McpClientTransport
       let client = new Client(
         { name: 'AgentPet-Client', version: '1.0.0' },
         { capabilities: {} }
@@ -193,22 +254,25 @@ export class McpManager {
 
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stream') {
-        transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+      if (mcpType === 'stdio') {
+        transport = this.createTransport(config)
+        await Promise.race([client.connect(transport), connectTimeout(60000)])
+      } else if (mcpType === 'stream') {
+        transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
       } else if (mcpType === 'sse') {
-        transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+        transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
       } else {
         try {
-          transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+          transport = this.createTransport({ ...config, type: 'stream' })
           await Promise.race([client.connect(transport), connectTimeout(5000)])
         } catch {
           client = new Client(
             { name: 'AgentPet-Client', version: '1.0.0' },
             { capabilities: {} }
           )
-          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+          transport = this.createTransport({ ...config, type: 'sse' })
           await Promise.race([client.connect(transport), connectTimeout(5000)])
         }
       }
@@ -267,12 +331,7 @@ export class McpManager {
       } catch {}
       this.connections.delete(id)
 
-      const headers: Record<string, string> = {}
-      if (config.apiKey) {
-        headers['Authorization'] = `Bearer ${config.apiKey}`
-      }
-
-      let transport: StreamableHTTPClientTransport | SSEClientTransport
+      let transport: McpClientTransport
       let client = new Client(
         { name: 'AgentPet-Client', version: '1.0.0' },
         { capabilities: {} }
@@ -284,17 +343,21 @@ export class McpManager {
 
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stream') {
-        transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+      if (mcpType === 'stdio') {
+        transport = this.createTransport(config)
+        await Promise.race([client.connect(transport), connectTimeout(60000)])
+        console.log(`[MCP] 服务 ${config.name} 重连成功 (stdio)`)
+      } else if (mcpType === 'stream') {
+        transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
         console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
       } else if (mcpType === 'sse') {
-        transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+        transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
         console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
       } else {
         try {
-          transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
+          transport = this.createTransport({ ...config, type: 'stream' })
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
         } catch (httpErr: any) {
@@ -303,7 +366,7 @@ export class McpManager {
             { name: 'AgentPet-Client', version: '1.0.0' },
             { capabilities: {} }
           )
-          transport = new SSEClientTransport(new URL(config.url), { eventSourceInitDict: { headers } } as any)
+          transport = this.createTransport({ ...config, type: 'sse' })
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
         }
@@ -357,7 +420,7 @@ export class McpManager {
   public getActiveServers(): any[] {
     const list: any[] = []
     for (const server of this.systemMcpConfig.servers) {
-      if (!server.enabled || !server.url) continue
+      if (!server.enabled || !this.isRunnable(server)) continue
       
       const conn = this.connections.get(server.id)
       let toolsCount = 0
@@ -374,7 +437,7 @@ export class McpManager {
       list.push({
         id: server.id,
         name: server.name,
-        url: server.url,
+        url: this.displayEndpoint(server),
         description: server.description || '',
         toolsCount,
         status
@@ -398,6 +461,83 @@ export class McpManager {
     }
     return false
   }
+
+  public getEnabledServerByPreset(preset: McpServerConfig['preset']): McpServerConfig | null {
+    return (
+      this.systemMcpConfig.servers.find(
+        server => server.enabled && server.preset === preset && this.isRunnable(server)
+      ) || null
+    )
+  }
+
+  public async getServerTools(serverId: string): Promise<any[]> {
+    const server = this.systemMcpConfig.servers.find(item => item.id === serverId)
+    if (!server || !server.enabled || !this.isRunnable(server)) return []
+    if (!this.connections.has(server.id)) {
+      const connected = await this.connectSingleServer(server)
+      if (!connected) return []
+    }
+    return [...(this.connections.get(server.id)?.tools || [])]
+  }
+
+  public async executeToolOnServer(
+    serverId: string,
+    name: string,
+    args: Record<string, unknown>,
+    abortSignal?: AbortSignal,
+    timeoutMs = 240000
+  ): Promise<string> {
+    const server = this.systemMcpConfig.servers.find(item => item.id === serverId)
+    if (!server || !server.enabled || !this.isRunnable(server)) {
+      throw new Error('指定的 MCP 服务未配置或未启用')
+    }
+    if (!server.apiKey && server.preset === 'paddleocr-aistudio') {
+      throw new Error('PADDLEOCR_TOKEN_REQUIRED')
+    }
+
+    if (!this.connections.has(server.id)) {
+      const connected = await this.connectSingleServer(server)
+      if (!connected) throw new Error('MCP_SERVICE_UNAVAILABLE')
+    }
+    const connection = this.connections.get(server.id)
+    if (!connection?.tools.some(tool => tool.name === name)) {
+      throw new Error(`MCP 工具不存在：${name}`)
+    }
+    if (abortSignal?.aborted) throw new Error('UserAborted')
+
+    let timer: NodeJS.Timeout | undefined
+    let onAbort: (() => void) | undefined
+    try {
+      const pending: Promise<any>[] = [
+        connection.client.callTool({ name, arguments: args })
+      ]
+      pending.push(
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('MCP_TOOL_TIMEOUT')), timeoutMs)
+        })
+      )
+      if (abortSignal) {
+        pending.push(
+          new Promise<never>((_, reject) => {
+            onAbort = () => reject(new Error('UserAborted'))
+            abortSignal.addEventListener('abort', onAbort, { once: true })
+          })
+        )
+      }
+
+      const response = await Promise.race(pending)
+      const content = Array.isArray(response?.content) ? response.content : []
+      const textParts = content
+        .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
+        .map((item: any) => item.text)
+      if (textParts.length === 0) throw new Error('MCP_EMPTY_RESPONSE')
+      return textParts.join('\n')
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (abortSignal && onAbort) abortSignal.removeEventListener('abort', onAbort)
+    }
+  }
+
   public async executeTool(name: string, args: any, abortSignal?: AbortSignal, isRetry = false): Promise<string> {
     const realName = McpNameMapper.toOriginalName(name)
     let targetServer: McpServerConfig | null = null
