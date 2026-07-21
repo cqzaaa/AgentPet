@@ -261,6 +261,10 @@ function startRpaScheduleMonitor(): void {
   rpaScheduleTimer = setInterval(() => void runDueRpaSchedules(), 30_000)
 }
 let inputWindow: BrowserWindow | null = null
+const quickChatWidth = 520
+let agentHiddenForQuickChat = false
+let petWidgetReady = false
+let pendingPetChat: { text: string; isNewSession?: boolean; imagePath?: string } | null = null
 let pendingAgentInput: string = '' // 缓存快捷输入框传递过来的待发送文本
 let tray: Tray | null = null
 let customModelDir = ''
@@ -503,10 +507,15 @@ ipcMain.handle('api:is-agent-window-maximized', () => {
 
 
 function createInputWindow(x?: number, y?: number, initialImage?: { path: string; base64: string; width: number; height: number }): void {
+  if (agentWindow && !agentWindow.isDestroyed() && agentWindow.isVisible()) {
+    agentWindow.hide()
+    agentHiddenForQuickChat = true
+  }
+
   if (inputWindow) {
     if (inputWindow.isMinimized()) inputWindow.restore()
     if (x !== undefined && y !== undefined) {
-      inputWindow.setBounds({ x, y, width: 400, height: 90 })
+      inputWindow.setBounds({ x, y, width: quickChatWidth, height: 90 })
     }
     inputWindow.focus()
     if (initialImage) {
@@ -521,12 +530,12 @@ function createInputWindow(x?: number, y?: number, initialImage?: { path: string
   if (targetX === undefined || targetY === undefined) {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width: scrWidth, height: scrHeight } = primaryDisplay.workArea
-    targetX = Math.round(scrWidth / 2 - 400 / 2)
+    targetX = Math.round(scrWidth / 2 - quickChatWidth / 2)
     targetY = Math.round(scrHeight * 0.22)
   }
 
   inputWindow = new BrowserWindow({
-    width: 400,
+    width: quickChatWidth,
     height: 90,
     x: targetX,
     y: targetY,
@@ -565,6 +574,12 @@ function createInputWindow(x?: number, y?: number, initialImage?: { path: string
 
   inputWindow.on('closed', () => {
     inputWindow = null
+    if (agentHiddenForQuickChat && agentWindow && !agentWindow.isDestroyed()) {
+      agentHiddenForQuickChat = false
+      showAgentWindow(agentWindow)
+    } else {
+      agentHiddenForQuickChat = false
+    }
     runImmediateGarbageCollection()
   })
 }
@@ -651,6 +666,7 @@ function showAgentWindow(win: BrowserWindow): void {
 }
 
 function createWindow(): void {
+  petWidgetReady = false
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width: scrWidth, height: scrHeight } = primaryDisplay.workArea
 
@@ -682,8 +698,13 @@ function createWindow(): void {
 
   mainWindow = win
 
+  win.webContents.on('did-start-loading', () => {
+    petWidgetReady = false
+  })
+
   win.on('closed', () => {
     mainWindow = null
+    petWidgetReady = false
     runImmediateGarbageCollection()
   })
 
@@ -805,10 +826,23 @@ function createWindow(): void {
       }
     })
 
+    const deliverPendingPetChat = (): void => {
+      if (!pendingPetChat || !petWidgetReady || !mainWindow || mainWindow.isDestroyed()) return
+      const request = pendingPetChat
+      pendingPetChat = null
+      mainWindow.webContents.send('chat-to-pet', request.text, request.isNewSession, request.imagePath)
+    }
+
+    ipcMain.on('pet-widget-ready', (event) => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return
+      petWidgetReady = true
+      deliverPendingPetChat()
+    })
+
     ipcMain.on('send-chat-to-pet', (_, text: string, isNewSession?: boolean, imagePath?: string) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('chat-to-pet', text, isNewSession, imagePath)
-      }
+      pendingPetChat = { text, isNewSession, imagePath }
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+      deliverPendingPetChat()
     })
 
     // 截图相关 IPC 通信注册
@@ -845,7 +879,7 @@ function createWindow(): void {
       if (!imagePath) return
 
       // 计算快捷窗口的最佳显示坐标 (400x90 规格，贴合屏幕安全距离)
-      const inputWidth = 400
+      const inputWidth = quickChatWidth
       const inputHeight = 90
       let targetX = bounds.x + (bounds.width - inputWidth) / 2
       let targetY = bounds.y + bounds.height + 10
@@ -2797,18 +2831,29 @@ app.whenReady().then(() => {
   }
 
   // 读取本地聊天记录
-  ipcMain.handle('api:get-local-sessions', async (_, options?: { loadAll?: boolean; activeSessionId?: string }) => {
+  ipcMain.handle('api:get-local-sessions', async (_, options?: { loadAll?: boolean; activeSessionId?: string; todayOnly?: boolean }) => {
     try {
       await migrateOldSessionsIfExist()
 
       const database = await getDB()
+      const now = new Date()
+      const todayDash = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const todaySlash = `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`
+      const sessionDateFilter = options?.todayOnly
+        ? 'WHERE created_at LIKE ? OR created_at LIKE ? OR time LIKE ? OR time LIKE ?'
+        : ''
+      const sessionDateParams = options?.todayOnly
+        ? [`${todayDash}%`, `${todaySlash}%`, `${todayDash}%`, `${todaySlash}%`]
+        : []
       const dbSessions = await database.all(`
         SELECT id, name, time, pinned, user_id, context_summary, created_at
         FROM sessions
+        ${sessionDateFilter}
         ORDER BY created_at DESC
-      `)
+      `, ...sessionDateParams)
       const fallbackActiveSession = dbSessions.find((s: any) => s.pinned !== 1 && !s.id.startsWith('wechat:')) || dbSessions[0]
-      const activeSessionId = options?.activeSessionId || fallbackActiveSession?.id
+      const requestedActiveSession = dbSessions.find((session: any) => session.id === options?.activeSessionId)
+      const activeSessionId = requestedActiveSession?.id || fallbackActiveSession?.id
 
       let dbMessages: any[] = []
       if (dbSessions.length > 0) {
@@ -2820,7 +2865,7 @@ app.whenReady().then(() => {
         `
         const previewMessageColumns = `
           m.rowid AS msg_rowid, m.id, m.session_id, m.sender, m.text, m.time,
-          m.is_thinking, m.is_error, m.user_id, m.is_summarized,
+          m.is_thinking, m.file_info, m.file_infos, m.is_error, m.user_id, m.is_summarized,
           CASE WHEN m.prompt_info IS NOT NULL THEN 1 ELSE 0 END AS has_prompt_info
         `
         const activeMessages = activeSessionId
@@ -2832,16 +2877,21 @@ app.whenReady().then(() => {
               LIMIT 20
             `, activeSessionId)
           : []
-        const previewMessages = await database.all(`
-          SELECT ${previewMessageColumns}
-          FROM messages m
-          INNER JOIN (
-            SELECT session_id, MAX(rowid) AS msg_rowid
-            FROM messages
-            ${activeSessionId ? 'WHERE session_id <> ?' : ''}
-            GROUP BY session_id
-          ) latest ON latest.msg_rowid = m.rowid
-        `, ...(activeSessionId ? [activeSessionId] : []))
+        const previewSessionIds = dbSessions
+          .map((session: any) => session.id)
+          .filter((sessionId: string) => sessionId !== activeSessionId)
+        const previewMessages = previewSessionIds.length > 0
+          ? await database.all(`
+              SELECT ${previewMessageColumns}
+              FROM messages m
+              INNER JOIN (
+                SELECT session_id, MAX(rowid) AS msg_rowid
+                FROM messages
+                WHERE session_id IN (${previewSessionIds.map(() => '?').join(', ')})
+                GROUP BY session_id
+              ) latest ON latest.msg_rowid = m.rowid
+            `, ...previewSessionIds)
+          : []
         dbMessages = [...activeMessages, ...previewMessages]
       }
 
@@ -3501,6 +3551,20 @@ app.whenReady().then(() => {
   })
 
   // 解析指定路径的文档文件内容（供粘贴/拖拽文件时使用）
+  ipcMain.handle('api:select-attachment-files', async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return []
+    const result = await dialog.showOpenDialog(window, {
+      title: '选择聊天附件',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '常用附件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs', 'html', 'css', 'xml', 'yaml', 'yml', 'zip', 'rar', '7z', 'mp3', 'wav', 'flac', 'ogg', 'mp4', 'avi', 'mkv', 'mov'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    return result.canceled ? [] : result.filePaths
+  })
+
   ipcMain.handle('api:parse-file-content', async (_, filePath: string) => {
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
     try {

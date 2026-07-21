@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 type SessionMutation =
@@ -60,6 +60,8 @@ const api = {
     ipcRenderer.invoke('api:call-llm', config, messages, workspacePath),
   selectFile: (): Promise<{ name: string; path: string; content: string } | null> =>
     ipcRenderer.invoke('api:select-file'),
+  selectAttachmentFiles: (): Promise<string[]> =>
+    ipcRenderer.invoke('api:select-attachment-files'),
   parseFileContent: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-content', filePath),
   parseFileHtml: (filePath: string): Promise<string> =>
@@ -145,7 +147,7 @@ const api = {
     ipcRenderer.invoke('api:get-ollama-models', baseUrl),
   getModels: (config: any): Promise<string[]> =>
     ipcRenderer.invoke('api:get-models', config),
-  getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string }): Promise<any[] | null> =>
+  getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string; todayOnly?: boolean }): Promise<any[] | null> =>
     ipcRenderer.invoke('api:get-local-sessions', options),
   getMessagePromptInfo: (messageId: string | number): Promise<any | null> =>
     ipcRenderer.invoke('api:get-message-prompt-info', messageId),
@@ -306,6 +308,7 @@ const api = {
     ipcRenderer.invoke('api:copy-files', { filePaths, text }),
   readClipboardFiles: (): Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null> =>
     ipcRenderer.invoke('api:read-clipboard-files'),
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   showImageContextMenu: (imageUrl: string): void => {
     ipcRenderer.send('api:show-image-context-menu', imageUrl)
   },

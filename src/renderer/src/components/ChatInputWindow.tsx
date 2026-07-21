@@ -18,6 +18,7 @@ import {
   History,
   Lightbulb,
   MessageSquare,
+  Paperclip,
   Plus,
   Presentation,
   Send,
@@ -27,13 +28,70 @@ import {
   X
 } from 'lucide-react'
 
+const QUICK_CHAT_WIDTH = 520
+const MAX_QUICK_ATTACHMENTS = 12
+
+interface QuickAttachment {
+  path: string
+  name: string
+  isImage: boolean
+  base64?: string
+}
+
+interface QuickMessage {
+  sender: 'user' | 'agent' | 'assistant' | 'system'
+  text: string
+  fileInfo?: { name?: string }
+  fileInfos?: Array<{ name?: string }>
+  isThinking?: boolean
+}
+
+interface QuickSession {
+  id: string
+  name: string
+  time?: string
+  createdAt?: string
+  contextSummary?: string
+  messages?: QuickMessage[]
+}
+
+function getSessionPreview(session: QuickSession): string {
+  const messages = session.messages || []
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.sender === 'system' || message.isThinking) continue
+    const text = (message.text || '')
+      .replace(/```[\s\S]*?```/g, '[代码]')
+      .replace(/[*_`#>\-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text) return text
+    const files = message.fileInfos?.map(file => file.name).filter(Boolean) || []
+    if (files.length > 0) return `附件：${files.join('、')}`
+    if (message.fileInfo?.name) return `附件：${message.fileInfo.name}`
+  }
+  return session.contextSummary?.replace(/\s+/g, ' ').trim() || '暂无消息内容'
+}
+
+function isSessionToday(session: QuickSession): boolean {
+  const raw = session.createdAt || session.time
+  if (!raw) return false
+  const parsed = new Date(raw.replace(/-/g, '/'))
+  if (Number.isNaN(parsed.getTime())) return false
+  const now = new Date()
+  return parsed.getFullYear() === now.getFullYear()
+    && parsed.getMonth() === now.getMonth()
+    && parsed.getDate() === now.getDate()
+}
+
 export function ChatInputWindow(): React.JSX.Element {
   const [text, setText] = useState('')
   const [screenshotImages, setScreenshotImages] = useState<{ path: string; base64: string; width: number; height: number }[]>([]);
-  const [pastedFiles, setPastedFiles] = useState<{ path: string; name: string; isImage: boolean; base64?: string }[]>([]);
-  const [messages, setMessages] = useState<{ sender: 'user' | 'agent'; text: string }[]>([])
+  const [pastedFiles, setPastedFiles] = useState<QuickAttachment[]>([])
+  const [messages, setMessages] = useState<QuickMessage[]>([])
   const [isThinking, setIsThinking] = useState(false)
   const [showChat, setShowChat] = useState(false)
+  const [isFileDragging, setIsFileDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // 监听截图提问发送的截图图片并追加到数组中
@@ -54,17 +112,19 @@ export function ChatInputWindow(): React.JSX.Element {
   const lastYRef = useRef(0)
 
   // 历史会话管理状态
-  const [sessions, setSessions] = useState<any[]>([])
+  const [sessions, setSessions] = useState<QuickSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string>('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const loadingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const requestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const shouldScrollRef = useRef<'smooth' | 'auto' | false>(false)
 
   // 组件卸载时清理定时器
   useEffect(() => {
     return () => {
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+      if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
     }
   }, [])
 
@@ -145,17 +205,24 @@ export function ChatInputWindow(): React.JSX.Element {
   }
 
   // 读取本地会话列表并进行初始化
-  const loadSessions = () => {
+  const loadSessions = async (syncActiveView = true): Promise<void> => {
+    const storedActiveId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
+    let parsed: QuickSession[] = []
+    try {
+      parsed = await window.api.getLocalSessions({ activeSessionId: storedActiveId, todayOnly: true }) || []
+    } catch (error) {
+      console.error('读取最近会话失败', error)
+    }
     const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-    let parsed: any[] = []
-    if (saved) {
+    if (parsed.length === 0 && saved) {
       try {
         parsed = JSON.parse(saved)
       } catch (e) {
         console.error('解析历史会话失败', e)
       }
     }
-    const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
+    parsed = parsed.filter(isSessionToday)
+    const activeId = parsed.some(session => session.id === storedActiveId) ? storedActiveId : (parsed[0]?.id || '')
 
     const sorted = [...parsed].sort((a, b) => {
       const t1 = a.createdAt || a.time || ''
@@ -165,11 +232,13 @@ export function ChatInputWindow(): React.JSX.Element {
     setSessions(sorted)
     setCurrentSessionId(activeId)
 
-    const activeSession = parsed.find(s => s.id === activeId)
+    if (!syncActiveView) return
+
+    const activeSession = sorted.find(session => session.id === activeId)
     if (activeSession) {
       if (activeSession.messages && activeSession.messages.length > 0) {
         setShowChat(true)
-        window.api.setWindowSize(400, 400, 'top')
+        window.api.setWindowSize(QUICK_CHAT_WIDTH, 400, 'top')
         setIsLoadingHistory(true)
         if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
         loadingTimerRef.current = setTimeout(() => {
@@ -181,43 +250,34 @@ export function ChatInputWindow(): React.JSX.Element {
         setMessages([])
         setIsLoadingHistory(false)
         setShowChat(false)
-        window.api.setWindowSize(400, 90, 'top')
+        window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
       }
     } else {
       setMessages([])
       setIsLoadingHistory(false)
       setShowChat(false)
-      window.api.setWindowSize(400, 90, 'top')
+      window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
     }
   }
 
   // 初始化加载
   useEffect(() => {
-    loadSessions()
+    void loadSessions(false)
   }, [])
 
   // 监听大模型的回复
   useEffect(() => {
     if (!window.api.onPetReplyResponse) return
     const unsubscribe = window.api.onPetReplyResponse((replyText: string) => {
+      if (requestTimeoutRef.current) {
+        clearTimeout(requestTimeoutRef.current)
+        requestTimeoutRef.current = null
+      }
       shouldScrollRef.current = 'smooth'
       setMessages(prev => [...prev, { sender: 'agent', text: replyText }])
       setIsThinking(false)
       // 延时加载一下，确保 PetWidget 已将最新的 response 序列化存储在 localStorage
-      setTimeout(() => {
-        const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved)
-            const sorted = [...parsed].sort((a, b) => {
-              const t1 = a.createdAt || a.time || ''
-              const t2 = b.createdAt || b.time || ''
-              return t2.localeCompare(t1)
-            })
-            setSessions(sorted)
-          } catch (e) { }
-        }
-      }, 150)
+      setTimeout(() => { void loadSessions() }, 150)
     })
     return () => {
       unsubscribe()
@@ -227,19 +287,17 @@ export function ChatInputWindow(): React.JSX.Element {
   // 监听下拉菜单和聊天框的展开状态，自适应调节 Electron 窗口大小以防止裁剪
   useEffect(() => {
     const hasAttachments = screenshotImages.length > 0 || pastedFiles.length > 0
-    const extraH = hasAttachments ? 60 : 0
+    const extraH = (hasAttachments || isFileDragging) ? 60 : 0
     if (showDropdown) {
-      if (!showChat) {
-        window.api.setWindowSize(400, 240 + extraH, 'top')
-      }
+      window.api.setWindowSize(QUICK_CHAT_WIDTH, (showChat ? 400 : 260) + extraH, 'top')
     } else {
       if (!showChat) {
-        window.api.setWindowSize(400, 90 + extraH, 'top')
+        window.api.setWindowSize(QUICK_CHAT_WIDTH, 90 + extraH, 'top')
       } else {
-        window.api.setWindowSize(400, 400 + extraH, 'top')
+        window.api.setWindowSize(QUICK_CHAT_WIDTH, 400 + extraH, 'top')
       }
     }
-  }, [showDropdown, showChat, screenshotImages.length, pastedFiles.length])
+  }, [showDropdown, showChat, isFileDragging, screenshotImages.length, pastedFiles.length])
 
   // 自动滚动到底部 (新消息平滑滚动，历史会话瞬间直达底部无滚动动画)
   useEffect(() => {
@@ -265,41 +323,54 @@ export function ChatInputWindow(): React.JSX.Element {
   }, [messages, isThinking])
 
   // 切换历史会话
-  const handleSwitchSession = (sessionId: string) => {
+  const handleSwitchSession = async (sessionId: string): Promise<void> => {
     localStorage.setItem('agentself_active_session_id', sessionId)
     localStorage.setItem('agentpet_active_session_id', sessionId)
     if (window.electron && window.electron.ipcRenderer) {
       window.electron.ipcRenderer.send('api:wechat-session-updated', sessionId)
     }
 
-    const saved = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
-    let parsed: any[] = []
-    if (saved) {
-      try { parsed = JSON.parse(saved) } catch (e) { }
+    setShowDropdown(false)
+    setIsLoadingHistory(true)
+    window.api.setWindowSize(QUICK_CHAT_WIDTH, 400, 'top')
+
+    let selected = sessions.find(session => session.id === sessionId)
+    try {
+      const refreshedSessions = await window.api.getLocalSessions({ activeSessionId: sessionId, todayOnly: true }) || []
+      if (refreshedSessions.length > 0) {
+        const sorted = [...refreshedSessions].sort((a, b) =>
+          (b.createdAt || b.time || '').localeCompare(a.createdAt || a.time || '')
+        )
+        setSessions(sorted)
+        selected = sorted.find(session => session.id === sessionId)
+      }
+    } catch (error) {
+      console.error('加载会话记录失败', error)
     }
 
-    const selected = parsed.find(s => s.id === sessionId)
     if (selected) {
       setCurrentSessionId(sessionId)
-      setShowDropdown(false)
 
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
 
       if (selected.messages && selected.messages.length > 0) {
         setShowChat(true)
-        window.api.setWindowSize(400, 400, 'top')
-        setIsLoadingHistory(true)
         loadingTimerRef.current = setTimeout(() => {
           shouldScrollRef.current = 'auto'
           setMessages(selected.messages || [])
           setIsLoadingHistory(false)
-        }, 350)
+        }, 120)
       } else {
         setMessages([])
         setIsLoadingHistory(false)
         setShowChat(false)
-        window.api.setWindowSize(400, 90, 'top')
+        window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
       }
+    } else {
+      setMessages([])
+      setIsLoadingHistory(false)
+      setShowChat(false)
+      window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
     }
   }
 
@@ -331,7 +402,7 @@ export function ChatInputWindow(): React.JSX.Element {
     setIsLoadingHistory(false)
     setCurrentSessionId(newId)
     setShowChat(false)
-    window.api.setWindowSize(400, 90, 'top')
+    window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
     setShowDropdown(false)
 
     setTimeout(() => {
@@ -358,6 +429,7 @@ export function ChatInputWindow(): React.JSX.Element {
     }
     if (allFiles.length > 0) {
       payload.files = allFiles
+      payload.autoSend = true
     }
     if (userText) {
       payload.text = userText
@@ -373,6 +445,16 @@ export function ChatInputWindow(): React.JSX.Element {
       setMessages(prev => [...prev, { sender: 'user', text: userText }])
       setIsThinking(true)
       setShowChat(true)
+      if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
+      requestTimeoutRef.current = setTimeout(() => {
+        requestTimeoutRef.current = null
+        setIsThinking(false)
+        shouldScrollRef.current = 'smooth'
+        setMessages(prev => [...prev, {
+          sender: 'agent',
+          text: '请求等待时间过长，请检查模型配置或网络后重试。'
+        }])
+      }, 90_000)
       if (window.api.sendChatToPet) {
         window.api.sendChatToPet(userText)
       }
@@ -410,11 +492,11 @@ export function ChatInputWindow(): React.JSX.Element {
     setIsLoadingHistory(false)
     setShowChat(false)
     setIsThinking(false)
-    window.api.setWindowSize(400, 90, 'top')
+    window.api.setWindowSize(QUICK_CHAT_WIDTH, 90, 'top')
     setCurrentSessionId(newId)
 
     setTimeout(() => {
-      loadSessions()
+      void loadSessions()
     }, 100)
     setTimeout(() => {
       if (inputRef.current) inputRef.current.focus()
@@ -448,7 +530,7 @@ export function ChatInputWindow(): React.JSX.Element {
   }
 
   // 辅助：将文件添加到粘贴文件预览列表（图片自动加载缩略图）
-  const addPastedFile = async (filePath: string, fileName: string) => {
+  const addPastedFile = async (filePath: string, fileName: string): Promise<void> => {
     const ext = fileName.split('.').pop()?.toLowerCase() || ''
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
     const isImage = imageExts.includes(ext)
@@ -461,7 +543,30 @@ export function ChatInputWindow(): React.JSX.Element {
       } catch { /* 缩略图加载失败不影响 */ }
     }
 
-    setPastedFiles(prev => [...prev, { path: filePath, name: fileName, isImage, base64 }])
+    setPastedFiles(prev => (prev.length >= MAX_QUICK_ATTACHMENTS || prev.some(file => file.path === filePath))
+      ? prev
+      : [...prev, { path: filePath, name: fileName, isImage, base64 }])
+  }
+
+  const handleSelectAttachments = async (): Promise<void> => {
+    setShowDropdown(false)
+    const paths = await window.api.selectAttachmentFiles()
+    const availableSlots = Math.max(0, MAX_QUICK_ATTACHMENTS - pastedFiles.length)
+    for (const filePath of paths.slice(0, availableSlots)) {
+      await addPastedFile(filePath, filePath.split(/[\\/]/).pop() || 'file')
+    }
+    inputRef.current?.focus()
+  }
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>): Promise<void> => {
+    event.preventDefault()
+    event.stopPropagation()
+    setShowDropdown(false)
+    const paths = Array.from(event.dataTransfer.files)
+      .map(file => ({ path: window.api.getPathForFile(file), name: file.name }))
+      .filter(file => Boolean(file.path))
+    for (const file of paths) await addPastedFile(file.path, file.name)
+    setIsFileDragging(false)
   }
 
   // 粘贴文件/图片时处理：添加到预览列表，发送时再跳转
@@ -472,6 +577,7 @@ export function ChatInputWindow(): React.JSX.Element {
     const plainText = e.clipboardData.getData('text/plain')
     const items = Array.from(e.clipboardData.items)
     const imageItem = items.find(item => item.type.startsWith('image/'))
+    if (imageItem || e.clipboardData.files.length > 0) setShowDropdown(false)
 
     // 优先同步提取 HTML5 剪贴板中的纯图片（如浏览器中复制的图片），防止异步后数据丢失
     let fallbackDataUrl: string | null = null
@@ -660,15 +766,30 @@ export function ChatInputWindow(): React.JSX.Element {
   if (showChat) {
     wrapperHeight = hasAttachments ? `${378 + attachmentsHeaderHeight}px` : '378px'
   } else if (showDropdown) {
-    wrapperHeight = hasAttachments ? `${220 + attachmentsHeaderHeight}px` : '220px'
+    wrapperHeight = hasAttachments ? `${250 + attachmentsHeaderHeight}px` : '250px'
   } else {
     wrapperHeight = hasAttachments ? `${66 + attachmentsHeaderHeight}px` : '66px'
   }
 
   return (
     <div
-      className="chat-input-window-wrapper"
+      className={`chat-input-window-wrapper ${hasAttachments ? 'has-attachments' : ''} ${isFileDragging ? 'dragging-files' : ''}`}
       style={{ height: wrapperHeight }}
+      onDragEnter={(event) => {
+        event.preventDefault()
+        if (event.dataTransfer.types.includes('Files')) {
+          setShowDropdown(false)
+          setIsFileDragging(true)
+        }
+      }}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(event) => {
+        if (event.target === event.currentTarget) setIsFileDragging(false)
+      }}
+      onDrop={(event) => { void handleDrop(event) }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
           handleMouseDown(e)
@@ -720,7 +841,10 @@ export function ChatInputWindow(): React.JSX.Element {
           {(screenshotImages.length > 0 || pastedFiles.length > 0) && (
             <button
               className="screenshot-preview-add-more"
-              onClick={() => window.api.startScreenshot()}
+              onClick={() => {
+                setShowDropdown(false)
+                window.api.startScreenshot()
+              }}
               title="继续截图"
             >
               <Plus size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
@@ -740,7 +864,6 @@ export function ChatInputWindow(): React.JSX.Element {
           padding: 8px 10px;
           overflow: visible; /* 必须是 visible，否则绝对定位的下拉列表在缩短高度时会被截断 */
           background: transparent;
-          transition: height 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
 
         .screenshot-previews-container {
@@ -895,8 +1018,13 @@ export function ChatInputWindow(): React.JSX.Element {
           padding: 0 10px 0 6px;
           box-sizing: border-box;
           transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-          -webkit-app-region: no-drag;
+          -webkit-app-region: drag;
           position: relative;
+        }
+
+        .dragging-files .chat-input-container {
+          border-color: rgba(37, 99, 235, 0.72);
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14), 0 8px 24px rgba(37, 99, 235, 0.14);
         }
 
         .chat-input-container:focus-within {
@@ -928,7 +1056,7 @@ export function ChatInputWindow(): React.JSX.Element {
           display: flex;
           align-items: center;
           justify-content: center;
-          color: #475569;
+          color: #2563eb;
           margin-right: 4px;
           opacity: 0.85;
           filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.05));
@@ -985,8 +1113,8 @@ export function ChatInputWindow(): React.JSX.Element {
           position: absolute;
           top: 60px;
           left: 36px;
-          width: 328px;
-          max-height: 145px;
+          width: 448px;
+          max-height: 180px;
           background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(243, 244, 246, 0.94));
           backdrop-filter: blur(25px) saturate(180%);
           -webkit-backdrop-filter: blur(25px) saturate(180%);
@@ -999,13 +1127,18 @@ export function ChatInputWindow(): React.JSX.Element {
           box-sizing: border-box;
           overflow-y: auto;
           z-index: 1000;
-          animation: dropdownFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          transform-origin: top center;
+          animation: dropdownReveal 0.16s ease-out;
           -webkit-app-region: no-drag;
         }
 
-        @keyframes dropdownFadeIn {
-          from { opacity: 0; transform: translateY(-6px) scale(0.97); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
+        .has-attachments .history-dropdown-menu {
+          top: 120px;
+        }
+
+        @keyframes dropdownReveal {
+          from { opacity: 0; clip-path: inset(0 0 100% 0); }
+          to { opacity: 1; clip-path: inset(0 0 0 0); }
         }
 
         .history-dropdown-menu::-webkit-scrollbar {
@@ -1020,7 +1153,7 @@ export function ChatInputWindow(): React.JSX.Element {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 7px 12px;
+          padding: 8px 12px;
           font-size: 12px;
           font-weight: 600;
           color: #334155;
@@ -1040,6 +1173,7 @@ export function ChatInputWindow(): React.JSX.Element {
           color: #2563eb;
         }
 
+        .attachment-btn,
         .screenshot-btn {
           width: 30px;
           height: 30px;
@@ -1062,6 +1196,12 @@ export function ChatInputWindow(): React.JSX.Element {
           background: rgba(59, 130, 246, 0.08);
         }
 
+        .attachment-btn:hover {
+          color: #7c3aed;
+          background: rgba(124, 58, 237, 0.09);
+          transform: translateY(-1px);
+        }
+
         .new-session-item {
           color: #2563eb;
           border-bottom: 1px solid rgba(0, 0, 0, 0.04);
@@ -1080,10 +1220,33 @@ export function ChatInputWindow(): React.JSX.Element {
         }
 
         .session-title {
-          flex: 1;
+          display: block;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+
+        .session-copy {
+          min-width: 0;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .session-preview {
+          display: block;
+          overflow: hidden;
+          color: #8491a3;
+          font-size: 10.5px;
+          font-weight: 500;
+          line-height: 1.25;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .dropdown-item.active .session-preview {
+          color: #6b8dc9;
         }
 
         .session-time {
@@ -1217,7 +1380,7 @@ export function ChatInputWindow(): React.JSX.Element {
         .mini-panel-title {
           font-size: 11px;
           font-weight: 700;
-          color: #64748b;
+          color: #2563eb;
           letter-spacing: 0.5px;
         }
 
@@ -1352,7 +1515,9 @@ export function ChatInputWindow(): React.JSX.Element {
           width: 22px;
           height: 22px;
           border-radius: 50%;
-          background: rgba(0, 0, 0, 0.05);
+          color: #2563eb;
+          background: rgba(37, 99, 235, 0.11);
+          border: 1px solid rgba(37, 99, 235, 0.2);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1371,12 +1536,12 @@ export function ChatInputWindow(): React.JSX.Element {
         }
 
         .mini-chat-msg.user .msg-content {
-          color: #0f172a;
+          color: #1d4ed8;
           font-weight: 600;
         }
 
         .mini-chat-msg.agent .msg-content {
-          color: #334155;
+          color: #1e3a8a;
         }
 
         .thinking-dots {
@@ -1389,7 +1554,7 @@ export function ChatInputWindow(): React.JSX.Element {
         .thinking-dots span {
           width: 5px;
           height: 5px;
-          background: #475569;
+          background: #2563eb;
           border-radius: 50%;
           animation: dotBlink 1.4s infinite both;
         }
@@ -1413,7 +1578,6 @@ export function ChatInputWindow(): React.JSX.Element {
         <div
           className="drag-handle"
           title="按住拖拽窗口"
-          onMouseDown={handleMouseDown}
         >
           <GripVertical size={15} strokeWidth={2} aria-hidden="true" />
         </div>
@@ -1428,7 +1592,8 @@ export function ChatInputWindow(): React.JSX.Element {
           className={`history-dropdown-trigger ${showDropdown ? 'active' : ''}`}
           onClick={(e) => {
             e.stopPropagation()
-            setShowDropdown(!showDropdown)
+            const nextOpen = !showDropdown
+            setShowDropdown(nextOpen)
           }}
           title="历史会话"
         >
@@ -1450,8 +1615,19 @@ export function ChatInputWindow(): React.JSX.Element {
 
         {/* 截图按钮 */}
         <button
+          className="attachment-btn"
+          onClick={() => { void handleSelectAttachments() }}
+          title="添加图片、文档、表格、代码或媒体文件"
+        >
+          <Paperclip size={16} strokeWidth={2} aria-hidden="true" />
+        </button>
+
+        <button
           className="screenshot-btn"
-          onClick={() => window.api.startScreenshot()}
+          onClick={() => {
+            setShowDropdown(false)
+            window.api.startScreenshot()
+          }}
           title="屏幕截图区域提问"
         >
           <Camera size={16} strokeWidth={2} aria-hidden="true" />
@@ -1483,18 +1659,24 @@ export function ChatInputWindow(): React.JSX.Element {
               无历史会话记录
             </div>
           ) : (
-            sessions.map(session => (
-              <div
-                key={session.id}
-                className={`dropdown-item ${session.id === currentSessionId ? 'active' : ''}`}
-                onClick={() => handleSwitchSession(session.id)}
-              >
-                <span className="session-title" title={session.name}>{session.name}</span>
-                <span className="session-time">
-                  {session.createdAt || session.time ? formatSessionTime(session.createdAt || session.time) : ''}
-                </span>
-              </div>
-            ))
+            sessions.map(session => {
+              const preview = getSessionPreview(session)
+              return (
+                <div
+                  key={session.id}
+                  className={`dropdown-item ${session.id === currentSessionId ? 'active' : ''}`}
+                  onClick={() => handleSwitchSession(session.id)}
+                >
+                  <span className="session-copy">
+                    <span className="session-title" title={session.name}>{session.name}</span>
+                    <span className="session-preview" title={preview}>{preview}</span>
+                  </span>
+                  <span className="session-time">
+                    {session.createdAt || session.time ? formatSessionTime(session.createdAt || session.time || '') : ''}
+                  </span>
+                </div>
+              )
+            })
           )}
         </div>
       )}

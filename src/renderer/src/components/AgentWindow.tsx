@@ -95,8 +95,13 @@ function getSessionPreview(session: Session): string {
       .replace(/\s+/g, ' ')
       .trim()
     if (text) return text.slice(0, 40)
+    const fileNames = Array.isArray(message.fileInfos)
+      ? message.fileInfos.map((file: { name?: string }) => file.name).filter(Boolean)
+      : []
+    if (fileNames.length > 0) return `附件：${fileNames.join('、')}`
+    if (message.fileInfo?.name) return `附件：${message.fileInfo.name}`
   }
-  return ''
+  return (session.contextSummary || '').replace(/\s+/g, ' ').trim().slice(0, 40)
 }
 
 /** Keeps the shell stable while only the active agent message text is growing. */
@@ -645,6 +650,7 @@ export function AgentWindow(): React.JSX.Element {
               )}
             </div>
           )}
+          <div className="titlebar-drag-region" aria-hidden="true" />
           </div>
 
           {/* 窗口控制按钮 */}

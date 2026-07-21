@@ -35,6 +35,7 @@ declare global {
       getToolsDefinition: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
+      selectAttachmentFiles: () => Promise<string[]>
       parseFileContent: (filePath: string) => Promise<string>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
@@ -87,7 +88,7 @@ declare global {
       getModelUrl: () => Promise<string>
       getOllamaModels: (baseUrl: string) => Promise<string[]>
       getModels: (config: any) => Promise<string[]>
-      getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string }) => Promise<any[] | null>
+      getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string; todayOnly?: boolean }) => Promise<any[] | null>
       getMessagePromptInfo: (messageId: string | number) => Promise<any | null>
       createSession: (session: any) => Promise<boolean>
       updateSession: (sessionId: string, updates: any) => Promise<boolean>
@@ -146,6 +147,7 @@ declare global {
       copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
       copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
       readClipboardFiles: () => Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null>
+      getPathForFile: (file: File) => string
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
       showPetContextMenu: () => void

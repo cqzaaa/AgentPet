@@ -270,15 +270,16 @@ body {
   height: 100%;
   margin-right: 20px;
   position: relative;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .titlebar-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   height: 100%;
   overflow-x: hidden;
   overflow-y: hidden;
@@ -293,7 +294,9 @@ body {
 
 .titlebar-drag-region {
   flex: 1;
+  min-width: 40px;
   height: 100%;
+  -webkit-app-region: drag;
 }
 
 /* 每一个 Tab */
@@ -337,6 +340,7 @@ body {
   position: relative;
   flex-shrink: 0;
   margin-left: 4px;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar-tab-overflow-btn {

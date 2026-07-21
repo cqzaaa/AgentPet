@@ -44,10 +44,17 @@ function getPreview(s: Session): string {
     const m = msgs[i]
     if (m.sender === 'system' || m.isThinking) continue
     let text = (m.text || '').replace(/```[\s\S]*?```/g, '[代码]').replace(/[*_`#>\-]/g, '').replace(/\s+/g, ' ').trim()
-    if (!text) continue
+    if (!text) {
+      const fileNames = Array.isArray(m.fileInfos)
+        ? m.fileInfos.map((file: { name?: string }) => file.name).filter(Boolean)
+        : []
+      if (fileNames.length > 0) return `附件：${fileNames.join('、')}`
+      if (m.fileInfo?.name) return `附件：${m.fileInfo.name}`
+      continue
+    }
     return text.length > 40 ? text.slice(0, 40) + '…' : text
   }
-  return ''
+  return (s.contextSummary || '').replace(/\s+/g, ' ').trim()
 }
 
 function checkIsThinking(s: Session): boolean {

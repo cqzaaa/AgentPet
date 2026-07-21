@@ -587,6 +587,8 @@ export function useAppStore() {
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
   const activeSessionIdRef = useRef(activeSessionId)
   const creatingSessionIdsRef = useRef<Set<string>>(new Set())
+  const [pendingAutoSendTick, setPendingAutoSendTick] = useState(0)
+  const consumedAutoSendTickRef = useRef(0)
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId
@@ -1243,6 +1245,9 @@ export function useAppStore() {
         if (payload.text) {
           setInputValue(prev => prev ? prev + payload.text : payload.text)
         }
+        if (payload.autoSend) {
+          setPendingAutoSendTick(tick => tick + 1)
+        }
         return
       }
     } catch {
@@ -1596,6 +1601,14 @@ export function useAppStore() {
     failReply,
     triggerSessionSummary
   })
+  useEffect(() => {
+    if (pendingAutoSendTick === 0 || pendingAutoSendTick <= consumedAutoSendTickRef.current) return undefined
+    consumedAutoSendTickRef.current = pendingAutoSendTick
+    const timer = setTimeout(() => {
+      void handleSendChat()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [handleSendChat, pendingAutoSendTick])
   useChatStreamEvents({ setSessions, abortedReplyIdsRef })
 
 

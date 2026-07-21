@@ -324,7 +324,10 @@ export function PetWidget(): React.JSX.Element {
 
   // ── 快捷聊天核心响应大模型逻辑 ─────────────────────────────
   const handleChatToPet = async (text: string, isNewSession?: boolean, imagePath?: string) => {
-    if (isLlmThinkingRef.current) return
+    if (isLlmThinkingRef.current) {
+      window.api.sendPetReplyToInput?.('上一条请求仍在处理中，请稍候再试。')
+      return
+    }
     setIsLlmThinking(true)
     localStorage.setItem('agentpet_llm_thinking_at', String(Date.now()))
 
@@ -384,7 +387,12 @@ export function PetWidget(): React.JSX.Element {
 
       const savedSessions = localStorage.getItem('agentself_sessions') || localStorage.getItem('agentpet_sessions')
       let sessions: any[] = []
-      if (savedSessions) {
+      try {
+        sessions = await window.api.getLocalSessions({ activeSessionId }) || []
+      } catch (error) {
+        console.error('[PetWidget] 读取数据库会话失败:', error)
+      }
+      if (sessions.length === 0 && savedSessions) {
         try { sessions = JSON.parse(savedSessions) } catch (e) { }
       }
 
@@ -629,6 +637,7 @@ ${memoryContext}
       handleChatToPet(text, isNewSession, imagePath)
     }
     window.electron.ipcRenderer.on('chat-to-pet', handleChat)
+    window.electron.ipcRenderer.send('pet-widget-ready')
     return () => {
       window.electron.ipcRenderer.removeListener('chat-to-pet', handleChat)
     }
