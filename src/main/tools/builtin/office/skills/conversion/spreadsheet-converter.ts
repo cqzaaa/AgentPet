@@ -18,6 +18,26 @@ function safeSheetName(value: string): string {
   return normalized || 'Sheet'
 }
 
+export function resolveRequestedSheetNames(
+  input: Record<string, any>,
+  availableSheetNames: string[]
+): string[] {
+  const requested = Array.isArray(input.sheets)
+    ? input.sheets
+        .filter((name: unknown): name is string => typeof name === 'string')
+        .map((name: string) => name.trim())
+        .filter(Boolean)
+    : typeof input.sheet_name === 'string' && input.sheet_name.trim()
+      ? [input.sheet_name.trim()]
+      : []
+  if (requested.length === 0) return [...availableSheetNames]
+
+  const selected = [...new Set(requested)]
+  const missing = selected.filter(name => !availableSheetNames.includes(name))
+  if (missing.length > 0) throw new Error(`工作表不存在：${missing.join('、')}`)
+  return selected
+}
+
 export async function convertSpreadsheet(
   input: Record<string, any>,
   context: ToolContext
@@ -36,9 +56,16 @@ export async function convertSpreadsheet(
   const workbook = XLSX.readFile(source.path, { cellDates: true, raw: false })
   runtime.check()
   const baseName = basename(source.path, extname(source.path))
+  const sheetNames = resolveRequestedSheetNames(input, workbook.SheetNames)
 
   if (target === 'xlsx') {
-    const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const selectedWorkbook = XLSX.utils.book_new()
+    selectedWorkbook.Props = workbook.Props
+    selectedWorkbook.Custprops = workbook.Custprops
+    for (const sheetName of sheetNames) {
+      XLSX.utils.book_append_sheet(selectedWorkbook, workbook.Sheets[sheetName], sheetName)
+    }
+    const bytes = XLSX.write(selectedWorkbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
     const output = await writeGeneratedFile(
       bytes,
       input.output_name,
@@ -56,20 +83,18 @@ export async function convertSpreadsheet(
       source_path: source.path,
       file_path: output.filePath,
       file_name: output.fileName,
-      sheet_count: workbook.SheetNames.length,
+      sheet_count: sheetNames.length,
+      selected_sheets: sheetNames,
       validation: {
-        valid: validationWorkbook.SheetNames.length === workbook.SheetNames.length,
+        valid:
+          validationWorkbook.SheetNames.length === sheetNames.length &&
+          validationWorkbook.SheetNames.every((name, index) => name === sheetNames[index]),
         checks: ['xlsx_package', 'workbook_load', 'sheet_count']
       },
       progress: { status: 'completed', completed: 1, total: 1 }
     })
   }
 
-  const requestedSheet = typeof input.sheet_name === 'string' ? input.sheet_name.trim() : ''
-  const sheetNames = requestedSheet ? [requestedSheet] : workbook.SheetNames
-  if (requestedSheet && !workbook.Sheets[requestedSheet]) {
-    throw new Error(`工作表不存在：${requestedSheet}`)
-  }
   const outputs: Array<{ file_path: string; file_name: string; sheet: string }> = []
   for (let index = 0; index < sheetNames.length; index++) {
     runtime.check()
@@ -98,6 +123,7 @@ export async function convertSpreadsheet(
     file_name: outputs.length === 1 ? outputs[0].file_name : undefined,
     files: outputs,
     sheet_count: outputs.length,
+    selected_sheets: sheetNames,
     validation: { valid: outputs.length > 0, checks: ['csv_write', 'non_empty_output_set'] },
     progress: { status: 'completed', completed: outputs.length, total: outputs.length }
   })

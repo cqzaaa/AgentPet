@@ -182,6 +182,12 @@ const api = {
     ipcRenderer.invoke('api:strengthen-experiences', ids),
   getActiveMcpServers: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-active-mcp-servers'),
+  getPaddleOcrTokenStatus: (): Promise<{ configured: boolean }> =>
+    ipcRenderer.invoke('api:get-paddleocr-token-status'),
+  setPaddleOcrToken: (token: string): Promise<{ configured: boolean }> =>
+    ipcRenderer.invoke('api:set-paddleocr-token', token),
+  clearPaddleOcrToken: (): Promise<{ configured: boolean }> =>
+    ipcRenderer.invoke('api:clear-paddleocr-token'),
   getAvatarsList: (): Promise<any[]> =>
     ipcRenderer.invoke('api:get-avatars-list'),
   saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string; scale?: number; xOffset?: number; yOffset?: number }): Promise<boolean> =>
@@ -217,6 +223,12 @@ const api = {
   },
   respondClarification: (requestId: number, answers: Record<string, string>, cancelled = false): void => {
     ipcRenderer.send('api:clarification-response', { requestId, answers, cancelled })
+  },
+  respondCredential: (requestId: number, token: string, cancelled = false): void => {
+    ipcRenderer.send('api:credential-response', { requestId, token, cancelled })
+  },
+  respondOfficeRuntimeInstall: (requestId: number, approved: boolean): void => {
+    ipcRenderer.send('api:office-runtime-response', { requestId, approved })
   },
   abortLlm: (sessionId?: string): Promise<boolean> =>
     ipcRenderer.invoke('api:abort-llm', sessionId),

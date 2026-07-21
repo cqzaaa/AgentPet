@@ -7,6 +7,7 @@ import { createCanvas, loadImage } from '@napi-rs/canvas'
 import { PDFDocument } from 'pdf-lib'
 
 import type { ToolContext, ToolResult } from '../../../../core/types'
+import { officeRuntimeManager } from '../../../../interaction/office-runtime-manager'
 import { getAllowedFileRoots, isPathWithinRoots, resolveSessionPath } from '../../../../utils/paths'
 import { jsonResult, normalizeOutputName, writeGeneratedFile } from '../shared'
 import {
@@ -19,6 +20,12 @@ import {
 } from './capabilities'
 import { createConversionRuntime } from './runtime'
 import { convertPdfWithPaddle } from './paddle-pdf-converter'
+import {
+  classifyPdfForEditableConversion,
+  convertDigitalPdfWithPdf2Docx
+} from './pdf2docx-converter'
+import { convertPdfToMarkdownOrText } from './pdf-text-converter'
+import { convertPdfToXlsx } from './pdf-xlsx-converter'
 
 const MAX_INPUT_FILES = 100
 const MAX_RENDER_PIXELS = 50_000_000
@@ -336,7 +343,40 @@ export async function convertPdfOrImages(
   const source = files[0]
   assertOfficeConversionSupported(source.format, targetFormat)
   if (targetFormat === 'pptx') return convertPdfWithPaddle(source.path, 'pptx', input, context)
-  if (targetFormat === 'docx') return convertPdfWithPaddle(source.path, 'docx', input, context)
+  if (targetFormat === 'markdown' || targetFormat === 'txt') {
+    return convertPdfToMarkdownOrText(source.path, targetFormat, input, context)
+  }
+  if (targetFormat === 'xlsx') return convertPdfToXlsx(source.path, input, context)
+  if (targetFormat === 'docx') {
+    const officeRuntime = await officeRuntimeManager.ensure(context)
+    const classification = await classifyPdfForEditableConversion(source.path, input.pages)
+    if (classification.kind === 'digital') {
+      try {
+        return await convertDigitalPdfWithPdf2Docx(
+          source.path,
+          input,
+          context,
+          officeRuntime,
+          classification
+        )
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        context.event?.sender.send('api:llm-tool-event', {
+          type: 'tool_progress',
+          name: 'PDF → DOCX（自动回退）',
+          detail: `Office 组件转换未完成，正在改用兼容模式：${detail}`,
+          progress: 0,
+          timestamp: Date.now(),
+          messageId: context.messageId,
+          sessionId: context.sessionId
+        })
+      }
+    }
+    return convertPdfWithPaddle(source.path, 'docx', {
+      ...input,
+      document_classification: classification.kind
+    }, context)
+  }
   if (targetFormat !== 'png' && targetFormat !== 'jpg') {
     throw new Error(`PDF 不支持转换为 ${targetFormat}`)
   }

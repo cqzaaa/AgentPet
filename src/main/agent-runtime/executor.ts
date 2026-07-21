@@ -48,6 +48,39 @@ export class AgentExecutor {
       })
   }
 
+  private getToolGeneratedFiles(state: any): Array<{ name: string; path: string; size: number }> {
+    const files: Array<{ name: string; path: string; size: number }> = []
+    const seen = new Set<string>()
+    const addFile = (filePath: unknown, fileName?: unknown): void => {
+      if (typeof filePath !== 'string' || !/[\\/]generated_files[\\/]/i.test(filePath)) return
+      if (seen.has(filePath)) return
+      try {
+        const stat = fs.statSync(filePath)
+        if (!stat.isFile()) return
+        seen.add(filePath)
+        files.push({
+          name:
+            typeof fileName === 'string' && fileName.trim()
+              ? fileName.trim()
+              : filePath.replace(/\\/g, '/').split('/').pop() || 'generated-file',
+          path: filePath,
+          size: stat.size
+        })
+      } catch {
+        // Ignore stale or incomplete output paths.
+      }
+    }
+    addFile(state?.file_path, state?.file_name)
+    addFile(state?.filePath, state?.fileName)
+    for (const item of Array.isArray(state?.files) ? state.files : []) {
+      addFile(item?.file_path || item?.path, item?.file_name || item?.name)
+    }
+    for (const item of Array.isArray(state?.outputs) ? state.outputs : []) {
+      addFile(item?.file_path || item?.path, item?.file_name || item?.name)
+    }
+    return files
+  }
+
   private buildToolImageBlocks(filePaths: string[]): any[] {
     const blocks: any[] = []
     for (const filePath of filePaths) {
@@ -731,6 +764,7 @@ export class AgentExecutor {
             let toolResult: string
             let webSources: any[] | undefined
             let imageFilePaths: string[] = []
+            let generatedFiles: Array<{ name: string; path: string; size: number }> = []
             if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
               toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
@@ -777,6 +811,7 @@ export class AgentExecutor {
                   toolResult = res.content
                   webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
                   imageFilePaths = this.getToolImagePaths(res.state)
+                  generatedFiles = this.getToolGeneratedFiles(res.state)
                 }
               }
             } else {
@@ -793,6 +828,7 @@ export class AgentExecutor {
               toolResult = res.content
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
               imageFilePaths = this.getToolImagePaths(res.state)
+              generatedFiles = this.getToolGeneratedFiles(res.state)
             }
 
             if (abortSignal?.aborted) {
@@ -821,7 +857,8 @@ export class AgentExecutor {
               displayResult,
               contextToolResult,
               webSources,
-              imageFilePaths
+              imageFilePaths,
+              generatedFiles
             }
           }))
           toolExecutionResults.push(...batchResults)
@@ -847,6 +884,9 @@ export class AgentExecutor {
             type: 'tool_result',
             name: res.toolName,
             result: res.displayResult
+          }
+          if (res.generatedFiles?.length) {
+            yield { type: 'generated_files', files: res.generatedFiles }
           }
           if (normalizedSources.length) {
             webSourcesForMemory.push(...normalizedSources)

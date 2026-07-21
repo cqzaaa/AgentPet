@@ -117,7 +117,14 @@ const descriptor: OfficeSkillDescriptor = {
           source_path: { type: 'string' },
           target_format: { type: 'string', enum: ['pdf', 'xlsx', 'csv'] },
           output_name: { type: 'string' },
-          sheet_name: { type: 'string' },
+          sheets: {
+            type: 'array',
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: 'string', minLength: 1 },
+            description: '可选工作表名称；不提供时处理全部工作表'
+          },
+          sheet_name: { type: 'string', description: '兼容旧调用的单个工作表名称' },
           timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
         },
         required: ['source_path', 'target_format']

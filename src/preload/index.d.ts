@@ -103,6 +103,9 @@ declare global {
       recallExperiences: (queryText: string) => Promise<any[]>
       strengthenExperiences: (ids: string[]) => Promise<boolean>
       getActiveMcpServers: () => Promise<any[]>
+      getPaddleOcrTokenStatus: () => Promise<{ configured: boolean }>
+      setPaddleOcrToken: (token: string) => Promise<{ configured: boolean }>
+      clearPaddleOcrToken: () => Promise<{ configured: boolean }>
       getAvatarsList: () => Promise<any[]>
       saveAvatarConfig: (params: { id: string; name: string; languageStyle: string; voice?: string; scale?: number; xOffset?: number; yOffset?: number }) => Promise<boolean>
       synthesizeTts: (text: string, voice: string) => Promise<ArrayBuffer | null>
@@ -115,6 +118,8 @@ declare global {
       onRequestPermission: (callback: (data: any) => void) => () => void
       respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn') => void
       respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
+      respondCredential: (requestId: number, token: string, cancelled?: boolean) => void
+      respondOfficeRuntimeInstall: (requestId: number, approved: boolean) => void
       abortLlm: (sessionId?: string) => Promise<boolean>
       getCronTasks: () => Promise<any[] | null>
       saveCronTasks: (tasks: any[]) => Promise<boolean>

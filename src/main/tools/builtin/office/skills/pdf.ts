@@ -112,7 +112,7 @@ const descriptor: OfficeSkillDescriptor = {
     },
     convert: {
       description:
-        '在 PDF、图片和 Office 之间转换。目标为 DOCX/PPTX 时固定使用 PaddleOCR 生成可编辑内容；目标为 PNG/JPG 时导出页面图片。',
+        '在 PDF、图片和 Office 之间转换。PDF→DOCX/PPTX 默认生成可编辑内容；PDF→Markdown/TXT 输出结构化文本文件。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -123,9 +123,22 @@ const descriptor: OfficeSkillDescriptor = {
             maxItems: 100,
             items: { type: 'string', minLength: 1 }
           },
-          target_format: { type: 'string', enum: ['pdf', 'png', 'jpg', 'pptx', 'docx'] },
+          target_format: {
+            type: 'string',
+            enum: ['pdf', 'png', 'jpg', 'pptx', 'docx', 'xlsx', 'markdown', 'md', 'txt']
+          },
+          conversion_mode: {
+            type: 'string',
+            enum: ['auto', 'editable'],
+            description: 'DOCX/PPTX 转换模式；默认 auto，当前自动模式优先生成可编辑内容。'
+          },
           output_name: { type: 'string', minLength: 1 },
-          pages: { type: 'string', minLength: 1, description: '例如 1-3,5；仅用于 PDF 转图片' },
+          pages: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '可选 PDF 页码，例如 1、1-3 或 1-3,5；适用于 PDF 转 DOCX、XLSX、PPTX、Markdown、TXT 和图片'
+          },
           dpi: { type: 'number', minimum: 36, maximum: 300 },
           quality: { type: 'number', minimum: 1, maximum: 100 },
           page_size: { type: 'string', enum: ['original', 'a4'] },

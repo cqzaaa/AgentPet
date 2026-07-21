@@ -17,6 +17,7 @@ import {
   FolderOpen,
   Ghost,
   Lightbulb,
+  KeyRound,
   LoaderCircle,
   Network,
   Pause,
@@ -80,8 +81,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [mcpNewName, setMcpNewName] = React.useState('')
   const [mcpNewUrl, setMcpNewUrl] = React.useState('')
   const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
-  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto' | 'stdio'>('stream')
+  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
   const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
+  const [showPaddleTokenModal, setShowPaddleTokenModal] = React.useState(false)
+  const [paddleToken, setPaddleToken] = React.useState('')
+  const [paddleTokenConfigured, setPaddleTokenConfigured] = React.useState(false)
 
   // 编辑弹窗相关状态
   const [showEditModal, setShowEditModal] = React.useState(false)
@@ -90,7 +94,14 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
   const [editClearApiKey, setEditClearApiKey] = React.useState(false)
-  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto' | 'stdio'>('stream')
+  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+
+  React.useEffect(() => {
+    if (agentSubTab !== 'mcp') return
+    window.api.getPaddleOcrTokenStatus()
+      .then(status => setPaddleTokenConfigured(Boolean(status.configured)))
+      .catch(() => setPaddleTokenConfigured(false))
+  }, [agentSubTab])
 
   // MCP 测试结果弹框状态
   const [showTestResultModal, setShowTestResultModal] = React.useState(false)
@@ -854,15 +865,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   type="button"
                   className="btn-secondary"
                   onClick={() => {
-                    setMcpNewName('PaddleOCR 官方解析')
-                    setMcpNewUrl('')
-                    setMcpNewApiKey('')
-                    setMcpNewType('stdio')
-                    setShowAddMcpForm(true)
+                    setPaddleToken('')
+                    setShowPaddleTokenModal(true)
                   }}
-                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer' }}
+                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
                 >
-                  配置 PaddleOCR
+                  <KeyRound size={14} strokeWidth={2} aria-hidden="true" />
+                  {paddleTokenConfigured ? '更换 PaddleOCR Token' : '配置 PaddleOCR Token'}
                 </button>
                 <button
                   type="button"
@@ -902,13 +911,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             {server.name}
                           </td>
                           <td>
-                            <span className="mcp-url-text" title={server.url || 'uvx:paddleocr-mcp'}>
-                              {server.type === 'stdio' ? 'uvx:paddleocr-mcp' : server.url}
+                            <span className="mcp-url-text" title={server.url}>
+                              {server.url}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <span className={`mcp-badge ${server.type === 'sse' ? 'none' : 'configured'}`}>
-                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : server.type === 'stdio' ? 'stdio' : 'Stream'}
+                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : 'Stream'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -1000,6 +1009,105 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
         )}
       </div>
 
+      {showPaddleTokenModal && (
+        <div className="mcp-modal-overlay">
+          <div className="mcp-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <KeyRound size={17} strokeWidth={2} aria-hidden="true" />
+                <span>{paddleTokenConfigured ? '更换 PaddleOCR Token' : '配置 PaddleOCR Token'}</span>
+              </div>
+              <button
+                className="mcp-modal-close-btn"
+                onClick={() => { setShowPaddleTokenModal(false); setPaddleToken('') }}
+                title="关闭"
+              >
+                <X size={18} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="mcp-modal-body">
+              <div style={{ fontSize: '12px', lineHeight: 1.7, color: 'var(--text-muted)' }}>
+                PDF 转 DOCX/PPTX 时会直接调用 PaddleOCR AI Studio API，不经过 MCP。
+                {paddleTokenConfigured
+                  ? ' 当前已有 Token；保存新 Token 后会立即替换旧 Token。'
+                  : ' 首次转换时如果尚未配置，也会自动显示同类引导卡片。'}
+              </div>
+              <a
+                href="https://aistudio.baidu.com/paddleocr"
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '12px' }}
+              >
+                获取 AI Studio Access Token <ExternalLink size={12} />
+              </a>
+              <div>
+                <label className="mcp-form-label">新的 AI Studio Access Token</label>
+                <input
+                  autoFocus
+                  type="password"
+                  className="mcp-input-fancy"
+                  placeholder={paddleTokenConfigured ? '粘贴新 Token 以替换旧 Token' : '粘贴 Access Token'}
+                  value={paddleToken}
+                  onChange={e => setPaddleToken(e.target.value)}
+                />
+                <div style={{ marginTop: 7, fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Token 使用系统加密存储，不写入聊天记录，也不会发送给大模型。
+                </div>
+              </div>
+            </div>
+            <div className="mcp-modal-footer" style={{ justifyContent: 'space-between' }}>
+              <div>
+                {paddleTokenConfigured && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={async () => {
+                      try {
+                        await window.api.clearPaddleOcrToken()
+                        setPaddleTokenConfigured(false)
+                        setPaddleToken('')
+                        showToast('已删除 PaddleOCR Token。下次转换时会重新显示引导卡片。', 'success')
+                      } catch (error: any) {
+                        showToast(`删除 Token 失败：${error?.message || error}`, 'error')
+                      }
+                    }}
+                  >
+                    删除现有 Token
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { setShowPaddleTokenModal(false); setPaddleToken('') }}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={!paddleToken.trim()}
+                  onClick={async () => {
+                    try {
+                      await window.api.setPaddleOcrToken(paddleToken)
+                      setPaddleTokenConfigured(true)
+                      setPaddleToken('')
+                      setShowPaddleTokenModal(false)
+                      showToast('PaddleOCR Token 已安全保存。', 'success')
+                    } catch (error: any) {
+                      showToast(`保存 Token 失败：${error?.message || error}`, 'error')
+                    }
+                  }}
+                >
+                  {paddleTokenConfigured ? '保存并替换' : '安全保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 编辑弹窗 Modal */}
       {showEditModal && editingServer && (
         <div className="mcp-modal-overlay">
@@ -1023,18 +1131,16 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              {editType !== 'stdio' && (
-                <div>
-                  <label className="mcp-form-label">MCP Endpoint 地址</label>
-                  <input
-                    type="text"
-                    className="mcp-input-fancy"
-                    placeholder="https://mcpmarket.cn/mcp/..."
-                    value={editUrl}
-                    onChange={e => setEditUrl(e.target.value)}
-                  />
-                </div>
-              )}
+              <div>
+                <label className="mcp-form-label">MCP Endpoint 地址</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="https://mcpmarket.cn/mcp/..."
+                  value={editUrl}
+                  onChange={e => setEditUrl(e.target.value)}
+                />
+              </div>
 
               <div>
                 <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
@@ -1068,9 +1174,6 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   <option value="stream">Streamable HTTP (推荐)</option>
                   <option value="sse">Server-Sent Events</option>
                   <option value="auto">自动探测</option>
-                  {editingServer.preset === 'paddleocr-aistudio' && (
-                    <option value="stdio">PaddleOCR 官方服务 (stdio/uvx)</option>
-                  )}
                 </select>
               </div>
             </div>
@@ -1087,7 +1190,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  if (!editName.trim() || (editType !== 'stdio' && !editUrl.trim())) {
+                  if (!editName.trim() || !editUrl.trim()) {
                     showToast('请完整填写服务名称和地址！', 'error')
                     return
                   }
@@ -1147,31 +1250,19 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              {mcpNewType === 'stdio' ? (
-                <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                  可编辑 PDF 转换将统一使用百度官方 PaddleOCR-VL-1.6 解析。请先在{' '}
-                  <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noreferrer">
-                    百度 AI Studio PaddleOCR
-                  </a>{' '}
-                  注册并获取 Access Token，然后粘贴到下方。Token 会使用系统加密安全保存。
-                </div>
-              ) : (
-                <div>
-                  <label className="mcp-form-label">MCP Endpoint 地址</label>
-                  <input
-                    type="text"
-                    className="mcp-input-fancy"
-                    placeholder="https://mcpmarket.cn/mcp/..."
-                    value={mcpNewUrl}
-                    onChange={e => setMcpNewUrl(e.target.value)}
-                  />
-                </div>
-              )}
+              <div>
+                <label className="mcp-form-label">MCP Endpoint 地址</label>
+                <input
+                  type="text"
+                  className="mcp-input-fancy"
+                  placeholder="https://mcpmarket.cn/mcp/..."
+                  value={mcpNewUrl}
+                  onChange={e => setMcpNewUrl(e.target.value)}
+                />
+              </div>
 
               <div>
-                <label className="mcp-form-label">
-                  {mcpNewType === 'stdio' ? 'AI Studio Access Token' : 'API 鉴权密钥 (Token) - 可选'}
-                </label>
+                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
                 <input
                   type="password"
                   className="mcp-input-fancy"
@@ -1192,7 +1283,6 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   <option value="stream">Streamable HTTP (推荐)</option>
                   <option value="sse">Server-Sent Events</option>
                   <option value="auto">自动探测</option>
-                  {mcpNewType === 'stdio' && <option value="stdio">PaddleOCR 官方服务 (stdio/uvx)</option>}
                 </select>
               </div>
             </div>
@@ -1215,11 +1305,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  if (
-                    !mcpNewName.trim() ||
-                    (mcpNewType !== 'stdio' && !mcpNewUrl.trim()) ||
-                    (mcpNewType === 'stdio' && !mcpNewApiKey.trim())
-                  ) {
+                  if (!mcpNewName.trim() || !mcpNewUrl.trim()) {
                     showToast('请完整填写服务名称和地址！', 'error')
                     return
                   }
@@ -1230,9 +1316,6 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     url: mcpNewUrl.trim(),
                     apiKey: mcpNewApiKey.trim(),
                     type: mcpNewType,
-                    ...(mcpNewType === 'stdio'
-                      ? { preset: 'paddleocr-aistudio', model: 'PaddleOCR-VL-1.6' }
-                      : {}),
                     enabled: true
                   }]
                   saveMcpConfig({ servers: newServers })

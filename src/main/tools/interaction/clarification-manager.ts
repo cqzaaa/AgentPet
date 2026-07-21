@@ -13,6 +13,7 @@ export type ClarificationQuestion = {
 type PendingRequest = {
   resolve: (value: { cancelled: boolean; answers: Record<string, string> }) => void
   timer: NodeJS.Timeout
+  sessionId?: string
 }
 
 class ClarificationManager {
@@ -47,13 +48,23 @@ class ClarificationManager {
         this.closeNotification(requestId)
         resolve({ cancelled: true, answers: {} })
       }, 10 * 60 * 1000)
-      this.pending.set(requestId, { resolve, timer })
+      this.pending.set(requestId, { resolve, timer, sessionId })
 
       target.webContents.send('api:llm-tool-event', { type: 'clarification_request', requestId, questions, sessionId })
       if (!target.isFocused() || target.isMinimized() || !target.isVisible()) {
         this.showClarificationNotification(requestId, target)
       }
     })
+  }
+
+  public cancelPending(sessionId?: string): void {
+    for (const [requestId, pending] of this.pending.entries()) {
+      if (sessionId && pending.sessionId !== sessionId) continue
+      clearTimeout(pending.timer)
+      this.pending.delete(requestId)
+      this.closeNotification(requestId)
+      pending.resolve({ cancelled: true, answers: {} })
+    }
   }
 
   private showClarificationNotification(requestId: number, win: BrowserWindow): void {

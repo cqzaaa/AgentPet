@@ -1,9 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
-import {
-  getDefaultEnvironment,
-  StdioClientTransport
-} from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { app } from 'electron'
 import * as fs from 'fs'
@@ -22,21 +18,16 @@ export interface McpServerConfig {
   url: string
   apiKey: string
   hasApiKey?: boolean
-  type?: 'sse' | 'stream' | 'auto' | 'stdio'
-  preset?: 'paddleocr-aistudio'
-  model?: 'PaddleOCR-VL-1.6' | 'PP-StructureV3' | 'PP-OCRv6'
+  type?: 'sse' | 'stream' | 'auto'
   enabled: boolean
   description?: string
   tools?: any[] // 工具定义缓存字段
   timeout?: number // 超时时间（秒），可选
 }
 
-export const PADDLEOCR_MCP_VERSION = '0.8.5'
-
 type McpClientTransport =
   | SSEClientTransport
   | StreamableHTTPClientTransport
-  | StdioClientTransport
 
 export class McpManager {
   private static instance: McpManager
@@ -51,34 +42,20 @@ export class McpManager {
 
   private constructor() {}
 
+  private isLegacyPaddleMcpConfig(config: McpServerConfig): boolean {
+    const legacy = config as unknown as { preset?: string; type?: string }
+    return legacy.preset === 'paddleocr-aistudio' || legacy.type === 'stdio'
+  }
+
   private isRunnable(config: McpServerConfig): boolean {
-    return config.type === 'stdio'
-      ? config.preset === 'paddleocr-aistudio'
-      : Boolean(config.url)
+    return Boolean(config.url)
   }
 
   private displayEndpoint(config: McpServerConfig): string {
-    return config.type === 'stdio' ? 'uvx:paddleocr-mcp' : config.url
+    return config.url
   }
 
   private createTransport(config: McpServerConfig): McpClientTransport {
-    if (config.type === 'stdio') {
-      if (config.preset !== 'paddleocr-aistudio') {
-        throw new Error('不允许启动未知的本地 MCP 预设')
-      }
-      return new StdioClientTransport({
-        command: 'uvx',
-        args: ['--from', `paddleocr-mcp==${PADDLEOCR_MCP_VERSION}`, 'paddleocr_mcp'],
-        env: {
-          ...getDefaultEnvironment(),
-          PADDLEOCR_MCP_MODEL: config.model || 'PaddleOCR-VL-1.6',
-          PADDLEOCR_MCP_PPOCR_SOURCE: 'aistudio',
-          PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN: config.apiKey
-        },
-        stderr: 'ignore'
-      })
-    }
-
     const headers: Record<string, string> = {}
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
     if (config.type === 'sse') {
@@ -164,9 +141,7 @@ export class McpManager {
         existing &&
         existing.config.url === config.url &&
         existing.config.apiKey === config.apiKey &&
-        existing.config.type === config.type &&
-        existing.config.preset === config.preset &&
-        existing.config.model === config.model
+        existing.config.type === config.type
       ) {
         return
       }
@@ -194,11 +169,7 @@ export class McpManager {
 
         const mcpType = config.type || 'stream'
 
-        if (mcpType === 'stdio') {
-          transport = this.createTransport(config)
-          await Promise.race([client.connect(transport), connectTimeout(60000)])
-          console.log(`[MCP] 服务 ${config.name} 使用本地 stdio 协议连接成功`)
-        } else if (mcpType === 'stream') {
+        if (mcpType === 'stream') {
           transport = this.createTransport(config)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
           console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
@@ -254,10 +225,7 @@ export class McpManager {
 
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stdio') {
-        transport = this.createTransport(config)
-        await Promise.race([client.connect(transport), connectTimeout(60000)])
-      } else if (mcpType === 'stream') {
+      if (mcpType === 'stream') {
         transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
       } else if (mcpType === 'sse') {
@@ -343,11 +311,7 @@ export class McpManager {
 
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stdio') {
-        transport = this.createTransport(config)
-        await Promise.race([client.connect(transport), connectTimeout(60000)])
-        console.log(`[MCP] 服务 ${config.name} 重连成功 (stdio)`)
-      } else if (mcpType === 'stream') {
+      if (mcpType === 'stream') {
         transport = this.createTransport(config)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
         console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
@@ -462,14 +426,6 @@ export class McpManager {
     return false
   }
 
-  public getEnabledServerByPreset(preset: McpServerConfig['preset']): McpServerConfig | null {
-    return (
-      this.systemMcpConfig.servers.find(
-        server => server.enabled && server.preset === preset && this.isRunnable(server)
-      ) || null
-    )
-  }
-
   public async getServerTools(serverId: string): Promise<any[]> {
     const server = this.systemMcpConfig.servers.find(item => item.id === serverId)
     if (!server || !server.enabled || !this.isRunnable(server)) return []
@@ -478,64 +434,6 @@ export class McpManager {
       if (!connected) return []
     }
     return [...(this.connections.get(server.id)?.tools || [])]
-  }
-
-  public async executeToolOnServer(
-    serverId: string,
-    name: string,
-    args: Record<string, unknown>,
-    abortSignal?: AbortSignal,
-    timeoutMs = 240000
-  ): Promise<string> {
-    const server = this.systemMcpConfig.servers.find(item => item.id === serverId)
-    if (!server || !server.enabled || !this.isRunnable(server)) {
-      throw new Error('指定的 MCP 服务未配置或未启用')
-    }
-    if (!server.apiKey && server.preset === 'paddleocr-aistudio') {
-      throw new Error('PADDLEOCR_TOKEN_REQUIRED')
-    }
-
-    if (!this.connections.has(server.id)) {
-      const connected = await this.connectSingleServer(server)
-      if (!connected) throw new Error('MCP_SERVICE_UNAVAILABLE')
-    }
-    const connection = this.connections.get(server.id)
-    if (!connection?.tools.some(tool => tool.name === name)) {
-      throw new Error(`MCP 工具不存在：${name}`)
-    }
-    if (abortSignal?.aborted) throw new Error('UserAborted')
-
-    let timer: NodeJS.Timeout | undefined
-    let onAbort: (() => void) | undefined
-    try {
-      const pending: Promise<any>[] = [
-        connection.client.callTool({ name, arguments: args })
-      ]
-      pending.push(
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('MCP_TOOL_TIMEOUT')), timeoutMs)
-        })
-      )
-      if (abortSignal) {
-        pending.push(
-          new Promise<never>((_, reject) => {
-            onAbort = () => reject(new Error('UserAborted'))
-            abortSignal.addEventListener('abort', onAbort, { once: true })
-          })
-        )
-      }
-
-      const response = await Promise.race(pending)
-      const content = Array.isArray(response?.content) ? response.content : []
-      const textParts = content
-        .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
-        .map((item: any) => item.text)
-      if (textParts.length === 0) throw new Error('MCP_EMPTY_RESPONSE')
-      return textParts.join('\n')
-    } finally {
-      if (timer) clearTimeout(timer)
-      if (abortSignal && onAbort) abortSignal.removeEventListener('abort', onAbort)
-    }
   }
 
   public async executeTool(name: string, args: any, abortSignal?: AbortSignal, isRetry = false): Promise<string> {
@@ -651,7 +549,12 @@ export class McpManager {
     try {
       const cachePath = join(app.getPath('userData'), 'mcp_tools_cache.json')
       const loaded = loadSecureSystemMcpConfig()
-      this.systemMcpConfig = { servers: loaded.servers as McpServerConfig[] }
+      const loadedServers = loaded.servers as McpServerConfig[]
+      const servers = loadedServers.filter(server => !this.isLegacyPaddleMcpConfig(server))
+      if (servers.length !== loadedServers.length) {
+        saveSecureSystemMcpConfig({ servers })
+      }
+      this.systemMcpConfig = { servers }
       if (loaded.secretMigrationPending) {
         console.warn('[Secrets] MCP credential migration is pending because OS encryption is unavailable')
       }
@@ -683,7 +586,11 @@ export class McpManager {
   }
 
   public saveSystemMcpConfig(config: Record<string, unknown>): { servers: McpServerConfig[] } {
-    const saved = saveSecureSystemMcpConfig(config)
+    const rawServers = Array.isArray(config.servers) ? config.servers as McpServerConfig[] : []
+    const saved = saveSecureSystemMcpConfig({
+      ...config,
+      servers: rawServers.filter(server => !this.isLegacyPaddleMcpConfig(server))
+    })
     this.systemMcpConfig = { servers: saved.servers as McpServerConfig[] }
     this.setConfigs(this.systemMcpConfig.servers)
     return this.systemMcpConfig

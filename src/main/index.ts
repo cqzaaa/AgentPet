@@ -16,10 +16,20 @@ import * as XLSX from 'xlsx'
 import * as Papa from 'papaparse'
 import ExcelJS from 'exceljs'
 
+const ATTACHMENT_TEXT_PREVIEW_LIMIT = 30000
+
+function limitAttachmentTextPreview(content: string): string {
+  if (content.length <= ATTACHMENT_TEXT_PREVIEW_LIMIT) return content
+  return `${content.slice(0, ATTACHMENT_TEXT_PREVIEW_LIMIT)}\n\n[附件文本预读已截断：原文共 ${content.length} 个字符，仅保留前 ${ATTACHMENT_TEXT_PREVIEW_LIMIT} 个字符。需要完整内容时请使用文件工具分段读取；需要版式转换时请使用 Office PDF 转换工具。]`
+}
+
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
-import { mcpManager, PADDLEOCR_MCP_VERSION } from './tools/mcp/mcp-manager'
+import { mcpManager } from './tools/mcp/mcp-manager'
 import { permissionManager } from './tools/security/permission-manager'
+import { clarificationManager } from './tools/interaction/clarification-manager'
+import { credentialManager } from './tools/interaction/credential-manager'
+import { officeRuntimeManager } from './tools/interaction/office-runtime-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
 import { ModelRuntimeFactory } from './model-runtime'
@@ -115,6 +125,11 @@ import {
   saveSecureSystemLlmConfig
 } from './security/secure-llm-config'
 import { DEFAULT_LLM_CONFIG, type RuntimeLlmConfig } from './security/llm-config-store'
+import {
+  clearPaddleOcrToken,
+  hasPaddleOcrToken,
+  setPaddleOcrToken
+} from './security/paddle-ocr-token'
 
 let wechatBotManager: WechatBotManager | null = null
 let systemLlmConfig: RuntimeLlmConfig = { ...DEFAULT_LLM_CONFIG }
@@ -2053,6 +2068,9 @@ app.whenReady().then(() => {
       activeLlmAbortControllers.clear()
     }
     permissionManager.clearPendingPermissions()
+    clarificationManager.cancelPending(sessionId)
+    credentialManager.cancelPending(sessionId)
+    officeRuntimeManager.cancelPending(sessionId)
 
     return true
   })
@@ -3429,7 +3447,7 @@ app.whenReady().then(() => {
         const buffer = await fs.promises.readFile(filePath)
         const parser = new PDFParse({ data: buffer })
         const textResult = await parser.getText()
-        content = textResult.text || ''
+        content = limitAttachmentTextPreview(textResult.text || '')
         if (!content.trim()) {
           content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
         }
@@ -3490,7 +3508,7 @@ app.whenReady().then(() => {
         const buffer = await fs.promises.readFile(filePath)
         const parser = new PDFParse({ data: buffer })
         const textResult = await parser.getText()
-        return textResult.text || '[PDF 未能提取到文本内容]'
+        return limitAttachmentTextPreview(textResult.text || '') || '[PDF 未能提取到文本内容]'
       } else if (ext === 'docx') {
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.extractRawText({ buffer })
@@ -3831,6 +3849,16 @@ app.whenReady().then(() => {
           if (onToolEvent) {
             onToolEvent({ type: 'tool_result', name: step.name, result: step.result })
           }
+        } else if (step.type === 'generated_files') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'generated_files',
+              files: step.files,
+              timestamp: Date.now(),
+              messageId: config.messageId,
+              sessionId: config.sessionId
+            })
+          }
         } else if (step.type === 'web_sources') {
           if (event) {
             event.sender.send('api:llm-tool-event', {
@@ -3963,13 +3991,11 @@ app.whenReady().then(() => {
       const [
         { Client },
         { StreamableHTTPClientTransport },
-        { SSEClientTransport },
-        { StdioClientTransport, getDefaultEnvironment }
+        { SSEClientTransport }
       ] = await Promise.all([
         import('@modelcontextprotocol/sdk/client/index.js'),
         import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
-        import('@modelcontextprotocol/sdk/client/sse.js'),
-        import('@modelcontextprotocol/sdk/client/stdio.js')
+        import('@modelcontextprotocol/sdk/client/sse.js')
       ])
 
       const runtimeServer = systemMcpConfig.servers.find((server: any) => server.id === config.id)
@@ -3984,25 +4010,7 @@ app.whenReady().then(() => {
       let usedProtocol = 'Streamable HTTP'
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stdio') {
-        if (config.preset !== 'paddleocr-aistudio') {
-          throw new Error('不允许测试未知的本地 MCP 预设')
-        }
-        if (!apiKey) throw new Error('请先填写 AI Studio Access Token')
-        const transport = new StdioClientTransport({
-          command: 'uvx',
-          args: ['--from', `paddleocr-mcp==${PADDLEOCR_MCP_VERSION}`, 'paddleocr_mcp'],
-          env: {
-            ...getDefaultEnvironment(),
-            PADDLEOCR_MCP_MODEL: config.model || 'PaddleOCR-VL-1.6',
-            PADDLEOCR_MCP_PPOCR_SOURCE: 'aistudio',
-            PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN: apiKey
-          },
-          stderr: 'ignore'
-        })
-        await client.connect(transport)
-        usedProtocol = 'stdio (uvx)'
-      } else if (mcpType === 'stream') {
+      if (mcpType === 'stream') {
         const transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })
         await client.connect(transport)
         usedProtocol = 'Streamable HTTP'
@@ -4062,6 +4070,18 @@ app.whenReady().then(() => {
     return mcpManager.getActiveServers()
   })
 
+  ipcMain.handle('api:get-paddleocr-token-status', () => ({ configured: hasPaddleOcrToken() }))
+
+  ipcMain.handle('api:set-paddleocr-token', (_, token: string) => {
+    setPaddleOcrToken(typeof token === 'string' ? token : '')
+    return { configured: true }
+  })
+
+  ipcMain.handle('api:clear-paddleocr-token', () => {
+    clearPaddleOcrToken()
+    return { configured: false }
+  })
+
   // 初始化微信 Bot 服务
   wechatBotManager = new WechatBotManager({
     getDB,
@@ -4118,6 +4138,9 @@ app.whenReady().then(() => {
 
     // 2. 解除所有等待授权的阻塞，避免 loading 挂起
     permissionManager.clearPendingPermissions()
+    clarificationManager.cancelPending()
+    credentialManager.cancelPending()
+    officeRuntimeManager.cancelPending()
 
 
     // 3. 断开所有 MCP 服务连接

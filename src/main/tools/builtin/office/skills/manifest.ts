@@ -29,7 +29,7 @@ export const officeSkillManifest: ToolManifest = {
     {
       name: 'run_office_skill',
       humanIntervention: 'auto',
-      timeout: 300000,
+      timeout: 2_400_000,
       description:
         '创建、检查、修改、验证或预览 Office 文件的首选执行工具。先用 load_office_skill 获取 input schema；修改已有文件时先 inspect，完成后必须 validate。',
       parameters: {

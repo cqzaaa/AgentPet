@@ -1716,6 +1716,7 @@ export function useAppStore() {
   }
 
   const handleAbortLlm = async (): Promise<void> => {
+    setActivePermissionRequest(null)
     const activeMessages = (useAppStoreRaw.getState().sessions as Session[])
       .find(session => session.id === activeSessionId)?.messages || []
     await abortReply(activeSessionId, activeMessages, showToast)

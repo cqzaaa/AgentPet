@@ -15,11 +15,16 @@ interface ChatReplyRuntime {
   abortReply: (sessionId: string, messages: any[], showToast: (message: string, type: 'info' | 'error') => void) => Promise<void>
 }
 
-function withoutClarificationSteps(message: any): any {
+function withoutEphemeralInteractionSteps(message: any): any {
   if (!Array.isArray(message?.toolSteps)) return message
   return {
     ...message,
-    toolSteps: message.toolSteps.filter((step: any) => step?.type !== 'clarification')
+    toolSteps: message.toolSteps.filter(
+      (step: any) =>
+        step?.type !== 'clarification' &&
+        step?.type !== 'credential' &&
+        step?.type !== 'officeRuntime'
+    )
   }
 }
 
@@ -65,7 +70,7 @@ export function useChatReplyRuntime({
             wasAborted = true
             return message
           }
-          return withoutClarificationSteps({ ...message, text: fullText, isThinking: false })
+          return withoutEphemeralInteractionSteps({ ...message, text: fullText, isThinking: false })
         })
         const target = messages.find((message: any) => message.id === replyId)
         if (target && !wasAborted) savedMessage = target
@@ -112,7 +117,7 @@ export function useChatReplyRuntime({
         const suffix = isAbort
           ? '\n\n⚠️ 对话生成已被用户手动中断。'
           : `\n\n⚠️ ${failureText}`
-        savedMessage = withoutClarificationSteps({
+        savedMessage = withoutEphemeralInteractionSteps({
           ...item,
           text: currentText + suffix,
           isThinking: false,
@@ -145,7 +150,7 @@ export function useChatReplyRuntime({
             text: message.text ? `${message.text}\n\n⚠️ 对话生成已被手动中断。` : '⚠️ 对话生成已被手动中断。',
             isThinking: false
           }
-          const cleanedUpdated = withoutClarificationSteps(updated)
+          const cleanedUpdated = withoutEphemeralInteractionSteps(updated)
           interrupted.push(cleanedUpdated)
           return cleanedUpdated
         })

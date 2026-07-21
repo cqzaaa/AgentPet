@@ -48,14 +48,20 @@ function toLlmMessage(message: any): { role: string; content: any } {
 
   if (message.fileInfo) {
     const pathNote = message.fileInfo.path ? `\n[源文件路径: ${message.fileInfo.path}]` : ''
-    textContent = `${message.text}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}\n${message.fileInfo.content}`
+    const previewNotice = /\.pdf$/i.test(message.fileInfo.name || '') && message.fileInfo.content
+      ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
+      : ''
+    textContent = `${message.text}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}${previewNotice}\n${message.fileInfo.content}`
   } else if (message.fileInfos?.length) {
     const attachmentsText = message.fileInfos
       .filter((file: any) => file.content || file.path)
       .map((file: any) => {
         const pathNote = file.path ? `\n[源文件路径: ${file.path}]` : ''
+        const previewNotice = /\.pdf$/i.test(file.name || '') && file.content
+          ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
+          : ''
         const content = file.content ? `\n${file.content}` : ''
-        return `--- [附带文件: ${file.name}]${pathNote}${content}`
+        return `--- [附带文件: ${file.name}]${pathNote}${previewNotice}${content}`
       })
       .join('\n\n')
     if (attachmentsText) textContent = `${message.text}\n\n${attachmentsText}`
@@ -147,7 +153,19 @@ export function useChatSend({
         }
         const messages = session.messages.map((message: any) => {
           if (!message.isThinking) return message
-          const cleaned = { ...message, isThinking: false, text: message.text || '⚠️ 对话生成被中断。' }
+          const cleaned = {
+            ...message,
+            isThinking: false,
+            text: message.text || '⚠️ 对话生成被中断。',
+            toolSteps: Array.isArray(message.toolSteps)
+              ? message.toolSteps.filter(
+                  (step: any) =>
+                    step?.type !== 'clarification' &&
+                    step?.type !== 'credential' &&
+                    step?.type !== 'officeRuntime'
+                )
+              : message.toolSteps
+          }
           window.api.saveMessage({ ...cleaned, sessionId }).catch(console.error)
           return cleaned
         })
@@ -239,6 +257,8 @@ ${skillsContext}
 - 权限失败：遇到 Access is denied、拒绝访问、System error 5 等错误时必须停止等价命令重试，直接说明需要管理员权限。不得擅自绕过 Windows 服务管理器启动底层进程。
 - Windows 命令：PowerShell 中调用传统程序必须写完整可执行名，例如 \`sc.exe\`、\`where.exe\`，避免与 PowerShell 别名冲突。
 - 结果判断：非零退出码不一定是系统异常；查询无匹配或状态检查未命中时，应结合输出和命令语义判断。
+- 附件预读：上传时抽取的 PDF 内容只是语义文本预览。PDF 转 DOCX/PPTX 必须调用 run_office_skill 的 pdf.convert；转换失败或用户取消配置后，禁止使用预读文本调用 docx.create/pptx.create 冒充转换结果。
+- 生成文件：工具返回 file_path 后，最终回复只需简短说明转换完成并给出完整绝对路径的 Markdown 文件链接，例如 \`[文件名.docx](<C:/完整路径/generated_files/文件名.docx>)\`。禁止只写 \`generated_files\`、目录简称或不可点击的文件名；禁止向用户罗列转换引擎、Python 包、解析过程、质量检查或内部验证项。
 
 </tool_use_rules>
 

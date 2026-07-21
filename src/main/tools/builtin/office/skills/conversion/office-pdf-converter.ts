@@ -17,12 +17,15 @@ import {
 } from '../shared'
 import { assertOfficeConversionSupported } from './capabilities'
 import { createConversionRuntime, resolveConversionSource } from './runtime'
+import { resolveRequestedSheetNames } from './spreadsheet-converter'
+import * as XLSX from 'xlsx'
 
 const execFileAsync = promisify(execFile)
 
 interface NativeOfficeExportResult {
   sourcePages?: number
   exporter: 'Microsoft Word' | 'Microsoft PowerPoint' | 'Microsoft Excel'
+  sheets?: string[]
 }
 
 function encodePowerShell(script: string): string {
@@ -34,6 +37,7 @@ function officeExportScript(source: 'pptx' | 'docx' | 'xlsx'): string {
 $ErrorActionPreference = 'Stop'
 $sourcePath = [Environment]::GetEnvironmentVariable('AGENTPET_OFFICE_SOURCE', 'Process')
 $outputPath = [Environment]::GetEnvironmentVariable('AGENTPET_OFFICE_OUTPUT', 'Process')
+$selectedSheetsJson = [Environment]::GetEnvironmentVariable('AGENTPET_OFFICE_SHEETS', 'Process')
 if ([string]::IsNullOrWhiteSpace($sourcePath) -or [string]::IsNullOrWhiteSpace($outputPath)) {
   throw 'Office export paths are missing'
 }
@@ -89,9 +93,32 @@ try {
   $app.Visible = $false
   $app.DisplayAlerts = $false
   $workbook = $app.Workbooks.Open($sourcePath, 0, $true)
+  $selectedSheetNames = @()
+  if (-not [string]::IsNullOrWhiteSpace($selectedSheetsJson)) {
+    $selectedSheetNames = @($selectedSheetsJson | ConvertFrom-Json)
+  }
+  $selectedLookup = @{}
+  foreach ($name in $selectedSheetNames) { $selectedLookup[[string]$name] = $true }
+  if ($selectedSheetNames.Count -gt 0) {
+    $matched = 0
+    foreach ($sheet in $workbook.Worksheets) {
+      if ($selectedLookup.ContainsKey([string]$sheet.Name)) {
+        $sheet.Visible = -1
+        $matched++
+      }
+      [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
+    }
+    if ($matched -ne $selectedSheetNames.Count) { throw 'One or more selected worksheets do not exist' }
+    foreach ($sheet in $workbook.Worksheets) {
+      if (-not $selectedLookup.ContainsKey([string]$sheet.Name)) { $sheet.Visible = 0 }
+      [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
+    }
+  }
   $sourcePages = 0
+  $exportedSheets = @()
   foreach ($sheet in $workbook.Worksheets) {
     if ($sheet.Visible -eq -1) {
+      $exportedSheets += [string]$sheet.Name
       $sheet.Activate()
       $count = $app.ExecuteExcel4Macro('GET.DOCUMENT(50)')
       if ($count -is [double] -or $count -is [int]) { $sourcePages += [int]$count }
@@ -99,7 +126,7 @@ try {
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
   }
   $workbook.ExportAsFixedFormat(0, $outputPath, 0, $true, $false)
-  @{ sourcePages = $sourcePages; exporter = 'Microsoft Excel' } | ConvertTo-Json -Compress
+  @{ sourcePages = $sourcePages; exporter = 'Microsoft Excel'; sheets = $exportedSheets } | ConvertTo-Json -Compress
 } finally {
   if ($null -ne $workbook) { $workbook.Close($false) }
   if ($null -ne $app) { $app.Quit() }
@@ -115,7 +142,8 @@ async function exportWithMicrosoftOffice(
   sourcePath: string,
   outputPath: string,
   timeoutMs: number,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  selectedSheets?: string[]
 ): Promise<NativeOfficeExportResult> {
   if (process.platform !== 'win32') {
     throw new Error('高保真 Office → PDF 当前需要 Windows 和 Microsoft Office')
@@ -142,7 +170,8 @@ async function exportWithMicrosoftOffice(
         env: {
           ...process.env,
           AGENTPET_OFFICE_SOURCE: sourcePath,
-          AGENTPET_OFFICE_OUTPUT: outputPath
+          AGENTPET_OFFICE_OUTPUT: outputPath,
+          AGENTPET_OFFICE_SHEETS: selectedSheets?.length ? JSON.stringify(selectedSheets) : ''
         }
       }
     )
@@ -186,6 +215,14 @@ export async function convertOfficeToPdf(
   }
   assertOfficeConversionSupported(source.format, 'pdf')
 
+  const hasRequestedSheets =
+    (Array.isArray(input.sheets) && input.sheets.length > 0) ||
+    (typeof input.sheet_name === 'string' && input.sheet_name.trim().length > 0)
+  const selectedSheets =
+    expectedSource === 'xlsx' && hasRequestedSheets
+      ? resolveRequestedSheetNames(input, XLSX.readFile(source.path).SheetNames)
+      : undefined
+
   const runtime = createConversionRuntime(input, context, `${expectedSource.toUpperCase()} → PDF`)
   const outputName = normalizeOutputName(
     input.output_name,
@@ -203,7 +240,8 @@ export async function convertOfficeToPdf(
       source.path,
       outputPath,
       runtime.timeoutMs,
-      context.abortSignal
+      context.abortSignal,
+      selectedSheets
     )
     runtime.check()
     if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
@@ -240,6 +278,7 @@ export async function convertOfficeToPdf(
       file_path: outputPath,
       file_name: outputName,
       source_page_count: sourcePageCount,
+      selected_sheets: nativeResult.sheets,
       page_count: pageCount,
       searchable_text: searchable,
       extracted_text_characters: extractedText.trim().length,

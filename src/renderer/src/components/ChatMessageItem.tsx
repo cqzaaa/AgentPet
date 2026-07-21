@@ -3,6 +3,8 @@ import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'r
 import { setInternalClipboard } from '../hooks/useAppStore'
 import iconSvg from '../assets/icon_from_image.svg'
 import { ClarificationCard } from './ClarificationCard'
+import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
+import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import {
@@ -1381,6 +1383,11 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   const toolSteps = msg.toolSteps || []
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
+  const credentialSteps = toolSteps.filter((step: any) => step.type === 'credential')
+  const officeRuntimeSteps = toolSteps.filter((step: any) => step.type === 'officeRuntime')
+  const generatedToolFiles = toolSteps
+    .filter((step: any) => step.type === 'generatedFiles' && Array.isArray(step.files))
+    .flatMap((step: any) => step.files)
   const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
   const webSources = Array.from(new Map(
     toolSteps
@@ -1538,6 +1545,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         {clarificationSteps.map((step: any) => (
           <ClarificationCard key={step.id} step={step} />
         ))}
+        {credentialSteps.map((step: any) => (
+          <PaddleOcrCredentialCard key={step.id} step={step} />
+        ))}
+        {officeRuntimeSteps.map((step: any) => (
+          <OfficeRuntimeInstallCard key={step.id} step={step} />
+        ))}
+        {generatedToolFiles.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            {generatedToolFiles.map((file: any) => (
+              <LocalFileButton key={file.path} path={file.path} onPreviewFile={onPreviewFile} />
+            ))}
+          </div>
+        )}
 
         {shouldShowToolSteps && (
           <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>

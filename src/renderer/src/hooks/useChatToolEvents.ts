@@ -12,7 +12,7 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, detail, progress, sources, requestId, questions, timestamp: eventTimestamp } of events) {
+  for (const { type, name, args, result, detail, progress, sources, files, requestId, questions, request, timestamp: eventTimestamp } of events) {
     const timestamp = Number(eventTimestamp) || Date.now()
     const id = `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
@@ -28,6 +28,33 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
     }
     else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
     else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, sequence, timestamp, type: 'clarification', requestId, questions })
+    else if (type === 'credential_request' && request) toolSteps.push({ id, sequence, timestamp, type: 'credential', requestId, request })
+    else if (type === 'generated_files' && Array.isArray(files)) {
+      const existingPaths = new Set(
+        toolSteps
+          .filter(step => step.type === 'generatedFiles' && Array.isArray(step.files))
+          .flatMap(step => step.files.map((file: any) => file.path))
+      )
+      const newFiles = files.filter((file: any) => file?.path && !existingPaths.has(file.path))
+      if (newFiles.length > 0) {
+        toolSteps.push({ id, sequence, timestamp, type: 'generatedFiles', files: newFiles })
+      }
+    }
+    else if (type === 'office_runtime_request' && request) {
+      toolSteps.push({ id, sequence, timestamp, type: 'officeRuntime', requestId, request, status: 'waiting', progress: 0 })
+    }
+    else if (type === 'office_runtime_progress' || type === 'office_runtime_complete' || type === 'office_runtime_error') {
+      const existing = toolSteps.findIndex(step => step.type === 'officeRuntime' && step.requestId === requestId)
+      if (existing >= 0) {
+        toolSteps[existing] = {
+          ...toolSteps[existing],
+          timestamp,
+          detail,
+          progress: Number(progress) || 0,
+          status: type === 'office_runtime_complete' ? 'complete' : type === 'office_runtime_error' ? 'error' : 'installing'
+        }
+      }
+    }
   }
   return toolSteps
 }
@@ -36,7 +63,7 @@ function withoutEphemeralToolSteps(message: any): any {
   if (!Array.isArray(message?.toolSteps)) return message
   return {
     ...message,
-    toolSteps: message.toolSteps.filter((step: any) => step?.type !== 'clarification')
+    toolSteps: message.toolSteps.filter((step: any) => step?.type !== 'clarification' && step?.type !== 'credential' && step?.type !== 'officeRuntime')
   }
 }
 
