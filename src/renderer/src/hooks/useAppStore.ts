@@ -8,6 +8,13 @@ import { useChatToolEvents } from './useChatToolEvents'
 import { useChatReplyRuntime } from './useChatReplyRuntime'
 import { useChatSend } from './useChatSend'
 import { useChatSessionSummary } from './useChatSessionSummary'
+import {
+  estimateContextMessageTokens,
+  estimatePromptEnvelopeTokens,
+  getContextMessageSignature,
+  getPromptEnvelopeSignature,
+  selectContextMessages
+} from '../utils/contextBudget'
 
 // ── 类型定义 ─────────────────────────────────────────────────
 export interface CronLog {
@@ -152,31 +159,23 @@ interface CachedContextMessage {
 
 interface SessionContextCache {
   total: number
+  scopeSignature: string
   messages: Map<string | number, CachedContextMessage>
 }
 
 const contextTokenCache = new Map<string, SessionContextCache>()
 
-function getMessageTokenSignature(message: any): string {
-  const fileContent = message.fileInfo?.content || message.fileInfos?.map((file: any) => file.content || '').join('\n') || ''
-  return `${message.sender || ''}\u0000${message.text || ''}\u0000${fileContent}`
-}
-
-function estimateContextMessageTokens(message: any): number {
-  if (message.sender !== 'user' && message.sender !== 'agent') return 0
-  return Math.max(1, Math.round(getMessageTokenSignature(message).split('\u0000').slice(1).join('\n').length * 0.5))
-}
-
-function rebuildSessionContextTokens(session: Session): number {
+function rebuildSessionContextTokens(session: Session, contextRounds: number): number {
   const messages = new Map<string | number, CachedContextMessage>()
-  let total = 1500
-  for (const message of session.messages || []) {
-    const signature = getMessageTokenSignature(message)
+  const scopeSignature = `${contextRounds}\u0000${getPromptEnvelopeSignature(session)}`
+  let total = estimatePromptEnvelopeTokens(session)
+  for (const message of selectContextMessages(session, contextRounds)) {
+    const signature = getContextMessageSignature(message)
     const tokens = estimateContextMessageTokens(message)
     messages.set(message.id, { signature, tokens })
     total += tokens
   }
-  contextTokenCache.set(session.id, { total, messages })
+  contextTokenCache.set(session.id, { total, scopeSignature, messages })
   return total
 }
 
@@ -185,32 +184,33 @@ function rebuildSessionContextTokens(session: Session): number {
  * and update that one message in O(1); other message edits safely fall back to
  * a full rebuild.
  */
-function getSessionContextTokens(previous: Session | undefined, next: Session): number {
+function getSessionContextTokens(previous: Session | undefined, next: Session, contextRounds: number): number {
   const cache = contextTokenCache.get(next.id)
+  const scopeSignature = `${contextRounds}\u0000${getPromptEnvelopeSignature(next)}`
   const previousMessages = previous?.messages || []
   const nextMessages = next.messages || []
   const previousLast = previousMessages[previousMessages.length - 1]
   const nextLast = nextMessages[nextMessages.length - 1]
 
   if (
-    cache && previousLast && nextLast &&
+    cache && cache.scopeSignature === scopeSignature && previousLast && nextLast &&
     previousMessages.length === nextMessages.length &&
     previousLast.id === nextLast.id && previousLast !== nextLast
   ) {
     const cached = cache.messages.get(nextLast.id)
-    const previousSignature = getMessageTokenSignature(previousLast)
+    const previousSignature = getContextMessageSignature(previousLast)
     if (cached?.signature === previousSignature) {
-      const signature = getMessageTokenSignature(nextLast)
+      const signature = getContextMessageSignature(nextLast)
       const tokens = estimateContextMessageTokens(nextLast)
       cache.messages.set(nextLast.id, { signature, tokens })
       cache.total += tokens - cached.tokens
       return cache.total
     }
   }
-  return rebuildSessionContextTokens(next)
+  return rebuildSessionContextTokens(next, contextRounds)
 }
 
-function syncContextTokenUsage(previous: Session[], next: Session[], usage: Record<string, number>): Record<string, number> {
+function syncContextTokenUsage(previous: Session[], next: Session[], usage: Record<string, number>, contextRounds: number): Record<string, number> {
   const previousById = new Map(previous.map(session => [session.id, session]))
   let changed = false
   const nextUsage: Record<string, number> = {}
@@ -218,7 +218,7 @@ function syncContextTokenUsage(previous: Session[], next: Session[], usage: Reco
     const prior = previousById.get(session.id)
     const tokens = prior?.messages === session.messages && usage[session.id] !== undefined
       ? usage[session.id]
-      : getSessionContextTokens(prior, session)
+      : getSessionContextTokens(prior, session, contextRounds)
     nextUsage[session.id] = tokens
     changed ||= usage[session.id] !== tokens
   }
@@ -439,7 +439,12 @@ export const useAppStoreRaw = create<any>((set) => ({
     if (sessions === state.sessions) return state
     return {
       sessions,
-      contextTokenUsageBySession: syncContextTokenUsage(state.sessions, sessions, state.contextTokenUsageBySession)
+      contextTokenUsageBySession: syncContextTokenUsage(
+        state.sessions,
+        sessions,
+        state.contextTokenUsageBySession,
+        state.contextRounds
+      )
     }
   }),
   setActiveSessionId: (val: any) => set((state: any) => {
@@ -499,7 +504,13 @@ export const useAppStoreRaw = create<any>((set) => ({
   setAvatarList: (val: any) => set({ avatarList: val }),
   setTtsEnabled: (val: any) => set({ ttsEnabled: val }),
   setAutoSaveHistory: (val: any) => set({ autoSaveHistory: val }),
-  setContextRounds: (val: any) => set({ contextRounds: val }),
+  setContextRounds: (val: any) => set((state: any) => {
+    const contextRounds = Number(typeof val === 'function' ? val(state.contextRounds) : val) || 10
+    return {
+      contextRounds,
+      contextTokenUsageBySession: syncContextTokenUsage([], state.sessions, {}, contextRounds)
+    }
+  }),
   setTestStatus: (val: any) => set({ testStatus: val }),
   setIsSessionSwitching: (val: any) => set({ isSessionSwitching: val }),
   setIsSessionsInitialized: (val: any) => set({ isSessionsInitialized: val }),

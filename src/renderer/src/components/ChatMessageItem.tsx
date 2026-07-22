@@ -771,6 +771,29 @@ export function ToolThinkItem({ step, isThinking }: { step: any; isThinking: boo
   )
 }
 
+function ContextCompactionItem({ step }: { step: any }) {
+  const running = step.status === 'started'
+  const failed = step.status === 'failed'
+  const label = running
+    ? '正在自动压缩上下文'
+    : failed
+      ? '自动压缩上下文失败'
+      : '已自动压缩上下文'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12.5px' }}>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: failed ? '#ef4444' : running ? '#60a5fa' : '#10b981', backgroundColor: 'var(--bg-card)' }}>
+        {running ? <LoaderCircle size={12} strokeWidth={2.5} className="icon-spin" aria-hidden="true" /> : <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
+      </span>
+      <span>{label}</span>
+      {!running && !failed && Number.isFinite(Number(step.beforeTokens)) && Number.isFinite(Number(step.afterTokens)) && (
+        <span style={{ fontSize: '10.5px', opacity: 0.65 }}>
+          {formatTokens(Number(step.beforeTokens))} → {formatTokens(Number(step.afterTokens))}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ── 可独立折叠的工具具体执行结果子组件 ─────────────────────────────────
 export function ToolResultItem({ step, isThinking }: { step: any; isThinking: boolean }) {
   const [isItemCollapsed, setIsItemCollapsed] = useState(true)
@@ -1027,6 +1050,8 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
         name: step.name,
         detail: step.detail
       })
+    } else if (step.type === 'compaction') {
+      combined.push(step)
     } else if (step.type === 'call') {
       combined.push({
         id: step.id,
@@ -1405,7 +1430,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     }
   }, [toolSteps.length])
   const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
-  const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || (s.type === 'think' && s.detail?.trim()))
+  const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || s.type === 'compaction' || (s.type === 'think' && s.detail?.trim()))
 
   const callSteps = toolSteps.filter((s: any) => s.type === 'call')
   let summaryText = ''
@@ -1627,6 +1652,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       return (
                         <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />
                       )
+                    } else if (step.type === 'compaction') {
+                      return <ContextCompactionItem key={step.id} step={step} />
                     } else {
                       return (
                         <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />

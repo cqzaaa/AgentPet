@@ -81,6 +81,8 @@ declare global {
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
       getStoragePath: () => Promise<string>
+      getToolCacheStats: () => Promise<{ fileCount: number; totalBytes: number }>
+      clearToolCache: () => Promise<{ success: boolean; deletedDirectories: number }>
       selectDirectory: (options?: { title?: string }) => Promise<string | null>
       getCustomModel: () => Promise<{ customModelDir: string; customModelFile: string } | null>
       selectModelDir: () => Promise<{ customModelDir: string; customModelFile: string } | null>

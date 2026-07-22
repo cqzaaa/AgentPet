@@ -516,8 +516,8 @@ async function getEmbeddingInternal(
   return null
 }
 
-// 辅助函数：自动扫描库内向量维度不符的老数据，重新生成向量嵌入并更新
-async function autoMigrateOldEmbeddings(db: any) {
+// 纯本地检索模式只需要保证关键词实体关系完整，不再执行无效的向量迁移探测。
+async function repairMemoryEntityLinks(db: any) {
   if (!memoryDeps) return
   try {
     const rows = await db.all("SELECT id, fact, keywords FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
@@ -550,49 +550,172 @@ async function autoMigrateOldEmbeddings(db: any) {
     if (linkRebuiltCount > 0) {
       console.log(`[Migration] 成功为 ${linkRebuiltCount} 条历史经验自动完成了实体多对多关联图谱的重建补建`)
     }
+  } catch (migrationErr) {
+    console.error('[Migration] 修复历史记忆实体关系失败:', migrationErr)
+  }
+}
 
-    // 2. 检测期望的向量维度并做向量重嵌入
-    let expectedLen = 1024 
-    const sampleEmb = await getEmbeddingInternal(memoryDeps.getSystemLlmConfig(), "test")
-    if (sampleEmb && sampleEmb.length > 0) {
-      expectedLen = sampleEmb.length
-    } else {
-      console.log('[Migration] 未获取到当前活动的向量生成模型，跳过向量增量更新。')
-      return
+type LocalMemoryFact = {
+  fact: string
+  keywords: string[]
+  category: 'experience'
+}
+
+const LOCAL_MEMORY_SECTIONS = [
+  '可复用经验',
+  '错误与恢复',
+  '任务结果',
+  '关键变更与证据'
+]
+
+function normalizeMemoryFact(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[`*_>#\[\](){}]/g, '')
+    .replace(/[\s，。；：、,.!?！？:;"'“”‘’/\\|-]+/g, '')
+    .trim()
+}
+
+function extractLocalKeywords(text: string): string[] {
+  const keywords = new Set<string>()
+  const sanitizedText = text
+    .replace(/[A-Za-z]:[\\/][^\s）)]+/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+  const stopWords = new Set([
+    '成功', '完成', '任务', '用户', '助手', '系统', '当前', '已经', '进行', '需要',
+    '可以', '通过', '使用', '相关', '结果', '文件', '内容', '这个', '以及', '一个'
+  ])
+
+  for (const match of sanitizedText.matchAll(/[A-Za-z][A-Za-z0-9_.:/-]{1,31}/g)) {
+    const value = match[0].replace(/[.,:;/]+$/g, '')
+    if (value.length >= 2) keywords.add(value)
+  }
+
+  for (const match of sanitizedText.matchAll(/[\u3400-\u9fff]{2,}/g)) {
+    const sequence = match[0]
+    if (sequence.length <= 10 && !stopWords.has(sequence)) keywords.add(sequence)
+    for (const size of [4, 3, 2]) {
+      for (let index = 0; index <= sequence.length - size; index++) {
+        const value = sequence.slice(index, index + size)
+        if (!stopWords.has(value)) keywords.add(value)
+        if (keywords.size >= 30) break
+      }
+      if (keywords.size >= 30) break
     }
+    if (keywords.size >= 30) break
+  }
 
-    const rowsToMigrate = rows.filter(row => {
-      if (!row.embedding) return true
-      try {
-        const parsed = JSON.parse(row.embedding)
-        return !Array.isArray(parsed) || parsed.length !== expectedLen
-      } catch {
-        return true
+  return [...keywords].slice(0, 30)
+}
+
+function extractLocalMemoryFacts(title: string, markdown: string): LocalMemoryFact[] {
+  const withoutBackup = markdown
+    .replace(/<details>[\s\S]*?<\/details>/gi, '')
+    .replace(/<!--([\s\S]*?)-->/g, '')
+  const candidates: Array<{ section: string; text: string; priority: number }> = []
+  let activeSection = ''
+
+  for (const rawLine of withoutBackup.split(/\r?\n/)) {
+    const heading = /^#{2,4}\s+(.+)$/.exec(rawLine.trim())
+    if (heading) {
+      activeSection = LOCAL_MEMORY_SECTIONS.find(section => heading[1].includes(section)) || ''
+      continue
+    }
+    if (!activeSection) continue
+
+    const text = rawLine
+      .trim()
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^\d+[.)、]\s*/, '')
+      .replace(/\[([^\]]+)\]\(<[^>]+>\)/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text.length < 8 || /^[-—]+$/.test(text)) continue
+    if (activeSection === '错误与恢复' && /^(?:无|未)(?:错误|异常|失败|发生错误)/.test(text)) continue
+    const priority = activeSection === '错误与恢复' || activeSection === '可复用经验'
+      ? 0
+      : activeSection === '任务结果'
+        ? 1
+        : 2
+    candidates.push({ section: activeSection, text: text.slice(0, 260), priority })
+  }
+
+  if (candidates.length === 0) {
+    const fallback = withoutBackup
+      .split(/\r?\n/)
+      .map(line => line.replace(/^#{1,6}\s+/, '').replace(/^[-*+]\s+/, '').trim())
+      .find(line => line.length >= 12 && !line.startsWith('记录时间') && !line.startsWith('会话ID'))
+    if (fallback) candidates.push({ section: '任务结果', text: fallback.slice(0, 260), priority: 1 })
+  }
+
+  const seen = new Set<string>()
+  return candidates
+    .sort((left, right) => left.priority - right.priority)
+    .filter(candidate => {
+      const normalized = normalizeMemoryFact(candidate.text)
+      if (!normalized || seen.has(normalized)) return false
+      seen.add(normalized)
+      return true
+    })
+    .slice(0, 5)
+    .map(candidate => {
+      const fact = `${candidate.section}：${candidate.text}`
+      return {
+        fact,
+        keywords: extractLocalKeywords(`${title} ${fact}`),
+        category: 'experience' as const
       }
     })
+}
 
-    if (rowsToMigrate.length === 0) {
-      return
+async function upsertLocalMemoryFacts(
+  database: any,
+  facts: LocalMemoryFact[],
+  sourcePath: string
+): Promise<number> {
+  const existingRows = await database.all(
+    "SELECT id, fact, link FROM persona_memories WHERE category = 'experience'"
+  ) as Array<{ id: string; fact: string; link?: string }>
+  let insertCount = 0
+
+  for (const item of facts) {
+    const normalized = normalizeMemoryFact(item.fact)
+    const matched = existingRows.find(row => normalizeMemoryFact(row.fact) === normalized)
+    const now = Date.now()
+    const targetId = matched?.id || `exp_${now}_${Math.random().toString(36).slice(2, 7)}`
+    const links = new Set((matched?.link || '').split(',').map(value => value.trim()).filter(Boolean))
+    links.add(sourcePath.replace(/\\/g, '/'))
+    const link = [...links].join(', ')
+
+    if (matched) {
+      await database.run(
+        'UPDATE persona_memories SET strength = MIN(1.0, strength + 0.2), last_accessed_at = ?, keywords = ?, link = ? WHERE id = ?',
+        now,
+        JSON.stringify(item.keywords),
+        link,
+        targetId
+      )
+    } else {
+      await database.run(`
+        INSERT INTO persona_memories (id, fact, strength, last_accessed_at, created_at, category, keywords, embedding, link)
+        VALUES (?, ?, 1.0, ?, ?, 'experience', ?, NULL, ?)
+      `, targetId, item.fact, now, now, JSON.stringify(item.keywords), link)
+      existingRows.push({ id: targetId, fact: item.fact, link })
+      insertCount++
     }
 
-    console.log(`[Migration] 检测到有 ${rowsToMigrate.length} 条历史避坑数据没有向量或向量维度不匹配，正在重算并迁移更新...`)
-
-    let updateCount = 0
-    for (const row of rowsToMigrate) {
-      try {
-        const newEmb = await getEmbeddingInternal(memoryDeps.getSystemLlmConfig(), row.fact)
-        if (newEmb && newEmb.length === expectedLen) {
-          await db.run("UPDATE persona_memories SET embedding = ? WHERE id = ?", JSON.stringify(newEmb), row.id)
-          updateCount++
-        }
-      } catch (err) {
-        console.error(`[Migration] 更新历史数据向量失败 (ID: ${row.id}):`, err)
-      }
+    await database.run('DELETE FROM memory_entity_links WHERE memory_id = ?', targetId)
+    for (const keyword of item.keywords) {
+      await database.run(
+        'INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)',
+        targetId,
+        keyword,
+        now
+      )
     }
-    console.log(`[Migration] 历史向量库增量更新迁移完毕，成功更新了 ${updateCount} 条数据。当前使用维度为 ${expectedLen}`)
-  } catch (migrationErr) {
-    console.error('[Migration] 执行历史老数据向量增量更新抛出异常:', migrationErr)
   }
+  return insertCount
 }
 
 // 第三层：系统内置画像整理与避坑经验沉淀的后台 pipeline
@@ -617,6 +740,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     
     let allSummariesCombined = ''
     const processedFiles: string[] = []
+    const pendingSummaries: Array<{ filePath: string; title: string; content: string }> = []
 
     for (const sess of sessions) {
       const safeSessionId = sess.id.replace(/[<>:"/\\|?*]/g, '_')
@@ -631,6 +755,11 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
             const content = await fs.promises.readFile(filePath, 'utf-8')
             allSummariesCombined += `\n### 会话: ${sess.name} (文件: ${file.replace(/\.md$/i, '')})\n${content}\n`
             processedFiles.push(filePath)
+            pendingSummaries.push({
+              filePath,
+              title: file.replace(/_\d{8}_\d{6}_\d{3}\.md$/i, '').replace(/\.md$/i, ''),
+              content
+            })
           } catch (e) {
             console.error(`读取会话主目录文件失败: ${filePath}`, e)
           }
@@ -773,10 +902,32 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
         }
       }
     } else {
-      console.log('[Purify] 增量单会话提纯，跳过避坑经验与个人偏好大模型提炼 (第三次调用)')
+      let locallyProcessed = 0
+      for (const summary of pendingSummaries) {
+        const facts = extractLocalMemoryFacts(summary.title, summary.content)
+        if (facts.length === 0) {
+          console.log(`[Purify] 单会话本地提纯未发现可入库条目，保留原文件: ${summary.filePath}`)
+          continue
+        }
+
+        await database.run('BEGIN TRANSACTION')
+        try {
+          insertCount += await upsertLocalMemoryFacts(database, facts, summary.filePath)
+          await database.run('COMMIT')
+        } catch (error) {
+          await database.run('ROLLBACK')
+          throw error
+        }
+
+        const updatedPath = summary.filePath.replace(/\.md$/i, '_已更新.md')
+        await fs.promises.rename(summary.filePath, updatedPath)
+        locallyProcessed++
+        console.log(`[Purify] 单会话本地提纯完成: ${facts.length} 条经验，来源: ${updatedPath}`)
+      }
+      console.log(`[Purify] 单会话增量提纯完成，共处理 ${locallyProcessed} 个记忆文件，新增 ${insertCount} 条结构化经验`)
     }
 
-    await autoMigrateOldEmbeddings(database)
+    await repairMemoryEntityLinks(database)
     parsedEmbeddingCache.clear()
     fileContentCache.clear()
     return { success: true, count: processedFiles.length, insertCount }

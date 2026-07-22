@@ -12,13 +12,37 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, detail, progress, sources, files, requestId, questions, request, timestamp: eventTimestamp } of events) {
+  for (const { type, name, args, result, contextTokens, detail, progress, sources, files, requestId, questions, request, status, beforeTokens, afterTokens, activeToolContextTokens, archivePath, removedMessages, timestamp: eventTimestamp } of events) {
     const timestamp = Number(eventTimestamp) || Date.now()
     const id = `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
     if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
-    else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result })
+    else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result, contextTokens })
     else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
+    else if (type === 'context_compaction') {
+      const existing = toolSteps.findIndex(step => step.type === 'compaction')
+      const compactionStep = {
+        id: existing >= 0 ? toolSteps[existing].id : id,
+        sequence: existing >= 0 ? toolSteps[existing].sequence : sequence,
+        timestamp,
+        type: 'compaction',
+        name: '上下文压缩',
+        status,
+        beforeTokens,
+        afterTokens,
+        contextTokens: status === 'completed' ? Number(activeToolContextTokens) || 0 : undefined,
+        archivePath,
+        removedMessages,
+        detail
+      }
+      if (status === 'completed') {
+        for (const step of toolSteps) {
+          if (step.type === 'result') step.contextTokens = 0
+        }
+      }
+      if (existing >= 0) toolSteps[existing] = compactionStep
+      else toolSteps.push(compactionStep)
+    }
     else if (type === 'tool_progress') {
       const progressDetail = detail || `${Number(progress) || 0}%`
       const existing = toolSteps.findLastIndex(step => step.type === 'think' && step.name === name)

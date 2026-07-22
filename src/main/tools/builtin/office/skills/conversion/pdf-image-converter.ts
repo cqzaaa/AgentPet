@@ -279,6 +279,7 @@ async function pdfToImages(
         const canvas = createCanvas(width, height)
         const canvasContext = canvas.getContext('2d')
         await page.render({
+          canvas: canvas as any,
           canvasContext: canvasContext as any,
           viewport,
           background: '#FFFFFF'

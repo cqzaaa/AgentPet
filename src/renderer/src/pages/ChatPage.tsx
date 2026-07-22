@@ -5,6 +5,7 @@ import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
 import { getModelIcon } from '../utils/modelIcons'
+import { estimateDraftTokens } from '../utils/contextBudget'
 import {
   ArrowDown,
   ArrowUp,
@@ -620,15 +621,19 @@ function ChatPageImpl(): React.JSX.Element {
 
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
-  const contextLimit = 168000
+  const contextLimit = Number((llmConfig as any).contextWindow) || 168000
+  const estimatedContextTokens = useMemo(
+    () => currentContextTokens + estimateDraftTokens(inputValue, attachedFiles),
+    [attachedFiles, currentContextTokens, inputValue]
+  )
 
 
   const contextPercent = useMemo(() => {
-    return Math.min(100, (currentContextTokens / contextLimit) * 100)
-  }, [currentContextTokens])
+    return Math.min(100, (estimatedContextTokens / contextLimit) * 100)
+  }, [contextLimit, estimatedContextTokens])
 
   const handleSendIntercept = () => {
-    if (currentContextTokens >= contextLimit) {
+    if (estimatedContextTokens >= contextLimit) {
       showToast('上下文额度已用满，请创建新会话以继续对话！', 'error')
       return
     }
@@ -1174,14 +1179,14 @@ function ChatPageImpl(): React.JSX.Element {
             className="chat-textarea-field"
             rows={2}
             placeholder={
-              currentContextTokens >= contextLimit
+              estimatedContextTokens >= contextLimit
                 ? '上下文额度已用满，请创建新会话以继续对话！'
                 : isSending
                   ? `${currentAvatarName} 正在思考中...`
                   : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
-            disabled={isSending || currentContextTokens >= contextLimit}
+            disabled={isSending || estimatedContextTokens >= contextLimit}
             onChange={e => setInputValue(e.target.value)}
             onPaste={async e => {
               // 优先检查内部剪贴板（从消息复制的文件+文本）
@@ -1452,11 +1457,15 @@ function ChatPageImpl(): React.JSX.Element {
                       color: 'var(--text-color, #1e293b)',
                       boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
                       whiteSpace: 'nowrap',
+                      textAlign: 'center',
+                      lineHeight: 1.55,
                       zIndex: 1000,
                       animation: 'slideUpMenu 0.15s ease-out'
                     }}
                   >
-                    {`${contextPercent.toFixed(1)}% · ${(currentContextTokens / 1000).toFixed(1)}K / ${(contextLimit / 1000).toFixed(0)}K 上下文已使用`}
+                    <div style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>背景信息窗口：</div>
+                    <div style={{ fontSize: '12px' }}>{`${Math.round(contextPercent)}% 已用`}</div>
+                    <div>{`已用 ${Math.round(estimatedContextTokens / 1000)}k 标记，共 ${Math.round(contextLimit / 1000)}k`}</div>
                   </div>
                 )}
               </div>
@@ -1503,8 +1512,8 @@ function ChatPageImpl(): React.JSX.Element {
               <button
                 className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}
-                disabled={isSending || currentContextTokens >= contextLimit}
-                title={currentContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
+                disabled={isSending || estimatedContextTokens >= contextLimit}
+                title={estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
               >
                 <Plus size={18} strokeWidth={2} aria-hidden="true" />
               </button>
@@ -1522,7 +1531,7 @@ function ChatPageImpl(): React.JSX.Element {
                   className="toolbar-send-btn"
                   onClick={handleSendIntercept}
                   title="发送消息"
-                  disabled={(!inputValue.trim() && attachedFiles.length === 0) || currentContextTokens >= contextLimit}
+                  disabled={(!inputValue.trim() && attachedFiles.length === 0) || estimatedContextTokens >= contextLimit}
                 >
                   <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                 </button>

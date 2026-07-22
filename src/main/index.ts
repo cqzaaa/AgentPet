@@ -1709,6 +1709,58 @@ app.whenReady().then(() => {
     return customStoragePath
   })
 
+  const listToolCacheDirs = async (): Promise<string[]> => {
+    const chatDir = getActiveChatDir()
+    const entries = await fs.promises.readdir(chatDir, { withFileTypes: true }).catch(() => [])
+    return entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(chatDir, entry.name, '.agentpet_cache', 'tool-results'))
+      .filter(cacheDir => fs.existsSync(cacheDir))
+  }
+
+  const collectDirectoryStats = async (directory: string): Promise<{ fileCount: number; totalBytes: number }> => {
+    let fileCount = 0
+    let totalBytes = 0
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const target = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        const nested = await collectDirectoryStats(target)
+        fileCount += nested.fileCount
+        totalBytes += nested.totalBytes
+      } else if (entry.isFile()) {
+        const stat = await fs.promises.stat(target).catch(() => null)
+        if (stat) {
+          fileCount++
+          totalBytes += stat.size
+        }
+      }
+    }
+    return { fileCount, totalBytes }
+  }
+
+  ipcMain.handle('api:get-tool-cache-stats', async () => {
+    const cacheDirs = await listToolCacheDirs()
+    let fileCount = 0
+    let totalBytes = 0
+    for (const cacheDir of cacheDirs) {
+      const stats = await collectDirectoryStats(cacheDir)
+      fileCount += stats.fileCount
+      totalBytes += stats.totalBytes
+    }
+    return { fileCount, totalBytes }
+  })
+
+  ipcMain.handle('api:clear-tool-cache', async () => {
+    const cacheDirs = await listToolCacheDirs()
+    let deletedDirectories = 0
+    for (const cacheDir of cacheDirs) {
+      await fs.promises.rm(cacheDir, { recursive: true, force: true })
+      deletedDirectories++
+    }
+    return { success: true, deletedDirectories }
+  })
+
   ipcMain.handle('api:get-sandbox-mode', () => {
     return sandboxMode
   })
@@ -3830,7 +3882,7 @@ app.whenReady().then(() => {
     messages: any[],
     workspacePath?: string,
     event?: Electron.IpcMainInvokeEvent,
-    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; detail?: string; sources?: any[] }) => void
+    onToolEvent?: (evt: { type: string; name: string; args?: any; result?: string; contextTokens?: number; detail?: string; sources?: any[]; status?: string; beforeTokens?: number; afterTokens?: number; activeToolContextTokens?: number; archivePath?: string; removedMessages?: number }) => void
   ): Promise<string> {
     config = {
       ...config,
@@ -3905,14 +3957,32 @@ app.whenReady().then(() => {
               type: 'tool_result',
               name: step.name,
               result: step.result,
+              contextTokens: step.contextTokens,
               timestamp: Date.now(),
               messageId: config.messageId,
               sessionId: config.sessionId
             })
           }
           if (onToolEvent) {
-            onToolEvent({ type: 'tool_result', name: step.name, result: step.result })
+            onToolEvent({ type: 'tool_result', name: step.name, result: step.result, contextTokens: step.contextTokens })
           }
+        } else if (step.type === 'context_compaction') {
+          const payload = {
+            type: 'context_compaction',
+            name: '上下文压缩',
+            status: step.status,
+            beforeTokens: step.beforeTokens,
+            afterTokens: step.afterTokens,
+            activeToolContextTokens: step.activeToolContextTokens,
+            archivePath: step.archivePath,
+            removedMessages: step.removedMessages,
+            detail: step.detail,
+            timestamp: Date.now(),
+            messageId: config.messageId,
+            sessionId: config.sessionId
+          }
+          if (event) event.sender.send('api:llm-tool-event', payload)
+          if (onToolEvent) onToolEvent(payload)
         } else if (step.type === 'generated_files') {
           if (event) {
             event.sender.send('api:llm-tool-event', {

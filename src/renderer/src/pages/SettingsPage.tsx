@@ -65,6 +65,46 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [dropdownPos, setDropdownPos] = React.useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 })
   const [apiKeyDraft, setApiKeyDraft] = React.useState('')
   const [isSavingApiKey, setIsSavingApiKey] = React.useState(false)
+  const [toolCacheStats, setToolCacheStats] = React.useState({ fileCount: 0, totalBytes: 0 })
+  const [isLoadingToolCache, setIsLoadingToolCache] = React.useState(false)
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+  }
+
+  const refreshToolCacheStats = React.useCallback(async (): Promise<void> => {
+    setIsLoadingToolCache(true)
+    try {
+      setToolCacheStats(await window.api.getToolCacheStats())
+    } catch (error) {
+      console.error('读取工具调用缓存统计失败:', error)
+    } finally {
+      setIsLoadingToolCache(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (settingsSubTab === 'storage') void refreshToolCacheStats()
+  }, [actualStoragePath, refreshToolCacheStats, settingsSubTab])
+
+  const handleClearToolCache = async (): Promise<void> => {
+    if (toolCacheStats.fileCount === 0) return
+    const confirmed = window.confirm('确认清理全部工具调用缓存？\n\n缓存可以安全删除，但旧记忆或经验 Markdown 中指向这些缓存文件的链接将无法继续读取。')
+    if (!confirmed) return
+    setIsLoadingToolCache(true)
+    try {
+      await window.api.clearToolCache()
+      await refreshToolCacheStats()
+      showToast('工具调用缓存已清理', 'success')
+    } catch (error: any) {
+      showToast(`清理工具调用缓存失败：${error?.message || error}`, 'error')
+    } finally {
+      setIsLoadingToolCache(false)
+    }
+  }
 
   const handleSaveApiKey = async (): Promise<void> => {
     if (!apiKeyDraft) {
@@ -374,6 +414,32 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                 {storageSaveStatus.message}
               </div>
             )}
+
+            <div className="form-group" style={{ marginTop: '22px' }}>
+              <label className="form-label">工具调用缓存</label>
+              <div style={{ padding: '14px 16px', border: '1px solid var(--border-color, rgba(128,128,128,0.2))', borderRadius: '8px', background: 'var(--bg-secondary, rgba(128,128,128,0.04))' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '5px' }}>
+                      {isLoadingToolCache ? '正在统计...' : `${toolCacheStats.fileCount} 个文件 · ${formatBytes(toolCacheStats.totalBytes)}`}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                      超大的工具输出会保存在这里，上下文只保留预览、路径和 grep/分页读取指令，以减少 Token 占用。缓存可安全删除，但旧经验 Markdown 中的缓存链接可能失效。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={isLoadingToolCache || toolCacheStats.fileCount === 0}
+                    onClick={() => void handleClearToolCache()}
+                    style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                  >
+                    <Trash2 size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                    清理工具调用缓存
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

@@ -1,18 +1,97 @@
 import * as fs from 'fs'
-import { join } from 'path'
+import { basename, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions } from '../model-runtime'
 import { AgentStepEvent } from './types'
-import { getActiveStorageDir } from '../tools/utils/paths'
+import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
 import { toolRegistry } from '../tools/core/tool-registry'
 import { mcpManager } from '../tools/mcp/mcp-manager'
 import { unifiedToolExecutor } from '../tools/core/tool-executor'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
+import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
 
 type WebMemorySource = {
   id: string
   title: string
   url: string
+}
+
+type MemoryValueSignals = {
+  toolCalls: number
+  toolNames: Set<string>
+  failureFingerprints: Set<string>
+  failedToolNames: Set<string>
+  recoveredToolNames: Set<string>
+  mutationCount: number
+  generatedFileCount: number
+  explicitRememberRequest: boolean
+  userCorrection: boolean
+  memoryAlreadySaved: boolean
+}
+
+type MemoryValueAssessment = {
+  score: number
+  shouldSummarize: boolean
+  reasons: string[]
+}
+
+type ContextCompactionPlan = {
+  start: number
+  end: number
+  reason: string
+  beforeTokens: number
+}
+
+const LARGE_TOOL_RESULT_TOKENS = 6000
+const TOOL_CONTEXT_SOFT_LIMIT = 16000
+const CONTEXT_COMPACT_RATIO = 0.75
+const DEFAULT_CONTEXT_WINDOW = 168000
+
+const MUTATING_TOOL_NAMES = new Set([
+  'write_file',
+  'edit_file',
+  'move_file',
+  'delete_file',
+  'generate_file',
+  'modify_docx_file',
+  'modify_xlsx_file',
+  'run_office_skill',
+  'manage_cron_task'
+])
+
+function messageText(message: ChatMessage | undefined): string {
+  if (!message) return ''
+  if (typeof message.content === 'string') return message.content
+  if (!Array.isArray(message.content)) return ''
+  return (message.content as unknown[])
+    .filter((block): block is { type: string; text: string } => {
+      if (!block || typeof block !== 'object') return false
+      const candidate = block as { type?: unknown; text?: unknown }
+      return candidate.type === 'text' && typeof candidate.text === 'string'
+    })
+    .map(block => block.text)
+    .join('\n')
+}
+
+function normalizeToolFailure(toolName: string, result: string): string {
+  const normalized = result
+    .toLowerCase()
+    .replace(/[a-z]:[\\/][^\s"']+/gi, '<path>')
+    .replace(/\b\d{4}-\d{2}-\d{2}[t\s][\d:.+-]+\b/g, '<time>')
+    .replace(/\b\d{6,}\b/g, '<number>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240)
+  return `${toolName}:${normalized}`
+}
+
+function isMutatingToolCall(toolName: string, args: unknown): boolean {
+  if (MUTATING_TOOL_NAMES.has(toolName)) return true
+  if (/^(?:create|update|delete|write|edit|modify|move|rename|save|apply)[_:-]/i.test(toolName)) return true
+  if (toolName !== 'run_terminal_command' && toolName !== 'run_command') return false
+  if (!args || typeof args !== 'object') return false
+  const command = String((args as { command?: unknown }).command || '')
+  return /(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|npm\s+(?:install|uninstall)|git\s+(?:apply|commit|merge|rebase)|(?:^|\s)(?:rm|mv|cp|mkdir|touch|sed\s+-i)\b|(?:^|[^>])>{1,2}(?:[^>]|$))/i.test(command)
 }
 
 function getActiveChatDir(): string {
@@ -98,6 +177,148 @@ export class AgentExecutor {
       }
     }
     return blocks
+  }
+
+  private getToolCacheDir(sessionId?: string): string {
+    return join(getSessionFilesDir(sessionId), '.agentpet_cache', 'tool-results')
+  }
+
+  private safeCacheName(value: string): string {
+    const cleaned = value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+    return cleaned.slice(0, 48) || 'tool'
+  }
+
+  private async writeToolCache(
+    sessionId: string | undefined,
+    label: string,
+    content: string,
+    extension: 'txt' | 'md' = 'txt'
+  ): Promise<string> {
+    const cacheDir = this.getToolCacheDir(sessionId)
+    await fs.promises.mkdir(cacheDir, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const filePath = join(cacheDir, `${stamp}-${this.safeCacheName(label)}-${suffix}.${extension}`)
+    await fs.promises.writeFile(filePath, content, 'utf8')
+    return resolve(filePath)
+  }
+
+  private truncateToTokenBudget(content: string, tokenBudget: number): string {
+    if (countTokens(content) <= tokenBudget) return content
+    let low = 0
+    let high = content.length
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2)
+      if (countTokens(content.slice(0, middle)) <= tokenBudget) low = middle
+      else high = middle - 1
+    }
+    return content.slice(0, low)
+  }
+
+  private buildCachedToolContext(toolName: string, result: string, cachePath: string): string {
+    const originalTokens = countTokens(result)
+    const lines = result.split(/\r?\n/)
+    const head = this.truncateToTokenBudget(result, 650)
+    const tailSource = lines.length > 1 ? lines.slice(-80).join('\n') : result.slice(Math.max(0, result.length - 2400))
+    const tail = this.truncateToTokenBudget(tailSource, 350)
+    const normalizedPath = cachePath.replace(/\\/g, '/')
+    return `[工具输出已缓存]
+工具: ${toolName}
+原始规模: 约 ${originalTokens} tokens，${lines.length} 行
+完整缓存: ${normalizedPath}
+
+开头预览:
+${head}
+
+末尾预览:
+${tail}
+
+不要重新调用原工具获取整份内容。需要定位信息时使用：
+grep_content({"pattern":"关键词","scope":"${normalizedPath}","output_mode":"content"})
+
+需要按页阅读时使用：
+read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
+  }
+
+  private getContextCompactionPlan(chatHistory: ChatMessage[], contextWindow: number): ContextCompactionPlan | null {
+    const beforeTokens = countMessagesTokens(chatHistory)
+    const latestUserIndex = chatHistory.findLastIndex(message => message.role === 'user')
+    if (latestUserIndex < 0) return null
+
+    const currentToolTokens = chatHistory
+      .slice(latestUserIndex + 1)
+      .filter(message => message.role === 'tool')
+      .reduce((total, message) => total + countTokens(messageText(message)), 0)
+    const totalLimitReached = beforeTokens >= Math.max(24000, contextWindow * CONTEXT_COMPACT_RATIO)
+    const toolLimitReached = currentToolTokens >= TOOL_CONTEXT_SOFT_LIMIT
+    if (!totalLimitReached && !toolLimitReached) return null
+
+    const currentToolCycles = chatHistory
+      .map((message, index) => ({ message, index }))
+      .filter(item => item.index > latestUserIndex && item.message.role === 'assistant' && item.message.tool_calls?.length)
+
+    if (currentToolCycles.length >= 3) {
+      return {
+        start: latestUserIndex + 1,
+        end: currentToolCycles[currentToolCycles.length - 2].index,
+        reason: toolLimitReached ? '当前任务的工具输出累计超过软阈值' : '整体上下文接近窗口阈值',
+        beforeTokens
+      }
+    }
+
+    const firstNonSystem = chatHistory.findIndex(message => message.role !== 'system')
+    const end = Math.max(firstNonSystem, latestUserIndex - 4)
+    if (firstNonSystem >= 0 && end > firstNonSystem) {
+      return {
+        start: firstNonSystem,
+        end,
+        reason: '整体上下文接近窗口阈值',
+        beforeTokens
+      }
+    }
+    return null
+  }
+
+  private async compactContext(
+    chatHistory: ChatMessage[],
+    plan: ContextCompactionPlan,
+    sessionId?: string
+  ): Promise<{ archivePath: string; removedMessages: number; afterTokens: number; activeToolContextTokens: number }> {
+    const removed = chatHistory.slice(plan.start, plan.end)
+    const archiveText = removed.map((message, index) => {
+      const toolCalls = message.tool_calls?.length
+        ? `\n工具调用: ${JSON.stringify(message.tool_calls, null, 2)}`
+        : ''
+      return `## ${index + 1}. ${message.role}${message.name ? ` (${message.name})` : ''}\n\n${messageText(message)}${toolCalls}`
+    }).join('\n\n---\n\n')
+    const archivePath = await this.writeToolCache(sessionId, 'context-compaction', archiveText, 'md')
+    const normalizedPath = archivePath.replace(/\\/g, '/')
+    const compactItems = removed.map(message => {
+      if (message.role === 'tool') {
+        const body = messageText(message)
+        const cachedPath = body.match(/完整缓存:\s*([^\r\n]+)/)?.[1]
+        return `- 工具 ${message.name || 'unknown'}：${this.truncateToTokenBudget(body.replace(/\s+/g, ' '), 90)}${cachedPath ? `；完整缓存 ${cachedPath}` : ''}`
+      }
+      if (message.tool_calls?.length) {
+        return `- 助手调用：${message.tool_calls.map((call: any) => call.function?.name).filter(Boolean).join('、')}`
+      }
+      const text = messageText(message).replace(/\s+/g, ' ').trim()
+      return text ? `- ${message.role === 'user' ? '用户' : '助手'}：${this.truncateToTokenBudget(text, 120)}` : ''
+    }).filter(Boolean).slice(0, 24)
+    const summary: ChatMessage = {
+      role: 'assistant',
+      content: `[自动压缩的历史执行上下文]\n触发原因：${plan.reason}\n已归档 ${removed.length} 条旧过程消息。\n${compactItems.join('\n')}\n\n完整归档：${normalizedPath}\n需要细节时请使用 grep_content 检索该文件，或用 read_file(start_line, end_line) 分页读取。`
+    }
+    chatHistory.splice(plan.start, plan.end - plan.start, summary)
+    return {
+      archivePath: normalizedPath,
+      removedMessages: removed.length,
+      afterTokens: countMessagesTokens(chatHistory),
+      activeToolContextTokens: chatHistory
+        .slice(chatHistory.findLastIndex(message => message.role === 'user') + 1)
+        .filter(message => message.role === 'tool')
+        .reduce((total, message) => total + countTokens(messageText(message)), 0)
+    }
   }
 
   private stripImageBlocksForCompatibility(messages: ChatMessage[]): number {
@@ -262,12 +483,112 @@ export class AgentExecutor {
     return true
   }
 
+  private assessMemoryValue(signals: MemoryValueSignals, loopCount: number, forcedStop = false): MemoryValueAssessment {
+    let score = 0
+    const reasons: string[] = []
+    const add = (points: number, reason: string): void => {
+      score += points
+      reasons.push(`+${points} ${reason}`)
+    }
+
+    if (signals.explicitRememberRequest) add(5, '用户明确要求记忆或沉淀')
+    if (signals.userCorrection) add(2, '用户对既有理解或方案进行了纠正')
+    if (signals.recoveredToolNames.size > 0) add(4, `工具失败后恢复成功(${signals.recoveredToolNames.size})`)
+    if (signals.failureFingerprints.size > 0) add(2, `出现可复盘的工具失败(${signals.failureFingerprints.size})`)
+    if (signals.failureFingerprints.size >= 2) add(1, '存在多个不同失败')
+    if (signals.mutationCount > 0) add(2, `产生修改型操作(${signals.mutationCount})`)
+    if (signals.generatedFileCount > 0) add(2, `生成交付文件(${signals.generatedFileCount})`)
+    if (signals.toolNames.size >= 3) add(1, `跨工具协作(${signals.toolNames.size}种)`)
+    if (signals.toolCalls >= 5) add(1, `多步骤任务(${signals.toolCalls}次工具调用)`)
+    if (signals.toolCalls >= 10) add(1, '超长工具链')
+    if (loopCount >= 3) add(1, `多轮代理执行(${loopCount}轮)`)
+    if (forcedStop) add(2, '任务达到最大循环上限')
+
+    return {
+      score,
+      shouldSummarize: !signals.memoryAlreadySaved && score >= 4,
+      reasons
+    }
+  }
+
+  private recordMemoryToolResult(
+    signals: MemoryValueSignals,
+    toolName: string,
+    success: boolean,
+    result: string,
+    generatedFileCount: number,
+    args: unknown
+  ): void {
+    if (toolName === 'trigger_memory_purify') return
+    signals.toolCalls++
+    signals.toolNames.add(toolName)
+    if (toolName === 'append_memory_summary' && success) signals.memoryAlreadySaved = true
+    if (isMutatingToolCall(toolName, args) && success) signals.mutationCount++
+    signals.generatedFileCount += generatedFileCount
+
+    if (!success) {
+      signals.failureFingerprints.add(normalizeToolFailure(toolName, result))
+      signals.failedToolNames.add(toolName)
+    } else if (signals.failedToolNames.has(toolName)) {
+      signals.recoveredToolNames.add(toolName)
+    }
+  }
+
+  private collectMemoryFileSources(chatHistory: ChatMessage[], workspacePath?: string): string[] {
+    const sources = new Set<string>()
+    const addCandidate = (value: unknown): void => {
+      if (typeof value !== 'string') return
+      let candidate = value.trim().replace(/^file:\/\/\/?/i, '').replace(/#L\d+(?:-L?\d+)?$/i, '')
+      candidate = candidate.replace(/^<|>$/g, '').replace(/\\/g, '/')
+      if (!candidate || /^https?:\/\//i.test(candidate)) return
+      const resolved = isAbsolute(candidate)
+        ? candidate
+        : workspacePath
+          ? resolve(workspacePath, candidate)
+          : ''
+      if (!resolved) return
+      try {
+        if (fs.statSync(resolved).isFile()) sources.add(resolved.replace(/\\/g, '/'))
+      } catch {
+        // Ignore stale paths and values that merely resemble paths.
+      }
+    }
+
+    const visit = (value: unknown, key = ''): void => {
+      if (typeof value === 'string') {
+        if (/(?:path|file|source|target|document|image|output)/i.test(key)) addCandidate(value)
+        return
+      }
+      if (Array.isArray(value)) {
+        value.forEach(item => visit(item, key))
+        return
+      }
+      if (!value || typeof value !== 'object') return
+      for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+        visit(childValue, childKey)
+      }
+    }
+
+    for (const message of chatHistory) {
+      visit(message.tool_calls, 'tool_calls')
+      const content = messageText(message)
+      for (const match of content.matchAll(/<!--\s*关联文件:\s*(.*?)\s*-->/g)) addCandidate(match[1])
+      for (const match of content.matchAll(/\[[^\]]*\]\(<([^>]+)>\)/g)) addCandidate(match[1])
+      for (const match of content.matchAll(/源文件路径:\s*([^\]\r\n]+)/g)) addCandidate(match[1])
+      for (const match of content.matchAll(/(?:完整缓存|完整归档):\s*([^\r\n]+)/g)) addCandidate(match[1])
+    }
+
+    return [...sources].slice(0, 12)
+  }
+
   private async handleLongTaskAutoMemory(
     sessionId: string,
     chatHistory: ChatMessage[],
     config: { provider: string; apiKey: string; baseUrl: string; model: string; temperature: number },
     finalResponse?: string,
-    webSources: WebMemorySource[] = []
+    webSources: WebMemorySource[] = [],
+    assessment?: MemoryValueAssessment,
+    workspacePath?: string
   ) {
     try {
       if (!sessionId) return
@@ -279,25 +600,33 @@ export class AgentExecutor {
         const contentStr = Array.isArray(msg.content)
           ? msg.content.map((b: any) => b.text || '').join('')
           : (msg.content || '')
-        chatLogs += `${msg.role === 'user' ? '用户' : '助手'}: ${contentStr}\n`
+        const roleName = msg.role === 'user'
+          ? '用户'
+          : msg.role === 'tool'
+            ? `工具结果${msg.name ? `(${msg.name})` : ''}`
+            : '助手'
+        chatLogs += `${roleName}: ${contentStr}\n`
       }
 
       const summarySystemPrompt = `你是一个经验丰富的 AI 对话与开发任务总结助手。
 请你仔细阅读以下【一轮包含了用户提问、助手回答及本地系统工具调用的对话日志】，并为他们生成一段精炼、实用的 Markdown 摘要与知识沉淀。
 
-你必须输出以下两个部分：
-1. 【主题】：为本次长任务起一个清晰的主题名称（如：“Electron SQLite 数据库新增 link 字段升级”、“使用 ripgrep 实现多路混合记忆召回”等，禁止带日期，只要主题名，不超过 20 字）。
-2. 【总结内容】：详细梳理出：
-   - 核心任务与解决过程。
-   - 成功经验与关键代码。
-   - 纠错避坑（若有报错，为什么报错，怎么解决的）。
-3. **字数严格限制**：【总结内容】的字数必须控制在 800 字以内，简明扼要，直击重点，剔除任何修饰性词汇。
-4. **精准 Wiki 溯源**：如果对话日志中助手参考了特定的本地文件或缓存文档路径（日志中可能已有 \`<!-- 关联文件: ... -->\` 注释），在总结对应要点时，请务必在这句话的末尾**原样保留或加上**该 HTML 注释文件引用，以实现知识到文件的精准溯源。
-5. **网页来源**：引用网页事实时，只能使用对话日志中出现过的 \`[S数字]\` 标识，不得编造来源名或编号。系统会在保存时将有效标识转为可点击链接并附上来源索引。
-6. 你的格式必须是 JSON 格式，包含 title 和 content 字段，示例如下：
+请输出一条可以长期复用的“任务经验记忆”，而不是普通聊天摘要：
+1. 【主题】禁止日期，不超过 20 字。
+2. content 严格使用以下 Markdown 结构；没有信息的可选小节可以省略：
+   - \`### 任务结果\`：完成了什么，状态是成功、部分成功还是未解决。
+   - \`### 可复用经验\`：同类问题可直接复用的做法、关键条件和判断依据。
+   - \`### 错误与恢复\`：仅在确有错误时记录现象、根因、无效尝试、最终解法和防复发措施。
+   - \`### 关键变更与证据\`：关键文件、命令、产物或来源，不罗列无价值的过程日志。
+3. 不要把临时路径、随机 ID、时间戳、一次性输出或未经验证的猜测写成长期经验。
+4. 尚未解决的问题必须明确标记“未解决”，不能把尝试方案写成成功经验。
+5. content 控制在 800 字以内，优先保留根因、解决方案和验证结果。
+6. 日志中的 \`<!-- 关联文件: ... -->\` 必须在对应结论句尾原样保留。
+7. 网页来源只能使用日志已有的 \`[S数字]\`，不得编造。
+8. 只返回包含 title 和 content 的合法 JSON：
 {
   "title": "主题名",
-  "content": "### 💡 核心知识与经验沉淀\\n...（在具体总结的句尾保留 <!-- 关联文件: xxx --> 注释）"
+  "content": "### 任务结果\\n...\\n\\n### 可复用经验\\n..."
 }
 请不要输出任何 Markdown 标记或多余的解释，只输出合法的 JSON 本身。`
 
@@ -347,7 +676,18 @@ export class AgentExecutor {
           `${summaryData.content}\n${finalResponse || ''}`,
           webSources
         ).sourceIndex
-        await appendMemorySummaryInternal(sessionId, summaryData.title, summaryWithSources.content + backupDialogStr + sourceIndex)
+        const assessmentSection = assessment
+          ? `### 记忆价值评估\n- 评分：${assessment.score}\n- 触发依据：${assessment.reasons.join('；') || '无'}\n\n`
+          : ''
+        const localFileSources = this.collectMemoryFileSources(chatHistory, workspacePath)
+        const localFileSection = localFileSources.length > 0
+          ? `\n\n---\n### 关联文件（按需读取）\n${localFileSources.map(filePath => `- [${basename(filePath)}](<${filePath}>)`).join('\n')}\n`
+          : ''
+        await appendMemorySummaryInternal(
+          sessionId,
+          summaryData.title,
+          assessmentSection + summaryWithSources.content + localFileSection + backupDialogStr + sourceIndex
+        )
         console.log('[Memory] 长任务自动经验总结完成并已保存。主题:', summaryData.title)
       } else {
         console.warn('[Memory] 长任务自动经验沉淀返回的 JSON 结构不正确:', responseText)
@@ -365,6 +705,7 @@ export class AgentExecutor {
       model: string
       temperature: number
       maxTokens?: number
+      contextWindow?: number
       sessionId?: string
       messageId?: number
       isBackground?: boolean
@@ -376,6 +717,7 @@ export class AgentExecutor {
     abortSignal?: AbortSignal
   ): AsyncGenerator<AgentStepEvent, string, unknown> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, sandboxMode, event } = config
+    const contextWindow = Math.max(32000, Number(config.contextWindow) || DEFAULT_CONTEXT_WINDOW)
     const isFrontend = !config.isBackground
 
     let chatHistory: ChatMessage[] = JSON.parse(JSON.stringify(messages))
@@ -497,7 +839,19 @@ export class AgentExecutor {
 
     let loopCount = 0
     const maxLoops = 100
-    let totalToolCallsCount = 0
+    const latestUserText = messageText([...chatHistory].reverse().find(message => message.role === 'user'))
+    const memorySignals: MemoryValueSignals = {
+      toolCalls: 0,
+      toolNames: new Set(),
+      failureFingerprints: new Set(),
+      failedToolNames: new Set(),
+      recoveredToolNames: new Set(),
+      mutationCount: 0,
+      generatedFileCount: 0,
+      explicitRememberRequest: /(?:记住|记下来|保存.{0,6}(?:记忆|经验)|沉淀.{0,6}(?:记忆|经验)|remember this)/i.test(latestUserText),
+      userCorrection: /(?:不对|错了|你理解错|不是这个意思|应该是|我说的是)/i.test(latestUserText),
+      memoryAlreadySaved: false
+    }
     let imageCompatibilityFallbackUsed = false
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
@@ -750,10 +1104,6 @@ export class AgentExecutor {
             }
 
             const toolName = toolCall.function.name
-            if (toolName !== 'trigger_memory_purify') {
-              totalToolCallsCount++
-            }
-
             let toolArgs: any = {}
             try {
               toolArgs = JSON.parse(toolCall.function.arguments || '{}')
@@ -762,6 +1112,7 @@ export class AgentExecutor {
             }
 
             let toolResult: string
+            let toolSuccess = true
             let webSources: any[] | undefined
             let imageFilePaths: string[] = []
             let generatedFiles: Array<{ name: string; path: string; size: number }> = []
@@ -790,6 +1141,7 @@ export class AgentExecutor {
                   toolArgs = { ...toolArgs, query }
                 } else {
                   toolResult = '已拦截单字搜索：请使用包含完整人名、事件或主题的查询词。'
+                  toolSuccess = false
                 }
               }
 
@@ -809,6 +1161,7 @@ export class AgentExecutor {
                   }
                   const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
                   toolResult = res.content
+                  toolSuccess = res.success
                   webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
                   imageFilePaths = this.getToolImagePaths(res.state)
                   generatedFiles = this.getToolGeneratedFiles(res.state)
@@ -826,6 +1179,7 @@ export class AgentExecutor {
               }
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
               toolResult = res.content
+              toolSuccess = res.success
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
               imageFilePaths = this.getToolImagePaths(res.state)
               generatedFiles = this.getToolGeneratedFiles(res.state)
@@ -845,17 +1199,27 @@ export class AgentExecutor {
             }
 
             let contextToolResult = toolResult
-            const MAX_CONTEXT_TOOL_RESULT = 12000
-            if (typeof contextToolResult === 'string' && contextToolResult.length > MAX_CONTEXT_TOOL_RESULT) {
-              contextToolResult = contextToolResult.substring(0, MAX_CONTEXT_TOOL_RESULT) +
-                `\n\n[系统保护警告]: 数据量过大，已被系统强制截断（仅保留前 ${MAX_CONTEXT_TOOL_RESULT} 字符）。\n🚫 严禁使用相同的参数再次无脑读取整个文件或网页！\n💡 解决方案：如果你需要后续内容，请务必在工具参数中使用 start_line 和 end_line 进行精确的分页读取，或使用 grep_content 检索精准内容。`
+            let toolCachePath: string | undefined
+            if (typeof contextToolResult === 'string' && countTokens(contextToolResult) > LARGE_TOOL_RESULT_TOKENS) {
+              try {
+                toolCachePath = await this.writeToolCache(sessionId, toolName, contextToolResult)
+                contextToolResult = this.buildCachedToolContext(toolName, contextToolResult, toolCachePath)
+                displayResult += `\n\n完整工具输出已缓存，可按需检索或分页读取：${toolCachePath.replace(/\\/g, '/')}`
+              } catch (cacheError) {
+                console.error('[AgentExecutor] 缓存大型工具输出失败，降级为截断上下文:', cacheError)
+                contextToolResult = this.truncateToTokenBudget(contextToolResult, LARGE_TOOL_RESULT_TOKENS) +
+                  '\n\n[系统保护] 工具输出缓存失败，当前仅保留截断内容。后续请使用 grep_content 或 read_file 分页缩小读取范围。'
+              }
             }
 
             return {
               toolCallId: toolCall.id,
               toolName,
+              toolSuccess,
+              toolArgs,
               displayResult,
               contextToolResult,
+              toolCachePath,
               webSources,
               imageFilePaths,
               generatedFiles
@@ -869,6 +1233,14 @@ export class AgentExecutor {
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
+          this.recordMemoryToolResult(
+            memorySignals,
+            res.toolName,
+            res.toolSuccess,
+            res.contextToolResult,
+            Array.isArray(res.generatedFiles) ? res.generatedFiles.length : 0,
+            res.toolArgs
+          )
           const normalizedSources: any[] = []
           if (res.webSources?.length) {
             normalizedSources.push(...res.webSources.map((source: any) => ({ ...source, id: `S${++webSourceCounter}` })))
@@ -883,7 +1255,8 @@ export class AgentExecutor {
           yield {
             type: 'tool_result',
             name: res.toolName,
-            result: res.displayResult
+            result: res.displayResult,
+            contextTokens: countTokens(res.contextToolResult)
           }
           if (res.generatedFiles?.length) {
             yield { type: 'generated_files', files: res.generatedFiles }
@@ -921,6 +1294,31 @@ export class AgentExecutor {
           }
         }
 
+        const compactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow)
+        if (compactionPlan) {
+          yield { type: 'context_compaction', status: 'started', beforeTokens: compactionPlan.beforeTokens }
+          try {
+            const compacted = await this.compactContext(chatHistory, compactionPlan, sessionId)
+            yield {
+              type: 'context_compaction',
+              status: 'completed',
+              beforeTokens: compactionPlan.beforeTokens,
+              afterTokens: compacted.afterTokens,
+              archivePath: compacted.archivePath,
+              removedMessages: compacted.removedMessages,
+              activeToolContextTokens: compacted.activeToolContextTokens
+            }
+          } catch (compactionError) {
+            console.error('[AgentExecutor] 自动压缩上下文失败:', compactionError)
+            yield {
+              type: 'context_compaction',
+              status: 'failed',
+              beforeTokens: compactionPlan.beforeTokens,
+              detail: compactionError instanceof Error ? compactionError.message : String(compactionError)
+            }
+          }
+        }
+
         continue
       } else {
         // 完成整个调用链
@@ -940,18 +1338,38 @@ export class AgentExecutor {
           content: finalResponse
         }
 
-        if (totalToolCallsCount >= 5 && sessionId) {
-          console.log(`[System] 长任务正常结束，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-          this.handleLongTaskAutoMemory(sessionId, chatHistory, config, finalResponse, webSourcesForMemory).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+        const memoryAssessment = this.assessMemoryValue(memorySignals, loopCount)
+        console.log(`[Memory] 本轮记忆价值评分: ${memoryAssessment.score}`, memoryAssessment.reasons)
+        if (memoryAssessment.shouldSummarize && sessionId) {
+          console.log(`[System] 检测到高价值任务，自动触发后台经验总结及沉淀... (评分: ${memoryAssessment.score})`)
+          this.handleLongTaskAutoMemory(
+            sessionId,
+            chatHistory,
+            config,
+            finalResponse,
+            webSourcesForMemory,
+            memoryAssessment,
+            workspacePath
+          ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
         }
 
         return finalResponse
       }
     }
 
-    if (totalToolCallsCount >= 5 && sessionId) {
-      console.log(`[System] 长任务因达到最大轮数上限退出，自动触发后台大模型经验总结及沉淀... (工具调用次数: ${totalToolCallsCount})`)
-      this.handleLongTaskAutoMemory(sessionId, chatHistory, config, '智能代理执行工具链已达到最大轮数上限。', webSourcesForMemory).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+    const forcedStopMemoryAssessment = this.assessMemoryValue(memorySignals, loopCount, true)
+    console.log(`[Memory] 最大轮数退出时记忆价值评分: ${forcedStopMemoryAssessment.score}`, forcedStopMemoryAssessment.reasons)
+    if (forcedStopMemoryAssessment.shouldSummarize && sessionId) {
+      console.log(`[System] 高价值任务达到最大轮数上限，自动触发后台经验总结及沉淀... (评分: ${forcedStopMemoryAssessment.score})`)
+      this.handleLongTaskAutoMemory(
+        sessionId,
+        chatHistory,
+        config,
+        '智能代理执行工具链已达到最大轮数上限。',
+        webSourcesForMemory,
+        forcedStopMemoryAssessment,
+        workspacePath
+      ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
     }
 
     yield {

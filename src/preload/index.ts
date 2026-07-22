@@ -133,6 +133,8 @@ const api = {
   },
   setStoragePath: (pathStr: string): Promise<string> => ipcRenderer.invoke('api:set-storage-path', pathStr),
   getStoragePath: (): Promise<string> => ipcRenderer.invoke('api:get-storage-path'),
+  getToolCacheStats: (): Promise<{ fileCount: number; totalBytes: number }> => ipcRenderer.invoke('api:get-tool-cache-stats'),
+  clearToolCache: (): Promise<{ success: boolean; deletedDirectories: number }> => ipcRenderer.invoke('api:clear-tool-cache'),
   selectDirectory: (options?: { title?: string }): Promise<string | null> =>
     ipcRenderer.invoke('api:select-directory', options),
   getCustomModel: (): Promise<{ customModelDir: string; customModelFile: string } | null> =>
