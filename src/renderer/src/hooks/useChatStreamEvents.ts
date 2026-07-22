@@ -9,12 +9,12 @@ interface StreamUpdate {
 }
 
 interface UseChatStreamEventsOptions {
-  setSessions: (updater: (sessions: any[]) => any[]) => void
+  updateSessionMessages: (sessionId: string, updater: (messages: any[]) => any[]) => void
   abortedReplyIdsRef: MutableRefObject<Set<number>>
 }
 
 /** Batches high-frequency LLM text IPC events to one React update per frame. */
-export function useChatStreamEvents({ setSessions, abortedReplyIdsRef }: UseChatStreamEventsOptions): void {
+export function useChatStreamEvents({ updateSessionMessages, abortedReplyIdsRef }: UseChatStreamEventsOptions): void {
   useEffect(() => {
     if (!window.api.onLlmTextDelta) return
 
@@ -32,25 +32,19 @@ export function useChatStreamEvents({ setSessions, abortedReplyIdsRef }: UseChat
       }
       pendingByMessage.clear()
 
-      setSessions(previous => {
-        let changed = false
-        const next = previous.map(session => {
-          const updates = updatesBySession.get(session.id)
-          if (!updates) return session
+      for (const [sessionId, updates] of updatesBySession) {
+        updateSessionMessages(sessionId, previous => {
           let messages: any[] | null = null
-          for (let index = 0; index < session.messages.length; index++) {
-            const message = session.messages[index]
+          for (let index = 0; index < previous.length; index++) {
+            const message = previous[index]
             const content = updates.get(message.id)
             if (!content || !message.isThinking || abortedReplyIdsRef.current.has(message.id)) continue
-            if (!messages) messages = [...session.messages]
+            if (!messages) messages = [...previous]
             messages[index] = { ...message, text: (message.text || '') + content }
           }
-          if (!messages) return session
-          changed = true
-          return { ...session, messages }
+          return messages || previous
         })
-        return changed ? next : previous
-      })
+      }
     }
 
     const unsubscribe = window.api.onLlmTextDelta(({ content, sessionId, messageId }) => {
@@ -67,5 +61,5 @@ export function useChatStreamEvents({ setSessions, abortedReplyIdsRef }: UseChat
       if (frameId !== null) cancelAnimationFrame(frameId)
       flush()
     }
-  }, [setSessions, abortedReplyIdsRef])
+  }, [updateSessionMessages, abortedReplyIdsRef])
 }

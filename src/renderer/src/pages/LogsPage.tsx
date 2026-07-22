@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { type AppStore } from '../hooks/useAppStore'
+import { type AppStore, useAppStoreRaw } from '../hooks/useAppStore'
 import { BarChart3, Search, Trash2 } from 'lucide-react'
 
 interface LogsPageProps {
@@ -13,9 +13,9 @@ export function LogsPage({ store }: LogsPageProps): React.JSX.Element {
     showToast,
     setActiveTab,
     setActiveSessionId,
-    setHighlightedMessageId,
-    sessions
+    setHighlightedMessageId
   } = store
+  const sessions = useAppStoreRaw(state => state.sessions)
 
   // 1. 时间范围筛选状态：'24h' | '7d' | 'all'，默认 '7d'
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | 'all'>('7d')

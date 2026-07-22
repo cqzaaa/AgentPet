@@ -213,7 +213,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
 
-  const chatActions = {
+  const chatActions = useMemo(() => ({
     setInputValue: store.setInputValue,
     handleSendChat: store.handleSendChat,
     saveLlmConfig: store.saveLlmConfig,
@@ -235,7 +235,29 @@ export function AgentWindow(): React.JSX.Element {
     saveMcpConfig: store.saveMcpConfig,
     handlePreviewFile: store.handlePreviewFile,
     setShowFilePanel: store.setShowFilePanel
-  }
+  }), [
+    store.setInputValue,
+    store.handleSendChat,
+    store.saveLlmConfig,
+    store.setAttachedFiles,
+    store.handlePasteFiles,
+    store.handleUploadFile,
+    store.setHighlightedMessageId,
+    store.handleAbortLlm,
+    store.handleUpdateExecutionDevice,
+    store.handleConnectSsh,
+    store.handleDisconnectSsh,
+    store.showToast,
+    store.handleRespondPermission,
+    store.toggleSkillEnable,
+    store.setActiveTab,
+    store.setAgentSubTab,
+    store.refreshSkillsAndStorage,
+    store.refreshMcpServers,
+    store.saveMcpConfig,
+    store.handlePreviewFile,
+    store.setShowFilePanel
+  ])
 
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)

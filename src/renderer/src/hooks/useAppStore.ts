@@ -8,6 +8,9 @@ import { useChatToolEvents } from './useChatToolEvents'
 import { useChatReplyRuntime } from './useChatReplyRuntime'
 import { useChatSend } from './useChatSend'
 import { useChatSessionSummary } from './useChatSessionSummary'
+import { useCronScheduler } from './useCronScheduler'
+import { useSessionSyncRuntime } from './useSessionSyncRuntime'
+import { useTokenUsageRuntime } from './useTokenUsageRuntime'
 import {
   estimateContextMessageTokens,
   estimatePromptEnvelopeTokens,
@@ -45,87 +48,6 @@ export interface Session {
   messages: any[]
   pinned?: boolean
   contextSummary?: string
-}
-
-type SessionMutation =
-  | { type: 'session-upsert'; session: Session }
-  | { type: 'session-update'; sessionId: string; updates: Partial<Session> }
-  | { type: 'session-delete'; sessionId: string }
-  | { type: 'message-upsert'; sessionId: string; message: any; sessionTime?: string }
-  | { type: 'messages-upsert'; messages: Array<any & { sessionId: string }> }
-  | { type: 'message-delete'; messageId: string }
-  | { type: 'refresh'; sessionId?: string }
-
-function upsertSessionMessages(messages: any[], updates: any[]): any[] {
-  if (updates.length === 0) return messages
-  const next = [...messages]
-  for (const update of updates) {
-    const index = next.findIndex(message => String(message.id) === String(update.id))
-    if (index >= 0) next[index] = { ...next[index], ...update }
-    else next.push(update)
-  }
-  return next
-}
-
-function applySessionMutation(sessions: Session[], mutation: SessionMutation): Session[] {
-  switch (mutation.type) {
-    case 'session-upsert': {
-      const index = sessions.findIndex(session => session.id === mutation.session.id)
-      if (index < 0) return [mutation.session, ...sessions]
-      const current = sessions[index]
-      const incomingMessages = mutation.session.messages || []
-      const next = [...sessions]
-      next[index] = {
-        ...current,
-        ...mutation.session,
-        messages: incomingMessages.length > 0 ? incomingMessages : current.messages
-      }
-      return next
-    }
-    case 'session-update':
-      return sessions.map(session =>
-        session.id === mutation.sessionId ? { ...session, ...mutation.updates } : session
-      )
-    case 'session-delete':
-      return sessions.filter(session => session.id !== mutation.sessionId)
-    case 'message-upsert':
-      return sessions.map(session => {
-        if (session.id !== mutation.sessionId) return session
-        return {
-          ...session,
-          ...(mutation.sessionTime ? { time: mutation.sessionTime } : {}),
-          messages: upsertSessionMessages(session.messages || [], [mutation.message])
-        }
-      })
-    case 'messages-upsert': {
-      const updatesBySession = new Map<string, any[]>()
-      for (const message of mutation.messages) {
-        if (!message.sessionId) continue
-        const updates = updatesBySession.get(message.sessionId) || []
-        updates.push(message)
-        updatesBySession.set(message.sessionId, updates)
-      }
-      return sessions.map(session => {
-        const updates = updatesBySession.get(session.id)
-        if (!updates) return session
-        const latestTime = updates.reduce((time, message) => message.time || time, session.time)
-        return {
-          ...session,
-          time: latestTime,
-          messages: upsertSessionMessages(session.messages || [], updates)
-        }
-      })
-    }
-    case 'message-delete':
-      return sessions.map(session => {
-        const messages = (session.messages || []).filter(
-          message => String(message.id) !== String(mutation.messageId)
-        )
-        return messages.length === session.messages.length ? session : { ...session, messages }
-      })
-    case 'refresh':
-      return sessions
-  }
 }
 
 export interface TokenLog {
@@ -211,6 +133,30 @@ function getSessionContextTokens(previous: Session | undefined, next: Session, c
 }
 
 function syncContextTokenUsage(previous: Session[], next: Session[], usage: Record<string, number>, contextRounds: number): Record<string, number> {
+  if (previous.length === next.length) {
+    let changedIndex = -1
+    let compatible = true
+    for (let index = 0; index < next.length; index++) {
+      if (previous[index]?.id !== next[index]?.id) {
+        compatible = false
+        break
+      }
+      if (previous[index] !== next[index]) {
+        if (changedIndex >= 0) {
+          compatible = false
+          break
+        }
+        changedIndex = index
+      }
+    }
+    if (compatible) {
+      if (changedIndex < 0) return usage
+      const session = next[changedIndex]
+      const tokens = getSessionContextTokens(previous[changedIndex], session, contextRounds)
+      return usage[session.id] === tokens ? usage : { ...usage, [session.id]: tokens }
+    }
+  }
+
   const previousById = new Map(previous.map(session => [session.id, session]))
   let changed = false
   const nextUsage: Record<string, number> = {}
@@ -366,9 +312,13 @@ export const useAppStoreRaw = create<any>((set) => ({
   inputValue: '',
   attachedFiles: [],
   tokenLogs: (() => {
-    const saved = localStorage.getItem('agentself_token_logs') || localStorage.getItem('agentpet_token_logs')
+    const saved = localStorage.getItem('agentpet_token_logs') || localStorage.getItem('agentself_token_logs')
     if (saved) {
-      try { return JSON.parse(saved) } catch (e) { console.error(e) }
+      try {
+        const parsed = JSON.parse(saved)
+        localStorage.removeItem('agentself_token_logs')
+        return Array.isArray(parsed) ? parsed.slice(-1000) : []
+      } catch (e) { console.error(e) }
     }
     return []
   })(),
@@ -431,9 +381,10 @@ export const useAppStoreRaw = create<any>((set) => ({
   })),
   setLlmConfig: (val: any) => set({ llmConfig: val }),
   setMcpConfig: (val: any) => set({ mcpConfig: val }),
-  setCronTasks: (val: any) => set((state: any) => ({
-    cronTasks: typeof val === 'function' ? val(state.cronTasks) : val
-  })),
+  setCronTasks: (val: any) => set((state: any) => {
+    const cronTasks = typeof val === 'function' ? val(state.cronTasks) : val
+    return cronTasks === state.cronTasks ? state : { cronTasks }
+  }),
   setSessions: (val: any) => set((state: any) => {
     const sessions = typeof val === 'function' ? val(state.sessions) : val
     if (sessions === state.sessions) return state
@@ -445,6 +396,24 @@ export const useAppStoreRaw = create<any>((set) => ({
         state.contextTokenUsageBySession,
         state.contextRounds
       )
+    }
+  }),
+  updateSessionMessages: (sessionId: string, updater: (messages: any[]) => any[]) => set((state: any) => {
+    const index = state.sessions.findIndex((session: Session) => session.id === sessionId)
+    if (index < 0) return state
+    const previousSession = state.sessions[index] as Session
+    const messages = updater(previousSession.messages || [])
+    if (messages === previousSession.messages) return state
+    const nextSession = { ...previousSession, messages }
+    const sessions = [...state.sessions]
+    sessions[index] = nextSession
+    const tokens = getSessionContextTokens(previousSession, nextSession, state.contextRounds)
+    const previousTokens = state.contextTokenUsageBySession[sessionId]
+    return {
+      sessions,
+      contextTokenUsageBySession: previousTokens === tokens
+        ? state.contextTokenUsageBySession
+        : { ...state.contextTokenUsageBySession, [sessionId]: tokens }
     }
   }),
   setActiveSessionId: (val: any) => set((state: any) => {
@@ -556,7 +525,7 @@ export function useAppStore() {
     llmConfig, setLlmConfig,
     mcpConfig, setMcpConfig,
     cronTasks, setCronTasks,
-    setSessions,
+    setSessions, updateSessionMessages,
     activeSessionId, setActiveSessionId,
     inputValue, setInputValue,
     attachedFiles, setAttachedFiles,
@@ -591,13 +560,12 @@ export function useAppStore() {
     isSessionSwitching, setIsSessionSwitching,
     isSessionsInitialized, setIsSessionsInitialized
   } = store
-  const sessions = useAppStoreRaw.getState().sessions as Session[]
-
   const dropdownRef = useRef<HTMLDivElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
   const activeSessionIdRef = useRef(activeSessionId)
   const creatingSessionIdsRef = useRef<Set<string>>(new Set())
+  const refreshSessionsRequestRef = useRef(0)
   const [pendingAutoSendTick, setPendingAutoSendTick] = useState(0)
   const consumedAutoSendTickRef = useRef(0)
 
@@ -787,6 +755,7 @@ export function useAppStore() {
 
   // 应用启动或配置更改时自动获取最新可用模型列表
   useEffect(() => {
+    let cancelled = false
     const isOllama = llmConfig.provider === 'ollama'
     const hasKey = isOllama || !!llmConfig.apiKey || !!llmConfig.hasApiKey
     if (hasKey) {
@@ -798,6 +767,7 @@ export function useAppStore() {
             apiKey: llmConfig.apiKey, 
             baseUrl: llmConfig.baseUrl 
           })
+          if (cancelled) return
           if (list && list.length > 0) {
             setAvailableModels(list)
             // 如果拉取到的列表中不包含当前设置的 model，我们自适应选择第一个
@@ -806,15 +776,16 @@ export function useAppStore() {
             }
           }
         } catch (e) {
-          console.error('自动加载模型列表失败', e)
+          if (!cancelled) console.error('自动加载模型列表失败', e)
         } finally {
-          setIsLoadingModels(false)
+          if (!cancelled) setIsLoadingModels(false)
         }
       }
       autoFetch()
     } else {
       setAvailableModels([])
     }
+    return () => { cancelled = true }
   }, [llmConfig.provider, llmConfig.apiKey, llmConfig.hasApiKey, llmConfig.baseUrl])
 
   // 校验 API Key 初始化，如果没有有效的 key，就弹出需要配置 key
@@ -840,11 +811,13 @@ export function useAppStore() {
   // Load skills & storage path
   const refreshSkillsAndStorage = async (): Promise<void> => {
     try {
-      const list = await window.api.getSkillsList()
+      const [list, path, customPath] = await Promise.all([
+        window.api.getSkillsList(),
+        window.api.getSkillsPath(),
+        window.api.getStoragePath()
+      ])
       setSkillsList(list)
-      const path = await window.api.getSkillsPath()
       setSkillsPath(path)
-      const customPath = await window.api.getStoragePath()
       setActualStoragePath(customPath || path.replace(/[\\/]skills$/, ''))
       setStorageInputPath(customPath)
     } catch (e) { console.error(e) }
@@ -1000,36 +973,16 @@ export function useAppStore() {
     return () => unsubscribe()
   }, [])
 
-  // Listen for Token Usage
-  useEffect(() => {
-    if (!window.api.onTokenUsage) return
-    const unsubscribe = window.api.onTokenUsage((data: any) => {
-      const newLog: TokenLog = {
-        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        model: data.model || 'unknown',
-        provider: data.provider || 'unknown',
-        promptTokens: data.promptTokens || 0,
-        completionTokens: data.completionTokens || 0,
-        totalTokens: (data.promptTokens || 0) + (data.completionTokens || 0),
-        timestamp: data.timestamp || Date.now(),
-        sessionId: data.sessionId,
-        messageId: data.messageId
-      }
-      setTokenLogs(prev => {
-        const next = [...prev, newLog]
-        localStorage.setItem('agentpet_token_logs', JSON.stringify(next))
-        return next
-      })
-    })
-    return () => unsubscribe()
-  }, [])
+  useTokenUsageRuntime({ setTokenLogs })
 
-  const refreshSessions = async (clearThinking = false): Promise<void> => {
+  const refreshSessions = useCallback(async (clearThinking = false): Promise<void> => {
+    const requestId = ++refreshSessionsRequestRef.current
     try {
       const currentActiveId = useAppStoreRaw.getState().activeSessionId
       const localSess = await window.api.getLocalSessions({
         activeSessionId: clearThinking ? undefined : currentActiveId
       })
+      if (requestId !== refreshSessionsRequestRef.current) return
       if (localSess && localSess.length > 0) {
         if (clearThinking) {
           // 检查 PetWidget 的 LLM 是否正在工作（30 秒内有活动则不清除）
@@ -1094,20 +1047,23 @@ export function useAppStore() {
             if (!prev || prev.length === 0) return localSess
 
             // 找出所有内存中正在创建、但在数据库 localSess 中尚未出现的会话
+            const localSessionIds = new Set(localSess.map((session: Session) => session.id))
             const creatingSessions = prev.filter(ps =>
-              creatingSessionIdsRef.current.has(ps.id) && !localSess.some(ls => ls.id === ps.id)
+              creatingSessionIdsRef.current.has(ps.id) && !localSessionIds.has(ps.id)
             )
+            const previousById = new Map<string, Session>(prev.map(session => [session.id, session]))
 
             const merged = localSess.map((ls: any) => {
-              const matchedPrev = prev.find(p => p.id === ls.id)
+              const matchedPrev = previousById.get(ls.id)
               if (!matchedPrev) return ls
               
               const dbMessageIds = new Set((ls.messages || []).map((m: any) => m.id))
+              const previousMessagesById = new Map((matchedPrev.messages || []).map((message: any) => [message.id, message]))
               // 找出在内存中但还没来得及落库的消息（竞态保护）
               const memoryOnlyMessages = (matchedPrev.messages || []).filter((m: any) => !dbMessageIds.has(m.id))
 
               const mergedMessages = (ls.messages || []).map((lm: any) => {
-                const pm = matchedPrev.messages?.find((m: any) => m.id === lm.id)
+                const pm = previousMessagesById.get(lm.id) as any
                 const hasPendingClarification = pm?.isThinking && Array.isArray(pm.toolSteps) && pm.toolSteps.some((step: any) => step?.type === 'clarification')
                 if (hasPendingClarification) {
                   return {
@@ -1148,9 +1104,11 @@ export function useAppStore() {
     } catch (e) {
       console.error('从本地文件载入会话记录失败', e)
     } finally {
-      setIsSessionsInitialized(true)
+      if (requestId === refreshSessionsRequestRef.current) setIsSessionsInitialized(true)
     }
-  }
+  }, [setActiveSessionId, setIsSessionsInitialized, setSessions])
+
+  useSessionSyncRuntime({ activeSessionId, refreshSessions, setSessions })
 
   // 同步初始化大模型与 MCP 配置
   useEffect(() => {
@@ -1371,23 +1329,6 @@ export function useAppStore() {
   // 注：新消息到来时的外层滚动由 ChatPage.tsx 中监听 activeSessMessages.length 的 effect 负责，
   // 此处不再重复监听 sessions 整体变化（否则流式输出每帧都会触发 scrollIntoView 打断用户翻看历史）
 
-  // 监听原子接口引发的数据修改通知（跨窗口或其它事件）
-  useEffect(() => {
-    if (!window.api.onSessionsUpdated) return
-    const unsubscribe = window.api.onSessionsUpdated((mutation?: SessionMutation) => {
-      if (!mutation || mutation.type === 'refresh') {
-        refreshSessions()
-        return
-      }
-      setSessions(previous => applySessionMutation(previous, mutation))
-    })
-    return () => unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem('agentself_active_session_id', activeSessionId)
-  }, [activeSessionId])
-
   // Cron timer loop variables moved below to avoid TDZ
 
   // ── Handlers ─────────────────────────────────────────────────
@@ -1586,7 +1527,7 @@ export function useAppStore() {
   }
 
   const { discardPendingMessageSave } = useChatToolEvents({
-    setSessions,
+    updateSessionMessages,
     setCronTasks,
     activeSessionIdRef,
     cronRunningLogsRef,
@@ -1620,7 +1561,7 @@ export function useAppStore() {
     }, 0)
     return () => clearTimeout(timer)
   }, [handleSendChat, pendingAutoSendTick])
-  useChatStreamEvents({ setSessions, abortedReplyIdsRef })
+  useChatStreamEvents({ updateSessionMessages, abortedReplyIdsRef })
 
 
   const handleTestConnection = async (): Promise<void> => {
@@ -1794,22 +1735,12 @@ export function useAppStore() {
   const handleClearTokenLogs = (): void => {
     setTokenLogs([])
     localStorage.removeItem('agentpet_token_logs')
+    localStorage.removeItem('agentself_token_logs')
     showToast('已清空 Token 消耗日志', 'success')
   }
 
-  // ── Derived State ─────────────────────────────────────────────
-  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || {
-    id: 'agent:main:dashboard:default',
-    name: 'agent:main:dashboard:default',
-    time: '',
-    messages: []
-  }
-  const activeSessMessages = activeSession.messages || []
-
   // ── Cron Timer Loop & Backend Executor (Moved here to avoid TDZ) ──
   // Cron timer loop
-  const elapsedTimesRef = useRef<Record<string, number>>({})
-  
   const runTaskBackend = async (taskToRun: CronTask, tempSessionId: string, logId: string) => {
     try {
       const skillsContext = skillsList.length > 0
@@ -1954,63 +1885,7 @@ ${skillsContext}`
     }
   }
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCronTasks(prevTasks => {
-        let changed = false
-        const nextTasks = prevTasks.map(task => {
-          if (!task.isActive) return task
-          const currentElapsed = (elapsedTimesRef.current[task.id] || 0) + 1
-          if (currentElapsed >= task.interval) {
-            changed = true
-            elapsedTimesRef.current[task.id] = 0
-            const timeStr = formatDateTime()
-            const tempSessionId = `cron:${task.id}:${Date.now()}`
-            
-            // 写入日志
-            const newLog: CronLog = {
-              id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-              time: timeStr,
-              status: 'running',
-              message: `定时任务 [${task.name}] 触发。正在后台执行...`,
-              messages: [
-                {
-                  id: `user-${Date.now()}`,
-                  sender: 'user',
-                  text: `执行定时任务指令: ${task.action || '无'}`,
-                  time: timeStr
-                },
-                {
-                  id: `agent-${Date.now()}`,
-                  sender: 'agent',
-                  text: '',
-                  isThinking: true,
-                  toolSteps: [],
-                  time: timeStr
-                }
-              ]
-            }
-            cronRunningLogsRef.current[tempSessionId] = newLog
-            const logs = [newLog, ...(task.logs || [])].slice(0, 100)
-
-            // 异步触发后台大模型执行
-            runTaskBackend(task, tempSessionId, newLog.id)
-
-            return { ...task, triggerCount: task.triggerCount + 1, lastTriggered: timeStr, logs }
-          } else {
-            elapsedTimesRef.current[task.id] = currentElapsed
-            return task
-          }
-        })
-        if (changed) {
-          localStorage.setItem('agentpet_cron_tasks', JSON.stringify(nextTasks))
-          window.api.saveCronTasks(nextTasks)
-        }
-        return nextTasks
-      })
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [activeSessionId, autoSaveHistory, skillsList, currentAvatarName, llmConfig, workspacePath])
+  useCronScheduler({ setCronTasks, cronRunningLogsRef, runTaskBackend })
 
   const handleSetActiveSessionId = useCallback((id: string) => {
     setActiveSessionId(id)
@@ -2048,10 +1923,9 @@ ${skillsContext}`
     selectedTaskForLog, setSelectedTaskForLog,
     selectedCronLogDetails, setSelectedCronLogDetails,
     // sessions
-    sessions, setSessions,
+    setSessions,
     refreshSessions,
     activeSessionId, setActiveSessionId: handleSetActiveSessionId,
-    activeSession, activeSessMessages,
     inputValue, setInputValue,
     isSending,
     chatEndRef,
@@ -2134,10 +2008,10 @@ ${skillsContext}`
     pendingOpenTaskId, pendingOpenLogId,
     theme, sendingSessionIds,
     llmConfig, mcpConfig,
-    cronTasks, sessions, activeSessionId,
+    cronTasks, activeSessionId,
     inputValue, tokenLogs,
     highlightedMessageId, generatedFiles, showFilePanel,
-    openTabs, previewFile, previewLoading,
+    openTabs, previewFile, previewLoading, officePreviewRequest,
     skillsList, skillsPath, disabledSkillNames,
     activeMcpServers, storageInputPath, actualStoragePath, storageSaveStatus,
     sandboxMode, activePermissionRequest,

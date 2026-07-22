@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { ReactFlow, Background, Controls, MiniMap, Connection, addEdge } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useRpaStore } from './useRpaStore'
-import { useAppStore } from '../hooks/useAppStore' // 用于获取 LLM 密钥等配置
+import { useAppStoreRaw } from '../hooks/useAppStore'
 import {
   StartNode,
   EndNode,
@@ -61,7 +61,7 @@ const nodeTypes = {
 
 export function RpaPage(): React.JSX.Element {
   const store = useRpaStore()
-  const appStore = useAppStore() // 获取全局大模型设置
+  const appLlmConfig = useAppStoreRaw(state => state.llmConfig)
 
   const {
     tasks,
@@ -849,10 +849,10 @@ export function RpaPage(): React.JSX.Element {
 请以简明、专业的态度回答用户的问题，提供关于如何组织流程节点、如何设置 CSS 选择器、如何使用 AI 处理节点等方面的指导。`
 
       const llmConfig = {
-        provider: appStore.llmConfig.provider,
-        apiKey: appStore.llmConfig.apiKey,
-        baseUrl: appStore.llmConfig.baseUrl,
-        model: appStore.llmConfig.model,
+        provider: appLlmConfig.provider,
+        apiKey: appLlmConfig.apiKey,
+        baseUrl: appLlmConfig.baseUrl,
+        model: appLlmConfig.model,
         temperature: 0.7,
         sessionId: (activeTaskId || 'rpa') + '-chat'
       }

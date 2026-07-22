@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 
 interface UseChatToolEventsOptions {
-  setSessions: (updater: (sessions: any[]) => any[]) => void
+  updateSessionMessages: (sessionId: string, updater: (messages: any[]) => any[]) => void
   setCronTasks: (updater: (tasks: any[]) => any[]) => void
   activeSessionIdRef: MutableRefObject<string>
   cronRunningLogsRef: MutableRefObject<Record<string, any>>
@@ -113,7 +113,7 @@ function toolNoticeForEvent(event: any): { message: string; type: 'success' | 'e
 
 /** Batches tool IPC updates and persists only the latest affected chat message. */
 export function useChatToolEvents({
-  setSessions,
+  updateSessionMessages,
   setCronTasks,
   activeSessionIdRef,
   cronRunningLogsRef,
@@ -164,29 +164,23 @@ export function useChatToolEvents({
       }
 
       if (normalBySession.size > 0) {
-        setSessions(previous => {
+        for (const [sessionId, sessionEvents] of normalBySession) {
           let savedMessage: any = null
-          let changed = false
-          const next = previous.map(session => {
-            const sessionEvents = normalBySession.get(session.id)
-            if (!sessionEvents) return session
+          updateSessionMessages(sessionId, previous => {
             const eventMessageId = sessionEvents.findLast((event: any) => event.messageId != null)?.messageId
             const index = eventMessageId != null
-              ? session.messages.findIndex((message: any) => message.id === eventMessageId)
-              : session.messages.findLastIndex((message: any) => message.sender === 'agent')
-            if (index < 0) return session
-
-            const messages = [...session.messages]
+              ? previous.findIndex((message: any) => message.id === eventMessageId)
+              : previous.findLastIndex((message: any) => message.sender === 'agent')
+            if (index < 0) return previous
+            const messages = [...previous]
             const message = { ...messages[index] }
             message.toolSteps = appendToolSteps(message.toolSteps, sessionEvents)
             messages[index] = message
-            savedMessage = { ...message, sessionId: session.id }
-            changed = true
-            return { ...session, messages }
+            savedMessage = { ...message, sessionId }
+            return messages
           })
           if (savedMessage) scheduleSave(savedMessage)
-          return changed ? next : previous
-        })
+        }
       }
 
       if (cronBySession.size > 0) {
@@ -231,7 +225,7 @@ export function useChatToolEvents({
       if (latestMessageRef.current) window.api.saveMessage(withoutEphemeralToolSteps(latestMessageRef.current)).catch(console.error)
       latestMessageRef.current = null
     }
-  }, [activeSessionIdRef, cronRunningLogsRef, setCronTasks, setSessions, showToast])
+  }, [activeSessionIdRef, cronRunningLogsRef, setCronTasks, showToast, updateSessionMessages])
 
   return { discardPendingMessageSave }
 }
