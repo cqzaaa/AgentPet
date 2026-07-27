@@ -4,6 +4,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
+import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
 import {
@@ -19,6 +20,7 @@ import {
   Globe2,
   KeyRound,
   Link,
+  Mic,
   Monitor,
   Palette,
   Plug,
@@ -101,6 +103,7 @@ function ChatPageImpl(): React.JSX.Element {
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
   const [showMcpPopover, setShowMcpPopover] = useState(false)
   const [showModelPopover, setShowModelPopover] = useState(false)
+  const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [approvalDetailsExpanded, setApprovalDetailsExpanded] = useState(false)
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
@@ -825,6 +828,7 @@ function ChatPageImpl(): React.JSX.Element {
 
   const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
   const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
+  const approvalAllowTurnScope = (activePermissionRequest as any)?.allowTurnScope !== false
   const approvalIsDangerous = /删除|高危|rm\b|del\b|remove-item|delete/i.test(`${approvalCommand}\n${approvalWarning}`)
   const approvalLines = approvalCommand.split(/\r?\n/)
   const approvalHasMore = approvalLines.length > 6 || approvalCommand.length > 700
@@ -833,7 +837,7 @@ function ChatPageImpl(): React.JSX.Element {
     : approvalLines.slice(0, 6).join('\n').slice(0, 700)
 
   return (
-    <div className="chat-split-container">
+    <div className={`chat-split-container ${showMeetingRecorder ? 'has-meeting-recorder' : ''}`}>
       <div
         className="chat-main"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
@@ -1150,16 +1154,18 @@ function ChatPageImpl(): React.JSX.Element {
                     >
                       允许一次
                     </button>
-                    <button
-                      type="button"
-                      className="approval-action allow menu"
-                      onClick={() => setApprovalMenuOpen(prev => !prev)}
-                      aria-label="更多允许选项"
-                      aria-expanded={approvalMenuOpen}
-                    >
-                      <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-                    </button>
-                    {approvalMenuOpen && (
+                    {approvalAllowTurnScope && (
+                      <button
+                        type="button"
+                        className="approval-action allow menu"
+                        onClick={() => setApprovalMenuOpen(prev => !prev)}
+                        aria-label="更多允许选项"
+                        aria-expanded={approvalMenuOpen}
+                      >
+                        <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    )}
+                    {approvalAllowTurnScope && approvalMenuOpen && (
                       <div className="approval-menu">
                         <button
                           type="button"
@@ -1182,11 +1188,11 @@ function ChatPageImpl(): React.JSX.Element {
               estimatedContextTokens >= contextLimit
                 ? '上下文额度已用满，请创建新会话以继续对话！'
                 : isSending
-                  ? `${currentAvatarName} 正在思考中...`
+                  ? `${currentAvatarName} 正在思考中…可继续发送追加指引`
                   : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
-            disabled={isSending || estimatedContextTokens >= contextLimit}
+            disabled={estimatedContextTokens >= contextLimit}
             onChange={e => setInputValue(e.target.value)}
             onPaste={async e => {
               // 优先检查内部剪贴板（从消息复制的文件+文本）
@@ -1510,22 +1516,42 @@ function ChatPageImpl(): React.JSX.Element {
 
               {/* 上传文件按钮 */}
               <button
+                type="button"
+                className={`toolbar-icon-btn meeting-recorder-trigger ${showMeetingRecorder ? 'active' : ''}`}
+                onClick={() => setShowMeetingRecorder(true)}
+                disabled={isSending}
+                title="AI 会议录音"
+              >
+                <Mic size={17} strokeWidth={2} aria-hidden="true" />
+              </button>
+
+              <button
                 className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}
-                disabled={isSending || estimatedContextTokens >= contextLimit}
+                disabled={estimatedContextTokens >= contextLimit}
                 title={estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
               >
                 <Plus size={18} strokeWidth={2} aria-hidden="true" />
               </button>
 
               {isSending ? (
-                <button
-                  className="toolbar-send-btn stop"
-                  onClick={handleAbortLlm}
-                  title="停止生成"
-                >
-                  <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
-                </button>
+                <>
+                  <button
+                    className="toolbar-send-btn stop"
+                    onClick={handleAbortLlm}
+                    title="停止生成"
+                  >
+                    <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
+                  </button>
+                  <button
+                    className="toolbar-send-btn"
+                    onClick={handleSendIntercept}
+                    title="发送追加指引并调整当前任务"
+                    disabled={(!inputValue.trim() && attachedFiles.length === 0) || estimatedContextTokens >= contextLimit}
+                  >
+                    <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
+                  </button>
+                </>
               ) : (
                 <button
                   className="toolbar-send-btn"
@@ -1540,6 +1566,14 @@ function ChatPageImpl(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {showMeetingRecorder && (
+        <MeetingRecorderPanel
+          llmConfig={llmConfig}
+          onClose={() => setShowMeetingRecorder(false)}
+          onToast={showToast}
+        />
+      )}
 
       {previewImageSrc && (
         <div

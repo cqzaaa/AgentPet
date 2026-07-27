@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { createSessionId } from '../utils/helpers'
+import { createSessionId, normalizeSearchCitations } from '../utils/helpers'
 import {
   Bot,
   Camera,
@@ -681,7 +681,8 @@ export function ChatInputWindow(): React.JSX.Element {
 
   // 渲染 Markdown 加粗 + 图片语法 (与主 Chat 页面保持一致)
   const renderMessageText = (txt: string) => {
-    const lines = txt.split('\n')
+    const normalizedText = normalizeSearchCitations(txt, 'plain')
+    const lines = normalizedText.split('\n')
     const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
 
     return lines.map((line, idx) => {

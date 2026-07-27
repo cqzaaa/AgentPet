@@ -45,10 +45,15 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
     }
     else if (type === 'tool_progress') {
       const progressDetail = detail || `${Number(progress) || 0}%`
-      const existing = toolSteps.findLastIndex(step => step.type === 'think' && step.name === name)
-      const progressStep = { id, sequence, timestamp, type: 'think', name, detail: progressDetail }
-      if (existing >= 0) toolSteps[existing] = progressStep
-      else toolSteps.push(progressStep)
+      const isTerminalOutput = name === 'run_terminal_command' || name === 'run_command'
+      const existing = isTerminalOutput
+        ? toolSteps.findLastIndex(step => step.type === 'call' && step.name === name)
+        : -1
+      if (existing >= 0) {
+        toolSteps[existing] = { ...toolSteps[existing], liveDetail: progressDetail, timestamp }
+      } else {
+        toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail: progressDetail })
+      }
     }
     else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
     else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, sequence, timestamp, type: 'clarification', requestId, questions })

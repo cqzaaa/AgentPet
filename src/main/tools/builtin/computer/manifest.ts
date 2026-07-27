@@ -157,6 +157,12 @@ export const computerManifest: ToolManifest = {
 你有一组电脑操控工具，可以截图感知屏幕并控制鼠标键盘。
 
 <core_workflow>
+IMPORTANT — this policy supersedes the legacy step-by-step loop below. Optimize for correct completion, not for the number of screenshots.
+
+Use the most deterministic interaction first: application shortcuts/native navigation (for a browser search use Ctrl+L → type_text → Enter, rather than clicking a page search box); then PID returned by get_windows with focus_window(pid); then a coordinate that was confirmed in a screenshot. A title is only a fallback when a PID is unavailable.
+
+Take a screenshot only to establish an unknown initial state, verify an irreversible action, wait for a page/application to load, or recover after an unexpected result. Once focus is known and the following actions are deterministic, carry them out consecutively without intervening screenshots. If an action has an unexpected result, stop, take one screenshot, and recover based on it.
+
 每次操作任务都应遵循以下循环：
 1. 先调用 screenshot 截图，仔细分析当前界面状态
 2. 根据截图确认目标元素的精确坐标（坐标系以屏幕左上角为原点）
@@ -188,6 +194,8 @@ export const computerManifest: ToolManifest = {
 </when_target_not_visible>
 
 <rules>
+IMPORTANT — this policy supersedes any requirement below to screenshot before or after every action. Do not guess a coordinate when Ctrl+L, Ctrl+F, Ctrl+T, Tab, Enter, or another deterministic shortcut can reach the target. Before entering text, establish focus through a shortcut or a confirmed control; do not infer focus merely because a prior click was issued. If get_windows returned a PID, use focus_window(pid). If title matching fails, call get_windows and use the PID rather than retrying title variants.
+
 - 操作前必须先截图，不能盲目猜测坐标
 - 输入文字前先点击目标输入框，确保焦点正确
 - 遇到弹窗或意外界面时先截图再处理，不要强行继续

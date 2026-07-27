@@ -74,9 +74,28 @@ declare global {
         error?: string
       }) => void
       saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer) => Promise<{ name: string; path: string; safeName: string }>
+      updateMeetingSummary: (folderName: string, summary: string) => Promise<boolean>
+      showMeetingArchive: (folderPath: string) => Promise<boolean>
+      listMeetingArchives: () => Promise<any[]>
+      getMeetingArchive: (folderName: string) => Promise<any>
+      startLocalMeeting: (options?: { model?: string; deviceId?: number }) => Promise<{ device: string; model: string }>
+      getQwenAsrConfig: () => Promise<{ endpoint: string; hasToken: boolean }>
+      saveQwenAsrConfig: (config: { endpoint?: string; token?: string; clearToken?: boolean }) => Promise<{ endpoint: string; hasToken: boolean }>
+      listLocalMeetingDevices: () => Promise<Array<{ id: number; name: string; host: string; isDefault: boolean }>>
+      startLocalMicrophoneTest: (deviceId?: number) => Promise<boolean>
+      stopLocalMicrophoneTest: () => Promise<boolean>
+      onLocalMicrophoneTestEvent: (callback: (event: any) => void) => () => void
+      installLocalMeetingComponents: () => Promise<boolean>
+      pauseLocalMeeting: () => Promise<boolean>
+      resumeLocalMeeting: () => Promise<boolean>
+      stopLocalMeeting: () => Promise<{ audioPath: string; durationSeconds: number; transcript: string }>
+      finalizeLocalMeeting: (audioPath: string) => Promise<{ transcript: string; model: string }>
+      archiveLocalMeeting: (payload: { name: string; audioPath: string; transcript: string; durationSeconds: number; createdAt: string }) => Promise<{ folderName: string; folderPath: string }>
+      onLocalMeetingEvent: (callback: (event: any) => void) => () => void
       copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
       onToolEvent: (callback: (data: any) => void) => () => void
+      onAutomationProgress: (callback: (data: any) => void) => () => void
       onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>

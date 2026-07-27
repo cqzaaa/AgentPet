@@ -13,6 +13,9 @@ const ChatInputWindow = lazy(() =>
 const ScreenshotWindow = lazy(() =>
   import('./components/ScreenshotWindow').then(module => ({ default: module.ScreenshotWindow }))
 )
+const AutomationOverlay = lazy(() =>
+  import('./components/AutomationOverlay').then(module => ({ default: module.AutomationOverlay }))
+)
 
 function WindowLoadingFallback(): React.JSX.Element {
   return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
@@ -55,9 +58,11 @@ function App(): React.JSX.Element {
     ? <AgentWindow />
     : currentHash === '#/chat-input'
       ? <ChatInputWindow />
-      : currentHash.startsWith('#/screenshot')
-        ? <ScreenshotWindow />
-        : <PetWidget />
+    : currentHash.startsWith('#/screenshot')
+      ? <ScreenshotWindow />
+      : currentHash === '#/automation-overlay'
+        ? <AutomationOverlay />
+      : <PetWidget />
 
   return <Suspense fallback={<WindowLoadingFallback />}>{page}</Suspense>
 }

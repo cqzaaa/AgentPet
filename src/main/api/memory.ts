@@ -43,9 +43,6 @@ class LRUCache<K, V> {
   }
 }
 
-// 长期记忆向量反序列化缓存，避免在大数量级下频繁解析 JSON（LRU 限定最大 500 条）
-const parsedEmbeddingCache = new LRUCache<string, number[]>(500)
-
 // 已更新只读历史 Markdown 文件的内容缓存，避免重复文件 I/O 读取（LRU 限定最大 200 条）
 const fileContentCache = new LRUCache<string, string>(200)
 
@@ -197,7 +194,12 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, category, link FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
 
-      const linkRows = await database.all("SELECT memory_id, entity_name FROM memory_entity_links") as { memory_id: string, entity_name: string }[]
+      const linkRows = await database.all(`
+        SELECT memory_id, entity_name
+        FROM memory_entity_links
+        WHERE entity_type IN ('person', 'work', 'program', 'organization', 'product', 'location', 'topic')
+          AND confidence >= 0.6
+      `) as { memory_id: string, entity_name: string }[]
       
       // 构建每个记忆与其包含的实体的映射 Map<memoryId, Set<entityName>>
       const memoryToEntities = new Map<string, Set<string>>()
@@ -246,22 +248,6 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         })
       }
 
-      // 4. 跳过云端 Embedding 向量，直接使用纯文本+图谱匹配模式
-      let queryEmb: number[] | null = null
-
-      // 5. 本地轻量级 Jaccard 相似度辅助算法
-      const jaccardSimilarity = (strA: string, strB: string): number => {
-        const cleanTokens = (str: string) => {
-          return new Set(str.toLowerCase().match(/[\w\-]+|[\u4e00-\u9fa5]/g) || [])
-        }
-        const setA = cleanTokens(strA)
-        const setB = cleanTokens(strB)
-        if (setA.size === 0 || setB.size === 0) return 0
-        const intersection = new Set([...setA].filter(x => setB.has(x)))
-        const union = new Set([...setA, ...setB])
-        return intersection.size / union.size
-      }
-
       // 6. 关键词预过滤：提取 query 关键词，快速排除完全无关的记忆，减少后续向量/图谱计算量
       const queryKeywords = new Set(
         (queryText.toLowerCase().match(/[\w\-]+|[一-龥]+/g) || [])
@@ -288,6 +274,33 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       }
 
       const now = Date.now()
+      // Pure-local retrieval is driven by lexical evidence. Graph links can only
+      // expand a candidate after its text has established a topic anchor.
+      const queryTerms = extractRetrievalTerms(queryText)
+      const documentFrequency = new Map<string, number>()
+      for (const row of rows) {
+        const rowTerms = new Set(extractRetrievalTerms(row.fact || ''))
+        for (const term of queryTerms) {
+          if (rowTerms.has(term)) documentFrequency.set(term, (documentFrequency.get(term) || 0) + 1)
+        }
+      }
+      const totalIdf = [...queryTerms].reduce(
+        (total, term) => total + inverseDocumentFrequency(rows.length, documentFrequency.get(term) || 0),
+        0
+      )
+      const lexicalMatch = (fact: string) => {
+        const factTerms = new Set(extractRetrievalTerms(fact))
+        const matches = [...queryTerms].filter(term => factTerms.has(term))
+        const weightedMatch = matches.reduce(
+          (total, term) => total + inverseDocumentFrequency(rows.length, documentFrequency.get(term) || 0),
+          0
+        )
+        const nonNumericMatches = matches.filter(term => !/^\d+$/.test(term))
+        return {
+          score: totalIdf > 0 ? weightedMatch / totalIdf : 0,
+          grounded: nonNumericMatches.length >= 2 || nonNumericMatches.some(term => term.length >= 4)
+        }
+      }
 
       const scoredResults = candidateRows.map(row => {
         // A. 指数时间衰退实际强度 (S_now)
@@ -324,37 +337,17 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
           }
         }
 
-        // C. 向量相似度得分 (Vector Score)
-        let vectorScore = 0
-        if (queryEmb && row.embedding) {
-          try {
-            let dbEmb = parsedEmbeddingCache.get(row.id)
-            if (!dbEmb) {
-              dbEmb = JSON.parse(row.embedding)
-              if (Array.isArray(dbEmb)) {
-                parsedEmbeddingCache.set(row.id, dbEmb)
-              }
-            }
-            if (Array.isArray(dbEmb)) {
-              vectorScore = cosineSimilarity(queryEmb, dbEmb)
-              // 归一化 [-1, 1] 到 [0, 1]
-              vectorScore = (vectorScore + 1) / 2
-            }
-          } catch {}
-        }
+        // C. 向量召回在本地模式下关闭，保留 0 仅供调试面板显示。
+        const vectorScore = 0
 
         // D. 纯本地文本 Jaccard 相似度匹配分 (Jaccard Score)
-        const jaccardScore = jaccardSimilarity(queryText, row.fact)
+        const lexical = lexicalMatch(row.fact || '')
 
         // E. 融合计算综合打分
-        let score = 0
-        if (queryEmb && row.embedding) {
-          // 有向量支持：加权图谱、向量相似度、本地文本分及时间衰减
-          score = 0.4 * vectorScore + 0.3 * graphScore + 0.2 * jaccardScore + 0.1 * sNow
-        } else {
-          // 无向量支持（降级模式）：完全依赖图谱分、本地文本匹配和时间衰减
-          score = 0.5 * graphScore + 0.3 * jaccardScore + 0.2 * sNow
-        }
+        // Text evidence is primary. A graph hit without a lexical topic anchor
+        // is ignored, so broad terms cannot independently trigger recall.
+        const graphContribution = lexical.grounded ? graphScore : 0
+        const score = 0.7 * lexical.score + 0.15 * graphContribution + 0.15 * sNow
 
         return {
           id: row.id,
@@ -363,13 +356,13 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
           sNow,
           vectorScore,
           graphScore,
-          jaccardScore,
+          jaccardScore: lexical.score,
           score
         }
       })
 
       // 过滤低相关分（最终得分必须大于 0.5），并按得分从高到低排序
-      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.5)
+      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.4)
       activeResults.sort((a, b) => b.score - a.score)
       const top3 = activeResults.slice(0, 3)
 
@@ -558,7 +551,36 @@ async function repairMemoryEntityLinks(db: any) {
 type LocalMemoryFact = {
   fact: string
   keywords: string[]
+  entities: MemoryEntity[]
   category: 'experience'
+}
+
+type MemoryEntity = {
+  name: string
+  type: 'person' | 'work' | 'program' | 'organization' | 'product' | 'location' | 'topic'
+  confidence: number
+}
+
+const MEMORY_ENTITY_TYPES = new Set<MemoryEntity['type']>([
+  'person', 'work', 'program', 'organization', 'product', 'location', 'topic'
+])
+
+function normalizeMemoryEntities(value: unknown): MemoryEntity[] {
+  if (!Array.isArray(value)) return []
+  const unique = new Map<string, MemoryEntity>()
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const raw = candidate as { name?: unknown, type?: unknown, confidence?: unknown }
+    const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+    const type = typeof raw.type === 'string' ? raw.type.toLowerCase().trim() : ''
+    const confidence = typeof raw.confidence === 'number' ? raw.confidence : 0
+    if (name.length < 2 || name.length > 80 || !MEMORY_ENTITY_TYPES.has(type as MemoryEntity['type'])) continue
+    if (!Number.isFinite(confidence) || confidence < 0.6 || confidence > 1) continue
+    const entity = { name, type: type as MemoryEntity['type'], confidence }
+    const existing = unique.get(`${entity.type}:${entity.name.toLowerCase()}`)
+    if (!existing || existing.confidence < entity.confidence) unique.set(`${entity.type}:${entity.name.toLowerCase()}`, entity)
+  }
+  return [...unique.values()]
 }
 
 const LOCAL_MEMORY_SECTIONS = [
@@ -574,6 +596,31 @@ function normalizeMemoryFact(value: string): string {
     .replace(/[`*_>#\[\](){}]/g, '')
     .replace(/[\s，。；：、,.!?！？:;"'“”‘’/\\|-]+/g, '')
     .trim()
+}
+
+/**
+ * Local, language-agnostic lexical terms. Chinese is represented by overlapping
+ * 2–4 character phrases; Latin words and numbers remain intact.
+ */
+function extractRetrievalTerms(value: string): Set<string> {
+  const terms = new Set<string>()
+  const normalized = value.toLowerCase()
+  for (const match of normalized.matchAll(/[a-z][a-z0-9_.-]{1,31}|\d{2,}/g)) {
+    terms.add(match[0])
+  }
+  for (const match of normalized.matchAll(/[\u3400-\u9fff]{2,}/g)) {
+    const sequence = match[0]
+    for (let size = 2; size <= Math.min(4, sequence.length); size++) {
+      for (let index = 0; index <= sequence.length - size; index++) {
+        terms.add(sequence.slice(index, index + size))
+      }
+    }
+  }
+  return terms
+}
+
+function inverseDocumentFrequency(documentCount: number, documentFrequency: number): number {
+  return Math.log(1 + (documentCount - documentFrequency + 0.5) / (documentFrequency + 0.5))
 }
 
 function extractLocalKeywords(text: string): string[] {
@@ -664,6 +711,7 @@ function extractLocalMemoryFacts(title: string, markdown: string): LocalMemoryFa
       return {
         fact,
         keywords: extractLocalKeywords(`${title} ${fact}`),
+        entities: [],
         category: 'experience' as const
       }
     })
@@ -706,11 +754,13 @@ async function upsertLocalMemoryFacts(
     }
 
     await database.run('DELETE FROM memory_entity_links WHERE memory_id = ?', targetId)
-    for (const keyword of item.keywords) {
+    for (const entity of item.entities) {
       await database.run(
-        'INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)',
+        'INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, entity_type, confidence, created_at) VALUES (?, ?, ?, ?, ?)',
         targetId,
-        keyword,
+        entity.name,
+        entity.type,
+        entity.confidence,
         now
       )
     }
@@ -788,6 +838,10 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
 
       const experienceMessages = [
         { role: 'system', content: experienceSystemPrompt },
+        {
+          role: 'system',
+          content: 'For every memory item, also return an "entities" array. Each entry must be {"name":"...","type":"person|work|program|organization|product|location|topic","confidence":0.0-1.0}. Include only concrete named entities or clearly bounded topics (confidence >= 0.6). Do not include dates, years, recency words, rankings, statuses, actions, or generic descriptive keywords as entities.'
+        },
         { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验、技术事实、生活喜好或习惯并输出为 JSON 数组。` }
       ]
 
@@ -809,6 +863,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
       if (Array.isArray(experiences) && experiences.length > 0) {
         for (const item of experiences) {
           if (!item.fact) continue
+          const entities = normalizeMemoryEntities(item.entities)
           
           let emb: number[] | null = null
           try {
@@ -878,12 +933,16 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
             // 先清理旧有的实体绑定，以防大模型更新时实体关键词发生变更
             await database.run("DELETE FROM memory_entity_links WHERE memory_id = ?", targetId)
 
-            const keywordsList = Array.isArray(item.keywords) ? item.keywords : []
-            if (keywordsList.length > 0) {
-              for (const kw of keywordsList) {
-                if (kw && typeof kw === 'string' && kw.trim()) {
-                  await database.run("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)", targetId, kw.trim(), now)
-                }
+            if (entities.length > 0) {
+              for (const entity of entities) {
+                await database.run(
+                  "INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, entity_type, confidence, created_at) VALUES (?, ?, ?, ?, ?)",
+                  targetId,
+                  entity.name,
+                  entity.type,
+                  entity.confidence,
+                  now
+                )
               }
             }
           } catch (linkErr) {
@@ -928,7 +987,6 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
     }
 
     await repairMemoryEntityLinks(database)
-    parsedEmbeddingCache.clear()
     fileContentCache.clear()
     return { success: true, count: processedFiles.length, insertCount }
   } catch (e: any) {

@@ -44,6 +44,9 @@ function getAvatar(state: ChatSendState): { name: string; style: string; voice: 
 
 function toLlmMessage(message: any): { role: string; content: any } {
   let textContent = message.text || ''
+  if (message.sender === 'user' && message.isSteering) {
+    textContent = `【用户追加指引：请立即优先遵循，并据此调整当前任务】\n${textContent}`
+  }
   const imageBlocks: any[] = []
 
   if (message.fileInfo) {
@@ -51,7 +54,7 @@ function toLlmMessage(message: any): { role: string; content: any } {
     const previewNotice = /\.pdf$/i.test(message.fileInfo.name || '') && message.fileInfo.content
       ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
       : ''
-    textContent = `${message.text}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}${previewNotice}\n${message.fileInfo.content}`
+    textContent = `${textContent}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}${previewNotice}\n${message.fileInfo.content}`
   } else if (message.fileInfos?.length) {
     const attachmentsText = message.fileInfos
       .filter((file: any) => file.content || file.path)
@@ -64,7 +67,7 @@ function toLlmMessage(message: any): { role: string; content: any } {
         return `--- [附带文件: ${file.name}]${pathNote}${previewNotice}${content}`
       })
       .join('\n\n')
-    if (attachmentsText) textContent = `${message.text}\n\n${attachmentsText}`
+    if (attachmentsText) textContent = `${textContent}\n\n${attachmentsText}`
 
     for (const file of message.fileInfos) {
       if (!file.content && file.path && (/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name) || file.objectUrl)) {
@@ -106,7 +109,10 @@ export function useChatSend({
     const sessionId = state.activeSessionId
     const attachedFiles = [...state.attachedFiles]
     const text = state.inputValue.trim()
-    if ((!text && attachedFiles.length === 0) || state.sendingSessionIds[sessionId]) return
+    if (!text && attachedFiles.length === 0) return
+    // A send while the model is working is a steering instruction. The main process
+    // replaces the active request for this session with one that includes this message.
+    const isSteering = Boolean(state.sendingSessionIds[sessionId])
 
     const llmConfig = { ...state.llmConfig }
     if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey && !llmConfig.hasApiKey) {
@@ -120,7 +126,8 @@ export function useChatSend({
       id: Date.now(),
       sender: 'user',
       text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''),
-      time
+      time,
+      isSteering
     }
     if (attachedFiles.length > 0) {
       userMessage.fileInfos = attachedFiles.map(file => ({
@@ -156,7 +163,8 @@ export function useChatSend({
           const cleaned = {
             ...message,
             isThinking: false,
-            text: message.text || '⚠️ 对话生成被中断。',
+            isSuperseded: isSteering,
+            text: message.text || (isSteering ? '↳ 已根据后续指引调整方向。' : '⚠️ 对话生成被中断。'),
             toolSteps: Array.isArray(message.toolSteps)
               ? message.toolSteps.filter(
                   (step: any) =>
@@ -188,7 +196,7 @@ export function useChatSend({
     try {
       if (!activeSession) throw new Error(`SessionNotFound: ${sessionId}`)
       const chatMessages = activeSession.messages
-        .filter((message: any) => (message.sender === 'user' || message.sender === 'agent') && !message.isThinking)
+        .filter((message: any) => (message.sender === 'user' || message.sender === 'agent') && !message.isThinking && !message.isSuperseded)
         .slice(-state.contextRounds * 2)
         .map(toLlmMessage)
 
@@ -231,6 +239,17 @@ export function useChatSend({
       const stylePrompt = avatar.style === 'cute'
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
         : '你需要使用专业、友好、自然的语气与主人（用户）对话。'
+      const runtimeTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+      const runtimeDateTime = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: runtimeTimeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(new Date())
       const mcpContext = activeMcpServers.length > 0
         ? `\n\n🔗 此外，你已成功接入 MCP（Model Context Protocol）扩展服务：
 ${activeMcpServers.map((server: any, index: number) => `${index + 1}. ${server.name} — ${server.description || '外部 MCP 服务'} (包含 ${server.toolsCount} 个工具)`).join('\n')}
@@ -245,6 +264,12 @@ ${activeMcpServers.map((server: any, index: number) => `${index + 1}. ${server.n
 - 核心人设：你是专属的桌面萌宠助理，永远坚称自己是 ${avatar.name}。
 - 🚫 绝对约束：严禁泄露你是大语言模型（如 Gemini、OpenAI、DeepSeek 等）的真实身份，以免破坏人设。
 </avatar_profile>
+<runtime_context>
+- 当前可信本机时间：${runtimeDateTime}
+- 时区：${runtimeTimeZone}
+- “今天 / 明天 / 昨天 / 本周”等相对日期必须以本段时间为准，禁止自行猜测日期。
+- 处理天气、台风、新闻、行情、赛程等实时问题时，必须先通过终端获取当前系统时间，再使用工具返回的明确日期检索和回答；不得直接用臆测的日期搜索。
+</runtime_context>
 ${memoryContext}
 ${skillsContext}
 

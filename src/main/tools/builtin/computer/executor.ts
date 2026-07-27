@@ -381,6 +381,15 @@ public class WinAPI {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+    // Captions often contain an em dash or NBSP that a model cannot reproduce.
+    static string NormalizeCaption(string value) {
+        if (String.IsNullOrEmpty(value)) return "";
+        var builder = new StringBuilder();
+        foreach (char c in value.ToLowerInvariant()) {
+            if (Char.IsLetterOrDigit(c)) builder.Append(c);
+        }
+        return builder.ToString();
+    }
     
     public static string FocusWindow(string targetTitle, int targetPid, string targetProcessName) {
         IntPtr targetHWnd = IntPtr.Zero;
@@ -398,7 +407,10 @@ public class WinAPI {
                     uint wPid;
                     GetWindowThreadProcessId(hWnd, out wPid);
                     
-                    bool titleMatch = !string.IsNullOrEmpty(targetTitle) && wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0;
+                    bool titleMatch = !string.IsNullOrEmpty(targetTitle) && (
+                        wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        NormalizeCaption(wTitle).IndexOf(NormalizeCaption(targetTitle), StringComparison.OrdinalIgnoreCase) >= 0
+                    );
                     bool pidMatch = targetPid > 0 && wPid == targetPid;
                     bool processMatch = false;
                     if (!string.IsNullOrEmpty(targetProcessName)) {

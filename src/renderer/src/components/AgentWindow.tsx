@@ -30,6 +30,7 @@ import {
 import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
+import { normalizeSearchCitations } from '../utils/helpers'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -89,7 +90,7 @@ function getSessionPreview(session: Session): string {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
     if (message.sender === 'system' || message.isThinking) continue
-    const text = (message.text || '')
+    const text = normalizeSearchCitations(message.text || '', 'plain')
       .replace(/```[\s\S]*?```/g, '[代码]')
       .replace(/[-*_`#>]/g, '')
       .replace(/\s+/g, ' ')
@@ -771,9 +772,9 @@ export function AgentWindow(): React.JSX.Element {
                             setHighlightedMessageId(msg.id)
                             setShowHistoryDropdown(false)
                           }}
-                          title={msg.text}
+                          title={normalizeSearchCitations(msg.text, 'plain')}
                         >
-                          {msg.text}
+                          {normalizeSearchCitations(msg.text, 'plain')}
                         </div>
                       ))
                     ) : (

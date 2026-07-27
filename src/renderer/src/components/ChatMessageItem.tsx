@@ -31,6 +31,7 @@ import {
   Wrench,
   X
 } from 'lucide-react'
+import { normalizeSearchCitations } from '../utils/helpers'
 
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
@@ -240,9 +241,10 @@ function parseInlineMarkdown(text: string): string {
   // 3. 图片 ![alt](url)
   html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
   // 4. 链接 [text](url)
+  html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
   // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
-  html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">S$1</span>')
+  html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">【S$1】</span>')
   return html
 }
 
@@ -325,6 +327,9 @@ function parseMarkdownToHtml(markdown: string): string {
   if (!markdown) return ''
   // 移除 HTML 注释（包括多行），防止被 escapeHtml 转义后作为纯文本显示
   markdown = markdown.replace(/<!--[\s\S]*?-->/g, '')
+  // Citations use a compact [S12] form; their link targets are shown in the source card.
+  // This also normalizes malformed provider output such as [S12]()(newsDetail_forward_*).
+  markdown = normalizeSearchCitations(markdown)
   const lines = markdown.split('\n')
   let html = ''
 
@@ -842,7 +847,7 @@ function renderSvgGraph(debug: any) {
 
   const firstOrder = debug.firstOrderActive || []
   const secondOrder = debug.secondOrderActive || []
-  const recalledFacts = (debug.allScored || []).filter((c: any, idx: number) => idx < 2 && c.score > 0.05)
+  const recalledFacts = (debug.allScored || []).filter((c: any, idx: number) => idx < 2 && c.score > 0.4)
 
   if (firstOrder.length === 0 && secondOrder.length === 0) {
     return (
@@ -1058,6 +1063,7 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
         type: 'tool',
         name: step.name,
         callDetail: step.detail,
+        liveDetail: step.liveDetail,
         isWaiting: false
       })
     } else if (step.type === 'result') {
@@ -1101,6 +1107,10 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
       setIsReqCollapsed(true)
     }
   }, [isThinking])
+
+  useEffect(() => {
+    if (isThinking && step.liveDetail) setIsItemCollapsed(false)
+  }, [isThinking, step.liveDetail])
 
   const toolDisplayName = translateToolName(step.name || '')
 
@@ -1152,6 +1162,14 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
               <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><ArrowUpFromLine size={13} strokeWidth={2} aria-hidden="true" />返回结果:</div>
               <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
                 {displayResult}
+              </div>
+            </div>
+          )}
+          {step.liveDetail && !step.resultDetail && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontSize: '10.5px', color: '#60a5fa', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><LoaderCircle size={13} strokeWidth={2} className="icon-spin" aria-hidden="true" />实时输出:</div>
+              <div style={{ padding: '8px 12px', background: 'rgba(59,130,246,0.07)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '220px', overflowY: 'auto', border: '1px solid rgba(59,130,246,0.2)' }}>
+                {step.liveDetail}
               </div>
             </div>
           )}
@@ -1252,6 +1270,8 @@ function buildToolTrace(msg: any, requestMessage: any): any {
     request: {
       text: requestMessage?.text || '',
       model: requestMessage?.promptInfo?.model || null,
+      systemPrompt: requestMessage?.promptInfo?.systemPrompt || '',
+      chatMessages: requestMessage?.promptInfo?.chatMessages || [],
       toolsDefinition: requestMessage?.promptInfo?.toolsDefinition || []
     },
     toolCalls: calls,
@@ -1295,6 +1315,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         : textForRender
     // Resolve source IDs emitted by the model (for example [新浪新闻 S32])
     // to the URL retained in the corresponding web_sources tool event.
+    displayText = normalizeSearchCitations(displayText)
     const sourceById = new Map(
       (msg.toolSteps || [])
         .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
@@ -1305,7 +1326,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     displayText = displayText.replace(/\[([^\]\n]*?\bS\d+)\](?!\()/g, (citation, label) => {
       const sourceId = label.match(/\b(S\d+)\b/)?.[1]
       const source = sourceId ? sourceById.get(sourceId) as any : undefined
-      return source ? `[${label}](${source.url})` : citation
+      return source ? `[${sourceId}](${source.url})` : citation
     })
     return renderAdvancedMessage(displayText, onPreviewFile)
   }, [textForRender, currentAvatarName, msg.toolSteps, onPreviewFile])
@@ -1889,7 +1910,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       {candidates.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           {candidates.slice(0, 5).map((c: any, idx: number) => {
-                            const isRecalled = idx < 3 && c.score > 0.05
+                            const isRecalled = idx < 3 && c.score > 0.4
                             return (
                               <div
                                 key={c.id || idx}
@@ -1931,7 +1952,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '11px', color: 'var(--color-text-secondary, #666)' }}>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span><Orbit size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />向量分 (40%):</span>
+                                      <span><Orbit size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />向量分 (当前关闭):</span>
                                       <span style={{ fontWeight: 600 }}>{c.vectorScore.toFixed(3)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1940,7 +1961,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span><Network size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />图谱分 (30%):</span>
+                                      <span><Network size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />图谱分 (15%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.graphScore.toFixed(2)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1949,7 +1970,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span><FileText size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />文本分 (20%):</span>
+                                      <span><FileText size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />文本分 (70%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.jaccardScore.toFixed(3)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1958,7 +1979,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                                   </div>
                                   <div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                      <span><Hourglass size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />遗忘强度 (10%):</span>
+                                      <span><Hourglass size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />遗忘强度 (15%):</span>
                                       <span style={{ fontWeight: 600 }}>{c.sNow.toFixed(2)}</span>
                                     </div>
                                     <div style={{ height: '5px', backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: '3px', overflow: 'hidden' }}>

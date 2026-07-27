@@ -28,6 +28,21 @@ export function createSessionId(prefix = 'agent:main:dashboard'): string {
 
 
 // ── 字节格式化 ───────────────────────────────────────────────
+export function normalizeSearchCitations(text: string, display: 'markdown' | 'plain' = 'markdown'): string {
+  if (!text) return text
+  const citation = (_match: string, id: string) => display === 'plain' ? `【S${id}】` : `[S${id}]`
+
+  return text
+    .replace(/\[\s*\[S(\d+)\]\s*\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/【S(\d+)】\s*\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*\(\s*\)\s*\(\s*[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*\(\s*\)/gi, citation)
+    .replace(/\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
+    .replace(/\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
+    .replace(/\bnewsDetail_forward_[\w-]+\b/gi, '')
+}
+
 export const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -47,6 +62,7 @@ export const formatSeconds = (sec: number): string => {
 // ── 简单 Markdown 渲染（仅支持代码块）───────────────────────
 export function renderMessageText(text: string): React.ReactNode {
   if (!text) return ''
+  text = normalizeSearchCitations(text, 'plain')
   const parts: React.ReactNode[] = []
   let keyIdx = 0
 

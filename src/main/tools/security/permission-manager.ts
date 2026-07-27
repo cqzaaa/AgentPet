@@ -41,13 +41,16 @@ export class PermissionManager {
     sessionId?: string
     warning?: string
     sender?: WebContents
+    forcePrompt?: boolean
+    allowTurnScope?: boolean
   }): Promise<boolean> {
-    if (this.isTurnApprovalGranted(params.sessionId)) {
+    if (!params.forcePrompt && this.isTurnApprovalGranted(params.sessionId)) {
       return true
     }
 
     const ownerWin = params.sender ? BrowserWindow.fromWebContents(params.sender) : null
-    const activeWin = ownerWin || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    const activeWin =
+      ownerWin || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     if (!activeWin) {
       console.warn('[PermissionManager] No active window found for command approval')
       return false
@@ -56,7 +59,12 @@ export class PermissionManager {
     const reqId = this.nextPermissionRequestId++
     return new Promise<boolean>((resolve) => {
       this.pendingPermissions.set(reqId, (response) => {
-        if (response.approved && response.scope === 'turn' && params.sessionId) {
+        if (
+          response.approved &&
+          response.scope === 'turn' &&
+          params.sessionId &&
+          params.allowTurnScope !== false
+        ) {
           this.grantTurnApproval(params.sessionId)
         }
         resolve(response.approved)
@@ -67,7 +75,8 @@ export class PermissionManager {
         command: params.command,
         execCwd: params.execCwd,
         sessionId: params.sessionId,
-        warning: params.warning
+        warning: params.warning,
+        allowTurnScope: params.allowTurnScope !== false
       })
 
       if (!activeWin.isFocused() || activeWin.isMinimized() || !activeWin.isVisible()) {

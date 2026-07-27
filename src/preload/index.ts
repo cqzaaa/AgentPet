@@ -108,6 +108,43 @@ const api = {
   }): void => ipcRenderer.send('api:complete-office-preview-capture', payload),
   saveChatFile: (sessionId: string, fileName: string, arrayBuffer: ArrayBuffer): Promise<{ name: string; path: string; safeName: string }> =>
     ipcRenderer.invoke('api:save-chat-file', sessionId, fileName, arrayBuffer),
+  updateMeetingSummary: (folderName: string, summary: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:update-meeting-summary', folderName, summary),
+  showMeetingArchive: (folderPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:show-meeting-archive', folderPath),
+  listMeetingArchives: (): Promise<any[]> => ipcRenderer.invoke('api:list-meeting-archives'),
+  getMeetingArchive: (folderName: string): Promise<any> => ipcRenderer.invoke('api:get-meeting-archive', folderName),
+  startLocalMeeting: (options?: { model?: string; deviceId?: number }): Promise<{ device: string; model: string }> =>
+    ipcRenderer.invoke('api:start-local-meeting', options),
+  getQwenAsrConfig: (): Promise<{ endpoint: string; hasToken: boolean }> =>
+    ipcRenderer.invoke('api:get-qwen-asr-config'),
+  saveQwenAsrConfig: (config: { endpoint?: string; token?: string; clearToken?: boolean }): Promise<{ endpoint: string; hasToken: boolean }> =>
+    ipcRenderer.invoke('api:save-qwen-asr-config', config),
+  listLocalMeetingDevices: (): Promise<Array<{ id: number; name: string; host: string; isDefault: boolean }>> =>
+    ipcRenderer.invoke('api:list-local-meeting-devices'),
+  startLocalMicrophoneTest: (deviceId?: number): Promise<boolean> =>
+    ipcRenderer.invoke('api:start-local-microphone-test', deviceId),
+  stopLocalMicrophoneTest: (): Promise<boolean> => ipcRenderer.invoke('api:stop-local-microphone-test'),
+  onLocalMicrophoneTestEvent: (callback: (event: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any): void => callback(data)
+    ipcRenderer.on('api:local-microphone-test-event', handler)
+    return (): void => { ipcRenderer.removeListener('api:local-microphone-test-event', handler) }
+  },
+  installLocalMeetingComponents: (): Promise<boolean> =>
+    ipcRenderer.invoke('api:install-local-meeting-components'),
+  pauseLocalMeeting: (): Promise<boolean> => ipcRenderer.invoke('api:pause-local-meeting'),
+  resumeLocalMeeting: (): Promise<boolean> => ipcRenderer.invoke('api:resume-local-meeting'),
+  stopLocalMeeting: (): Promise<{ audioPath: string; durationSeconds: number; transcript: string }> =>
+    ipcRenderer.invoke('api:stop-local-meeting'),
+  finalizeLocalMeeting: (audioPath: string): Promise<{ transcript: string; model: string }> =>
+    ipcRenderer.invoke('api:finalize-local-meeting', audioPath),
+  archiveLocalMeeting: (payload: { name: string; audioPath: string; transcript: string; durationSeconds: number; createdAt: string }): Promise<{ folderName: string; folderPath: string }> =>
+    ipcRenderer.invoke('api:archive-local-meeting', payload),
+  onLocalMeetingEvent: (callback: (event: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any): void => callback(data)
+    ipcRenderer.on('api:local-meeting-event', handler)
+    return (): void => { ipcRenderer.removeListener('api:local-meeting-event', handler) }
+  },
   copyToChatFile: (sessionId: string, sourcePath: string): Promise<{ path: string; exists: boolean }> =>
     ipcRenderer.invoke('api:copy-to-chat-file', sessionId, sourcePath),
   attachFileFromPath: (filePath: string, sessionId: string): Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null> =>
@@ -118,6 +155,11 @@ const api = {
     return () => {
       ipcRenderer.removeListener('api:llm-tool-event', subscription)
     }
+  },
+  onAutomationProgress: (callback: (data: any) => void): (() => void) => {
+    const subscription = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('api:automation-progress', subscription)
+    return () => ipcRenderer.removeListener('api:automation-progress', subscription)
   },
   onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void): (() => void) => {
     const subscription = (_event: any, data: { content: string; sessionId?: string; messageId?: number }) => callback(data)

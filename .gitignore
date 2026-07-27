@@ -8,3 +8,4 @@ out
 .vscode*
 skills-lock.json
 .gemini*
+.claude/

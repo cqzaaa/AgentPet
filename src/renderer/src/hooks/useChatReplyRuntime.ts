@@ -61,6 +61,7 @@ export function useChatReplyRuntime({
     discardPendingMessageSave()
     let savedMessage: any = null
     let wasAborted = false
+    let hasAnotherActiveReply = false
     setSessions(previous => {
       const next = previous.map(session => {
         if (session.id !== sessionId) return session
@@ -73,13 +74,14 @@ export function useChatReplyRuntime({
           return withoutEphemeralInteractionSteps({ ...message, text: fullText, isThinking: false })
         })
         const target = messages.find((message: any) => message.id === replyId)
+        hasAnotherActiveReply = messages.some((message: any) => message.id !== replyId && message.isThinking)
         if (target && !wasAborted) savedMessage = target
         return { ...session, messages }
       })
       if (savedMessage) window.api.saveMessage({ ...savedMessage, sessionId }).catch(console.error)
       return next
     })
-    setSendingSessionIds(previous => ({ ...previous, [sessionId]: false }))
+    setSendingSessionIds(previous => ({ ...previous, [sessionId]: hasAnotherActiveReply }))
     if (savedMessage && !wasAborted) {
       notifyReplySettled('AgentPet 已回复', fullText)
       setTimeout(onComplete, 500)
@@ -105,6 +107,7 @@ export function useChatReplyRuntime({
             ? '模型上游服务暂时不可用。已完成的文件操作仍会保留，请稍后重试。'
             : '本次回复未能继续完成。已完成的工具操作仍会保留，请重试；若持续失败，再检查模型配置。'
     let savedMessage: any = null
+    let hasAnotherActiveReply = false
 
     setSessions(previous => previous.map(session => {
       if (session.id !== sessionId) return session
@@ -125,12 +128,13 @@ export function useChatReplyRuntime({
         })
         return savedMessage
       })
+      hasAnotherActiveReply = messages.some((message: any) => message.id !== replyId && message.isThinking)
       return { ...session, messages }
     }))
 
     if (savedMessage) window.api.saveMessage({ ...savedMessage, sessionId }).catch(console.error)
     if (savedMessage && !isAbort) notifyReplySettled('AgentPet 回复失败', message)
-    setSendingSessionIds(previous => ({ ...previous, [sessionId]: false }))
+    setSendingSessionIds(previous => ({ ...previous, [sessionId]: hasAnotherActiveReply }))
     abortedReplyIdsRef.current.delete(replyId)
   }, [discardPendingMessageSave, setSendingSessionIds, setSessions])
 

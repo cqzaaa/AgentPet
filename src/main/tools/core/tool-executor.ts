@@ -87,31 +87,45 @@ export class UnifiedToolExecutor {
     const api = manifest.api.find(a => a.name === name)
     let timeoutMs = api?.timeout || 30000
     if (args && typeof args.timeout_seconds === 'number') {
-      timeoutMs = args.timeout_seconds * 1000
+      const timeoutSchema = api?.parameters?.properties?.timeout_seconds || {}
+      const minimum = Number(timeoutSchema.minimum) || 1
+      const maximum = Number(timeoutSchema.maximum) || 3600
+      timeoutMs = Math.min(Math.max(args.timeout_seconds, minimum), maximum) * 1000
     }
 
     let timer: NodeJS.Timeout | null = null
     let onAbort: (() => void) | null = null
+    const executionController = new AbortController()
 
     try {
       const promises: Promise<any>[] = []
       
-      const execPromise = executor.execute(name, args, context)
+      const execPromise = executor.execute(name, args, {
+        ...context,
+        abortSignal: executionController.signal
+      })
       promises.push(execPromise)
 
       if (timeoutMs > 0) {
         const timeoutPromise = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`工具执行超时（限制 ${timeoutMs / 1000} 秒）`)), timeoutMs)
+          timer = setTimeout(() => {
+            executionController.abort()
+            reject(new Error(`工具执行超时（限制 ${timeoutMs / 1000} 秒）`))
+          }, timeoutMs)
         })
         promises.push(timeoutPromise)
       }
 
       if (context.abortSignal) {
         if (context.abortSignal.aborted) {
+          executionController.abort()
           throw new Error('UserAborted')
         }
         const abortPromise = new Promise<never>((_, reject) => {
-          onAbort = () => reject(new Error('UserAborted'))
+          onAbort = () => {
+            executionController.abort()
+            reject(new Error('UserAborted'))
+          }
           context.abortSignal!.addEventListener('abort', onAbort)
         })
         promises.push(abortPromise)

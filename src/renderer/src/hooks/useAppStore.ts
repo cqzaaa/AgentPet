@@ -19,6 +19,31 @@ import {
   selectContextMessages
 } from '../utils/contextBudget'
 
+const MODEL_CACHE_PREFIX = 'agentpet_model_list:'
+
+function modelCacheKey(provider: string, baseUrl: string): string {
+  return `${MODEL_CACHE_PREFIX}${provider}:${encodeURIComponent(baseUrl || '')}`
+}
+
+function readCachedModels(provider: string, baseUrl: string): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(modelCacheKey(provider, baseUrl)) || '[]')
+    return Array.isArray(value) ? value.filter(item => typeof item === 'string' && item) : []
+  } catch {
+    return []
+  }
+}
+
+function modelFallbacks(provider: string, model?: string): string[] {
+  const known: Record<string, string[]> = {
+    deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+    openai: ['gpt-4o-mini'],
+    gemini: ['gemini-1.5-flash'],
+    ollama: []
+  }
+  return Array.from(new Set([model, ...(known[provider] || []), DEFAULT_MODELS[provider]].filter(Boolean) as string[]))
+}
+
 // ── 类型定义 ─────────────────────────────────────────────────
 export interface CronLog {
   id: string
@@ -758,6 +783,9 @@ export function useAppStore() {
     let cancelled = false
     const isOllama = llmConfig.provider === 'ollama'
     const hasKey = isOllama || !!llmConfig.apiKey || !!llmConfig.hasApiKey
+    const cached = readCachedModels(llmConfig.provider, llmConfig.baseUrl)
+    const fallback = Array.from(new Set([...modelFallbacks(llmConfig.provider, llmConfig.model), ...cached]))
+    if (fallback.length) setAvailableModels(fallback)
     if (hasKey) {
       const autoFetch = async () => {
         setIsLoadingModels(true)
@@ -769,21 +797,17 @@ export function useAppStore() {
           })
           if (cancelled) return
           if (list && list.length > 0) {
-            setAvailableModels(list)
-            // 如果拉取到的列表中不包含当前设置的 model，我们自适应选择第一个
-            if (!list.includes(llmConfig.model)) {
-              saveLlmConfig({ ...llmConfig, model: list[0] })
-            }
+            const merged = Array.from(new Set([llmConfig.model, ...list].filter(Boolean))) as string[]
+            setAvailableModels(merged)
+            localStorage.setItem(modelCacheKey(llmConfig.provider, llmConfig.baseUrl), JSON.stringify(merged))
           }
         } catch (e) {
-          if (!cancelled) console.error('自动加载模型列表失败', e)
+          if (!cancelled) console.warn('自动加载模型列表失败，使用缓存模型', e)
         } finally {
           if (!cancelled) setIsLoadingModels(false)
         }
       }
       autoFetch()
-    } else {
-      setAvailableModels([])
     }
     return () => { cancelled = true }
   }, [llmConfig.provider, llmConfig.apiKey, llmConfig.hasApiKey, llmConfig.baseUrl])
@@ -1339,15 +1363,20 @@ export function useAppStore() {
     try {
       const list = await window.api.getModels({ provider: llmConfig.provider, apiKey: llmConfig.apiKey, baseUrl: llmConfig.baseUrl })
       if (list && list.length > 0) {
-        setAvailableModels(list)
+        const merged = Array.from(new Set([llmConfig.model, ...list].filter(Boolean))) as string[]
+        setAvailableModels(merged)
+        localStorage.setItem(modelCacheKey(llmConfig.provider, llmConfig.baseUrl), JSON.stringify(merged))
         showToast('获取模型列表成功！', 'success')
       } else {
-        setAvailableModels([])
-        showToast('未获取到可用模型列表', 'info')
+        const fallback = Array.from(new Set([
+          ...modelFallbacks(llmConfig.provider, llmConfig.model),
+          ...readCachedModels(llmConfig.provider, llmConfig.baseUrl)
+        ]))
+        if (fallback.length) setAvailableModels(fallback)
+        showToast('模型服务暂不可用，已保留当前模型', 'info')
       }
     } catch (e: any) {
-      setAvailableModels([])
-      showToast(e.message || '获取模型列表失败，请检查网络或配置', 'error')
+      showToast(e.message || '获取模型列表失败，已保留当前模型', 'info')
     } finally {
       setIsLoadingModels(false)
     }

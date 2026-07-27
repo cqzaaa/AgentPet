@@ -36,6 +36,8 @@ export interface ShellExecResult {
   exitCode: number
 }
 
+export type ShellOutputHandler = (chunk: string) => void
+
 export class ShellManager {
   private static instance: ShellManager
   private sessions = new Map<string, ShellSession>()
@@ -97,18 +99,51 @@ export class ShellManager {
   }
 
   // 同步执行命令。shell 由调用方显式指定；本机未指定时固定使用 PowerShell，避免猜测命令语法。
-  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd: string; timeout?: number; signal?: AbortSignal }): Promise<ShellExecResult> {
+  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd: string; timeout?: number; signal?: AbortSignal; onOutput?: ShellOutputHandler }): Promise<ShellExecResult> {
     const bashPath = this.getBashPath()
     const cmd = command.trim()
 
     const runExec = async (cmdStr: string, execOptions: any) => {
       try {
-        const result: any = await execAsync(cmdStr, { ...execOptions, encoding: 'buffer' })
-        return {
-          stdout: decodeOutputBuffer(result.stdout),
-          stderr: decodeOutputBuffer(result.stderr),
-          exitCode: 0
+        if (!options.onOutput) {
+          const result: any = await execAsync(cmdStr, { ...execOptions, encoding: 'buffer' })
+          return {
+            stdout: decodeOutputBuffer(result.stdout),
+            stderr: decodeOutputBuffer(result.stderr),
+            exitCode: 0
+          }
         }
+
+        return await new Promise<ShellExecResult>((resolve, reject) => {
+          const child = exec(cmdStr, { ...execOptions, encoding: 'buffer' }, (error: any, stdout: Buffer, stderr: Buffer) => {
+            const normalizedStdout = decodeOutputBuffer(stdout || Buffer.alloc(0))
+            const normalizedStderr = decodeOutputBuffer(stderr || Buffer.alloc(0))
+            if (!error) {
+              resolve({ stdout: normalizedStdout, stderr: normalizedStderr, exitCode: 0 })
+              return
+            }
+            if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+              reject(error)
+              return
+            }
+            if (error?.killed || error?.code === 'ETIMEDOUT' || /timed?\s*out/i.test(String(error?.message || ''))) {
+              const timeoutError: any = new Error(`命令执行超时${execOptions.timeout ? `（限制 ${execOptions.timeout / 1000} 秒）` : ''}`)
+              timeoutError.code = 'ETIMEDOUT'
+              timeoutError.stdout = normalizedStdout
+              timeoutError.stderr = normalizedStderr
+              reject(timeoutError)
+              return
+            }
+            if (typeof error?.code === 'number') {
+              resolve({ stdout: normalizedStdout, stderr: normalizedStderr, exitCode: error.code })
+              return
+            }
+            reject(error)
+          })
+          const forward = (data: Buffer | string) => options.onOutput?.(decodeOutputBuffer(data))
+          child.stdout?.on('data', forward)
+          child.stderr?.on('data', forward)
+        })
       } catch (err: any) {
         const stdout = err.stdout !== undefined ? decodeOutputBuffer(err.stdout) : ''
         const stderr = err.stderr !== undefined ? decodeOutputBuffer(err.stderr) : ''
@@ -160,7 +195,7 @@ export class ShellManager {
   }
 
   // 启动异步 shell 会话
-  public startSession(command: string, shell: ShellKind = 'powershell', cwd: string): ShellSession {
+  public startSession(command: string, shell: ShellKind = 'powershell', cwd: string, onOutput?: ShellOutputHandler): ShellSession {
     const shellId = `shell_${this.nextShellId++}`
     const bashPath = this.getBashPath()
 
@@ -202,13 +237,14 @@ export class ShellManager {
       command,
     }
 
-    proc.stdout.on('data', (data: Buffer) => {
-      session.output += decodeOutputBuffer(data)
-    })
+    const appendOutput = (data: Buffer | string) => {
+      const chunk = decodeOutputBuffer(data)
+      session.output += chunk
+      onOutput?.(chunk)
+    }
+    proc.stdout.on('data', appendOutput)
 
-    proc.stderr.on('data', (data: Buffer) => {
-      session.output += decodeOutputBuffer(data)
-    })
+    proc.stderr.on('data', appendOutput)
 
     proc.on('close', (code: number) => {
       session.isRunning = false

@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
-import { join, basename, dirname, extname } from 'path'
+import { join, basename, dirname, extname, sep } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -33,6 +33,7 @@ import { officeRuntimeManager } from './tools/interaction/office-runtime-manager
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
 import { ModelRuntimeFactory } from './model-runtime'
+import { localMeetingRuntime } from './local-meeting-runtime'
 
 
 
@@ -61,7 +62,6 @@ if (!gotTheLock) {
 // 强制使用 Electron 的 net.fetch 代理 Node 的全局 fetch，以继承系统/代理工具（如 Clash/V2ray）的代理设置
 // 解决 MCP SDK 或内部请求抛出 fetch failed: ECONNRESET 的问题
 globalThis.fetch = net.fetch as any;
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // 本地环境变量 .env 极简解析加载器
 try {
@@ -207,8 +207,68 @@ const windowsAppUserModelId = 'com.electron.app'
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
+let automationOverlayWindow: BrowserWindow | null = null
+let automationOverlayHideTimer: NodeJS.Timeout | null = null
 let rpaScheduleTimer: NodeJS.Timeout | null = null
 let isCheckingRpaSchedules = false
+
+const automationToolNames = new Set([
+  'screenshot', 'mouse_move', 'mouse_click', 'mouse_scroll',
+  'type_text', 'key_press', 'get_windows', 'focus_window',
+  'browser_connect', 'browser_navigate', 'browser_search', 'browser_snapshot', 'browser_click', 'browser_click_ref'
+])
+
+function getAutomationOverlayUrl(): string {
+  return is.dev && process.env['ELECTRON_RENDERER_URL']
+    ? `${process.env['ELECTRON_RENDERER_URL']}/#/automation-overlay`
+    : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/automation-overlay`
+}
+
+function ensureAutomationOverlay(): BrowserWindow {
+  if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) return automationOverlayWindow
+  const overlayWidth = 318
+  const overlayHeight = 82
+  const workArea = screen.getPrimaryDisplay().workArea
+  automationOverlayWindow = new BrowserWindow({
+    x: workArea.x + workArea.width - overlayWidth - 24,
+    y: workArea.y + 24,
+    width: overlayWidth,
+    height: overlayHeight,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    focusable: false,
+    hasShadow: false,
+    webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false }
+  })
+  automationOverlayWindow.setMenu(null)
+  // The indicator must never intercept the agent's clicks on the controlled app.
+  automationOverlayWindow.setIgnoreMouseEvents(true)
+  automationOverlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  automationOverlayWindow.loadURL(getAutomationOverlayUrl())
+  automationOverlayWindow.on('closed', () => { automationOverlayWindow = null })
+  return automationOverlayWindow
+}
+
+function publishAutomationProgress(payload: { type: 'tool_call' | 'tool_result'; name: string; args?: any; result?: string }): void {
+  if (!automationToolNames.has(payload.name)) return
+  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
+  const overlay = ensureAutomationOverlay()
+  const send = () => overlay.webContents.send('api:automation-progress', payload)
+  if (overlay.webContents.isLoading()) overlay.webContents.once('did-finish-load', () => { send(); overlay?.showInactive() })
+  else { send(); overlay.showInactive() }
+}
+
+function dismissAutomationOverlay(): void {
+  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
+  automationOverlayHideTimer = setTimeout(() => {
+    if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) automationOverlayWindow.hide()
+  }, 1800)
+}
 
 function isRpaScheduleDue(task: rpaStorage.RpaTaskManifest, now: Date): boolean {
   if (task.enabled === false || !task.schedule || task.schedule.type === 'manual') return false
@@ -964,7 +1024,10 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId(windowsAppUserModelId)
 
   // 配置地理定位权限处理器，允许渲染进程获取系统定位
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+  const isTrustedAgentContents = (webContents: Electron.WebContents | null): boolean =>
+    !!webContents && !!agentWindow && !agentWindow.isDestroyed() && agentWindow.webContents === webContents
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     if (permission === 'geolocation') {
       const activeWin = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
       dialog.showMessageBox(activeWin, {
@@ -980,14 +1043,25 @@ app.whenReady().then(() => {
       }).catch(() => {
         callback(false)
       })
-    } else {
-      callback(false)
+      return
     }
+
+    if (permission === 'media' && isTrustedAgentContents(webContents)) {
+      const mediaDetails = details as Electron.MediaAccessPermissionRequest
+      const mediaTypes = Array.isArray(mediaDetails.mediaTypes) ? mediaDetails.mediaTypes : []
+      callback(mediaTypes.length === 0 || (mediaTypes.includes('audio') && !mediaTypes.includes('video')))
+      return
+    }
+
+    callback(false)
   })
 
-  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details) => {
     if (permission === 'geolocation') {
       return true
+    }
+    if (permission === 'media' && isTrustedAgentContents(webContents)) {
+      return !details.mediaType || details.mediaType === 'audio'
     }
     return false
   })
@@ -1672,7 +1746,7 @@ app.whenReady().then(() => {
       }
 
       // 自动迁移 skills, chat, live2d, memory 四个模块子目录
-      const modules = ['skills', 'chat', 'live2d', 'memory']
+      const modules = ['skills', 'chat', 'live2d', 'memory', 'meetings']
       for (const mod of modules) {
         const oldModPath = join(oldBaseDir, mod)
         const newModPath = join(newBaseDir, mod)
@@ -2546,10 +2620,12 @@ app.whenReady().then(() => {
 
     // 如果是 ollama，优先用原有的 api/tags 获取方式
     if (provider === 'ollama') {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 8000)
       try {
         const urlObj = new URL(baseUrl || 'http://localhost:11434/v1')
         const tagsUrl = `${urlObj.protocol}//${urlObj.host}/api/tags`
-        const response = await net.fetch(tagsUrl)
+        const response = await net.fetch(tagsUrl, { signal: controller.signal })
         if (response.ok) {
           const data: any = await response.json()
           const list = data.models?.map((m: any) => m.name) || []
@@ -2557,12 +2633,16 @@ app.whenReady().then(() => {
         }
         throw new Error(`HTTP ${response.status}: 获取 Ollama 模型失败`)
       } catch (e: any) {
-        console.error('获取 Ollama 本地模型列表失败', e)
-        throw new Error(`获取 Ollama 模型列表失败: ${e.message || e}`)
+        console.warn('获取 Ollama 模型列表失败，保留当前模型配置:', e?.message || e)
+        return []
+      } finally {
+        clearTimeout(timeout)
       }
     }
 
     // 通用 OpenAI 兼容的 models 接口
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
     try {
       let url = ''
       const headers: any = {
@@ -2591,22 +2671,157 @@ app.whenReady().then(() => {
 
       const response = await net.fetch(url, {
         method: 'GET',
-        headers
+        headers,
+        signal: controller.signal
       })
-
       if (response.ok) {
         const data: any = await response.json()
         if (data && Array.isArray(data.data)) {
           return data.data.map((m: any) => m.id)
         }
-        throw new Error('未获取到有效的模型列表结构')
-      } else {
-        const errText = await response.text().catch(() => '')
-        throw new Error(`HTTP ${response.status}${errText ? ': ' + errText : ''}`)
+        return []
       }
+      return []
     } catch (e: any) {
-      console.error('获取通用模型列表失败', e)
-      throw new Error(`获取模型列表失败: ${e.message || e}`)
+      console.warn('获取通用模型列表失败，保留当前模型配置:', e?.message || e)
+      return []
+    } finally {
+      clearTimeout(timeout)
+    }
+  })
+
+  ipcMain.handle('api:start-local-meeting', async (event, options?: { model?: string; deviceId?: number }) =>
+    localMeetingRuntime.start(event.sender, options?.model || 'funasr-paraformer-2pass', options?.deviceId)
+  )
+  ipcMain.handle('api:get-qwen-asr-config', () => localMeetingRuntime.getQwenAsrConfig())
+  ipcMain.handle('api:save-qwen-asr-config', (_event, config: { endpoint?: string; token?: string; clearToken?: boolean }) =>
+    localMeetingRuntime.saveQwenAsrConfig(config || {})
+  )
+  ipcMain.handle('api:list-local-meeting-devices', event => localMeetingRuntime.listDevices(event.sender))
+  ipcMain.handle('api:start-local-microphone-test', (event, deviceId?: number) => localMeetingRuntime.startMicrophoneTest(event.sender, deviceId))
+  ipcMain.handle('api:stop-local-microphone-test', () => localMeetingRuntime.stopMicrophoneTest())
+  ipcMain.handle('api:install-local-meeting-components', event =>
+    localMeetingRuntime.installComponents(event.sender)
+  )
+  ipcMain.handle('api:pause-local-meeting', () => {
+    localMeetingRuntime.pause()
+    return true
+  })
+  ipcMain.handle('api:resume-local-meeting', () => {
+    localMeetingRuntime.resume()
+    return true
+  })
+  ipcMain.handle('api:stop-local-meeting', () => localMeetingRuntime.stop())
+  ipcMain.handle('api:finalize-local-meeting', (_, audioPath: string) =>
+    localMeetingRuntime.finalizeRecording(audioPath)
+  )
+
+  ipcMain.handle('api:archive-local-meeting', async (_, payload: {
+    name: string
+    audioPath: string
+    transcript: string
+    durationSeconds: number
+    createdAt: string
+  }) => {
+    const recordingRoot = fs.realpathSync(join(getActiveStorageDir(), 'meetings', '.recording'))
+    const sourcePath = fs.realpathSync(payload.audioPath)
+    if (!sourcePath.startsWith(`${recordingRoot}${sep}`)) throw new Error('无效的本地录音文件')
+    const meetingsDir = join(getActiveStorageDir(), 'meetings')
+    const safeBaseName = String(payload.name || 'meeting')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+      .replace(/[. ]+$/g, '')
+      .slice(0, 100) || 'meeting'
+    let folderName = safeBaseName
+    let suffix = 2
+    while (fs.existsSync(join(meetingsDir, folderName))) folderName = `${safeBaseName}_${suffix++}`
+    const folderPath = join(meetingsDir, folderName)
+    await fs.promises.mkdir(folderPath, { recursive: true })
+    await fs.promises.rename(sourcePath, join(folderPath, 'recording.wav')).catch(async () => {
+      await fs.promises.copyFile(sourcePath, join(folderPath, 'recording.wav'))
+      await fs.promises.rm(sourcePath, { force: true })
+    })
+    await Promise.all([
+      fs.promises.writeFile(join(folderPath, 'transcript.txt'), payload.transcript || '', 'utf8'),
+      fs.promises.writeFile(join(folderPath, 'summary.md'), '# AI 会议总结\n\n正在生成总结…\n', 'utf8'),
+      fs.promises.writeFile(join(folderPath, 'metadata.json'), JSON.stringify({
+        name: payload.name,
+        createdAt: payload.createdAt,
+        durationSeconds: payload.durationSeconds,
+        recorder: 'sounddevice',
+        transcription: 'funasr-paraformer-zh-streaming-int8',
+        privacy: 'local-only',
+        files: ['recording.wav', 'transcript.txt', 'summary.md']
+      }, null, 2), 'utf8')
+    ])
+    return { folderName, folderPath }
+  })
+
+  ipcMain.handle('api:update-meeting-summary', async (_, folderName: string, summary: string) => {
+    const meetingsDir = join(getActiveStorageDir(), 'meetings')
+    const safeFolderName = basename(String(folderName || ''))
+    if (!safeFolderName || safeFolderName !== folderName) throw new Error('无效的会议归档目录')
+    const folderPath = join(meetingsDir, safeFolderName)
+    if (!fs.existsSync(folderPath)) throw new Error('会议归档不存在')
+    await fs.promises.writeFile(join(folderPath, 'summary.md'), summary || '', 'utf8')
+    return true
+  })
+
+  ipcMain.handle('api:show-meeting-archive', async (_, folderPath: string) => {
+    const meetingsDir = fs.realpathSync(join(getActiveStorageDir(), 'meetings'))
+    const resolved = fs.realpathSync(folderPath)
+    if (resolved !== meetingsDir && !resolved.startsWith(`${meetingsDir}${sep}`)) {
+      throw new Error('无效的会议归档路径')
+    }
+    shell.showItemInFolder(join(resolved, 'summary.md'))
+    return true
+  })
+
+  ipcMain.handle('api:list-meeting-archives', async () => {
+    const meetingsDir = join(getActiveStorageDir(), 'meetings')
+    await fs.promises.mkdir(meetingsDir, { recursive: true })
+    const entries = await fs.promises.readdir(meetingsDir, { withFileTypes: true })
+    const archives = await Promise.all(entries
+      .filter(entry => entry.isDirectory() && entry.name !== '.recording')
+      .map(async entry => {
+        const folderPath = join(meetingsDir, entry.name)
+        const metadataPath = join(folderPath, 'metadata.json')
+        let metadata: any = {}
+        try { metadata = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8')) } catch { /* legacy archive */ }
+        const stat = await fs.promises.stat(folderPath)
+        return {
+          folderName: entry.name,
+          folderPath,
+          name: metadata.name || entry.name,
+          createdAt: metadata.createdAt || stat.birthtime.toISOString(),
+          durationSeconds: Number(metadata.durationSeconds || 0),
+          transcription: metadata.transcription || '',
+          privacy: metadata.privacy || 'local-only'
+        }
+      }))
+    return archives.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+  })
+
+  ipcMain.handle('api:get-meeting-archive', async (_, folderName: string) => {
+    const meetingsDir = fs.realpathSync(join(getActiveStorageDir(), 'meetings'))
+    const safeName = basename(String(folderName || ''))
+    if (!safeName || safeName !== folderName) throw new Error('无效的会议归档名称')
+    const folderPath = fs.realpathSync(join(meetingsDir, safeName))
+    if (!folderPath.startsWith(`${meetingsDir}${sep}`)) throw new Error('无效的会议归档路径')
+    const readText = async (name: string): Promise<string> =>
+      fs.promises.readFile(join(folderPath, name), 'utf8').catch(() => '')
+    const audioName = (await fs.promises.readdir(folderPath)).find(name => /^recording\.(wav|webm|ogg)$/i.test(name)) || ''
+    let metadata: any = {}
+    try { metadata = JSON.parse(await readText('metadata.json')) } catch { /* legacy archive */ }
+    return {
+      folderName: safeName,
+      folderPath,
+      name: metadata.name || safeName,
+      createdAt: metadata.createdAt || '',
+      durationSeconds: Number(metadata.durationSeconds || 0),
+      transcript: await readText('transcript.txt'),
+      summary: await readText('summary.md'),
+      audioPath: audioName ? join(folderPath, audioName) : '',
+      metadata
     }
   })
 
@@ -2677,6 +2892,8 @@ app.whenReady().then(() => {
         CREATE TABLE IF NOT EXISTS memory_entity_links (
           memory_id TEXT,
           entity_name TEXT NOT NULL,
+          entity_type TEXT NOT NULL DEFAULT 'legacy',
+          confidence REAL NOT NULL DEFAULT 0,
           created_at INTEGER,
           PRIMARY KEY (memory_id, entity_name),
           FOREIGN KEY (memory_id) REFERENCES persona_memories(id) ON DELETE CASCADE
@@ -2817,6 +3034,27 @@ app.whenReady().then(() => {
           console.error("升级 persona_memories 表结构添加 link 失败", alterErr)
         }
       }
+      try {
+        await db.get("SELECT entity_type FROM memory_entity_links LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE memory_entity_links ADD COLUMN entity_type TEXT NOT NULL DEFAULT 'legacy'")
+          console.log("成功升级 SQLite memory_entity_links 表结构，加入实体类型")
+        } catch (alterErr) {
+          console.error("升级 memory_entity_links 表结构失败", alterErr)
+        }
+      }
+      try {
+        await db.get("SELECT confidence FROM memory_entity_links LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE memory_entity_links ADD COLUMN confidence REAL NOT NULL DEFAULT 0")
+          console.log("成功升级 SQLite memory_entity_links 表结构，加入实体置信度")
+        } catch (alterErr) {
+          console.error("升级 memory_entity_links 表结构添加置信度失败", alterErr)
+        }
+      }
+      await db.exec("CREATE INDEX IF NOT EXISTS idx_memory_entity_links_type_name ON memory_entity_links(entity_type, entity_name)")
     }
 
     return db
@@ -3798,7 +4036,6 @@ app.whenReady().then(() => {
     }
   })
 
-  // 导出单轮大模型工具调用过程，供失败诊断和提示词/工具策略调优。
   ipcMain.handle('api:export-tool-trace', async (_, payload: { defaultFileName?: string; trace?: any }) => {
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     if (!win) return { success: false, error: '没有可用窗口' }
@@ -3938,6 +4175,7 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'think', name: '深度思考过程', detail: step.detail })
           }
         } else if (step.type === 'tool_call') {
+          publishAutomationProgress({ type: 'tool_call', name: step.name, args: step.args })
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'tool_call',
@@ -3952,6 +4190,7 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'tool_call', name: step.name, args: step.args })
           }
         } else if (step.type === 'tool_result') {
+          publishAutomationProgress({ type: 'tool_result', name: step.name, result: step.result })
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'tool_result',
@@ -4044,12 +4283,14 @@ app.whenReady().then(() => {
         activeLlmAbortControllers.delete(sessionId)
       }
       abortedSessionIds.delete(sessionId)
+      dismissAutomationOverlay()
       return finalResponse
     } catch (e: any) {
       if (activeLlmAbortControllers.get(sessionId) === thisController) {
         activeLlmAbortControllers.delete(sessionId)
       }
       abortedSessionIds.delete(sessionId)
+      dismissAutomationOverlay()
       if (thisController.signal.aborted) {
         throw new Error('UserAborted')
       }
@@ -4284,6 +4525,7 @@ app.whenReady().then(() => {
     if (wechatBotManager) {
       wechatBotManager.shutdown().catch(() => { })
     }
+    localMeetingRuntime.shutdown()
 
     // 5. 中止所有运行中的 RPA 任务并释放浏览器资源
     PlaywrightRpaExecutor.cleanAll().catch(() => { })

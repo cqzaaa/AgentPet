@@ -43,6 +43,21 @@ type ContextCompactionPlan = {
 }
 
 const LARGE_TOOL_RESULT_TOKENS = 6000
+
+function normalizeSearchCitations(text: string): string {
+  if (!text) return text
+  const citation = (_match: string, id: string) => `[S${id}]`
+
+  return text
+    .replace(/\[\s*\[S(\d+)\]\s*\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/【S(\d+)】\s*\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*\(\s*\)\s*\(\s*[^)\n]*\s*\)/gi, citation)
+    .replace(/\[S(\d+)\]\s*\(\s*\)/gi, citation)
+    .replace(/\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
+    .replace(/\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
+    .replace(/\bnewsDetail_forward_[\w-]+\b/gi, '')
+}
 const TOOL_CONTEXT_SOFT_LIMIT = 16000
 const CONTEXT_COMPACT_RATIO = 0.75
 const DEFAULT_CONTEXT_WINDOW = 168000
@@ -58,6 +73,17 @@ const MUTATING_TOOL_NAMES = new Set([
   'run_office_skill',
   'manage_cron_task'
 ])
+
+// OS-level actions have temporal dependencies (focus → type, click → submit).
+// They must never share the parallel execution batch used for read-only tools.
+const COMPUTER_TOOL_NAMES = new Set([
+  'screenshot', 'mouse_move', 'mouse_click', 'mouse_scroll',
+  'type_text', 'key_press', 'get_windows', 'focus_window'
+])
+
+// A normal search is intentionally a short, deterministic workflow.
+// browser_search starts/connects Edge itself; browser_click opens a result.
+const BING_SEARCH_TOOL_NAMES = new Set(['browser_search', 'browser_click'])
 
 function messageText(message: ChatMessage | undefined): string {
   if (!message) return ''
@@ -108,7 +134,7 @@ function getActiveChatDir(): string {
 }
 
 export class AgentExecutor {
-  private toolListCache: { full?: any[], simplified?: any[] } = {}
+  private toolListCache: { full?: any[], simplified?: any[], browserSimplified?: any[], browserSearchSimplified?: any[] } = {}
 
   private getToolImagePaths(state: any): string[] {
     const candidates = [
@@ -385,8 +411,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
   }
 
-  private getFormattedTools(_isFrontend: boolean, simplify = false): any[] {
-    const cacheKey = simplify ? 'simplified' : 'full' as const
+  private getFormattedTools(_isFrontend: boolean, simplify = false, domBrowserOnly = false, forceBingSearch = false): any[] {
+    const cacheKey = forceBingSearch ? 'browserSearchSimplified' : domBrowserOnly ? 'browserSimplified' : simplify ? 'simplified' : 'full' as const
     const cached = this.toolListCache[cacheKey]
     if (cached) return cached
 
@@ -395,6 +421,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     // 从 toolRegistry 获取所有内置工具定义
     const allTools = toolRegistry.getAllToolsInfo()
     for (const tool of Object.values(allTools)) {
+      if (forceBingSearch && !BING_SEARCH_TOOL_NAMES.has(tool.name)) continue
+      if (domBrowserOnly && COMPUTER_TOOL_NAMES.has(tool.name)) continue
       list.push({
         type: 'function',
         function: {
@@ -406,16 +434,18 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
 
     // 添加 MCP 外部工具
-    const mcpTools = mcpManager.getTools()
-    for (const tool of mcpTools) {
-      list.push({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description || '',
-          parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
-        }
-      })
+    if (!forceBingSearch) {
+      const mcpTools = mcpManager.getTools()
+      for (const tool of mcpTools) {
+        list.push({
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description || '',
+            parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
+          }
+        })
+      }
     }
 
     this.toolListCache[cacheKey] = list
@@ -425,6 +455,18 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
   private getFullToolDefinitionByName(name: string, isFrontend: boolean): any | null {
     const fullTools = this.getFormattedTools(isFrontend, false)
     return fullTools.find((t: any) => t.function.name === name) || null
+  }
+
+  private shouldForceDomBrowser(userText: string): boolean {
+    const text = String(userText || '').toLowerCase()
+    return /浏览器|浏览|网页|网站|搜索|搜一下|链接|网址|url|browser|website|web page|search/.test(text)
+  }
+
+  private shouldForceBingSearch(userText: string): boolean {
+    const text = String(userText || '').toLowerCase()
+    const asksToSearch = /搜索|搜一下|search/.test(text)
+    const explicitlyRequestsBaidu = /百度|baidu/.test(text)
+    return asksToSearch && !explicitlyRequestsBaidu
   }
 
   /** Keep the parameter prompt small while retaining enough structure to validate a call. */
@@ -709,6 +751,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       sessionId?: string
       messageId?: number
       isBackground?: boolean
+      disableTools?: boolean
       sandboxMode?: boolean
       event?: Electron.IpcMainInvokeEvent
     },
@@ -723,6 +766,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let chatHistory: ChatMessage[] = JSON.parse(JSON.stringify(messages))
     let webSourceCounter = 0
     const availableWebSourceIds = new Set<string>()
+    const webSourceIdByUrl = new Map<string, string>()
     const webSourcesForMemory: WebMemorySource[] = []
     const executedWebSearchQueries = new Set<string>()
     chatHistory.unshift({
@@ -855,7 +899,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let imageCompatibilityFallbackUsed = false
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
-    const effectiveTools = this.getFormattedTools(isFrontend, true)
+    const domBrowserOnly = this.shouldForceDomBrowser(latestUserText)
+    const forceBingSearch = this.shouldForceBingSearch(latestUserText)
+    const effectiveTools = config.disableTools ? [] : this.getFormattedTools(isFrontend, true, domBrowserOnly, forceBingSearch)
 
     while (loopCount < maxLoops) {
       if (abortSignal?.aborted) {
@@ -1096,8 +1142,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
 
         // 2. 限制最大 2 个工具并行执行
         const toolExecutionResults: any[] = []
-        for (let i = 0; i < toolCalls.length; i += 2) {
-          const batch = toolCalls.slice(i, i + 2)
+        for (let i = 0; i < toolCalls.length;) {
+          const batchSize = COMPUTER_TOOL_NAMES.has(toolCalls[i].function.name) ? 1 : 2
+          const batch = toolCalls.slice(i, i + batchSize)
           const batchResults = await Promise.all(batch.map(async (toolCall) => {
             if (abortSignal?.aborted) {
               throw new Error('UserAborted')
@@ -1116,7 +1163,18 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             let webSources: any[] | undefined
             let imageFilePaths: string[] = []
             let generatedFiles: Array<{ name: string; path: string; size: number }> = []
-            if (toolName === 'trigger_memory_purify') {
+            const isBrowserLaunchCommand = (toolName === 'run_terminal_command' || toolName === 'run_command') &&
+              /(?:msedge|chrome|remote-debugging)/i.test(String(toolArgs.command || ''))
+            const isManualSearchNavigation = forceBingSearch && toolName === 'browser_navigate'
+            const isOutsideBingSearchWorkflow = forceBingSearch && !BING_SEARCH_TOOL_NAMES.has(toolName)
+            if (domBrowserOnly && (COMPUTER_TOOL_NAMES.has(toolName) || isBrowserLaunchCommand || isOutsideBingSearchWorkflow)) {
+              toolResult = isOutsideBingSearchWorkflow
+                ? '[Browser search policy] Only call browser_search, then browser_click if a result must be opened. browser_search starts/connects Edge automatically; do not use terminal, snapshots, navigation, screenshots, or another search engine.'
+                : isManualSearchNavigation
+                ? '[浏览器自动化策略] 搜索任务默认且强制使用必应。请调用 browser_search，不要通过 browser_navigate 打开百度或手工拼接搜索 URL。'
+                : '[浏览器自动化策略] 已阻止桌面截图、鼠标和键盘工具。请使用 browser_search、browser_snapshot、browser_click 或 browser_navigate 进行 DOM 操作。'
+              toolSuccess = false
+            } else if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
               toolResult = `[系统提示] 已成功触发后台经验沉淀 Pipeline。您的经验将在后台被提取并转化为长期记忆，您可以结束当前回答了。`
             } else if (toolName === 'web_search') {
@@ -1226,6 +1284,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             }
           }))
           toolExecutionResults.push(...batchResults)
+          i += batchSize
         }
 
         const results = toolExecutionResults
@@ -1243,11 +1302,35 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           )
           const normalizedSources: any[] = []
           if (res.webSources?.length) {
-            normalizedSources.push(...res.webSources.map((source: any) => ({ ...source, id: `S${++webSourceCounter}` })))
+            for (const source of res.webSources) {
+              let normalizedUrl = String(source.url || '').trim()
+              try {
+                const parsed = new URL(normalizedUrl)
+                parsed.hash = ''
+                normalizedUrl = parsed.toString()
+              } catch {
+                // 保留原始 URL；无效链接仍会在来源展示层被忽略。
+              }
+              const existingId = webSourceIdByUrl.get(normalizedUrl)
+              const normalizedId = existingId || `S${++webSourceCounter}`
+              if (!existingId) webSourceIdByUrl.set(normalizedUrl, normalizedId)
+              if (!normalizedSources.some(item => item.id === normalizedId)) {
+                normalizedSources.push({ ...source, url: normalizedUrl, id: normalizedId })
+              }
+            }
             normalizedSources.forEach(source => availableWebSourceIds.add(source.id))
             for (let index = 0; index < res.webSources.length; index++) {
               const oldId = res.webSources[index].id
-              const newId = normalizedSources[index].id
+              let normalizedUrl = String(res.webSources[index].url || '').trim()
+              try {
+                const parsed = new URL(normalizedUrl)
+                parsed.hash = ''
+                normalizedUrl = parsed.toString()
+              } catch {
+                // 使用原始 URL 查询已分配的来源 ID。
+              }
+              const newId = webSourceIdByUrl.get(normalizedUrl)
+              if (!newId) continue
               res.displayResult = String(res.displayResult).split(`[${oldId}]`).join(`[${newId}]`)
               res.contextToolResult = String(res.contextToolResult).split(`[${oldId}]`).join(`[${newId}]`)
             }
@@ -1324,8 +1407,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         // 完成整个调用链
         let finalResponse = typeof responseMsg.content === 'string' ? responseMsg.content : ''
         finalResponse = finalResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+        finalResponse = normalizeSearchCitations(finalResponse)
         // 只保留实际由本轮联网工具产生的引用，防止模型编造来源编号。
-        finalResponse = finalResponse.replace(/\[S(\d+)\]/g, (citation, number) =>
+        finalResponse = finalResponse.replace(/\[([^\]\n]*?\bS(\d+)\b[^\]\n]*)\]/g, (citation, _label, number) =>
           availableWebSourceIds.has(`S${number}`) ? citation : ''
         )
 
