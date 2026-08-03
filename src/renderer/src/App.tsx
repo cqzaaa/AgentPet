@@ -2,19 +2,24 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 
 // Each Electron window loads only the renderer code required by its hash route.
 const AgentWindow = lazy(() =>
-  import('./components/AgentWindow').then(module => ({ default: module.AgentWindow }))
+  import('./components/AgentWindow').then((module) => ({ default: module.AgentWindow }))
 )
 const PetWidget = lazy(() =>
-  import('./components/PetWidget').then(module => ({ default: module.PetWidget }))
+  import('./components/PetWidget').then((module) => ({ default: module.PetWidget }))
 )
 const ChatInputWindow = lazy(() =>
-  import('./components/ChatInputWindow').then(module => ({ default: module.ChatInputWindow }))
+  import('./components/ChatInputWindow').then((module) => ({ default: module.ChatInputWindow }))
 )
 const ScreenshotWindow = lazy(() =>
-  import('./components/ScreenshotWindow').then(module => ({ default: module.ScreenshotWindow }))
+  import('./components/ScreenshotWindow').then((module) => ({ default: module.ScreenshotWindow }))
 )
 const AutomationOverlay = lazy(() =>
-  import('./components/AutomationOverlay').then(module => ({ default: module.AutomationOverlay }))
+  import('./components/AutomationOverlay').then((module) => ({ default: module.AutomationOverlay }))
+)
+const GlobalAssistantWindow = lazy(() =>
+  import('./components/GlobalAssistantWindow').then((module) => ({
+    default: module.GlobalAssistantWindow
+  }))
 )
 
 function WindowLoadingFallback(): React.JSX.Element {
@@ -54,15 +59,20 @@ function App(): React.JSX.Element {
     return undefined
   }, [])
 
-  const page = currentHash === '#/agent'
-    ? <AgentWindow />
-    : currentHash === '#/chat-input'
-      ? <ChatInputWindow />
-    : currentHash.startsWith('#/screenshot')
-      ? <ScreenshotWindow />
-      : currentHash === '#/automation-overlay'
-        ? <AutomationOverlay />
-      : <PetWidget />
+  const page =
+    currentHash === '#/agent' ? (
+      <AgentWindow />
+    ) : currentHash === '#/chat-input' ? (
+      <ChatInputWindow />
+    ) : currentHash.startsWith('#/screenshot') ? (
+      <ScreenshotWindow />
+    ) : currentHash === '#/automation-overlay' ? (
+      <AutomationOverlay />
+    ) : currentHash === '#/global-assistant' ? (
+      <GlobalAssistantWindow />
+    ) : (
+      <PetWidget />
+    )
 
   return <Suspense fallback={<WindowLoadingFallback />}>{page}</Suspense>
 }

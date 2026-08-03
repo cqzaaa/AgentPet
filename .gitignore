@@ -9,3 +9,4 @@ out
 skills-lock.json
 .gemini*
 .claude/
+.agent-handoff/

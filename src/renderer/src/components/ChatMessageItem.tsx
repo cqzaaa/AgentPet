@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, no-useless-escape, react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/rules-of-hooks */
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
+import { createPortal } from 'react-dom'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import iconSvg from '../assets/icon_from_image.svg'
 import { ClarificationCard } from './ClarificationCard'
@@ -243,6 +244,11 @@ function parseInlineMarkdown(text: string): string {
   // 4. 链接 [text](url)
   html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
+  // 5. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
+  html = html.replace(/(?:\[KB(\d+)\]|【KB(\d+)】)/gi, (_match, squareId, bracketId) => {
+    const id = squareId || bracketId
+    return `<button type="button" class="knowledge-citation" data-citation-id="KB${id}" aria-label="查看知识库引用 KB${id}">【KB${id}】</button>`
+  })
   // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
   html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">【S$1】</span>')
   return html
@@ -1193,6 +1199,14 @@ interface MessageItemProps {
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
 }
 
+interface KnowledgeCitationPopoverState {
+  citationId: string
+  top: number
+  left: number
+  evidence: any | null
+  loading: boolean
+}
+
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
   if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile) {
     return false
@@ -1300,7 +1314,63 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [loadedPromptInfo, setLoadedPromptInfo] = useState<any | null>(null)
   const [promptInfoLoading, setPromptInfoLoading] = useState(false)
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
+  const [citationPopover, setCitationPopover] = useState<KnowledgeCitationPopoverState | null>(null)
+  const citationPopoverRef = useRef<HTMLDivElement>(null)
   const promptInfo = msg.promptInfo || loadedPromptInfo
+
+  useEffect(() => {
+    if (!citationPopover) return undefined
+    const close = (event: MouseEvent): void => {
+      if (!citationPopoverRef.current?.contains(event.target as Node)) setCitationPopover(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setCitationPopover(null)
+    }
+    const closeOnScroll = (): void => setCitationPopover(null)
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('scroll', closeOnScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('scroll', closeOnScroll, true)
+    }
+  }, [citationPopover])
+
+  const openKnowledgeCitation = async (event: React.MouseEvent): Promise<void> => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.knowledge-citation')
+    if (!button) return
+    event.preventDefault()
+    event.stopPropagation()
+    const citationId = button.dataset.citationId || ''
+    const rect = button.getBoundingClientRect()
+    const width = Math.min(420, window.innerWidth - 24)
+    const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left - 22))
+    const estimatedHeight = 280
+    const top = rect.bottom + estimatedHeight < window.innerHeight
+      ? rect.bottom + 8
+      : Math.max(12, rect.top - estimatedHeight - 8)
+    const inlineEvidence = requestMessage?.promptInfo?.knowledgeBase?.evidence || []
+    const immediateEvidence = inlineEvidence.find((item: any) => item.citationId === citationId) || null
+    setCitationPopover({ citationId, top, left, evidence: immediateEvidence, loading: !immediateEvidence })
+    if (immediateEvidence || !requestMessage?.id) return
+    const requestPromptInfo = await window.api.getMessagePromptInfo(requestMessage.id).catch(() => null)
+    const evidence = requestPromptInfo?.knowledgeBase?.evidence?.find((item: any) => item.citationId === citationId) || null
+    setCitationPopover(current => current?.citationId === citationId
+      ? { ...current, evidence, loading: false }
+      : current)
+  }
+
+  const previewCitationSource = (evidence: any): void => {
+    const path = String(evidence?.sourcePath || '')
+    if (!path) return
+    if (onPreviewFile) {
+      onPreviewFile({ name: evidence.document || localFileDisplayName(path), path, size: 0 })
+    } else if (window.api?.openLocalFile) {
+      void window.api.openLocalFile(normalizeLocalFileUrl(path))
+    }
+    setCitationPopover(null)
+  }
 
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const deferredStreamingText = useDeferredValue(msg.isThinking ? msg.text : null)
@@ -1700,6 +1770,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         {renderedText && (
           <div
             className="message-text"
+            onClick={(event) => void openKnowledgeCitation(event)}
             onContextMenu={(e) => {
               const selection = window.getSelection()
               const selectedText = selection?.toString().trim()
@@ -1711,6 +1782,46 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           >
             {renderedText}
           </div>
+        )}
+
+        {citationPopover && createPortal(
+          <div
+            ref={citationPopoverRef}
+            className="knowledge-citation-popover"
+            style={{ top: citationPopover.top, left: citationPopover.left }}
+            role="dialog"
+            aria-label={`${citationPopover.citationId} 引用详情`}
+          >
+            <header>
+              <span className="knowledge-citation-badge">{citationPopover.citationId}</span>
+              <span>
+                <strong>{citationPopover.evidence?.document || '知识库证据'}</strong>
+                <small>{citationPopover.evidence?.pageStart ? `第 ${citationPopover.evidence.pageStart} 页` : '结构化引用'}</small>
+              </span>
+              <button type="button" aria-label="关闭引用详情" onClick={() => setCitationPopover(null)}><X size={14} /></button>
+            </header>
+            {citationPopover.loading ? (
+              <div className="knowledge-citation-loading"><LoaderCircle className="icon-spin" size={16} />正在读取引用</div>
+            ) : citationPopover.evidence ? (
+              <>
+                <div className="knowledge-citation-path">
+                  {(citationPopover.evidence.headingPath || []).join(' / ') || '未标注结构路径'}
+                </div>
+                <blockquote>{citationPopover.evidence.matchedContent}</blockquote>
+                <footer>
+                  <span>匹配分 {Number(citationPopover.evidence.fusionScore || 0).toFixed(3)}</span>
+                  {citationPopover.evidence.sourcePath && (
+                    <button type="button" onClick={() => previewCitationSource(citationPopover.evidence)}>
+                      <FileText size={13} />打开来源文件
+                    </button>
+                  )}
+                </footer>
+              </>
+            ) : (
+              <div className="knowledge-citation-missing">这条历史消息没有保存对应的引用详情。</div>
+            )}
+          </div>,
+          document.querySelector('.agent-window-container') || document.body
         )}
 
         {webSources.length > 0 && !msg.isThinking && (

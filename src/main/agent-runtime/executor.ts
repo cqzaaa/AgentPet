@@ -9,6 +9,11 @@ import { unifiedToolExecutor } from '../tools/core/tool-executor'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
+import {
+  detectOfficeAttachment,
+  shouldForceBingSearch,
+  shouldForceDomBrowser
+} from './tool-routing'
 
 type WebMemorySource = {
   id: string
@@ -84,6 +89,7 @@ const COMPUTER_TOOL_NAMES = new Set([
 // A normal search is intentionally a short, deterministic workflow.
 // browser_search starts/connects Edge itself; browser_click opens a result.
 const BING_SEARCH_TOOL_NAMES = new Set(['browser_search', 'browser_click'])
+const OFFICE_SKILL_TOOL_NAMES = new Set(['load_office_skill', 'run_office_skill'])
 
 function messageText(message: ChatMessage | undefined): string {
   if (!message) return ''
@@ -457,18 +463,6 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     return fullTools.find((t: any) => t.function.name === name) || null
   }
 
-  private shouldForceDomBrowser(userText: string): boolean {
-    const text = String(userText || '').toLowerCase()
-    return /浏览器|浏览|网页|网站|搜索|搜一下|链接|网址|url|browser|website|web page|search/.test(text)
-  }
-
-  private shouldForceBingSearch(userText: string): boolean {
-    const text = String(userText || '').toLowerCase()
-    const asksToSearch = /搜索|搜一下|search/.test(text)
-    const explicitlyRequestsBaidu = /百度|baidu/.test(text)
-    return asksToSearch && !explicitlyRequestsBaidu
-  }
-
   /** Keep the parameter prompt small while retaining enough structure to validate a call. */
   private compactJsonSchema(schema: any, depth = 0): any {
     if (!schema || typeof schema !== 'object' || depth > 4) return {}
@@ -752,6 +746,11 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       messageId?: number
       isBackground?: boolean
       disableTools?: boolean
+      toolRouting?: 'auto' | 'all'
+      toolIntentText?: string
+      allowedToolNames?: string[]
+      dedupeMutatingToolCalls?: boolean
+      disableMemoryPersistence?: boolean
       sandboxMode?: boolean
       event?: Electron.IpcMainInvokeEvent
     },
@@ -884,6 +883,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let loopCount = 0
     const maxLoops = 100
     const latestUserText = messageText([...chatHistory].reverse().find(message => message.role === 'user'))
+    const toolIntentText = String(config.toolIntentText || latestUserText)
     const memorySignals: MemoryValueSignals = {
       toolCalls: 0,
       toolNames: new Set(),
@@ -897,11 +897,23 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       memoryAlreadySaved: false
     }
     let imageCompatibilityFallbackUsed = false
+    const successfulInputFingerprints = new Set<string>()
+    let currentInputTarget = 'current-focus'
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
-    const domBrowserOnly = this.shouldForceDomBrowser(latestUserText)
-    const forceBingSearch = this.shouldForceBingSearch(latestUserText)
-    const effectiveTools = config.disableTools ? [] : this.getFormattedTools(isFrontend, true, domBrowserOnly, forceBingSearch)
+    const forceAllTools = config.toolRouting === 'all'
+    const officeAttachment = forceAllTools ? null : detectOfficeAttachment(toolIntentText)
+    const officeSkillOnly = !!officeAttachment && !shouldForceDomBrowser(toolIntentText)
+    const domBrowserOnly = forceAllTools || officeSkillOnly ? false : shouldForceDomBrowser(toolIntentText)
+    const forceBingSearch = forceAllTools || officeSkillOnly ? false : shouldForceBingSearch(toolIntentText)
+    const allowedToolNames = Array.isArray(config.allowedToolNames)
+      ? new Set(config.allowedToolNames.map((name) => String(name)))
+      : null
+    const effectiveTools = config.disableTools
+      ? []
+      : this.getFormattedTools(isFrontend, true, domBrowserOnly, forceBingSearch)
+          .filter((tool: any) => !officeSkillOnly || OFFICE_SKILL_TOOL_NAMES.has(tool.function.name))
+          .filter((tool: any) => !allowedToolNames || allowedToolNames.has(tool.function.name))
 
     while (loopCount < maxLoops) {
       if (abortSignal?.aborted) {
@@ -1167,12 +1179,23 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
               /(?:msedge|chrome|remote-debugging)/i.test(String(toolArgs.command || ''))
             const isManualSearchNavigation = forceBingSearch && toolName === 'browser_navigate'
             const isOutsideBingSearchWorkflow = forceBingSearch && !BING_SEARCH_TOOL_NAMES.has(toolName)
-            if (domBrowserOnly && (COMPUTER_TOOL_NAMES.has(toolName) || isBrowserLaunchCommand || isOutsideBingSearchWorkflow)) {
-              toolResult = isOutsideBingSearchWorkflow
-                ? '[Browser search policy] Only call browser_search, then browser_click if a result must be opened. browser_search starts/connects Edge automatically; do not use terminal, snapshots, navigation, screenshots, or another search engine.'
-                : isManualSearchNavigation
+            const isOutsideOfficeWorkflow = officeSkillOnly && !OFFICE_SKILL_TOOL_NAMES.has(toolName)
+            const inputFingerprint = toolName === 'type_text'
+              ? `${currentInputTarget}\n${String(toolArgs.text ?? '')}`
+              : ''
+            if (config.dedupeMutatingToolCalls && inputFingerprint && successfulInputFingerprints.has(inputFingerprint)) {
+              toolResult = '[操作去重] 已阻止对同一焦点重复输入相同文本。上一次输入工具已成功返回；只有在截图明确证明失败后，才应重新定位目标并重试。'
+              toolSuccess = false
+            } else if (isOutsideOfficeWorkflow) {
+              toolResult = `[Office Skill policy] This request contains a ${officeAttachment?.toUpperCase()} attachment. Call load_office_skill first, then run_office_skill; do not use browser or terminal tools unless the user explicitly requests them.`
+              toolSuccess = false
+            } else if (forceBingSearch && isOutsideBingSearchWorkflow) {
+              toolResult = isManualSearchNavigation
                 ? '[浏览器自动化策略] 搜索任务默认且强制使用必应。请调用 browser_search，不要通过 browser_navigate 打开百度或手工拼接搜索 URL。'
-                : '[浏览器自动化策略] 已阻止桌面截图、鼠标和键盘工具。请使用 browser_search、browser_snapshot、browser_click 或 browser_navigate 进行 DOM 操作。'
+                : '[Browser search policy] Only call browser_search, then browser_click if a result must be opened. browser_search starts/connects Edge automatically; do not use terminal, snapshots, navigation, screenshots, or another search engine.'
+              toolSuccess = false
+            } else if (domBrowserOnly && (COMPUTER_TOOL_NAMES.has(toolName) || isBrowserLaunchCommand)) {
+              toolResult = '[浏览器自动化策略] 已阻止桌面截图、鼠标和键盘工具。请使用 browser_search、browser_snapshot、browser_click 或 browser_navigate 进行 DOM 操作。'
               toolSuccess = false
             } else if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
@@ -1241,6 +1264,18 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
               imageFilePaths = this.getToolImagePaths(res.state)
               generatedFiles = this.getToolGeneratedFiles(res.state)
+            }
+
+            if (toolSuccess) {
+              if (toolName === 'mouse_click') {
+                currentInputTarget = `point:${Number(toolArgs.x)},${Number(toolArgs.y)}:${String(toolArgs.button || 'left')}`
+              } else if (toolName === 'focus_window') {
+                currentInputTarget = `window:${String(toolArgs.pid ?? toolArgs.title ?? '')}`
+              } else if (toolName === 'key_press' && Array.isArray(toolArgs.keys) && toolArgs.keys.some((key: unknown) => String(key).toLowerCase() === 'tab')) {
+                currentInputTarget = `keyboard-focus:${Date.now()}`
+              } else if (inputFingerprint) {
+                successfulInputFingerprints.add(inputFingerprint)
+              }
             }
 
             if (abortSignal?.aborted) {
@@ -1422,38 +1457,42 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           content: finalResponse
         }
 
-        const memoryAssessment = this.assessMemoryValue(memorySignals, loopCount)
-        console.log(`[Memory] 本轮记忆价值评分: ${memoryAssessment.score}`, memoryAssessment.reasons)
-        if (memoryAssessment.shouldSummarize && sessionId) {
-          console.log(`[System] 检测到高价值任务，自动触发后台经验总结及沉淀... (评分: ${memoryAssessment.score})`)
-          this.handleLongTaskAutoMemory(
-            sessionId,
-            chatHistory,
-            config,
-            finalResponse,
-            webSourcesForMemory,
-            memoryAssessment,
-            workspacePath
-          ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+        if (!config.disableMemoryPersistence) {
+          const memoryAssessment = this.assessMemoryValue(memorySignals, loopCount)
+          console.log(`[Memory] 本轮记忆价值评分: ${memoryAssessment.score}`, memoryAssessment.reasons)
+          if (memoryAssessment.shouldSummarize && sessionId) {
+            console.log(`[System] 检测到高价值任务，自动触发后台经验总结及沉淀... (评分: ${memoryAssessment.score})`)
+            this.handleLongTaskAutoMemory(
+              sessionId,
+              chatHistory,
+              config,
+              finalResponse,
+              webSourcesForMemory,
+              memoryAssessment,
+              workspacePath
+            ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+          }
         }
 
         return finalResponse
       }
     }
 
-    const forcedStopMemoryAssessment = this.assessMemoryValue(memorySignals, loopCount, true)
-    console.log(`[Memory] 最大轮数退出时记忆价值评分: ${forcedStopMemoryAssessment.score}`, forcedStopMemoryAssessment.reasons)
-    if (forcedStopMemoryAssessment.shouldSummarize && sessionId) {
-      console.log(`[System] 高价值任务达到最大轮数上限，自动触发后台经验总结及沉淀... (评分: ${forcedStopMemoryAssessment.score})`)
-      this.handleLongTaskAutoMemory(
-        sessionId,
-        chatHistory,
-        config,
-        '智能代理执行工具链已达到最大轮数上限。',
-        webSourcesForMemory,
-        forcedStopMemoryAssessment,
-        workspacePath
-      ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+    if (!config.disableMemoryPersistence) {
+      const forcedStopMemoryAssessment = this.assessMemoryValue(memorySignals, loopCount, true)
+      console.log(`[Memory] 最大轮数退出时记忆价值评分: ${forcedStopMemoryAssessment.score}`, forcedStopMemoryAssessment.reasons)
+      if (forcedStopMemoryAssessment.shouldSummarize && sessionId) {
+        console.log(`[System] 高价值任务达到最大轮数上限，自动触发后台经验总结及沉淀... (评分: ${forcedStopMemoryAssessment.score})`)
+        this.handleLongTaskAutoMemory(
+          sessionId,
+          chatHistory,
+          config,
+          '智能代理执行工具链已达到最大轮数上限。',
+          webSourcesForMemory,
+          forcedStopMemoryAssessment,
+          workspacePath
+        ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
+      }
     }
 
     yield {

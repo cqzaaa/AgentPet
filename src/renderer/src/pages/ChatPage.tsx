@@ -11,6 +11,7 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  BookOpen,
   Check,
   ChevronDown,
   Code2,
@@ -26,6 +27,7 @@ import {
   Plug,
   Plus,
   Puzzle,
+  Radar,
   Server,
   Settings2,
   ShieldAlert,
@@ -61,6 +63,9 @@ function ChatPageImpl(): React.JSX.Element {
     saveLlmConfig,
     attachedFiles,
     setAttachedFiles,
+    selectedKnowledgeBaseId,
+    selectedKnowledgeBaseName,
+    setSelectedKnowledgeBase,
     handlePasteFiles,
     handleUploadFile,
     highlightedMessageId,
@@ -102,13 +107,18 @@ function ChatPageImpl(): React.JSX.Element {
   // 技能与 MCP Popover 状态与 Refs
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
   const [showMcpPopover, setShowMcpPopover] = useState(false)
+  const [showFeaturePopover, setShowFeaturePopover] = useState(false)
   const [showModelPopover, setShowModelPopover] = useState(false)
+  const [showKnowledgePopover, setShowKnowledgePopover] = useState(false)
+  const [knowledgeBases, setKnowledgeBases] = useState<any[]>([])
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [approvalDetailsExpanded, setApprovalDetailsExpanded] = useState(false)
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
   const mcpPopoverRef = useRef<HTMLDivElement>(null)
+  const featurePopoverRef = useRef<HTMLDivElement>(null)
   const modelPopoverRef = useRef<HTMLDivElement>(null)
+  const knowledgePopoverRef = useRef<HTMLDivElement>(null)
 
   // 搜索过滤
   const [skillsSearchKey, setSkillsSearchKey] = useState('')
@@ -146,6 +156,23 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }, [showModelPopover])
 
+  const refreshKnowledgeBases = useCallback(async () => {
+    try {
+      const bases = await window.api.knowledgeListBases()
+      setKnowledgeBases(Array.isArray(bases) ? bases : [])
+      if (selectedKnowledgeBaseId && !bases.some((base: any) => base.id === selectedKnowledgeBaseId)) {
+        setSelectedKnowledgeBase(null)
+      }
+    } catch (error) {
+      console.error('加载知识库列表失败:', error)
+      setKnowledgeBases([])
+    }
+  }, [selectedKnowledgeBaseId, setSelectedKnowledgeBase])
+
+  useEffect(() => {
+    void refreshKnowledgeBases()
+  }, [refreshKnowledgeBases])
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showSkillsPopover && skillsPopoverRef.current && !skillsPopoverRef.current.contains(event.target as Node)) {
@@ -164,16 +191,25 @@ function ChatPageImpl(): React.JSX.Element {
           setShowMcpPopover(false)
         }
       }
+      if (showFeaturePopover && featurePopoverRef.current && !featurePopoverRef.current.contains(event.target as Node)) {
+        const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-features')
+        if (!isClickOnBtn) {
+          setShowFeaturePopover(false)
+        }
+      }
       if (showModelPopover && modelPopoverRef.current && !modelPopoverRef.current.contains(event.target as Node)) {
         const isClickOnBtn = (event.target as HTMLElement).closest('.model-dropdown-container')
         if (!isClickOnBtn) {
           setShowModelPopover(false)
         }
       }
+      if (showKnowledgePopover && knowledgePopoverRef.current && !knowledgePopoverRef.current.contains(event.target as Node)) {
+        setShowKnowledgePopover(false)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showSkillsPopover, showMcpPopover, showModelPopover])
+  }, [showSkillsPopover, showMcpPopover, showFeaturePopover, showModelPopover, showKnowledgePopover])
 
   // 挂载时刷新技能与 MCP 状态
   useEffect(() => {
@@ -232,7 +268,6 @@ function ChatPageImpl(): React.JSX.Element {
           </span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>勾选在会话中启用</span>
         </div>
-        {/* 搜索框：仅在列表溢出时显示 */}
         {skillsOverflow && (
           <input
             style={searchInputStyle}
@@ -284,7 +319,6 @@ function ChatPageImpl(): React.JSX.Element {
                   >
                     {skill.name.replace(/\.zip$/i, '')}
                   </span>
-                  {/* CSS Toggle Switch */}
                   <div style={{ position: 'relative', width: '28px', height: '16px', borderRadius: '8px', backgroundColor: isEnabled ? 'var(--accent-color, #4f8cff)' : 'var(--border-color, rgba(128,128,128,0.3))', transition: 'background-color 0.2s ease', flexShrink: 0 }}>
                     <div style={{
                       position: 'absolute',
@@ -338,6 +372,51 @@ function ChatPageImpl(): React.JSX.Element {
       </div>
     )
   }
+
+  const renderFeaturePopover = () => (
+    <div
+      ref={featurePopoverRef}
+      className="chat-popover-card feature-launcher-popover"
+      style={{
+        position: 'absolute',
+        bottom: 'calc(100% + 8px)',
+        right: 0,
+        width: '230px',
+        background: 'var(--bg-card, #ffffff)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+        borderRadius: '10px',
+        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.12)',
+        zIndex: 1000,
+        padding: '12px',
+        animation: 'slideUpMenu 0.15s ease-out'
+      }}
+    >
+      <div className="feature-quick-actions">
+        <button
+          type="button"
+          onClick={() => {
+            setShowMeetingRecorder(true)
+            setShowFeaturePopover(false)
+          }}
+        >
+          <span><Mic size={16} /></span>
+          <span><strong>AI 会议录音</strong><small>实时录音、转写并整理会议总结</small></span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void window.api.openGlobalAssistant()
+            setShowFeaturePopover(false)
+          }}
+        >
+          <span><Radar size={16} /></span>
+          <span><strong>悬浮助手</strong><small>常驻右上角，实时查看屏幕或页面</small></span>
+        </button>
+      </div>
+    </div>
+  )
 
   const renderMcpPopover = () => {
     const filtered = mcpSearchKey
@@ -1288,6 +1367,74 @@ function ChatPageImpl(): React.JSX.Element {
                 {showModelPopover && renderModelPopover()}
               </div>
 
+              <div className="chat-knowledge-select" ref={knowledgePopoverRef}>
+                <button
+                  type="button"
+                  className={`chat-knowledge-trigger ${selectedKnowledgeBaseId ? 'selected' : ''}`}
+                  onClick={() => {
+                    const next = !showKnowledgePopover
+                    setShowKnowledgePopover(next)
+                    setShowModelPopover(false)
+                    if (next) void refreshKnowledgeBases()
+                  }}
+                  title={selectedKnowledgeBaseId ? `当前知识库：${selectedKnowledgeBaseName}` : '选择本轮聊天使用的知识库'}
+                >
+                  <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
+                  <span>{selectedKnowledgeBaseName || '知识库'}</span>
+                  <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
+                </button>
+
+                {showKnowledgePopover && (
+                  <div className="chat-knowledge-popover">
+                    <div className="chat-knowledge-popover__header">
+                      <div><strong>对话知识库</strong><small>发送时自动检索并附带引用</small></div>
+                      <BookOpen size={17} strokeWidth={1.8} aria-hidden="true" />
+                    </div>
+                    <button
+                      type="button"
+                      className={`chat-knowledge-option ${!selectedKnowledgeBaseId ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedKnowledgeBase(null)
+                        setShowKnowledgePopover(false)
+                      }}
+                    >
+                      <span className="chat-knowledge-option__mark" />
+                      <span><strong>不使用知识库</strong><small>仅使用当前对话与记忆</small></span>
+                      {!selectedKnowledgeBaseId && <Check size={14} aria-hidden="true" />}
+                    </button>
+                    <div className="chat-knowledge-options">
+                      {knowledgeBases.map((base: any) => (
+                        <button
+                          type="button"
+                          key={base.id}
+                          className={`chat-knowledge-option ${selectedKnowledgeBaseId === base.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedKnowledgeBase({ id: base.id, name: base.name })
+                            setShowKnowledgePopover(false)
+                          }}
+                        >
+                          <span className={`chat-knowledge-option__mark ${selectedKnowledgeBaseId === base.id ? 'filled' : ''}`} />
+                          <span><strong>{base.name}</strong><small>{base.documentCount || 0} 个文档 · {base.nodeCount || 0} 个结构节点</small></span>
+                          {selectedKnowledgeBaseId === base.id && <Check size={14} aria-hidden="true" />}
+                        </button>
+                      ))}
+                    </div>
+                    {knowledgeBases.length === 0 && (
+                      <button
+                        type="button"
+                        className="chat-knowledge-empty"
+                        onClick={() => {
+                          setShowKnowledgePopover(false)
+                          setActiveTab('knowledge')
+                        }}
+                      >
+                        还没有知识库，前往创建
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* 执行设备选择 */}
               <div className="custom-device-select-container" style={{ position: 'relative' }} ref={deviceMenuRef}>
                 <div
@@ -1484,6 +1631,7 @@ function ChatPageImpl(): React.JSX.Element {
                     const next = !showSkillsPopover
                     setShowSkillsPopover(next)
                     setShowMcpPopover(false)
+                    setShowFeaturePopover(false)
                     if (next) {
                       refreshSkillsAndStorage()
                     }
@@ -1503,6 +1651,7 @@ function ChatPageImpl(): React.JSX.Element {
                     const next = !showMcpPopover
                     setShowMcpPopover(next)
                     setShowSkillsPopover(false)
+                    setShowFeaturePopover(false)
                     if (next) {
                       refreshMcpServers()
                     }
@@ -1514,17 +1663,35 @@ function ChatPageImpl(): React.JSX.Element {
                 {showMcpPopover && renderMcpPopover()}
               </div>
 
-              {/* 上传文件按钮 */}
-              <button
-                type="button"
-                className={`toolbar-icon-btn meeting-recorder-trigger ${showMeetingRecorder ? 'active' : ''}`}
-                onClick={() => setShowMeetingRecorder(true)}
-                disabled={isSending}
-                title="AI 会议录音"
-              >
-                <Mic size={17} strokeWidth={2} aria-hidden="true" />
-              </button>
+              {/* 独立功能入口：会议录音与全局悬浮助手 */}
+              <div style={{ position: 'relative' }}>
+                <div
+                  className={`toolbar-icon-btn toolbar-action-btn-features ${showFeaturePopover ? 'active' : ''}`}
+                  onClick={() => {
+                    const next = !showFeaturePopover
+                    setShowFeaturePopover(next)
+                    setShowSkillsPopover(false)
+                    setShowMcpPopover(false)
+                  }}
+                  title="功能"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      const next = !showFeaturePopover
+                      setShowFeaturePopover(next)
+                      setShowSkillsPopover(false)
+                      setShowMcpPopover(false)
+                    }
+                  }}
+                >
+                  <Radar size={17} strokeWidth={2} aria-hidden="true" />
+                </div>
+                {showFeaturePopover && renderFeaturePopover()}
+              </div>
 
+              {/* 上传文件按钮 */}
               <button
                 className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}

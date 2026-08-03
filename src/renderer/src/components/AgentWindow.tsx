@@ -11,6 +11,7 @@ import {
   CircleX,
   Copy,
   KeyRound,
+  Library,
   Lightbulb,
   List,
   Minus,
@@ -37,6 +38,7 @@ const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ 
 const AgentPage = lazy(() => import('../pages/AgentPage').then(module => ({ default: module.AgentPage })))
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
 const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
+const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(module => ({ default: module.KnowledgeBasePage })))
 const RpaPage = lazy(() => import('../rpa/RpaPage').then(module => ({ default: module.RpaPage })))
 const FilePreviewPanel = lazy(() =>
   import('./FilePreviewPanel').then(module => ({ default: module.FilePreviewPanel }))
@@ -46,7 +48,7 @@ function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
 }
 
-type FunctionPageId = 'control' | 'agent' | 'rpa' | 'logs' | 'settings'
+type FunctionPageId = 'control' | 'agent' | 'knowledge' | 'rpa' | 'logs' | 'settings'
 
 type WorkspaceTab =
   | { key: string; kind: 'session'; sessionId: string }
@@ -55,6 +57,7 @@ type WorkspaceTab =
 const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
   control: '订阅频道',
   agent: '代理',
+  knowledge: '知识库',
   rpa: 'RPA 任务',
   logs: '日志',
   settings: '设置'
@@ -219,6 +222,7 @@ export function AgentWindow(): React.JSX.Element {
     handleSendChat: store.handleSendChat,
     saveLlmConfig: store.saveLlmConfig,
     setAttachedFiles: store.setAttachedFiles,
+    setSelectedKnowledgeBase: store.setSelectedKnowledgeBase,
     handlePasteFiles: store.handlePasteFiles,
     handleUploadFile: store.handleUploadFile,
     setHighlightedMessageId: store.setHighlightedMessageId,
@@ -241,6 +245,7 @@ export function AgentWindow(): React.JSX.Element {
     store.handleSendChat,
     store.saveLlmConfig,
     store.setAttachedFiles,
+    store.setSelectedKnowledgeBase,
     store.handlePasteFiles,
     store.handleUploadFile,
     store.setHighlightedMessageId,
@@ -467,6 +472,7 @@ export function AgentWindow(): React.JSX.Element {
       case 'chat': page = <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
       case 'control': page = <ControlPage store={store} />; break
       case 'agent': page = <AgentPage store={store} />; break
+      case 'knowledge': page = <KnowledgeBasePage />; break
       case 'logs': page = <LogsPage store={store} />; break
       case 'settings': page = <SettingsPage store={store} />; break
       case 'rpa': page = <RpaPage />; break
@@ -557,6 +563,10 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
                 <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              </div>
+              <div className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`} onClick={() => setActiveTab('knowledge')} title="知识库">
+                <div className="menu-item-left"><Library size={18} strokeWidth={2} aria-hidden="true" /><span>知识库</span></div>
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div

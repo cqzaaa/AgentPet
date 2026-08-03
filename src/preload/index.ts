@@ -45,6 +45,28 @@ const api = {
   closeInputWindow: (): void => {
     ipcRenderer.send('close-input-window')
   },
+  openGlobalAssistant: (): Promise<boolean> => ipcRenderer.invoke('api:open-global-assistant'),
+  closeGlobalAssistant: (): Promise<boolean> => ipcRenderer.invoke('api:close-global-assistant'),
+  setGlobalAssistantOpacity: (opacity: number): Promise<number> =>
+    ipcRenderer.invoke('api:set-global-assistant-opacity', opacity),
+  setGlobalAssistantCompact: (compact: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('api:set-global-assistant-compact', compact),
+  startGlobalAssistantTask: (input: {
+    prompt: string
+    observeMode: 'auto' | 'screen' | 'browser'
+    continuous?: boolean
+    intervalSeconds?: number
+  }): Promise<{ taskId: string; intervalSeconds: number }> =>
+    ipcRenderer.invoke('api:start-global-assistant-task', input),
+  stopGlobalAssistantTask: (): Promise<boolean> =>
+    ipcRenderer.invoke('api:stop-global-assistant-task'),
+  onGlobalAssistantEvent: (callback: (event: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any): void => callback(data)
+    ipcRenderer.on('api:global-assistant-event', handler)
+    return (): void => {
+      ipcRenderer.removeListener('api:global-assistant-event', handler)
+    }
+  },
   sendChatToPet: (text: string, isNewSession?: boolean, imagePath?: string): void => {
     ipcRenderer.send('send-chat-to-pet', text, isNewSession, imagePath)
   },
@@ -64,6 +86,31 @@ const api = {
     ipcRenderer.invoke('api:select-attachment-files'),
   parseFileContent: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-content', filePath),
+  knowledgeListBases: (): Promise<any[]> =>
+    ipcRenderer.invoke('api:knowledge-list-bases'),
+  knowledgeCreateBase: (name: string, description?: string): Promise<string> =>
+    ipcRenderer.invoke('api:knowledge-create-base', name, description),
+  knowledgeDeleteBase: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:knowledge-delete-base', id),
+  knowledgeListDocuments: (knowledgeBaseId: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:knowledge-list-documents', knowledgeBaseId),
+  knowledgeImportDocuments: (knowledgeBaseId: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:knowledge-import-documents', knowledgeBaseId),
+  knowledgeGetImportProgress: (knowledgeBaseId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:knowledge-get-import-progress', knowledgeBaseId),
+  onKnowledgeImportProgress: (callback: (progress: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: any): void => callback(progress)
+    ipcRenderer.on('api:knowledge-import-progress', handler)
+    return (): void => {
+      ipcRenderer.removeListener('api:knowledge-import-progress', handler)
+    }
+  },
+  knowledgeGetDocument: (documentId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:knowledge-get-document', documentId),
+  knowledgeDeleteDocument: (documentId: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:knowledge-delete-document', documentId),
+  knowledgeSearch: (knowledgeBaseId: string, query: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:knowledge-search', knowledgeBaseId, query),
   parseFileHtml: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-html', filePath),
   readFileBase64: (filePath: string): Promise<string | null> =>

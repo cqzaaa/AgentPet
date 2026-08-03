@@ -87,7 +87,7 @@ export interface TokenLog {
   messageId?: number
 }
 
-export type TabType = 'chat' | 'control' | 'agent' | 'settings' | 'logs' | 'rpa'
+export type TabType = 'chat' | 'control' | 'agent' | 'knowledge' | 'settings' | 'logs' | 'rpa'
 export type AgentSubTab = 'skills' | 'memory' | 'cron' | 'mcp'
 export type SettingsSubTab = 'keys' | 'storage' | 'avatar'
 
@@ -336,6 +336,8 @@ export const useAppStoreRaw = create<any>((set) => ({
   activeSessionId: localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default',
   inputValue: '',
   attachedFiles: [],
+  selectedKnowledgeBaseId: localStorage.getItem('agentpet_selected_knowledge_base_id') || '',
+  selectedKnowledgeBaseName: localStorage.getItem('agentpet_selected_knowledge_base_name') || '',
   tokenLogs: (() => {
     const saved = localStorage.getItem('agentpet_token_logs') || localStorage.getItem('agentself_token_logs')
     if (saved) {
@@ -464,6 +466,18 @@ export const useAppStoreRaw = create<any>((set) => ({
   setAttachedFiles: (val: any) => set((state: any) => ({
     attachedFiles: typeof val === 'function' ? val(state.attachedFiles) : val
   })),
+  setSelectedKnowledgeBase: (base: { id: string; name: string } | null) => {
+    const id = base?.id || ''
+    const name = base?.name || ''
+    if (id) {
+      localStorage.setItem('agentpet_selected_knowledge_base_id', id)
+      localStorage.setItem('agentpet_selected_knowledge_base_name', name)
+    } else {
+      localStorage.removeItem('agentpet_selected_knowledge_base_id')
+      localStorage.removeItem('agentpet_selected_knowledge_base_name')
+    }
+    set({ selectedKnowledgeBaseId: id, selectedKnowledgeBaseName: name })
+  },
   setTokenLogs: (val: any) => set((state: any) => ({
     tokenLogs: typeof val === 'function' ? val(state.tokenLogs) : val
   })),
@@ -554,6 +568,7 @@ export function useAppStore() {
     activeSessionId, setActiveSessionId,
     inputValue, setInputValue,
     attachedFiles, setAttachedFiles,
+    selectedKnowledgeBaseId, selectedKnowledgeBaseName, setSelectedKnowledgeBase,
     tokenLogs, setTokenLogs,
     highlightedMessageId, setHighlightedMessageId,
     generatedFiles, setGeneratedFiles,
@@ -1962,6 +1977,7 @@ ${skillsContext}`
     // workspace & attached file
     workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
     attachedFiles, setAttachedFiles, handlePasteFiles, handleUploadFile,
+    selectedKnowledgeBaseId, selectedKnowledgeBaseName, setSelectedKnowledgeBase,
     // generated files & preview
     generatedFiles, setGeneratedFiles,
     showFilePanel, setShowFilePanel,

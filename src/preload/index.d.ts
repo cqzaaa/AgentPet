@@ -24,6 +24,18 @@ declare global {
       hideWindow: () => void
       openInputWindow: () => void
       closeInputWindow: () => void
+      openGlobalAssistant: () => Promise<boolean>
+      closeGlobalAssistant: () => Promise<boolean>
+      setGlobalAssistantOpacity: (opacity: number) => Promise<number>
+      setGlobalAssistantCompact: (compact: boolean) => Promise<boolean>
+      startGlobalAssistantTask: (input: {
+        prompt: string
+        observeMode: 'auto' | 'screen' | 'browser'
+        continuous?: boolean
+        intervalSeconds?: number
+      }) => Promise<{ taskId: string; intervalSeconds: number }>
+      stopGlobalAssistantTask: () => Promise<boolean>
+      onGlobalAssistantEvent: (callback: (event: any) => void) => () => void
       sendChatToPet: (text: string, isNewSession?: boolean, imagePath?: string) => void
       getSystemInfo: () => Promise<any>
       getSkillsPath: () => Promise<string>
@@ -37,6 +49,16 @@ declare global {
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
       selectAttachmentFiles: () => Promise<string[]>
       parseFileContent: (filePath: string) => Promise<string>
+      knowledgeListBases: () => Promise<any[]>
+      knowledgeCreateBase: (name: string, description?: string) => Promise<string>
+      knowledgeDeleteBase: (id: string) => Promise<boolean>
+      knowledgeListDocuments: (knowledgeBaseId: string) => Promise<any[]>
+      knowledgeImportDocuments: (knowledgeBaseId: string) => Promise<any[]>
+      knowledgeGetImportProgress: (knowledgeBaseId: string) => Promise<any | null>
+      onKnowledgeImportProgress: (callback: (progress: any) => void) => () => void
+      knowledgeGetDocument: (documentId: string) => Promise<any | null>
+      knowledgeDeleteDocument: (documentId: string) => Promise<boolean>
+      knowledgeSearch: (knowledgeBaseId: string, query: string) => Promise<any[]>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>

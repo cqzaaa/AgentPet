@@ -1,6 +1,13 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import { join, relative } from 'path'
+import {
+  embedText,
+  embedTexts,
+  EMBEDDING_DIMENSIONS,
+  EMBEDDING_MODEL,
+  embeddingContentHash
+} from '../embedding/embedding-client'
 
 export interface MemoryDependencies {
   getDB: () => Promise<any>
@@ -136,6 +143,40 @@ export async function appendMemorySummaryInternal(sessionId: string, title: stri
   }
 }
 
+function parseMemoryEmbedding(value: unknown): number[] | null {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (!Array.isArray(parsed) || parsed.length !== EMBEDDING_DIMENSIONS) return null
+    const vector = parsed.map(Number)
+    return vector.every(Number.isFinite) ? vector : null
+  } catch {
+    return null
+  }
+}
+
+async function ensureMemoryEmbeddings(database: any, rows: any[]): Promise<void> {
+  // Incremental backfill prevents a large legacy memory library from blocking one recall.
+  const pending = rows.filter(row => !parseMemoryEmbedding(row.embedding)).slice(0, 64)
+  for (let offset = 0; offset < pending.length; offset += 16) {
+    const batch = pending.slice(offset, offset + 16)
+    const vectors = await embedTexts(batch.map(row => String(row.fact || '').slice(0, 24_000)))
+    for (let index = 0; index < batch.length; index++) {
+      const vector = vectors[index]
+      if (!vector) continue
+      const row = batch[index]
+      const hash = embeddingContentHash(String(row.fact || ''))
+      await database.run(`
+        UPDATE persona_memories
+        SET embedding = ?, embedding_model = ?, embedding_hash = ?
+        WHERE id = ?
+      `, JSON.stringify(vector), EMBEDDING_MODEL, hash, row.id)
+      row.embedding = JSON.stringify(vector)
+      row.embedding_model = EMBEDDING_MODEL
+      row.embedding_hash = hash
+    }
+  }
+}
+
 export function registerMemoryAPIs(deps: MemoryDependencies) {
   memoryDeps = deps
 
@@ -191,8 +232,10 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const database = await deps.getDB()
       
       // 1. 获取库中所有关联记录及实体映射（支持经验、习惯和偏好）
-      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, category, link FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+      const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, category, link, embedding, embedding_model, embedding_hash FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
+      await ensureMemoryEmbeddings(database, rows)
+      const queryEmbedding = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
 
       const linkRows = await database.all(`
         SELECT memory_id, entity_name
@@ -254,8 +297,8 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
           .filter(t => t.length >= 2)
       )
       const MAX_SCORING_CANDIDATES = 100
-      let candidateRows = rows
-      if (queryKeywords.size > 0) {
+      let candidateRows = queryEmbedding ? rows.slice(0, 500) : rows
+      if (!queryEmbedding && queryKeywords.size > 0) {
         const withHits = rows.map(row => {
           const factLower = (row.fact || '').toLowerCase()
           let hits = 0
@@ -337,8 +380,11 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
           }
         }
 
-        // C. 向量召回在本地模式下关闭，保留 0 仅供调试面板显示。
-        const vectorScore = 0
+        // C. BGE-M3 semantic similarity.
+        const storedEmbedding = parseMemoryEmbedding(row.embedding)
+        const vectorScore = queryEmbedding && storedEmbedding
+          ? cosineSimilarity(queryEmbedding, storedEmbedding)
+          : 0
 
         // D. 纯本地文本 Jaccard 相似度匹配分 (Jaccard Score)
         const lexical = lexicalMatch(row.fact || '')
@@ -347,7 +393,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         // Text evidence is primary. A graph hit without a lexical topic anchor
         // is ignored, so broad terms cannot independently trigger recall.
         const graphContribution = lexical.grounded ? graphScore : 0
-        const score = 0.7 * lexical.score + 0.15 * graphContribution + 0.15 * sNow
+        const score = 0.55 * lexical.score + 0.25 * vectorScore + 0.1 * graphContribution + 0.1 * sNow
 
         return {
           id: row.id,
@@ -361,8 +407,31 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         }
       })
 
-      // 过滤低相关分（最终得分必须大于 0.5），并按得分从高到低排序
-      const activeResults = scoredResults.filter(r => r.sNow >= 0.2 && r.score > 0.4)
+      // Filter weak fused candidates, then sort by RRF score.
+      const lexicalRank = scoredResults.filter(r => r.jaccardScore > 0)
+        .sort((a, b) => b.jaccardScore - a.jaccardScore)
+      const vectorRank = scoredResults.filter(r => r.vectorScore >= 0.42)
+        .sort((a, b) => b.vectorScore - a.vectorScore)
+      const graphRank = scoredResults.filter(r => r.graphScore > 0)
+        .sort((a, b) => b.graphScore - a.graphScore)
+      const rrfScores = new Map<string, number>()
+      const addRrf = (ranked: typeof scoredResults) => ranked.slice(0, 100).forEach((item, index) => {
+        rrfScores.set(item.id, (rrfScores.get(item.id) || 0) + 1 / (60 + index + 1))
+      })
+      addRrf(lexicalRank)
+      addRrf(vectorRank)
+      addRrf(graphRank)
+      const maxRrf = 3 / 61
+      for (const item of scoredResults) {
+        const fused = (rrfScores.get(item.id) || 0) / maxRrf
+        item.score = fused * 0.9 + Math.min(1, item.sNow) * 0.1
+      }
+
+      const activeResults = scoredResults.filter(r =>
+        r.sNow >= 0.2
+        && r.score > 0.12
+        && (r.jaccardScore > 0 || r.vectorScore >= 0.42 || r.graphScore > 0)
+      )
       activeResults.sort((a, b) => b.score - a.score)
       const top3 = activeResults.slice(0, 3)
 
@@ -504,9 +573,9 @@ async function getEmbeddingInternal(
     baseUrl: string;
     model: string;
   },
-  _text: string
+  text: string
 ): Promise<number[] | null> {
-  return null
+  return embedText(text)
 }
 
 // 纯本地检索模式只需要保证关键词实体关系完整，不再执行无效的向量迁移探测。
@@ -873,7 +942,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
           }
 
           // 查询是否有相似的已有经验/喜好事实（不限分类）
-          const rows = await database.all("SELECT id, fact FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
+          const rows = await database.all("SELECT id, fact, embedding FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
           
           let matchedId: string | null = null
           if (emb && rows.length > 0) {
@@ -883,7 +952,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
                   const dbEmb = JSON.parse(row.embedding)
                   if (Array.isArray(dbEmb)) {
                     const sim = cosineSimilarity(emb, dbEmb)
-                    if (sim > 0.85) {
+                    if (sim > 0.88) {
                       matchedId = row.id
                       break
                     }
