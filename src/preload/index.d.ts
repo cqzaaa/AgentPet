@@ -40,8 +40,12 @@ declare global {
       getSystemInfo: () => Promise<any>
       getSkillsPath: () => Promise<string>
       openSkillsFolder: () => Promise<void>
+      openExternalUrl: (url: string) => Promise<boolean>
+      onSkillHubInstallEvent: (callback: (data: { status: 'downloading' | 'validating' | 'installed' | 'failed'; filename: string; receivedBytes?: number; totalBytes?: number; skillName?: string; error?: string }) => void) => () => void
       uploadSkillPack: () => Promise<any[]>
       getSkillsList: () => Promise<any[]>
+      setSkillEnabled: (idOrArchive: string, enabled: boolean) => Promise<any[]>
+      getSkillCatalog: (query: string) => Promise<{ catalog: string; enabledCount: number }>
       deleteSkill: (name: string) => Promise<any[]>
       getActiveSkillsPrompt: (enabledSkillNames: string[]) => Promise<string>
       getToolsDefinition: () => Promise<any[]>
@@ -120,6 +124,10 @@ declare global {
       onAutomationProgress: (callback: (data: any) => void) => () => void
       onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
+      getTaskRun: (taskRunId: string) => Promise<any | null>
+      controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel') => Promise<any | null>
+      retryTaskStep: (taskRunId: string, taskStepId: string) => Promise<any | null>
+      onTaskRunUpdated: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
       getStoragePath: () => Promise<string>
       getToolCacheStats: () => Promise<{ fileCount: number; totalBytes: number }>

@@ -87,7 +87,7 @@ export interface TokenLog {
   messageId?: number
 }
 
-export type TabType = 'chat' | 'control' | 'agent' | 'knowledge' | 'settings' | 'logs' | 'rpa'
+export type TabType = 'chat' | 'control' | 'agent' | 'skillhub' | 'knowledge' | 'settings' | 'logs' | 'rpa'
 export type AgentSubTab = 'skills' | 'memory' | 'cron' | 'mcp'
 export type SettingsSubTab = 'keys' | 'storage' | 'avatar'
 
@@ -856,6 +856,7 @@ export function useAppStore() {
         window.api.getStoragePath()
       ])
       setSkillsList(list)
+      setDisabledSkillNames(list.filter((skill: any) => !skill.enabled).map((skill: any) => skill.name))
       setSkillsPath(path)
       setActualStoragePath(customPath || path.replace(/[\\/]skills$/, ''))
       setStorageInputPath(customPath)
@@ -872,13 +873,14 @@ export function useAppStore() {
   }
 
   const toggleSkillEnable = (name: string): void => {
-    setDisabledSkillNames(prev => {
-      const next = prev.includes(name)
-        ? prev.filter(n => n !== name)
-        : [...prev, name]
-      localStorage.setItem('agentpet_disabled_skills', JSON.stringify(next))
-      return next
-    })
+    const skill = skillsList.find((item: any) => item.name === name || item.id === name)
+    if (!skill) return
+    void window.api.setSkillEnabled(skill.id || skill.name, !skill.enabled)
+      .then(list => {
+        setSkillsList(list)
+        setDisabledSkillNames(list.filter((item: any) => !item.enabled).map((item: any) => item.name))
+      })
+      .catch(error => console.error('更新 Skill 启用状态失败:', error))
   }
 
   const refreshAvatarsList = async (): Promise<void> => {
@@ -1634,7 +1636,10 @@ export function useAppStore() {
   const handleImportSkill = async (): Promise<void> => {
     try {
       const list = await window.api.uploadSkillPack()
-      if (list && list.length > 0) setSkillsList(list)
+      if (list) {
+        setSkillsList(list)
+        setDisabledSkillNames(list.filter((skill: any) => !skill.enabled).map((skill: any) => skill.name))
+      }
     } catch (e) { console.error(e) }
   }
 
@@ -1642,6 +1647,7 @@ export function useAppStore() {
     try {
       const list = await window.api.deleteSkill(name)
       setSkillsList(list)
+      setDisabledSkillNames(list.filter((skill: any) => !skill.enabled).map((skill: any) => skill.name))
     } catch (e) { console.error(e) }
   }
 

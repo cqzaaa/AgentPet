@@ -73,8 +73,16 @@ const api = {
   getSystemInfo: (): Promise<any> => ipcRenderer.invoke('api:get-system-info'),
   getSkillsPath: (): Promise<string> => ipcRenderer.invoke('api:get-skills-path'),
   openSkillsFolder: (): Promise<void> => ipcRenderer.invoke('api:open-skills-folder'),
+  openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('api:open-external-url', url),
+  onSkillHubInstallEvent: (callback: (data: any) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, data: any): void => callback(data)
+    ipcRenderer.on('api:skillhub-install-event', subscription)
+    return (): void => { ipcRenderer.removeListener('api:skillhub-install-event', subscription) }
+  },
   uploadSkillPack: (): Promise<any[]> => ipcRenderer.invoke('api:upload-skill-pack'),
   getSkillsList: (): Promise<any[]> => ipcRenderer.invoke('api:get-skills-list'),
+  setSkillEnabled: (idOrArchive: string, enabled: boolean): Promise<any[]> => ipcRenderer.invoke('api:set-skill-enabled', idOrArchive, enabled),
+  getSkillCatalog: (query: string): Promise<{ catalog: string; enabledCount: number }> => ipcRenderer.invoke('api:get-skill-catalog', query),
   deleteSkill: (name: string): Promise<any[]> => ipcRenderer.invoke('api:delete-skill', name),
   getActiveSkillsPrompt: (enabledSkillNames: string[]): Promise<string> =>
     ipcRenderer.invoke('api:get-active-skills-prompt', enabledSkillNames),
@@ -219,6 +227,16 @@ const api = {
     return () => {
       ipcRenderer.removeListener('api:llm-token-usage', subscription)
     }
+  },
+  getTaskRun: (taskRunId: string): Promise<any | null> => ipcRenderer.invoke('api:get-task-run', taskRunId),
+  controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel'): Promise<any | null> =>
+    ipcRenderer.invoke('api:control-task-run', taskRunId, action),
+  retryTaskStep: (taskRunId: string, taskStepId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:retry-task-step', taskRunId, taskStepId),
+  onTaskRunUpdated: (callback: (data: any) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('api:task-run-updated', subscription)
+    return () => ipcRenderer.removeListener('api:task-run-updated', subscription)
   },
   setStoragePath: (pathStr: string): Promise<string> => ipcRenderer.invoke('api:set-storage-path', pathStr),
   getStoragePath: (): Promise<string> => ipcRenderer.invoke('api:get-storage-path'),

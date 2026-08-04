@@ -10,6 +10,9 @@ import { getActiveStorageDir } from '../../utils/paths'
 import { permissionManager } from '../../security/permission-manager'
 import { appendMemorySummaryInternal } from '../../../api/memory'
 import { clarificationManager } from '../../interaction/clarification-manager'
+import { taskRunner } from '../../../task-runtime/task-runner'
+import type { TaskPlanInputStep } from '../../../task-runtime/types'
+import { skillRegistry } from '../../../skills/skill-registry'
 
 const execAsync = promisify(exec)
 
@@ -20,6 +23,68 @@ export class SystemExecutor implements IToolExecutor {
     context: ToolContext
   ): Promise<ToolResult> {
     try {
+      if (api === 'update_task_plan') {
+        const allowedStatuses = new Set(['pending', 'in_progress', 'completed', 'blocked'])
+        const title = String(args.title || '').trim().slice(0, 120)
+        const rawSteps = Array.isArray(args.steps) ? args.steps.slice(0, 12) : []
+        const seenIds = new Set<string>()
+        const steps: TaskPlanInputStep[] = rawSteps
+          .map((step: any, index: number) => {
+            let id = String(step?.id || `step-${index + 1}`).trim().slice(0, 64) || `step-${index + 1}`
+            if (seenIds.has(id)) id = `${id}-${index + 1}`
+            seenIds.add(id)
+            return {
+              id,
+              title: String(step?.title || '').trim().slice(0, 180),
+              status: (allowedStatuses.has(String(step?.status)) ? String(step.status) : 'pending') as TaskPlanInputStep['status'],
+              detail: String(step?.detail || '').trim().slice(0, 500)
+            }
+          })
+          .filter((step: any) => step.title)
+
+        if (!title || steps.length < 2) {
+          return { content: 'Task plan requires a title and at least two valid steps.', success: false }
+        }
+
+        // Keep the message trace for historical rendering, and mirror the same
+        // plan into the durable task tables for long-running task recovery.
+        const taskRun = await taskRunner.updatePlan(context.sessionId, context.messageId, {
+          title,
+          explanation: typeof args.explanation === 'string' ? args.explanation.trim().slice(0, 500) : undefined,
+          steps
+        })
+
+        // The tool call arguments are retained in the message trace. Keep the
+        // acknowledgement compact so repeated progress updates cost very little.
+        const completed = steps.filter((step: any) => step.status === 'completed').length
+        const blocked = steps.some((step: any) => step.status === 'blocked')
+        return {
+          content: JSON.stringify({
+            taskRunId: taskRun.id,
+            status: blocked ? 'blocked' : completed === steps.length ? 'completed' : 'active',
+            completed,
+            total: steps.length
+          }),
+          success: true
+        }
+      }
+
+      if (api === 'request_skill') {
+        const skillIds = Array.isArray(args.skillIds)
+          ? args.skillIds.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 3)
+          : []
+        const reason = String(args.reason || '').trim().slice(0, 500)
+        if (skillIds.length === 0 || !reason) {
+          return { content: 'request_skill requires one to three skillIds and a reason.', success: false }
+        }
+        const result = await skillRegistry.requestSkills(skillIds, context.sessionId, context.messageId)
+        return {
+          content: JSON.stringify({ reason, ...result }),
+          state: { loadedSkillIds: result.loaded.map(skill => skill.id) },
+          success: result.loaded.length > 0
+        }
+      }
+
       // 1. get_system_status
       if (api === 'get_system_status') {
         const cpus = os.cpus()
@@ -301,7 +366,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['update_task_plan', 'request_skill', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

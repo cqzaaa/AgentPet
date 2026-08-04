@@ -1498,6 +1498,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
 
   const toolSteps = msg.toolSteps || []
+  const visibleToolSteps = toolSteps.filter((step: any) => step.name !== 'update_task_plan')
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
   const credentialSteps = toolSteps.filter((step: any) => step.type === 'credential')
   const officeRuntimeSteps = toolSteps.filter((step: any) => step.type === 'officeRuntime')
@@ -1521,9 +1522,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     }
   }, [toolSteps.length])
   const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
-  const shouldShowToolSteps = toolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || s.type === 'compaction' || (s.type === 'think' && s.detail?.trim()))
+  const shouldShowToolSteps = visibleToolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || s.type === 'compaction' || (s.type === 'think' && s.detail?.trim()))
 
-  const callSteps = toolSteps.filter((s: any) => s.type === 'call')
+  const callSteps = visibleToolSteps.filter((s: any) => s.type === 'call')
   let summaryText = ''
   if (callSteps.length > 0) {
     const names = Array.from(new Set(callSteps.map((s: any) => translateToolName(s.name))))
@@ -1738,7 +1739,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     paddingRight: '6px'
                   }}
                 >
-                  {combineToolSteps(toolSteps, msg.isThinking).map((step: any) => {
+                  {combineToolSteps(visibleToolSteps, msg.isThinking).map((step: any) => {
                     if (step.type === 'tool') {
                       return (
                         <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />

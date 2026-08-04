@@ -4,6 +4,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
+import { latestTaskPlan, TaskPlanFloatingStatus, TaskPlanPanel } from '../components/TaskPlanCard'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
@@ -21,6 +22,7 @@ import {
   Globe2,
   KeyRound,
   Link,
+  ListChecks,
   Mic,
   Monitor,
   Palette,
@@ -101,8 +103,36 @@ function ChatPageImpl(): React.JSX.Element {
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [manuallyOpenedTaskPlanMessageId, setManuallyOpenedTaskPlanMessageId] = useState<string | number | null>(null)
+  const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+
+  const latestTaskPlanInfo = useMemo(() => {
+    for (let index = activeSessMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeSessMessages[index]
+      if (message?.sender === 'user') break
+      if (message?.sender !== 'agent' || !Array.isArray(message.toolSteps)) continue
+      const plan = latestTaskPlan(message.toolSteps)
+      if (plan) return { plan, messageId: message.id as string | number, messageIndex: index }
+    }
+    return null
+  }, [activeSessMessages])
+
+  const taskPlanIsExecuting = Boolean(
+    isSending &&
+    latestTaskPlanInfo?.plan.steps.some(step => step.status === 'in_progress')
+  )
+  const showTaskPlanPanel = Boolean(
+    latestTaskPlanInfo &&
+    !showMeetingRecorder &&
+    manuallyOpenedTaskPlanMessageId === latestTaskPlanInfo.messageId
+  )
+
+  const locateTaskPlan = useCallback(() => {
+    if (!latestTaskPlanInfo) return
+    virtuosoRef.current?.scrollToIndex({ index: latestTaskPlanInfo.messageIndex, align: 'start', behavior: 'smooth' })
+  }, [latestTaskPlanInfo])
 
   // 技能与 MCP Popover 状态与 Refs
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
@@ -111,7 +141,6 @@ function ChatPageImpl(): React.JSX.Element {
   const [showModelPopover, setShowModelPopover] = useState(false)
   const [showKnowledgePopover, setShowKnowledgePopover] = useState(false)
   const [knowledgeBases, setKnowledgeBases] = useState<any[]>([])
-  const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [approvalDetailsExpanded, setApprovalDetailsExpanded] = useState(false)
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
@@ -916,7 +945,7 @@ function ChatPageImpl(): React.JSX.Element {
     : approvalLines.slice(0, 6).join('\n').slice(0, 700)
 
   return (
-    <div className={`chat-split-container ${showMeetingRecorder ? 'has-meeting-recorder' : ''}`}>
+    <div className={`chat-split-container ${showMeetingRecorder ? 'has-meeting-recorder' : ''} ${showTaskPlanPanel ? 'has-task-plan' : ''}`}>
       <div
         className="chat-main"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
@@ -1179,6 +1208,10 @@ function ChatPageImpl(): React.JSX.Element {
 
         {/* 现代卡片式输入控制面板 */}
         <div className="chat-control-card">
+          {taskPlanIsExecuting && latestTaskPlanInfo && !showMeetingRecorder && !showTaskPlanPanel && (
+            <TaskPlanFloatingStatus plan={latestTaskPlanInfo.plan} />
+          )}
+
           {/* 人机协作安全核对面板：锚定在输入框上方 */}
           {activePermissionRequest && (
             <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
@@ -1733,6 +1766,31 @@ function ChatPageImpl(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {showTaskPlanPanel && latestTaskPlanInfo && (
+        <TaskPlanPanel
+          plan={latestTaskPlanInfo.plan}
+          running={isSending}
+          onLocate={locateTaskPlan}
+          onClose={() => {
+            setManuallyOpenedTaskPlanMessageId(null)
+          }}
+        />
+      )}
+
+      {!showTaskPlanPanel && latestTaskPlanInfo && !showMeetingRecorder && (
+        <button
+          type="button"
+          className="task-plan-panel-reopen"
+          onClick={() => {
+            setManuallyOpenedTaskPlanMessageId(latestTaskPlanInfo.messageId)
+          }}
+          title="打开任务执行面板"
+        >
+          <ListChecks size={16} />
+          <span>{latestTaskPlanInfo.plan.steps.filter(step => step.status === 'completed').length}/{latestTaskPlanInfo.plan.steps.length}</span>
+        </button>
+      )}
 
       {showMeetingRecorder && (
         <MeetingRecorderPanel

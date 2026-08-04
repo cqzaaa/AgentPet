@@ -45,7 +45,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     agentSubTab, setAgentSubTab,
     // skills
     skillsList, skillsPath,
-    handleSkillsPathClick, handleImportSkill, handleDeleteSkill,
+    handleSkillsPathClick, handleImportSkill, handleDeleteSkill, toggleSkillEnable,
     // memory
     autoSaveHistory, setAutoSaveHistory,
     contextRounds, setContextRounds,
@@ -182,24 +182,62 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               </div>
             </div>
 
+            <div className="skills-summary-strip">
+              <span><strong>{skillsList.length}</strong> 已安装</span>
+              <span><strong>{skillsList.filter((skill: any) => skill.enabled).length}</strong> 已启用</span>
+              <span className="skills-summary-hint">启用表示允许按需调用，不会把完整 Skill 全部注入上下文</span>
+            </div>
+
             <div className="skills-table-wrapper">
               {skillsList.length > 0 ? (
                 <table className="skills-table">
+                  <colgroup>
+                    <col className="skill-col-enabled" />
+                    <col className="skill-col-identity" />
+                    <col className="skill-col-source" />
+                    <col className="skill-col-tokens" />
+                    <col className="skill-col-date" />
+                    <col className="skill-col-actions" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th>技能包名称</th>
-                      <th>文件格式</th>
-                      <th>文件大小</th>
+                      <th>启用</th>
+                      <th>Skill</th>
+                      <th>来源</th>
+                      <th>预计 Token</th>
                       <th>导入日期</th>
                       <th style={{ textAlign: 'right' }}>操作</th>
                     </tr>
                   </thead>
                   <tbody>
                     {skillsList.map(skill => (
-                      <tr key={skill.name}>
-                        <td style={{ fontWeight: 600 }}>{skill.name}</td>
-                        <td><span className="skill-zip-badge">ZIP</span></td>
-                        <td>{formatBytes(skill.size)}</td>
+                      <tr key={skill.name} className={skill.enabled ? '' : 'is-disabled'}>
+                        <td>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={Boolean(skill.enabled)}
+                            className={`skill-enable-switch ${skill.enabled ? 'is-on' : ''}`}
+                            onClick={() => toggleSkillEnable(skill.name)}
+                            title={skill.enabled ? '关闭 Skill' : '启用 Skill'}
+                          >
+                            <span />
+                          </button>
+                        </td>
+                        <td>
+                          <div className="skill-identity">
+                            <strong title={skill.displayName || skill.name.replace(/\.zip$/i, '')}>{skill.displayName || skill.name.replace(/\.zip$/i, '')}</strong>
+                            <small title={skill.description || '尚未提供描述'}>{skill.description || '尚未提供描述'}</small>
+                            <span title={skill.name}>{skill.name}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="skill-source-cell">
+                            <span className="skill-zip-badge">{skill.source?.type === 'skillhub' ? 'SkillHub' : '导入'}</span>
+                            <small>{formatBytes(skill.size)}{skill.version ? ` · v${skill.version}` : ''}</small>
+                          </div>
+                        </td>
+                        <td><span className="skill-token-count">≈ {Number(skill.estimatedTokens || 0).toLocaleString()}</span></td>
                         <td>{new Date(skill.mtime).toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button className="delete-btn" onClick={() => handleDeleteSkill(skill.name)}>

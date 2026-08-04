@@ -228,14 +228,11 @@ export function useChatSend({
         .slice(-state.contextRounds * 2)
         .map(toLlmMessage)
 
-      const enabledSkillNames = state.skillsList
-        .filter(skill => !state.disabledSkillNames.includes(skill.name))
-        .map(skill => skill.name)
       const retrievalQuery = text || fileNames
-      const [profileContent, recallResponse, skillsPromptText, activeMcpServers, knowledgeEvidence] = await Promise.all([
+      const [profileContent, recallResponse, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([
         window.api.getMemoryProfile().catch((error: any) => { console.error('获取人物画像失败:', error); return '' }),
         window.api.recallExperiences(text).catch((error: any) => { console.error('获取避坑经验失败:', error); return [] }),
-        window.api.getActiveSkillsPrompt(enabledSkillNames).catch((error: any) => { console.error('获取已启用技能提示词失败:', error); return '' }),
+        window.api.getSkillCatalog(retrievalQuery).catch((error: any) => { console.error('获取 Skill 候选目录失败:', error); return { catalog: '', enabledCount: 0 } }),
         window.api.getActiveMcpServers().catch((error: any) => { console.error('获取可用 MCP 服务列表失败:', error); return [] }),
         state.selectedKnowledgeBaseId && retrievalQuery
           ? window.api.knowledgeSearch(state.selectedKnowledgeBaseId, retrievalQuery).catch((error: any) => {
@@ -268,9 +265,9 @@ export function useChatSend({
             }).join('\n')}`
           : '')
       const knowledgeContext = formatKnowledgeEvidence(state.selectedKnowledgeBaseName, knowledgeEvidence as any[])
-      const skillsContext = String(skillsPromptText).trim()
-        ? `你当前已配备、激活并载入了以下专属技能扩展规约，请严格遵守这些技能定义的规约与最佳实践：\n\n${skillsPromptText}`
-        : '你当前尚未启用任何第三方扩展skill技能。'
+      const skillsContext = String(skillCatalogResult.catalog || '').trim()
+        ? `以下是当前请求可使用的 Skill 基础目录。目录不是完整规范；只有确实需要时才调用 request_skill 读取完整内容，每轮最多加载 3 个：\n\n${skillCatalogResult.catalog}`
+        : '当前请求没有可用的第三方 Skill。不要调用 request_skill。'
       const avatar = getAvatar(state)
       const stylePrompt = avatar.style === 'cute'
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'

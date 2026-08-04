@@ -34,6 +34,9 @@ import { officeRuntimeManager } from './tools/interaction/office-runtime-manager
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
 import { ModelRuntimeFactory } from './model-runtime'
+import { taskRunner } from './task-runtime/task-runner'
+import { handleSkillHubDownload } from './skills/skillhub-download-installer'
+import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
 import globalAssistantPageContextSkill from './tools/builtin/global-assistant-page-context/SKILL.md?raw'
 
@@ -652,19 +655,51 @@ function stopGlobalAssistantTaskInternal(): void {
 // 跟踪每个会话最近上传的 xlsx 文件，用于 generate_file 时自动复制数据验证
 const sessionLastXlsxMap: Map<string, string> = new Map()
 
-async function copyFolderRecursive(src: string, dest: string): Promise<void> {
+async function copyFolderRecursive(src: string, dest: string, skipNames: Set<string> = new Set()): Promise<void> {
   if (!fs.existsSync(src)) return
   await fs.promises.mkdir(dest, { recursive: true })
   const entries = await fs.promises.readdir(src, { withFileTypes: true })
   for (const entry of entries) {
+    if (skipNames.has(entry.name.toLowerCase())) continue
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
     if (entry.isDirectory()) {
-      await copyFolderRecursive(srcPath, destPath)
+      await copyFolderRecursive(srcPath, destPath, skipNames)
     } else {
       await fs.promises.copyFile(srcPath, destPath)
     }
   }
+}
+
+async function backupSqliteDatabase(sourcePath: string, destinationPath: string): Promise<void> {
+  await fs.promises.mkdir(dirname(destinationPath), { recursive: true })
+  await new Promise<void>((resolveBackup, rejectBackup) => {
+    const sourceDatabase = new sqlite3.Database(sourcePath, sqlite3.OPEN_READONLY, (openError) => {
+      if (openError) {
+        sourceDatabase.close(() => rejectBackup(openError))
+        return
+      }
+      const backup = (sourceDatabase as any).backup(destinationPath, (initializeError?: Error | null) => {
+        if (initializeError) {
+          sourceDatabase.close(() => rejectBackup(initializeError))
+          return
+        }
+        backup.step(-1, (stepError?: Error | null) => {
+          backup.finish((finishError?: Error | null) => {
+            sourceDatabase.close((closeError) => {
+              if (stepError) rejectBackup(stepError)
+              else if (finishError) rejectBackup(finishError)
+              else if (closeError) rejectBackup(closeError)
+              else resolveBackup()
+            })
+          })
+        })
+      })
+      // Explicit lifecycle: retryable BUSY/LOCKED states must surface to the
+      // caller, and finish() below releases the native backup handle.
+      backup.retryErrors = []
+    })
+  })
 }
 
 function createAgentWindow(openParams?: { taskId: string; logId: string }): void {
@@ -694,9 +729,64 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      plugins: true
+      plugins: true,
+      webviewTag: true
     }
   })
+
+  const skillHubHosts = new Set(['skillhub.cn', 'www.skillhub.cn'])
+  const isAllowedSkillHubUrl = (rawUrl: string): boolean => {
+    try {
+      const parsed = new URL(rawUrl)
+      return parsed.protocol === 'https:' && skillHubHosts.has(parsed.hostname.toLowerCase())
+    } catch {
+      return false
+    }
+  }
+
+  // The market guest is deliberately less privileged than AgentPet's renderer.
+  // Never accept preload paths or webPreferences supplied by remote content.
+  agentWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!isAllowedSkillHubUrl(params.src)) {
+      event.preventDefault()
+      return
+    }
+    delete (webPreferences as any).preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    webPreferences.webSecurity = true
+    webPreferences.allowRunningInsecureContent = false
+  })
+
+  agentWindow.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('https://')) void shell.openExternal(url)
+      return { action: 'deny' }
+    })
+    const guardSkillHubNavigation = (event: Electron.Event, url: string): void => {
+      if (!isAllowedSkillHubUrl(url)) {
+        event.preventDefault()
+        if (url.startsWith('https://')) void shell.openExternal(url)
+      }
+    }
+    guest.on('will-navigate', guardSkillHubNavigation)
+    guest.on('will-redirect', guardSkillHubNavigation)
+  })
+
+  const skillHubSession = session.fromPartition('persist:skillhub-market')
+  skillHubSession.setPermissionCheckHandler(() => false)
+  skillHubSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  if (!skillHubDownloadHandlerRegistered) {
+    skillHubDownloadHandlerRegistered = true
+    skillHubSession.on('will-download', (_event, item, source) => {
+      if (!agentWindow || agentWindow.isDestroyed()) {
+        item.cancel()
+        return
+      }
+      handleSkillHubDownload(item, agentWindow.webContents, source)
+    })
+  }
 
   // 禁用默认菜单栏
   agentWindow.setMenu(null)
@@ -892,6 +982,7 @@ function createTray(): void {
 }
 
 let ipcWindowHandlersRegistered = false
+let skillHubDownloadHandlerRegistered = false
 
 function showAgentWindow(win: BrowserWindow): void {
   const wasAlwaysOnTop = win.isAlwaysOnTop()
@@ -1213,6 +1304,37 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  taskRunner.recoverInterruptedRuns().catch((error) => {
+    console.error('[TaskRunner] Failed to restore interrupted task state', error)
+  })
+
+  ipcMain.handle('api:get-task-run', async (_event, taskRunId: string) => {
+    if (!taskRunId || typeof taskRunId !== 'string') return null
+    return taskRunner.getRun(taskRunId)
+  })
+
+  ipcMain.handle('api:control-task-run', async (event, taskRunId: string, action: 'pause' | 'resume' | 'cancel') => {
+    if (!taskRunId || !['pause', 'resume', 'cancel'].includes(action)) return null
+    const current = await taskRunner.getRun(taskRunId)
+    if (!current) return null
+    if (action === 'pause' || action === 'cancel') {
+      const controller = activeLlmAbortControllers.get(current.run.sessionId)
+      if (controller) {
+        try { controller.abort() } catch { /* best effort */ }
+        activeLlmAbortControllers.delete(current.run.sessionId)
+      }
+    }
+    const run = await taskRunner.control(taskRunId, action)
+    if (run) event.sender.send('api:task-run-updated', { taskRunId, run, action })
+    return run
+  })
+
+  ipcMain.handle('api:retry-task-step', async (event, taskRunId: string, taskStepId: string) => {
+    if (!taskRunId || !taskStepId || typeof taskRunId !== 'string' || typeof taskStepId !== 'string') return null
+    const result = await taskRunner.retryStep(taskRunId, taskStepId)
+    if (result) event.sender.send('api:task-run-updated', { taskRunId, ...result, action: 'retry_step' })
+    return result
+  })
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   registerBuiltinTools()
   loadSystemLlmConfig()
@@ -1950,7 +2072,19 @@ app.whenReady().then(() => {
         const oldModPath = join(oldBaseDir, mod)
         const newModPath = join(newBaseDir, mod)
         if (fs.existsSync(oldModPath)) {
-          await copyFolderRecursive(oldModPath, newModPath)
+          if (mod === 'chat') {
+            const oldDatabasePath = join(oldModPath, 'chat.db')
+            const newDatabasePath = join(newModPath, 'chat.db')
+            if (fs.existsSync(oldDatabasePath)) {
+              // SQLite owns the WAL/SHM files while AgentPet is running. Its
+              // online backup API produces a consistent destination database
+              // without copying those locked transient files.
+              await backupSqliteDatabase(oldDatabasePath, newDatabasePath)
+            }
+            await copyFolderRecursive(oldModPath, newModPath, new Set(['chat.db', 'chat.db-wal', 'chat.db-shm']))
+          } else {
+            await copyFolderRecursive(oldModPath, newModPath)
+          }
           try {
             await fs.promises.rm(oldModPath, { recursive: true, force: true })
           } catch (err) {
@@ -3885,6 +4019,17 @@ app.whenReady().then(() => {
     await shell.openPath(getActiveSkillsDir())
   })
 
+  ipcMain.handle('api:open-external-url', async (_event, rawUrl: string) => {
+    try {
+      const url = new URL(String(rawUrl || ''))
+      if (url.protocol !== 'https:') return false
+      await shell.openExternal(url.toString())
+      return true
+    } catch {
+      return false
+    }
+  })
+
   const unzipSkillPack = async (zipPath: string, destDir: string): Promise<void> => {
     try {
       const data = await fs.promises.readFile(zipPath)
@@ -3937,10 +4082,24 @@ app.whenReady().then(() => {
             await unzipSkillPack(filePath, folderPath)
           }
 
+          let skillIndex = await skillRegistry.getRecord(file)
+          if (needsUnzip || !skillIndex) {
+            skillIndex = await skillRegistry.indexArchive(file, folderPath, { type: 'import' })
+          }
+
           list.push({
             name: file,
             size: stat.size,
-            mtime: stat.mtime.toISOString()
+            mtime: stat.mtime.toISOString(),
+            id: skillIndex?.id || file.replace(/\.zip$/i, ''),
+            displayName: skillIndex?.name || file.replace(/\.zip$/i, ''),
+            description: skillIndex?.description || '',
+            triggers: skillIndex?.triggers || [],
+            allowedTools: skillIndex?.allowedTools || [],
+            version: skillIndex?.version || '',
+            enabled: skillIndex?.enabled === true,
+            estimatedTokens: skillIndex?.estimatedTokens || 0,
+            source: skillIndex?.source || { type: 'legacy' }
           })
         }
       }
@@ -3953,6 +4112,15 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:get-skills-list', async () => {
     return await readSkillsFolder()
+  })
+
+  ipcMain.handle('api:set-skill-enabled', async (_event, idOrArchive: string, enabled: boolean) => {
+    await skillRegistry.setEnabled(String(idOrArchive || ''), Boolean(enabled))
+    return await readSkillsFolder()
+  })
+
+  ipcMain.handle('api:get-skill-catalog', async (_event, query: string) => {
+    return await skillRegistry.buildCatalog(String(query || ''))
   })
 
   ipcMain.handle('api:upload-skill-pack', async (event) => {
@@ -3985,6 +4153,7 @@ app.whenReady().then(() => {
       if (fs.existsSync(filePath)) {
         await shell.trashItem(filePath)
       }
+      await skillRegistry.removeIndex(name)
       // 同时清理对应的解包文件夹
       if (name.toLowerCase().endsWith('.zip')) {
         const folderName = name.substring(0, name.length - 4)
@@ -4027,6 +4196,8 @@ app.whenReady().then(() => {
       const prompts: string[] = []
       
       for (const zipName of enabledSkillNames) {
+        const skillIndex = await skillRegistry.getRecord(zipName)
+        if (!skillIndex?.enabled) continue
         const folderName = zipName.toLowerCase().endsWith('.zip') 
           ? zipName.substring(0, zipName.length - 4)
           : zipName
@@ -4990,6 +5161,13 @@ app.whenReady().then(() => {
       try { controller.abort() } catch (_) { /* ignore */ }
     }
     activeLlmAbortControllers.clear()
+
+    // Persist a recoverable snapshot before the process exits. Recovery is
+    // deliberately passive: a later phase will ask the user before resuming
+    // any step that could have side effects.
+    taskRunner.checkpointActiveRuns().catch((error) => {
+      console.error('[TaskRunner] Failed to save task checkpoints before exit', error)
+    })
 
     // 2. 解除所有等待授权的阻塞，避免 loading 挂起
     permissionManager.clearPendingPermissions()

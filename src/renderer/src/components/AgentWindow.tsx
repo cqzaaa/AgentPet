@@ -24,6 +24,7 @@ import {
   Plus,
   ScrollText,
   Square,
+  Store,
   Sun,
   Workflow,
   X
@@ -40,6 +41,7 @@ const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => (
 const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
 const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(module => ({ default: module.KnowledgeBasePage })))
 const RpaPage = lazy(() => import('../rpa/RpaPage').then(module => ({ default: module.RpaPage })))
+const SkillHubPage = lazy(() => import('../pages/SkillHubPage').then(module => ({ default: module.SkillHubPage })))
 const FilePreviewPanel = lazy(() =>
   import('./FilePreviewPanel').then(module => ({ default: module.FilePreviewPanel }))
 )
@@ -48,13 +50,14 @@ function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
 }
 
-type FunctionPageId = 'control' | 'agent' | 'knowledge' | 'rpa' | 'logs' | 'settings'
+type FunctionPageId = 'control' | 'agent' | 'skillhub' | 'knowledge' | 'rpa' | 'logs' | 'settings'
 
 type WorkspaceTab =
   | { key: string; kind: 'session'; sessionId: string }
   | { key: string; kind: 'page'; pageId: FunctionPageId; detailId?: string }
 
 const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
+  skillhub: '技能市场',
   control: '订阅频道',
   agent: '代理',
   knowledge: '知识库',
@@ -472,6 +475,7 @@ export function AgentWindow(): React.JSX.Element {
       case 'chat': page = <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
       case 'control': page = <ControlPage store={store} />; break
       case 'agent': page = <AgentPage store={store} />; break
+      case 'skillhub': page = <SkillHubPage />; break
       case 'knowledge': page = <KnowledgeBasePage />; break
       case 'logs': page = <LogsPage store={store} />; break
       case 'settings': page = <SettingsPage store={store} />; break
@@ -563,6 +567,10 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
                 <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              </div>
+              <div className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`} onClick={() => setActiveTab('skillhub')} title="技能市场">
+                <div className="menu-item-left"><Store size={18} strokeWidth={2} aria-hidden="true" /><span>技能市场</span></div>
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`} onClick={() => setActiveTab('knowledge')} title="知识库">
@@ -724,6 +732,7 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'chat' && (sessions.find(s => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
               {activeTab === 'control' && '订阅频道'}
               {activeTab === 'agent' && 'Agent 智能体核心系统'}
+              {activeTab === 'skillhub' && '腾讯 SkillHub 技能市场'}
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
             </div>
@@ -731,6 +740,7 @@ export function AgentWindow(): React.JSX.Element {
               <div className="content-subtitle">
                 {activeTab === 'control' && '配置和管理您的订阅渠道'}
                 {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
+                {activeTab === 'skillhub' && '浏览第三方技能；安装仍由 AgentPet 进行权限确认'}
                 {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
                 {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
               </div>

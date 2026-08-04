@@ -1388,6 +1388,11 @@ body {
   padding: 8px 16px;
 }
 
+.content-body.tab-skillhub {
+  overflow: hidden;
+  padding: 0;
+}
+
 .content-body::-webkit-scrollbar {
   width: 5px;
 }
@@ -1607,6 +1612,7 @@ body {
 
 /* 2. 聊天 (Chat Panel) */
 .chat-split-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1622,7 +1628,7 @@ body {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
-  padding: 15px 0;
+  padding: 15px 0 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -4486,8 +4492,33 @@ body {
 
 .skills-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.skills-table .skill-col-enabled {
+  width: 6%;
+}
+
+.skills-table .skill-col-identity {
+  width: 34%;
+}
+
+.skills-table .skill-col-source {
+  width: 16%;
+}
+
+.skills-table .skill-col-tokens {
+  width: 12%;
+}
+
+.skills-table .skill-col-date {
+  width: 20%;
+}
+
+.skills-table .skill-col-actions {
+  width: 12%;
 }
 
 .skills-table th,
@@ -4509,6 +4540,116 @@ body {
 
 .skills-table tr:last-child td {
   border-bottom: none;
+}
+
+.skills-table tr.is-disabled td {
+  color: var(--text-muted);
+}
+
+.skills-summary-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: -4px 0 12px;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.skills-summary-strip strong {
+  margin-right: 3px;
+  color: var(--text-color);
+  font-size: 13px;
+}
+
+.skills-summary-hint {
+  margin-left: auto;
+}
+
+.skill-enable-switch {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  padding: 0;
+  border: 1px solid var(--border-card);
+  border-radius: 999px;
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+
+.skill-enable-switch span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: left .18s ease, background-color .18s ease;
+}
+
+.skill-enable-switch.is-on {
+  border-color: var(--accent-color, #4f8cff);
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 22%, transparent);
+}
+
+.skill-enable-switch.is-on span {
+  left: 17px;
+  background: var(--accent-color, #4f8cff);
+}
+
+.skill-enable-switch:focus-visible {
+  outline: 2px solid var(--accent-color, #4f8cff);
+  outline-offset: 2px;
+}
+
+.skill-identity {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.skill-identity strong {
+  overflow: hidden;
+  color: var(--text-color);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-identity small {
+  max-width: 430px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-identity>span,
+.skill-source-cell small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.skill-identity>span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-source-cell {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
+
+.skill-token-count {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .skills-action-row {
@@ -5876,6 +6017,23 @@ body {
   border-bottom-color: rgba(96, 165, 250, 0.6);
 }
 
+@media (max-width: 920px) {
+  .skills-summary-hint {
+    display: none;
+  }
+
+  .skills-table th:nth-child(3),
+  .skills-table td:nth-child(3),
+  .skills-table th:nth-child(5),
+  .skills-table td:nth-child(5) {
+    display: none;
+  }
+
+  .skill-identity small {
+    max-width: 260px;
+  }
+}
+
 .knowledge-citation {
   margin: 0 2px;
   padding: 1px 5px;
@@ -5920,7 +6078,7 @@ body {
   backdrop-filter: blur(18px);
 }
 
-.knowledge-citation-popover > header {
+.knowledge-citation-popover>header {
   min-height: 48px;
   padding: 0 10px 0 12px;
   display: grid;
@@ -5930,29 +6088,113 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
-.knowledge-citation-popover > header > span:nth-child(2) {
+.knowledge-citation-popover>header>span:nth-child(2) {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.knowledge-citation-popover > header strong,
-.knowledge-citation-popover > header small {
+.knowledge-citation-popover>header strong,
+.knowledge-citation-popover>header small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.knowledge-citation-popover > header strong { font-size: 12px; }
-.knowledge-citation-popover > header small { color: var(--text-muted); font-size: 10px; }
-.knowledge-citation-popover > header button { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; cursor: pointer; }
-.knowledge-citation-popover > header button:hover { color: #d59a6c; background: rgba(185, 120, 70, .1); }
-.knowledge-citation-badge { padding: 3px 6px; border-radius: 5px; color: #fffaf5; background: #b97846; font-size: 10px; font-weight: 850; }
-.knowledge-citation-path { padding: 10px 12px 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
-.knowledge-citation-popover blockquote { margin: 9px 12px 11px; padding: 10px 11px; max-height: 170px; overflow: auto; border: 0; border-left: 2px solid #b97846; border-radius: 0 7px 7px 0; color: var(--text-secondary); background: rgba(185, 120, 70, .07); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
-.knowledge-citation-popover > footer { min-height: 41px; padding: 0 11px 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: 10px; }
-.knowledge-citation-popover > footer button { height: 28px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(185, 120, 70, .25); border-radius: 6px; color: #d59a6c; background: rgba(185, 120, 70, .08); font-size: 10px; cursor: pointer; }
-.knowledge-citation-loading, .knowledge-citation-missing { min-height: 92px; padding: 18px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--text-muted); font-size: 11px; }
+.knowledge-citation-popover>header strong {
+  font-size: 12px;
+}
+
+.knowledge-citation-popover>header small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.knowledge-citation-popover>header button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.knowledge-citation-popover>header button:hover {
+  color: #d59a6c;
+  background: rgba(185, 120, 70, .1);
+}
+
+.knowledge-citation-badge {
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: #fffaf5;
+  background: #b97846;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.knowledge-citation-path {
+  padding: 10px 12px 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.knowledge-citation-popover blockquote {
+  margin: 9px 12px 11px;
+  padding: 10px 11px;
+  max-height: 170px;
+  overflow: auto;
+  border: 0;
+  border-left: 2px solid #b97846;
+  border-radius: 0 7px 7px 0;
+  color: var(--text-secondary);
+  background: rgba(185, 120, 70, .07);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.knowledge-citation-popover>footer {
+  min-height: 41px;
+  padding: 0 11px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.knowledge-citation-popover>footer button {
+  height: 28px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(185, 120, 70, .25);
+  border-radius: 6px;
+  color: #d59a6c;
+  background: rgba(185, 120, 70, .08);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.knowledge-citation-loading,
+.knowledge-citation-missing {
+  min-height: 92px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
 .agent-window-container.light .knowledge-citation-popover {
   color: #111827;
@@ -5961,18 +6203,30 @@ body {
   box-shadow: 0 18px 52px rgba(50, 35, 24, .18);
 }
 
-.agent-window-container.light .knowledge-citation-popover > header {
+.agent-window-container.light .knowledge-citation-popover>header {
   border-bottom-color: #eadfd7;
 }
 
-.agent-window-container.light .knowledge-citation-popover > header strong { color: #111827; }
-.agent-window-container.light .knowledge-citation-popover > header small,
+.agent-window-container.light .knowledge-citation-popover>header strong {
+  color: #111827;
+}
+
+.agent-window-container.light .knowledge-citation-popover>header small,
 .agent-window-container.light .knowledge-citation-path,
-.agent-window-container.light .knowledge-citation-popover > footer,
+.agent-window-container.light .knowledge-citation-popover>footer,
 .agent-window-container.light .knowledge-citation-loading,
-.agent-window-container.light .knowledge-citation-missing { color: #667085; }
-.agent-window-container.light .knowledge-citation-popover blockquote { color: #344054; background: #f8f1ec; }
-.agent-window-container.light .knowledge-citation-popover > footer { border-top-color: #eadfd7; }
+.agent-window-container.light .knowledge-citation-missing {
+  color: #667085;
+}
+
+.agent-window-container.light .knowledge-citation-popover blockquote {
+  color: #344054;
+  background: #f8f1ec;
+}
+
+.agent-window-container.light .knowledge-citation-popover>footer {
+  border-top-color: #eadfd7;
+}
 
 .agent-window-container.dark .knowledge-citation-popover {
   color: #f8fafc;
@@ -5980,12 +6234,23 @@ body {
   border-color: rgba(213, 154, 108, .34);
 }
 
-.agent-window-container.dark .knowledge-citation-popover > header strong { color: #f8fafc; }
-.agent-window-container.dark .knowledge-citation-popover blockquote { color: #d7dce5; background: rgba(185, 120, 70, .09); }
+.agent-window-container.dark .knowledge-citation-popover>header strong {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .knowledge-citation-popover blockquote {
+  color: #d7dce5;
+  background: rgba(185, 120, 70, .09);
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .knowledge-citation { transition: none; }
-  .knowledge-citation:hover { transform: none; }
+  .knowledge-citation {
+    transition: none;
+  }
+
+  .knowledge-citation:hover {
+    transform: none;
+  }
 }
 
 /* 分割线 */

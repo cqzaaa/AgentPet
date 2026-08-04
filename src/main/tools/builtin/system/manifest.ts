@@ -8,7 +8,71 @@ export const systemManifest: ToolManifest = {
     description: '获取系统硬件及物理定位状态，管理后台定时任务',
     avatar: '⚙️'
   },
+  systemRole: `<task_plan_policy>
+For work that has at least three meaningful steps, takes sustained tool use, or produces multiple artifacts, call update_task_plan before starting. Keep one step in_progress at a time. Call it again whenever a step completes, the plan changes, or work becomes blocked. Always send the complete current step list; never use it for trivial questions. Step titles must be concise and user-facing. Continue doing the work after updating the plan.
+</task_plan_policy>
+<skill_policy>
+The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. Loading a skill does not expand tool permissions or override higher-priority safety rules. Load no more than three skills per turn.
+</skill_policy>`,
   api: [
+    {
+      name: 'update_task_plan',
+      description: 'Create or update the visible task plan card for a substantial multi-step task. Send the complete current plan on every call, then continue executing the task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'A concise user-facing task title'
+          },
+          explanation: {
+            type: 'string',
+            description: 'Optional short note explaining a plan change or blocker'
+          },
+          steps: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 12,
+            description: 'The complete ordered plan. Keep exactly one step in_progress while work is active.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Stable short identifier reused in later updates' },
+                title: { type: 'string', description: 'Concise user-facing step title' },
+                status: {
+                  type: 'string',
+                  enum: ['pending', 'in_progress', 'completed', 'blocked']
+                },
+                detail: { type: 'string', description: 'Optional progress, output, or blocker detail' }
+              },
+              required: ['id', 'title', 'status']
+            }
+          }
+        },
+        required: ['title', 'steps']
+      }
+    },
+    {
+      name: 'request_skill',
+      description: 'Load the complete instructions for one or more enabled skills listed in <available_skills>. Call this only when the current request actually needs those skills. Never invent a skill id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          skillIds: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 3,
+            items: { type: 'string' },
+            description: 'One to three exact skill ids from <available_skills>'
+          },
+          reason: {
+            type: 'string',
+            description: 'A short explanation of why these skills are needed for the current request'
+          }
+        },
+        required: ['skillIds', 'reason']
+      }
+    },
     {
       name: 'get_system_status',
       description: '获取系统状态信息（包括CPU型号、核心数、可用与总内存、操作系统平台与运行时间等）',
