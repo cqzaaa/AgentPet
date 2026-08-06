@@ -1,5 +1,5 @@
 import * as fs from 'fs'
-import { basename, isAbsolute, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions } from '../model-runtime'
 import { AgentStepEvent } from './types'
 import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
@@ -9,11 +9,16 @@ import { unifiedToolExecutor } from '../tools/core/tool-executor'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
+import { skillRegistry } from '../skills/skill-registry'
+import { isSimpleSingleFileMutationRequest } from './tool-routing'
+import { taskRunner } from '../task-runtime/task-runner'
 import {
-  detectOfficeAttachment,
-  shouldForceBingSearch,
-  shouldForceDomBrowser
-} from './tool-routing'
+  BOOTSTRAP_TOOL_NAMES,
+  activateAllowedTools,
+  createInitialActiveToolNames,
+  filterToolDefinitions,
+  inferPreloadedSkillIds
+} from './skill-tool-routing'
 
 type WebMemorySource = {
   id: string
@@ -82,14 +87,14 @@ const MUTATING_TOOL_NAMES = new Set([
 // OS-level actions have temporal dependencies (focus → type, click → submit).
 // They must never share the parallel execution batch used for read-only tools.
 const COMPUTER_TOOL_NAMES = new Set([
-  'screenshot', 'mouse_move', 'mouse_click', 'mouse_scroll',
-  'type_text', 'key_press', 'get_windows', 'focus_window'
+  'screenshot', 'mouse_move', 'mouse_click', 'mouse_click_relative', 'mouse_scroll',
+  'type_text', 'key_press', 'get_windows', 'focus_window', 'find_ui_elements',
+  'click_ui_element', 'focus_ui_element', 'perform_computer_actions'
 ])
 
 // A normal search is intentionally a short, deterministic workflow.
 // browser_search starts/connects Edge itself; browser_click opens a result.
 const BING_SEARCH_TOOL_NAMES = new Set(['browser_search', 'browser_click'])
-const OFFICE_SKILL_TOOL_NAMES = new Set(['load_office_skill', 'run_office_skill'])
 
 function messageText(message: ChatMessage | undefined): string {
   if (!message) return ''
@@ -190,6 +195,37 @@ export class AgentExecutor {
       addFile(item?.file_path || item?.path, item?.file_name || item?.name)
     }
     return files
+  }
+
+  private getArtifactInputPaths(args: unknown): string[] {
+    const paths: string[] = []
+    const visit = (value: unknown, key = ''): void => {
+      if (typeof value === 'string') {
+        if (/^(?:source|input|file)_path$/i.test(key) && isAbsolute(value)) paths.push(value)
+        return
+      }
+      if (!value || typeof value !== 'object') return
+      if (Array.isArray(value)) {
+        value.forEach(item => visit(item, key))
+        return
+      }
+      for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+        visit(childValue, childKey)
+      }
+    }
+    visit(args)
+    return paths
+  }
+
+  private getExistingArtifact(filePath: unknown): { name: string; path: string; size: number } | null {
+    if (typeof filePath !== 'string' || !isAbsolute(filePath)) return null
+    try {
+      const stat = fs.statSync(filePath)
+      if (!stat.isFile()) return null
+      return { name: basename(filePath), path: filePath, size: stat.size }
+    } catch {
+      return null
+    }
   }
 
   private buildToolImageBlocks(filePaths: string[]): any[] {
@@ -746,9 +782,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       messageId?: number
       isBackground?: boolean
       disableTools?: boolean
-      toolRouting?: 'auto' | 'all'
-      toolIntentText?: string
       allowedToolNames?: string[]
+      blockedToolNames?: string[]
       dedupeMutatingToolCalls?: boolean
       disableMemoryPersistence?: boolean
       sandboxMode?: boolean
@@ -778,6 +813,15 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       ].join('\n')
     })
 
+    // Keep only the bootstrap policy in the initial prompt. Non-bootstrap tools,
+    // including delegation, become callable only after request_skill activates
+    // the owning built-in skill for this turn.
+    const taskToolManifest = toolRegistry.getManifest('delegate_tasks') || toolRegistry.getManifest('update_task_plan')
+    const taskToolPolicy = typeof taskToolManifest?.systemRole === 'string' ? taskToolManifest.systemRole : ''
+    if (taskToolPolicy && typeof chatHistory[0].content === 'string') {
+      chatHistory[0].content += `\n\n${taskToolPolicy}\n<builtin_task_tools>\n- update_task_plan creates a plan once; update_task_step applies later step changes.\n- Both plan tools are unavailable for simple single-file, single-mutation, low-risk tasks.\n- Load the agent-workflow Skill through request_skill before using delegate_tasks.\n</builtin_task_tools>`
+    }
+
     if (sessionId) {
       const chatDir = getActiveChatDir()
       const safeSessionId = sessionId.replace(/[<>:"/\\|?*]/g, '_')
@@ -786,9 +830,10 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
 
 [本地文件定位规则]
 1. 用户只提供文件名（例如“帮我找 erro.txt”）而没有说明目录时，不要猜测文件在其他磁盘，也不要在磁盘间自动切换。
-2. 先检查当前会话附件目录和用户已明确授权的目录。若信息不足，必须调用 request_user_clarification。问题、选项和输入提示必须由当前任务及已有上下文决定，不得使用固定问题或固定选项。
-3. 搜索超时只表示范围过大，绝不表示文件不存在。必须留在同一范围内缩小搜索；仍无法缩小范围时，调用 request_user_clarification 请求最有帮助的线索，而不是改搜其他磁盘。
-4. 找文件名优先调用 find_files；找到候选后再用 get_file_metadata 或 read_file 验证。`
+2. 用户明确说“桌面”“文档”或“下载”时，直接调用 find_files 并传 location=desktop/documents/downloads；不要询问 Windows 用户名，也不要调用终端解析这些标准目录。文件名可省略扩展名，默认 auto 匹配。
+3. 未说明目录时，先检查当前会话附件目录和用户已明确授权的目录。若信息不足，必须调用 request_user_clarification。问题、选项和输入提示必须由当前任务及已有上下文决定，不得使用固定问题或固定选项。
+4. 搜索超时只表示范围过大，绝不表示文件不存在。必须留在同一范围内缩小搜索；仍无法缩小范围时，调用 request_user_clarification 请求最有帮助的线索，而不是改搜其他磁盘。
+5. 找文件名优先调用 find_files；找到候选后再用 get_file_metadata 或 read_file 验证。`
 
       // 1. 扫描离线网页/文档缓存
       if (fs.existsSync(cacheDir)) {
@@ -883,7 +928,15 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let loopCount = 0
     const maxLoops = 100
     const latestUserText = messageText([...chatHistory].reverse().find(message => message.role === 'user'))
-    const toolIntentText = String(config.toolIntentText || latestUserText)
+    const hasSkillCatalog = chatHistory.some(message =>
+      typeof message.content === 'string' && message.content.includes('<available_skills>')
+    )
+    if (!hasSkillCatalog && typeof chatHistory[0]?.content === 'string') {
+      const { catalog } = await skillRegistry.buildCatalog(latestUserText)
+      if (catalog) {
+        chatHistory[0].content += `\n\n${catalog}`
+      }
+    }
     const memorySignals: MemoryValueSignals = {
       toolCalls: 0,
       toolNames: new Set(),
@@ -899,21 +952,99 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let imageCompatibilityFallbackUsed = false
     const successfulInputFingerprints = new Set<string>()
     let currentInputTarget = 'current-focus'
+    const artifactCandidates = new Map<string, { name: string; path: string; size: number }>()
+    const consumedArtifactPaths = new Set<string>()
+    const artifactKey = (filePath: string): string => resolve(filePath).toLocaleLowerCase()
+    const persistArtifactVisibility = (): void => {
+      const pathsByDirectory = new Map<string, Set<string>>()
+      for (const file of artifactCandidates.values()) {
+        if (!/[\\/]generated_files[\\/][^\\/]+$/i.test(file.path)) continue
+        const directory = dirname(file.path)
+        const paths = pathsByDirectory.get(directory) || new Set<string>()
+        paths.add(resolve(file.path))
+        pathsByDirectory.set(directory, paths)
+      }
+      for (const [directory, currentPaths] of pathsByDirectory) {
+        const manifestPath = join(directory, '.agentpet-artifacts.json')
+        let hiddenPaths = new Set<string>()
+        try {
+          const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+          hiddenPaths = new Set(
+            (Array.isArray(parsed?.hiddenPaths) ? parsed.hiddenPaths : [])
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map(item => resolve(item).toLocaleLowerCase())
+          )
+        } catch {
+          // The manifest is optional on first use.
+        }
+        for (const filePath of currentPaths) {
+          const key = artifactKey(filePath)
+          if (consumedArtifactPaths.has(key)) hiddenPaths.add(key)
+          else hiddenPaths.delete(key)
+        }
+        fs.writeFileSync(manifestPath, JSON.stringify({ hiddenPaths: [...hiddenPaths] }, null, 2), 'utf8')
+      }
+    }
+    const getDeliverableFiles = (): Array<{ name: string; path: string; size: number }> => {
+      persistArtifactVisibility()
+      return [...artifactCandidates.entries()]
+        .filter(([key, file]) => !consumedArtifactPaths.has(key) && fs.existsSync(file.path))
+        .map(([, file]) => file)
+    }
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
-    const forceAllTools = config.toolRouting === 'all'
-    const officeAttachment = forceAllTools ? null : detectOfficeAttachment(toolIntentText)
-    const officeSkillOnly = !!officeAttachment && !shouldForceDomBrowser(toolIntentText)
-    const domBrowserOnly = forceAllTools || officeSkillOnly ? false : shouldForceDomBrowser(toolIntentText)
-    const forceBingSearch = forceAllTools || officeSkillOnly ? false : shouldForceBingSearch(toolIntentText)
     const allowedToolNames = Array.isArray(config.allowedToolNames)
       ? new Set(config.allowedToolNames.map((name) => String(name)))
       : null
-    const effectiveTools = config.disableTools
+    const blockedToolNames = new Set((config.blockedToolNames || []).map(name => String(name)))
+    const simpleSingleFileMutation = isSimpleSingleFileMutationRequest(latestUserText)
+    if (simpleSingleFileMutation) {
+      blockedToolNames.add('update_task_plan')
+      blockedToolNames.add('update_task_step')
+    }
+    const availableToolDefinitions = config.disableTools
       ? []
-      : this.getFormattedTools(isFrontend, true, domBrowserOnly, forceBingSearch)
-          .filter((tool: any) => !officeSkillOnly || OFFICE_SKILL_TOOL_NAMES.has(tool.function.name))
-          .filter((tool: any) => !allowedToolNames || allowedToolNames.has(tool.function.name))
+      : this.getFormattedTools(isFrontend, true, false, false)
+          .filter((tool: any) => BOOTSTRAP_TOOL_NAMES.has(tool.function.name) || !allowedToolNames || allowedToolNames.has(tool.function.name))
+          .filter((tool: any) => !blockedToolNames.has(tool.function.name))
+    const availableToolNameSet = new Set(availableToolDefinitions.map((tool: any) => String(tool.function.name)))
+    const activeToolNames = createInitialActiveToolNames({
+      availableToolNames: availableToolNameSet
+    })
+    const localToolNames = new Set(Object.keys(toolRegistry.getAllToolsInfo()))
+    for (const name of availableToolNameSet) {
+      // This migration classifies every local built-in. External MCP tools keep
+      // their existing exposure until MCP servers gain first-class Skill metadata.
+      if (!localToolNames.has(name)) activeToolNames.add(name)
+    }
+    const preloadedSkillIds = inferPreloadedSkillIds(latestUserText)
+    const preloadedSkillInstructions: string[] = []
+    const preloadedSkills = preloadedSkillIds.length > 0
+      ? await skillRegistry.requestSkills(
+          preloadedSkillIds.map(id => ({ id })),
+          sessionId,
+          config.messageId
+        )
+      : { loaded: [] }
+    for (const skill of preloadedSkills.loaded) {
+      const activated = activateAllowedTools(
+        activeToolNames,
+        skill.allowedTools,
+        availableToolNameSet,
+        blockedToolNames
+      )
+      if (activated.length === 0) continue
+      preloadedSkillInstructions.push(
+        `<preloaded_skill id="${skill.id}">\n${skill.instructions}\n</preloaded_skill>`
+      )
+    }
+    if (preloadedSkillInstructions.length > 0 && typeof chatHistory[0]?.content === 'string') {
+      chatHistory[0].content += `\n\n${preloadedSkillInstructions.join('\n\n')}\nThese Skills are already loaded for this turn. Do not call request_skill for them.`
+    }
+    let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
+    if (simpleSingleFileMutation && typeof chatHistory[0]?.content === 'string') {
+      chatHistory[0].content += '\n\n<simple_task_mode>This is a single-file, single-mutation, low-risk task. Execute it directly. Do not create or mention a task plan.</simple_task_mode>'
+    }
 
     while (loopCount < maxLoops) {
       if (abortSignal?.aborted) {
@@ -982,6 +1113,10 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           effectiveTools.length = 0
           loopCount = 0
           continue
+        }
+        const recoverableArtifacts = getDeliverableFiles()
+        if (recoverableArtifacts.length > 0) {
+          yield { type: 'generated_files', files: recoverableArtifacts, autoPreview: true }
         }
         throw err
       }
@@ -1175,27 +1310,12 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             let webSources: any[] | undefined
             let imageFilePaths: string[] = []
             let generatedFiles: Array<{ name: string; path: string; size: number }> = []
-            const isBrowserLaunchCommand = (toolName === 'run_terminal_command' || toolName === 'run_command') &&
-              /(?:msedge|chrome|remote-debugging)/i.test(String(toolArgs.command || ''))
-            const isManualSearchNavigation = forceBingSearch && toolName === 'browser_navigate'
-            const isOutsideBingSearchWorkflow = forceBingSearch && !BING_SEARCH_TOOL_NAMES.has(toolName)
-            const isOutsideOfficeWorkflow = officeSkillOnly && !OFFICE_SKILL_TOOL_NAMES.has(toolName)
+            let toolState: any
             const inputFingerprint = toolName === 'type_text'
               ? `${currentInputTarget}\n${String(toolArgs.text ?? '')}`
               : ''
             if (config.dedupeMutatingToolCalls && inputFingerprint && successfulInputFingerprints.has(inputFingerprint)) {
               toolResult = '[操作去重] 已阻止对同一焦点重复输入相同文本。上一次输入工具已成功返回；只有在截图明确证明失败后，才应重新定位目标并重试。'
-              toolSuccess = false
-            } else if (isOutsideOfficeWorkflow) {
-              toolResult = `[Office Skill policy] This request contains a ${officeAttachment?.toUpperCase()} attachment. Call load_office_skill first, then run_office_skill; do not use browser or terminal tools unless the user explicitly requests them.`
-              toolSuccess = false
-            } else if (forceBingSearch && isOutsideBingSearchWorkflow) {
-              toolResult = isManualSearchNavigation
-                ? '[浏览器自动化策略] 搜索任务默认且强制使用必应。请调用 browser_search，不要通过 browser_navigate 打开百度或手工拼接搜索 URL。'
-                : '[Browser search policy] Only call browser_search, then browser_click if a result must be opened. browser_search starts/connects Edge automatically; do not use terminal, snapshots, navigation, screenshots, or another search engine.'
-              toolSuccess = false
-            } else if (domBrowserOnly && (COMPUTER_TOOL_NAMES.has(toolName) || isBrowserLaunchCommand)) {
-              toolResult = '[浏览器自动化策略] 已阻止桌面截图、鼠标和键盘工具。请使用 browser_search、browser_snapshot、browser_click 或 browser_navigate 进行 DOM 操作。'
               toolSuccess = false
             } else if (toolName === 'trigger_memory_purify') {
               runPurifyMemoryPipeline(sessionId).catch(err => console.error('后台经验沉淀执行失败', err))
@@ -1243,6 +1363,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                   const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
                   toolResult = res.content
                   toolSuccess = res.success
+                  toolState = res.state
                   webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
                   imageFilePaths = this.getToolImagePaths(res.state)
                   generatedFiles = this.getToolGeneratedFiles(res.state)
@@ -1261,6 +1382,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
               toolResult = res.content
               toolSuccess = res.success
+              toolState = res.state
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
               imageFilePaths = this.getToolImagePaths(res.state)
               generatedFiles = this.getToolGeneratedFiles(res.state)
@@ -1313,6 +1435,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
               displayResult,
               contextToolResult,
               toolCachePath,
+              toolState,
               webSources,
               imageFilePaths,
               generatedFiles
@@ -1327,6 +1450,34 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
+          const transfersArtifact = /^(?:move|copy)_file$/i.test(res.toolName)
+          if (res.toolSuccess && (transfersArtifact || (res.generatedFiles?.length || 0) > 0)) {
+            for (const inputPath of this.getArtifactInputPaths(res.toolArgs)) {
+              consumedArtifactPaths.add(artifactKey(inputPath))
+            }
+          }
+          for (const file of res.generatedFiles || []) {
+            const key = artifactKey(file.path)
+            consumedArtifactPaths.delete(key)
+            artifactCandidates.set(key, file)
+          }
+          if (res.toolSuccess && transfersArtifact) {
+            const destination = this.getExistingArtifact(
+              res.toolArgs?.destination_path || res.toolArgs?.target_path
+            )
+            if (destination) artifactCandidates.set(artifactKey(destination.path), destination)
+          }
+          if (res.toolSuccess && res.toolName === 'request_skill') {
+            const activated = activateAllowedTools(
+              activeToolNames,
+              Array.isArray(res.toolState?.allowedToolNames) ? res.toolState.allowedToolNames : [],
+              availableToolNameSet,
+              blockedToolNames
+            )
+            if (activated.length > 0) {
+              effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
+            }
+          }
           this.recordMemoryToolResult(
             memorySignals,
             res.toolName,
@@ -1375,9 +1526,6 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             name: res.toolName,
             result: res.displayResult,
             contextTokens: countTokens(res.contextToolResult)
-          }
-          if (res.generatedFiles?.length) {
-            yield { type: 'generated_files', files: res.generatedFiles }
           }
           if (normalizedSources.length) {
             webSourcesForMemory.push(...normalizedSources)
@@ -1452,6 +1600,20 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           finalResponse = '⚠️ [系统提示] 大模型在执行完工具链后返回了空回复，可能是因为工具返回的数据量过大超出了大模型的上下文处理上限，或触发了安全过滤机制。'
         }
 
+        const hasUnrecoveredToolFailure = [...memorySignals.failedToolNames]
+          .some(name => !memorySignals.recoveredToolNames.has(name))
+        const responseLooksIncomplete = /(?:无法完成|未完成|失败|受阻|需要你|请提供|cannot complete|failed|blocked|need you)/i.test(finalResponse)
+        if (!hasUnrecoveredToolFailure && !responseLooksIncomplete && sessionId && config.messageId !== undefined) {
+          await taskRunner.finalizePlanForMessage(sessionId, config.messageId).catch(error =>
+            console.error('[TaskPlan] automatic finalization failed', error)
+          )
+        }
+
+        const deliverableFiles = getDeliverableFiles()
+        if (deliverableFiles.length > 0) {
+          yield { type: 'generated_files', files: deliverableFiles, autoPreview: true }
+        }
+
         yield {
           type: 'text',
           content: finalResponse
@@ -1493,6 +1655,11 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           workspacePath
         ).catch(e => console.error('[System] 自动经验沉淀失败:', e))
       }
+    }
+
+    const recoverableArtifacts = getDeliverableFiles()
+    if (recoverableArtifacts.length > 0) {
+      yield { type: 'generated_files', files: recoverableArtifacts, autoPreview: true }
     }
 
     yield {

@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
-import { join, basename, dirname, extname, sep } from 'path'
+import { join, basename, dirname, extname, resolve, sep } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { registerKnowledgeBaseAPIs } from './api/knowledgeBase'
 import { pathToFileURL } from 'url'
@@ -33,8 +33,11 @@ import { credentialManager } from './tools/interaction/credential-manager'
 import { officeRuntimeManager } from './tools/interaction/office-runtime-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
+import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { ModelRuntimeFactory } from './model-runtime'
 import { taskRunner } from './task-runtime/task-runner'
+import { extractExecutionResult } from './task-runtime/prompt-builder'
+import { getSubagentToolNames, nextWithIdleTimeout, SUBAGENT_IDLE_TIMEOUT_MS } from './task-runtime/subagent-execution'
 import { handleSkillHubDownload } from './skills/skillhub-download-installer'
 import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
@@ -1313,7 +1316,21 @@ app.whenReady().then(() => {
     return taskRunner.getRun(taskRunId)
   })
 
-  ipcMain.handle('api:control-task-run', async (event, taskRunId: string, action: 'pause' | 'resume' | 'cancel') => {
+  ipcMain.handle('api:list-task-runs', async (_event, sessionId?: string) => {
+    return taskRunner.listRuns(typeof sessionId === 'string' && sessionId ? sessionId : undefined)
+  })
+
+  ipcMain.handle('api:list-subagent-tasks', async (_event, taskRunId: string) => {
+    if (!taskRunId || typeof taskRunId !== 'string') return []
+    return taskRunner.listSubagentTasks(taskRunId)
+  })
+
+  taskRunner.subscribe((update) => {
+    if (agentWindow && !agentWindow.isDestroyed()) agentWindow.webContents.send('api:task-run-updated', update)
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('api:task-run-updated', update)
+  })
+
+  ipcMain.handle('api:control-task-run', async (_event, taskRunId: string, action: 'pause' | 'resume' | 'cancel') => {
     if (!taskRunId || !['pause', 'resume', 'cancel'].includes(action)) return null
     const current = await taskRunner.getRun(taskRunId)
     if (!current) return null
@@ -1325,14 +1342,12 @@ app.whenReady().then(() => {
       }
     }
     const run = await taskRunner.control(taskRunId, action)
-    if (run) event.sender.send('api:task-run-updated', { taskRunId, run, action })
     return run
   })
 
-  ipcMain.handle('api:retry-task-step', async (event, taskRunId: string, taskStepId: string) => {
+  ipcMain.handle('api:retry-task-step', async (_event, taskRunId: string, taskStepId: string) => {
     if (!taskRunId || !taskStepId || typeof taskRunId !== 'string' || typeof taskStepId !== 'string') return null
     const result = await taskRunner.retryStep(taskRunId, taskStepId)
-    if (result) event.sender.send('api:task-run-updated', { taskRunId, ...result, action: 'retry_step' })
     return result
   })
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
@@ -4461,9 +4476,23 @@ app.whenReady().then(() => {
     try {
       const genDir = getGeneratedFilesDir(sessionId)
       const files = await fs.promises.readdir(genDir)
+      const visibilityManifest = join(genDir, '.agentpet-artifacts.json')
+      let hiddenPaths = new Set<string>()
+      try {
+        const parsed = JSON.parse(await fs.promises.readFile(visibilityManifest, 'utf8'))
+        hiddenPaths = new Set(
+          (Array.isArray(parsed?.hiddenPaths) ? parsed.hiddenPaths : [])
+            .filter((item: unknown): item is string => typeof item === 'string')
+            .map(item => resolve(item).toLocaleLowerCase())
+        )
+      } catch {
+        // Older sessions do not have an artifact visibility manifest.
+      }
       const list: { name: string; path: string; size: number; time: string }[] = []
       for (const file of files) {
+        if (file.startsWith('.')) continue
         const filePath = join(genDir, file)
+        if (hiddenPaths.has(resolve(filePath).toLocaleLowerCase())) continue
         const stat = await fs.promises.stat(filePath)
         if (stat.isFile()) {
           list.push({
@@ -4582,6 +4611,53 @@ app.whenReady().then(() => {
 
   // handleLongTaskAutoMemory has been relocated to AgentExecutor
 
+  function configureTaskExecutor(): void {
+    taskRunner.setExecutor(async (request) => {
+      const backgroundExecutor = new AgentExecutor()
+      let finalResponse = ''
+      const generatedPaths: string[] = []
+      const executionController = new AbortController()
+      const cancelExecution = (): void => executionController.abort()
+      request.signal.addEventListener('abort', cancelExecution, { once: true })
+      await request.reportProgress('等待子 Agent 模型响应')
+      const stream = backgroundExecutor.run({
+        ...systemLlmConfig,
+        apiKey: systemLlmConfig.apiKey,
+        sessionId: request.run.sessionId,
+        isBackground: true,
+        disableMemoryPersistence: true,
+        blockedToolNames: ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_user_clarification'],
+        allowedToolNames: getSubagentToolNames(request.step.agentRole)
+      }, [{ role: 'user', content: request.prompt }], request.run.workspacePath || getActiveStorageDir(), executionController.signal)
+      const iterator = stream[Symbol.asyncIterator]()
+      let writingReported = false
+      try {
+        while (true) {
+          const next = await nextWithIdleTimeout(iterator, SUBAGENT_IDLE_TIMEOUT_MS, cancelExecution)
+          if (next.done) break
+          const step = next.value
+          if (step.type === 'text') finalResponse = step.content
+          if (step.type === 'generated_files') generatedPaths.push(...step.files.map(file => file.path))
+          if (step.type === 'think') await request.reportProgress('子 Agent 正在推理')
+          if (step.type === 'tool_call') await request.reportProgress(`正在调用工具：${step.name}`)
+          if (step.type === 'tool_result') await request.reportProgress(`${step.name} 已完成，等待模型继续`)
+          if (step.type === 'text_delta' && !writingReported) {
+            writingReported = true
+            await request.reportProgress('子 Agent 正在生成结果')
+          }
+          if (step.type === 'error') throw new Error(step.message)
+        }
+      } finally {
+        request.signal.removeEventListener('abort', cancelExecution)
+      }
+      const result = extractExecutionResult(finalResponse)
+      result.artifactPaths = [...new Set([...result.artifactPaths, ...generatedPaths])]
+      return result
+    })
+  }
+
+  configureTaskExecutor()
+
   async function callLlmInternal(
     config: any,
     messages: any[],
@@ -4699,6 +4775,7 @@ app.whenReady().then(() => {
             event.sender.send('api:llm-tool-event', {
               type: 'generated_files',
               files: step.files,
+              autoPreview: step.autoPreview,
               timestamp: Date.now(),
               messageId: config.messageId,
               sessionId: config.sessionId
@@ -4818,8 +4895,6 @@ app.whenReady().then(() => {
           messageId: Date.now(),
           isBackground: true,
           registerAbortController: true,
-          toolRouting: 'all',
-          toolIntentText: task.prompt,
           allowedToolNames: Array.from(globalAssistantToolNames),
           dedupeMutatingToolCalls: true,
           disableMemoryPersistence: true,
@@ -4957,10 +5032,10 @@ app.whenReady().then(() => {
   // 获取当前可用的工具定义（用于明盒化展示）
   ipcMain.handle('api:get-tools-definition', async () => {
     try {
-      // 触发懒连接，确保 MCP 工具定义已加载
-      await mcpManager.ensureConnected()
+      // 明盒视图只展示首轮真正注入模型的基础工具；Skill 工具会在
+      // request_skill 成功后由 AgentExecutor 按本轮需要动态加入。
       const tools = getFormattedTools(true)
-      return tools
+      return tools.filter((tool: any) => BOOTSTRAP_TOOL_NAMES.has(String(tool?.function?.name || '')))
     } catch (err) {
       console.error('获取工具定义失败:', err)
       return []

@@ -53,8 +53,9 @@ export async function writeGeneratedFile(
 }
 
 export function notifyGeneratedFilesChanged(): void {
-  const activeWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-  activeWindow?.webContents.send('api:generated-file-updated')
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('api:generated-file-updated')
+  }
 }
 
 export function jsonResult(state: Record<string, any>, success = true): ToolResult {
@@ -81,6 +82,7 @@ export async function attachVisiblePreviewValidation(
   focus: OfficePreviewFocus = { mode: 'overview' }
 ): Promise<ToolResult> {
   if (!result.success) return result
+  if (context.suppressOfficePreview) return result
   const state = readToolResultState(result)
   if (typeof state.file_path !== 'string') return result
 

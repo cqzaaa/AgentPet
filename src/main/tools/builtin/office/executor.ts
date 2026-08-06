@@ -379,6 +379,8 @@ export class OfficeExecutor implements IToolExecutor {
         let xml = await docXmlFile.async('string')
         let replaceCount = 0
         let imageCount = 0
+        let requestedStyleCount = 0
+        let verifiedStyleCount = 0
 
         const mergeRPr = (existingRPr: string, style: any): string => {
           let rPr = existingRPr || '<w:rPr></w:rPr>'
@@ -558,6 +560,8 @@ export class OfficeExecutor implements IToolExecutor {
             if (!mod.search || typeof mod.search !== 'string') continue
             const before = xml
             const replacement = mod.replace ?? mod.search
+            const requestedStyle = mod.style && Object.keys(mod.style).length > 0
+            if (requestedStyle) requestedStyleCount++
 
             if (mod.paragraphStyle) {
               const pStyleVal = mod.paragraphStyle
@@ -585,7 +589,15 @@ export class OfficeExecutor implements IToolExecutor {
             }
 
             const changed = xml !== before
-            if (changed) replaceCount++
+            if (changed) {
+              replaceCount++
+              const expectedColor = typeof mod.style?.color === 'string'
+                ? `<w:color w:val="${mod.style.color.toUpperCase()}"/>`
+                : ''
+              if (requestedStyle && (!expectedColor || xml.includes(expectedColor))) {
+                verifiedStyleCount++
+              }
+            }
           }
         }
 
@@ -666,6 +678,13 @@ export class OfficeExecutor implements IToolExecutor {
           zip.file('[Content_Types].xml', contentTypes)
         }
 
+        if (replaceCount === 0 && imageCount === 0) {
+          return { content: '错误：没有匹配到任何待修改内容，未生成输出文件。请检查 search 或图片占位文字。', success: false }
+        }
+        if (requestedStyleCount > verifiedStyleCount) {
+          return { content: `错误：请求了 ${requestedStyleCount} 处样式修改，但仅验证通过 ${verifiedStyleCount} 处，未生成输出文件。`, success: false }
+        }
+
         zip.file('word/document.xml', xml)
         
         let outputBuffer
@@ -701,7 +720,8 @@ export class OfficeExecutor implements IToolExecutor {
             file_path: filePath,
             file_name: safeName,
             replaced: replaceCount,
-            images: imageCount
+            images: imageCount,
+            style_changes_verified: verifiedStyleCount
           }, null, 2),
           success: true
         }

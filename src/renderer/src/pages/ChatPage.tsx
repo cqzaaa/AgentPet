@@ -104,6 +104,7 @@ function ChatPageImpl(): React.JSX.Element {
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [manuallyOpenedTaskPlanMessageId, setManuallyOpenedTaskPlanMessageId] = useState<string | number | null>(null)
+  const autoOpenedDelegateMessageIdRef = useRef<string | number | null>(null)
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -114,7 +115,8 @@ function ChatPageImpl(): React.JSX.Element {
       if (message?.sender === 'user') break
       if (message?.sender !== 'agent' || !Array.isArray(message.toolSteps)) continue
       const plan = latestTaskPlan(message.toolSteps)
-      if (plan) return { plan, messageId: message.id as string | number, messageIndex: index }
+      const isDelegated = message.toolSteps.some((step: any) => step?.type === 'call' && step?.name === 'delegate_tasks')
+      if (plan) return { plan, messageId: message.id as string | number, messageIndex: index, isDelegated }
     }
     return null
   }, [activeSessMessages])
@@ -128,6 +130,13 @@ function ChatPageImpl(): React.JSX.Element {
     !showMeetingRecorder &&
     manuallyOpenedTaskPlanMessageId === latestTaskPlanInfo.messageId
   )
+
+  useEffect(() => {
+    if (!latestTaskPlanInfo?.isDelegated) return
+    if (autoOpenedDelegateMessageIdRef.current === latestTaskPlanInfo.messageId) return
+    autoOpenedDelegateMessageIdRef.current = latestTaskPlanInfo.messageId
+    setManuallyOpenedTaskPlanMessageId(latestTaskPlanInfo.messageId)
+  }, [latestTaskPlanInfo])
 
   const locateTaskPlan = useCallback(() => {
     if (!latestTaskPlanInfo) return
@@ -1770,6 +1779,7 @@ function ChatPageImpl(): React.JSX.Element {
       {showTaskPlanPanel && latestTaskPlanInfo && (
         <TaskPlanPanel
           plan={latestTaskPlanInfo.plan}
+          messageId={latestTaskPlanInfo.messageId}
           running={isSending}
           onLocate={locateTaskPlan}
           onClose={() => {

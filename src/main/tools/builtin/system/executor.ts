@@ -13,6 +13,8 @@ import { clarificationManager } from '../../interaction/clarification-manager'
 import { taskRunner } from '../../../task-runtime/task-runner'
 import type { TaskPlanInputStep } from '../../../task-runtime/types'
 import { skillRegistry } from '../../../skills/skill-registry'
+import { subagentRunner } from '../../../task-runtime/subagent-runner'
+import { SUBAGENT_ROLES, type DelegateTaskInput } from '../../../task-runtime/types'
 
 const execAsync = promisify(exec)
 
@@ -37,20 +39,43 @@ export class SystemExecutor implements IToolExecutor {
               id,
               title: String(step?.title || '').trim().slice(0, 180),
               status: (allowedStatuses.has(String(step?.status)) ? String(step.status) : 'pending') as TaskPlanInputStep['status'],
-              detail: String(step?.detail || '').trim().slice(0, 500)
+              detail: String(step?.detail || '').trim().slice(0, 500) || undefined,
+              goal: String(step?.goal || '').trim().slice(0, 2000) || undefined,
+              dependencies: Array.isArray(step?.dependencies) ? step.dependencies.map(String).filter(Boolean).slice(0, 12) : [],
+              acceptanceCriteria: String(step?.acceptanceCriteria || '').trim().slice(0, 1000) || undefined,
+              resultSummary: String(step?.resultSummary || '').trim().slice(0, 2000) || undefined,
+              artifactPaths: Array.isArray(step?.artifactPaths) ? step.artifactPaths.map(String).filter(Boolean).slice(0, 30) : [],
+              retryCount: Math.max(0, Math.min(20, Number(step?.retryCount) || 0))
             }
           })
           .filter((step: any) => step.title)
 
         if (!title || steps.length < 2) {
-          return { content: 'Task plan requires a title and at least two valid steps.', success: false }
+          return { content: 'A new task plan requires a title and at least two valid steps. Do not send empty updates; use update_task_step after creation.', success: false }
         }
+        const existing = await taskRunner.getRunForMessage(context.sessionId, context.messageId)
+        if (existing) {
+          return {
+            content: JSON.stringify({
+              error: 'plan_already_exists',
+              taskRunId: existing.run.id,
+              message: 'The plan structure is immutable. Use update_task_step with an existing step id.'
+            }),
+            success: false
+          }
+        }
+        const activeSteps = steps.filter(step => step.status === 'in_progress')
+        if (activeSteps.length > 1) {
+          return { content: 'A task plan may have only one in_progress step.', success: false }
+        }
+        if (activeSteps.length === 0) steps[0].status = 'in_progress'
 
         // Keep the message trace for historical rendering, and mirror the same
         // plan into the durable task tables for long-running task recovery.
         const taskRun = await taskRunner.updatePlan(context.sessionId, context.messageId, {
           title,
           explanation: typeof args.explanation === 'string' ? args.explanation.trim().slice(0, 500) : undefined,
+          workspacePath: context.workspacePath || undefined,
           steps
         })
 
@@ -69,18 +94,83 @@ export class SystemExecutor implements IToolExecutor {
         }
       }
 
+      if (api === 'update_task_step') {
+        const taskRunId = String(args.taskRunId || '').trim()
+        const stepId = String(args.stepId || '').trim()
+        const status = String(args.status || '') as 'in_progress' | 'completed' | 'blocked'
+        if (!taskRunId || !stepId || !['in_progress', 'completed', 'blocked'].includes(status)) {
+          return { content: 'update_task_step requires taskRunId, stepId, and a valid status.', success: false }
+        }
+        const ownedPlan = await taskRunner.getRun(taskRunId)
+        if (!ownedPlan || ownedPlan.run.sessionId !== (context.sessionId || 'default')) {
+          return { content: 'Task plan was not found in the current session.', success: false }
+        }
+        const snapshot = await taskRunner.updateStep(taskRunId, stepId, status, {
+          detail: typeof args.detail === 'string' ? args.detail.trim().slice(0, 500) || undefined : undefined,
+          resultSummary: typeof args.resultSummary === 'string' ? args.resultSummary.trim().slice(0, 2000) || undefined : undefined,
+          artifactPaths: Array.isArray(args.artifactPaths) ? args.artifactPaths.map(String).filter(Boolean).slice(0, 30) : undefined
+        })
+        if (!snapshot) return { content: 'Task plan was not found.', success: false }
+        const completed = snapshot.steps.filter(step => step.status === 'completed').length
+        const current = snapshot.steps.find(step => step.status === 'running')
+        return {
+          content: JSON.stringify({
+            taskRunId,
+            status: snapshot.run.status,
+            completed,
+            total: snapshot.steps.length,
+            currentStepId: current?.id
+          }),
+          state: snapshot,
+          success: true
+        }
+      }
+
+      if (api === 'delegate_tasks') {
+        let rawTasks: any[] = Array.isArray(args.tasks) ? args.tasks : []
+        if (rawTasks.length === 0 && Array.isArray(args.subtasks)) rawTasks = args.subtasks
+        if (rawTasks.length === 0 && typeof args.subtasks === 'string') {
+          try {
+            const parsed = JSON.parse(args.subtasks)
+            if (Array.isArray(parsed)) rawTasks = parsed
+          } catch { /* Validation below will return a useful error. */ }
+        }
+        const allowedRoles = new Set<string>(SUBAGENT_ROLES)
+        const tasks: DelegateTaskInput[] = rawTasks.map((task: any, index: number) => ({
+          id: String(task?.id || `agent-${index + 1}`).trim(),
+          title: String(task?.title || task?.description || `Sub-agent ${index + 1}`).trim(),
+          prompt: String(task?.prompt || task?.description || '').trim(),
+          role: allowedRoles.has(String(task?.role || task?.type)) ? (task.role || task.type) : 'general',
+          dependencies: Array.isArray(task?.dependencies) ? task.dependencies.map(String).filter(Boolean) : [],
+          acceptanceCriteria: String(task?.acceptanceCriteria || '').trim() || undefined
+        }))
+        const title = String(args.title || args.goal || 'Delegated task group').trim().slice(0, 120)
+        const maxConcurrency = Math.max(1, Math.min(6, Number(args.maxConcurrency) || 3))
+        const result = await subagentRunner.delegate(context.sessionId || 'default', context.messageId, title, tasks, maxConcurrency, context.workspacePath, context.abortSignal)
+        return { content: JSON.stringify(result), state: result, success: result.status === 'completed' }
+      }
+
       if (api === 'request_skill') {
-        const skillIds = Array.isArray(args.skillIds)
-          ? args.skillIds.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 3)
+        const skills = Array.isArray(args.skills)
+          ? args.skills.map((value: any) => ({
+              id: String(value?.id || '').trim(),
+              sections: Array.isArray(value?.sections)
+                ? value.sections.map((section: unknown) => String(section || '').trim()).filter(Boolean)
+                : undefined
+            })).filter((value: { id: string }) => Boolean(value.id)).slice(0, 3)
           : []
         const reason = String(args.reason || '').trim().slice(0, 500)
-        if (skillIds.length === 0 || !reason) {
-          return { content: 'request_skill requires one to three skillIds and a reason.', success: false }
+        if (skills.length === 0 || !reason) {
+          return { content: 'request_skill requires one to three skills and a reason.', success: false }
         }
-        const result = await skillRegistry.requestSkills(skillIds, context.sessionId, context.messageId)
+        const result = await skillRegistry.requestSkills(skills, context.sessionId, context.messageId)
+        const allowedToolNames = [...new Set(result.loaded.flatMap(skill => skill.allowedTools))]
         return {
           content: JSON.stringify({ reason, ...result }),
-          state: { loadedSkillIds: result.loaded.map(skill => skill.id) },
+          state: {
+            loadedSkillIds: result.loaded.map(skill => skill.id),
+            allowedToolNames
+          },
           success: result.loaded.length > 0
         }
       }
@@ -366,7 +456,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['update_task_plan', 'request_skill', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

@@ -4,6 +4,7 @@ import { permissionManager } from '../security/permission-manager'
 import { ToolContext, ToolResult } from './types'
 import { mcpManager } from '../mcp/mcp-manager'
 import { getSessionFilesDir, resolveSessionPath } from '../utils/paths'
+import { resolveToolTimeout } from './tool-timeout'
 
 export class UnifiedToolExecutor {
   private static instance: UnifiedToolExecutor
@@ -85,13 +86,9 @@ export class UnifiedToolExecutor {
 
     // 2. 执行工具（带超时控制）
     const api = manifest.api.find(a => a.name === name)
-    let timeoutMs = api?.timeout || 30000
-    if (args && typeof args.timeout_seconds === 'number') {
-      const timeoutSchema = api?.parameters?.properties?.timeout_seconds || {}
-      const minimum = Number(timeoutSchema.minimum) || 1
-      const maximum = Number(timeoutSchema.maximum) || 3600
-      timeoutMs = Math.min(Math.max(args.timeout_seconds, minimum), maximum) * 1000
-    }
+    // A manifest timeout of 0 explicitly opts a durable tool out of the
+    // ordinary wall-clock limit. User cancellation still flows via AbortSignal.
+    const timeoutMs = resolveToolTimeout(api?.timeout, args, api?.parameters?.properties?.timeout_seconds)
 
     let timer: NodeJS.Timeout | null = null
     let onAbort: (() => void) | null = null

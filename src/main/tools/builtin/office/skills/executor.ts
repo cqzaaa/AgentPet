@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { IToolExecutor, ToolContext, ToolResult } from '../../../core/types'
-import { getLoadedOfficeSkillNames, listOfficeSkills, loadOfficeSkill } from './registry'
-import { jsonResult, skillError } from './shared'
+import { basename, extname } from 'path'
+import { loadOfficeSkill } from './registry'
+import { attachVisiblePreviewValidation, jsonResult, readToolResultState, skillError } from './shared'
 import type { OfficeSkillAction } from './types'
+import { validateOfficeSkillInput } from './input-validation'
 
 const validActions = new Set<OfficeSkillAction>([
   'create',
@@ -11,66 +13,83 @@ const validActions = new Set<OfficeSkillAction>([
   'modify',
   'validate',
   'render',
-  'convert'
+  'convert',
+  'semantic_edit'
 ])
 
-function validateInput(value: any, schema: any, path = 'input'): void {
-  if (!schema || typeof schema !== 'object') return
+async function executePdfSemanticEdit(
+  input: Record<string, any>,
+  context: ToolContext
+): Promise<ToolResult> {
+  const sourcePath = String(input.source_path || '')
+  const search = String(input.search || '')
+  const hasReplacement = Object.prototype.hasOwnProperty.call(input, 'replace')
+  const style = input.style && typeof input.style === 'object' ? input.style : undefined
+  if (!sourcePath || !search) throw new Error('PDF semantic_edit 需要 source_path 和 search')
+  if (!hasReplacement && !style) throw new Error('PDF semantic_edit 至少需要 replace 或 style')
 
-  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-    throw new Error(`${path} 必须是以下值之一：${schema.enum.join(', ')}`)
+  const outputFormat = String(input.output_format || 'pdf').toLowerCase()
+  const sourceStem = basename(sourcePath, extname(sourcePath))
+  const internalContext: ToolContext = { ...context, suppressOfficePreview: true }
+  const pdfSkill = await loadOfficeSkill('pdf')
+  const docxSkill = await loadOfficeSkill('docx')
+
+  const editableResult = await executeConversionWithTimeout(pdfSkill, 'convert', {
+    source_path: sourcePath,
+    target_format: 'docx',
+    conversion_mode: 'editable',
+    output_name: `${sourceStem}-editable.docx`,
+    timeout_seconds: input.timeout_seconds
+  }, internalContext)
+  if (!editableResult.success) return editableResult
+  const editablePath = readToolResultState(editableResult).file_path
+  if (typeof editablePath !== 'string') throw new Error('PDF 转换未返回可编辑 DOCX 路径')
+
+  const modification: Record<string, any> = { search }
+  if (hasReplacement) modification.replace = String(input.replace)
+  if (style) modification.style = style
+  const modifiedDocxName = outputFormat === 'docx'
+    ? String(input.output_name || `${sourceStem}-edited.docx`)
+    : `${sourceStem}-edited-intermediate.docx`
+  const modifiedResult = await docxSkill.execute('modify', {
+    source_path: editablePath,
+    output_name: modifiedDocxName,
+    modifications: [modification]
+  }, internalContext)
+  if (!modifiedResult.success) return modifiedResult
+  const modifiedState = readToolResultState(modifiedResult)
+  const modifiedPath = modifiedState.file_path
+  if (typeof modifiedPath !== 'string') throw new Error('DOCX 修改未返回输出路径')
+
+  const focus = { mode: 'changes' as const, texts: [hasReplacement ? String(input.replace) : search, search] }
+  if (outputFormat === 'docx') {
+    return attachVisiblePreviewValidation(jsonResult({
+      ...modifiedState,
+      skill: 'pdf',
+      action: 'semantic_edit',
+      source_path: sourcePath,
+      output_format: 'docx',
+      intermediate_files_hidden: true
+    }), context, focus)
   }
 
-  if (schema.type === 'object') {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error(`${path} 必须是对象`)
-    }
-    for (const requiredKey of schema.required || []) {
-      if (value[requiredKey] === undefined || value[requiredKey] === null) {
-        throw new Error(`${path}.${requiredKey} 是必填参数`)
-      }
-    }
-    for (const [key, childSchema] of Object.entries(schema.properties || {})) {
-      if (value[key] !== undefined) validateInput(value[key], childSchema, `${path}.${key}`)
-    }
-    return
-  }
-
-  if (schema.type === 'array') {
-    if (!Array.isArray(value)) throw new Error(`${path} 必须是数组`)
-    if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
-      throw new Error(`${path} 至少需要 ${schema.minItems} 项`)
-    }
-    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
-      throw new Error(`${path} 最多允许 ${schema.maxItems} 项`)
-    }
-    value.forEach((item, index) => validateInput(item, schema.items, `${path}[${index}]`))
-    return
-  }
-
-  if (schema.type === 'string') {
-    if (typeof value !== 'string') throw new Error(`${path} 必须是字符串`)
-    if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
-      throw new Error(`${path} 长度不能小于 ${schema.minLength}`)
-    }
-  }
-
-  if (schema.type === 'number') {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new Error(`${path} 必须是有限数值`)
-    }
-    if (schema.integer && !Number.isInteger(value)) throw new Error(`${path} 必须是整数`)
-    if (typeof schema.minimum === 'number' && value < schema.minimum) {
-      throw new Error(`${path} 不能小于 ${schema.minimum}`)
-    }
-    if (typeof schema.maximum === 'number' && value > schema.maximum) {
-      throw new Error(`${path} 不能大于 ${schema.maximum}`)
-    }
-  }
-
-  if (schema.type === 'boolean' && typeof value !== 'boolean') {
-    throw new Error(`${path} 必须是布尔值`)
-  }
+  const finalResult = await executeConversionWithTimeout(docxSkill, 'convert', {
+    source_path: modifiedPath,
+    target_format: 'pdf',
+    output_name: String(input.output_name || `${sourceStem}-edited.pdf`),
+    timeout_seconds: input.timeout_seconds
+  }, internalContext)
+  if (!finalResult.success) return finalResult
+  return attachVisiblePreviewValidation(jsonResult({
+    ...readToolResultState(finalResult),
+    skill: 'pdf',
+    action: 'semantic_edit',
+    source_path: sourcePath,
+    output_format: 'pdf',
+    replacements: modifiedState.replaced,
+    style_changes_verified: modifiedState.style_changes_verified,
+    intermediate_files_hidden: true
+  }), context, focus)
 }
 
 async function executeConversionWithTimeout(
@@ -113,18 +132,6 @@ export class OfficeSkillExecutor implements IToolExecutor {
     context: ToolContext
   ): Promise<ToolResult> {
     try {
-      if (api === 'load_office_skill') {
-        const skill = await loadOfficeSkill(args.skill)
-        return jsonResult({
-          status: 'success',
-          message: `已按需加载 ${skill.descriptor.name} Skill。`,
-          skill: skill.descriptor,
-          loaded_skills: getLoadedOfficeSkillNames(),
-          available_skill_index: listOfficeSkills(),
-          next_step: '调用 run_office_skill，并按照目标 action 的 inputSchema 传入 input。'
-        })
-      }
-
       if (api === 'run_office_skill') {
         const action = String(args.action || '').toLowerCase() as OfficeSkillAction
         if (!validActions.has(action)) {
@@ -138,10 +145,19 @@ export class OfficeSkillExecutor implements IToolExecutor {
         }
 
         const input = args.input && typeof args.input === 'object' ? args.input : {}
-        validateInput(input, operation.inputSchema)
-        return action === 'convert'
-          ? executeConversionWithTimeout(skill, action, input, context)
-          : skill.execute(action, input, context)
+        validateOfficeSkillInput(input, operation.inputSchema)
+        if (action === 'semantic_edit') {
+          if (skill.descriptor.name !== 'pdf') throw new Error('semantic_edit 当前仅支持 PDF')
+          return executePdfSemanticEdit(input, context)
+        }
+        if (action === 'convert') {
+          const result = await executeConversionWithTimeout(skill, action, input, context)
+          const targetFormat = String(input.target_format || '').toLowerCase()
+          return ['docx', 'xlsx', 'pptx', 'pdf'].includes(targetFormat)
+            ? attachVisiblePreviewValidation(result, context)
+            : result
+        }
+        return skill.execute(action, input, context)
       }
 
       throw new Error(`未知 Office Skill API：${api}`)
@@ -151,7 +167,7 @@ export class OfficeSkillExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return ['load_office_skill', 'run_office_skill']
+    return ['run_office_skill']
   }
 }
 

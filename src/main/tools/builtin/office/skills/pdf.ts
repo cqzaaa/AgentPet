@@ -28,6 +28,7 @@ const descriptor: OfficeSkillDescriptor = {
   extensions: ['.pdf'],
   instructions: [
     'PDF 是固定布局，不能像 Word 一样可靠地重排任意已有段落。',
+    '对现有 PDF 做文字替换或样式修改时，优先使用 semantic_edit；它会在一次工具调用内完成 PDF→DOCX、修改、验证和最终导出。',
     '坐标原点位于页面左下角，单位为 PDF point。',
     '修改默认另存为新文件，不覆盖源文件。',
     '语义级大改优先修改原 DOCX/PPTX 后重新导出 PDF。'
@@ -147,6 +148,33 @@ const descriptor: OfficeSkillDescriptor = {
           timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
         },
         required: ['target_format']
+      }
+    },
+    semantic_edit: {
+      description: '一次完成 PDF→可编辑 DOCX、语义文字修改、验证及 PDF/DOCX 导出；中间文件不会作为产物展示。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source_path: { type: 'string', minLength: 1 },
+          search: { type: 'string', minLength: 1, description: '要定位的现有文字' },
+          replace: { type: 'string', description: '可选替换文字；省略时仅修改样式' },
+          style: {
+            type: 'object',
+            minProperties: 1,
+            properties: {
+              bold: { type: 'boolean' },
+              italic: { type: 'boolean' },
+              underline: { type: 'boolean' },
+              color: { type: 'string', pattern: '^[0-9A-Fa-f]{6}$' },
+              fontSize: { type: 'number' },
+              highlight: { type: 'string' }
+            }
+          },
+          output_format: { type: 'string', enum: ['pdf', 'docx'], description: '默认 pdf' },
+          output_name: { type: 'string', minLength: 1 },
+          timeout_seconds: { type: 'number', minimum: 10, maximum: 300 }
+        },
+        required: ['source_path', 'search']
       }
     },
     render: {

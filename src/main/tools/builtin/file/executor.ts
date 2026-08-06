@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import { dirname, basename, join, extname, relative } from 'path'
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 
@@ -82,11 +82,13 @@ export class FileExecutor implements IToolExecutor {
         let content = ''
 
         if (ext === 'pdf') {
-          const pdf = require('pdf-parse')
+          const { PDFParse } = require('pdf-parse')
           const buffer = await fs.promises.readFile(file_path)
-          const data = await pdf(buffer)
-          content = data.text || ''
-          if (!content.trim()) content = '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'
+          const parser = new PDFParse({ data: buffer })
+          const data = await parser.getText()
+          await parser.destroy()
+          const extractedText = data.text || ''
+          content = `${extractedText.trim() ? extractedText : '[PDF 文件已加载，但未能提取到文本内容（可能是扫描件或纯图片 PDF）]'}\n\n[提示：这里只提供语义文本，不包含可靠的字体、颜色、坐标或版式。修改或转换 PDF 请加载 office Skill。]`
         } else if (ext === 'docx') {
           const mammoth = require('mammoth')
           const buffer = await fs.promises.readFile(file_path)
@@ -206,11 +208,40 @@ export class FileExecutor implements IToolExecutor {
 
       if (api === 'find_files') {
         if (!args.file_name || typeof args.file_name !== 'string') return { content: '错误：缺少必要参数 file_name', success: false }
-        const directoryPath = args.directory_path ? await assertAllowedPath(args.directory_path, context) : getSessionFilesDir(context.sessionId)
+        const locations: Record<string, () => string> = {
+          desktop: () => app.getPath('desktop'),
+          documents: () => app.getPath('documents'),
+          downloads: () => app.getPath('downloads'),
+          workspace: () => context.workspacePath,
+          session: () => getSessionFilesDir(context.sessionId)
+        }
+        const requestedLocation = String(args.location || 'session').toLowerCase()
+        if (!args.directory_path && !locations[requestedLocation]) {
+          return { content: `错误：不支持的位置 ${String(args.location)}`, success: false }
+        }
+        const rawDirectoryPath = args.directory_path || locations[requestedLocation]()
+        if (!rawDirectoryPath) return { content: `错误：${requestedLocation} 位置尚未配置`, success: false }
+        const directoryPath = await assertAllowedPath(rawDirectoryPath, context)
         const stat = await fs.promises.stat(directoryPath)
         if (!stat.isDirectory()) return { content: `错误：该路径不是目录：${directoryPath}`, success: false }
 
         const targetName = args.file_name.trim().toLocaleLowerCase()
+        const matchMode = String(args.match_mode || 'auto').toLowerCase()
+        if (!['auto', 'exact', 'contains', 'glob'].includes(matchMode)) {
+          return { content: `错误：不支持的匹配方式 ${String(args.match_mode)}`, success: false }
+        }
+        const escapedGlob = targetName.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+        const globPattern = matchMode === 'glob' ? new RegExp(`^${escapedGlob}$`, 'i') : null
+        const targetHasExtension = Boolean(extname(targetName))
+        const matchesName = (fileName: string): boolean => {
+          const normalizedName = fileName.toLocaleLowerCase()
+          if (matchMode === 'exact') return normalizedName === targetName
+          if (matchMode === 'contains') return normalizedName.includes(targetName)
+          if (matchMode === 'glob') return Boolean(globPattern?.test(normalizedName))
+          if (normalizedName === targetName) return true
+          const stem = basename(normalizedName, extname(normalizedName))
+          return targetHasExtension ? normalizedName.includes(targetName) : stem === targetName || stem.includes(targetName)
+        }
         const maxDepth = Math.min(Math.max(Number(args.max_depth) || 4, 0), 8)
         const maxResults = Math.min(Math.max(Number(args.max_results) || 20, 1), 100)
         const maxVisited = 10000
@@ -230,14 +261,14 @@ export class FileExecutor implements IToolExecutor {
             }
             visited++
             const fullPath = join(directory, entry.name)
-            if (entry.isFile() && entry.name.toLocaleLowerCase() === targetName) matches.push(fullPath)
+            if (entry.isFile() && matchesName(entry.name)) matches.push(fullPath)
             if (entry.isDirectory()) await walk(fullPath, depth + 1)
           }
         }
 
         await walk(directoryPath, 0)
         const limitHint = wasLimited ? '\n\n[提示] 搜索达到安全上限，结果不完整。请缩小到更具体的上级目录后重试；不要自动切换到其他磁盘。' : ''
-        return { content: matches.length ? `[文件查找] 找到 ${matches.length} 个候选：\n${matches.join('\n')}${limitHint}` : `[文件查找] 在已授权目录中未找到 ${args.file_name}。${limitHint || '请确认文件名，或提供更可能的上级目录。'}`, success: true }
+        return { content: matches.length ? `[文件查找] 在 ${directoryPath} 找到 ${matches.length} 个候选：\n${matches.join('\n')}${limitHint}` : `[文件查找] 在 ${directoryPath} 未找到 ${args.file_name}。${limitHint || '请确认文件名，或提供更可能的上级目录。'}`, success: true }
       }
 
       // 2. write_file

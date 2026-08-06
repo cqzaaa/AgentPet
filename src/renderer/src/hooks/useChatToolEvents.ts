@@ -8,6 +8,7 @@ interface UseChatToolEventsOptions {
   activeSessionIdRef: MutableRefObject<string>
   cronRunningLogsRef: MutableRefObject<Record<string, any>>
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void
+  onFinalArtifacts?: (files: any[], sessionId?: string) => void
 }
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
@@ -48,11 +49,13 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
       const isTerminalOutput = name === 'run_terminal_command' || name === 'run_command'
       const existing = isTerminalOutput
         ? toolSteps.findLastIndex(step => step.type === 'call' && step.name === name)
-        : -1
+        : toolSteps.findLastIndex(step => step.type === 'think' && step.isProgress && step.name === name)
       if (existing >= 0) {
-        toolSteps[existing] = { ...toolSteps[existing], liveDetail: progressDetail, timestamp }
+        toolSteps[existing] = isTerminalOutput
+          ? { ...toolSteps[existing], liveDetail: progressDetail, progress: Number(progress) || 0, timestamp }
+          : { ...toolSteps[existing], detail: progressDetail, progress: Number(progress) || 0, timestamp }
       } else {
-        toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail: progressDetail })
+        toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail: progressDetail, progress: Number(progress) || 0, isProgress: true })
       }
     }
     else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
@@ -122,7 +125,8 @@ export function useChatToolEvents({
   setCronTasks,
   activeSessionIdRef,
   cronRunningLogsRef,
-  showToast
+  showToast,
+  onFinalArtifacts
 }: UseChatToolEventsOptions): { discardPendingMessageSave: () => void } {
   const latestMessageRef = useRef<any>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -218,6 +222,9 @@ export function useChatToolEvents({
       if (notice && (!event.sessionId || event.sessionId === activeSessionIdRef.current)) {
         showToast?.(notice.message, notice.type)
       }
+      if (event.type === 'generated_files' && event.autoPreview && Array.isArray(event.files)) {
+        onFinalArtifacts?.(event.files, event.sessionId)
+      }
       pendingEvents.push(event)
       if (!throttleTimeout) throttleTimeout = setTimeout(flushEvents, 50)
     })
@@ -230,7 +237,7 @@ export function useChatToolEvents({
       if (latestMessageRef.current) window.api.saveMessage(withoutEphemeralToolSteps(latestMessageRef.current)).catch(console.error)
       latestMessageRef.current = null
     }
-  }, [activeSessionIdRef, cronRunningLogsRef, setCronTasks, showToast, updateSessionMessages])
+  }, [activeSessionIdRef, cronRunningLogsRef, onFinalArtifacts, setCronTasks, showToast, updateSessionMessages])
 
   return { discardPendingMessageSave }
 }

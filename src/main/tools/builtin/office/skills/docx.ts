@@ -62,15 +62,38 @@ const descriptor: OfficeSkillDescriptor = {
             items: {
               type: 'object',
               properties: {
-                search: { type: 'string' },
-                replace: { type: 'string' },
-                paragraphStyle: { type: 'string' },
-                style: { type: 'object' }
+                search: { type: 'string', description: '要查找的现有文字；仅应用样式时无需 replace' },
+                replace: { type: 'string', description: '可选替换文字；省略时保留原文字' },
+                paragraphStyle: { type: 'string', description: '可选，仅匹配指定 Word 段落样式' },
+                style: {
+                  type: 'object',
+                  minProperties: 1,
+                  properties: {
+                    bold: { type: 'boolean' },
+                    italic: { type: 'boolean' },
+                    underline: { type: 'boolean' },
+                    color: { type: 'string', pattern: '^[0-9A-Fa-f]{6}$', description: '六位 RGB，例如红色 FF0000；不要包含 #' },
+                    fontSize: { type: 'number', description: '半磅值，例如 24 表示 12pt' },
+                    highlight: { type: 'string', description: 'Word 高亮颜色名称，例如 yellow' }
+                  }
+                }
               },
               required: ['search']
             }
           },
-          images: { type: 'array', items: { type: 'object' } }
+          images: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                search_text: { type: 'string' },
+                image_path: { type: 'string' },
+                width: { type: 'number', description: '厘米，默认 10' },
+                height: { type: 'number', description: '厘米，默认 8' }
+              },
+              required: ['search_text', 'image_path']
+            }
+          }
         },
         required: ['source_path', 'output_name']
       }
@@ -210,7 +233,7 @@ export const docxSkill: OfficeSkill = {
 
       if (action === 'modify') {
         const sourcePath = resolveRequiredSource(input, '.docx', context)
-        const rawModifications = input.modifications || input.operations
+        const rawModifications = input.modifications
         const modifications = Array.isArray(rawModifications)
           ? rawModifications.map((modification) => ({
               ...modification,

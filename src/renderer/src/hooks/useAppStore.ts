@@ -1572,12 +1572,25 @@ export function useAppStore() {
     }
   }
 
+  const handleFinalArtifacts = useCallback((files: any[], sessionId?: string) => {
+    if (!files.length || (sessionId && sessionId !== activeSessionIdRef.current)) return
+    const time = new Date().toISOString()
+    const finalFiles = files.filter(file => file?.path).map(file => ({ ...file, time }))
+    if (!finalFiles.length) return
+    setGeneratedFiles(finalFiles)
+    setOpenTabs(finalFiles)
+    setPreviewFile(finalFiles[0])
+    setActiveTab('chat')
+    setShowFilePanel(true)
+  }, [setActiveTab, setGeneratedFiles, setOpenTabs, setPreviewFile, setShowFilePanel])
+
   const { discardPendingMessageSave } = useChatToolEvents({
     updateSessionMessages,
     setCronTasks,
     activeSessionIdRef,
     cronRunningLogsRef,
-    showToast
+    showToast,
+    onFinalArtifacts: handleFinalArtifacts
   })
   const { abortedReplyIdsRef, finalizeReply, failReply, abortReply } = useChatReplyRuntime({
     setSessions,

@@ -52,6 +52,8 @@ export interface ToolContext {
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean
   abortSignal?: AbortSignal
+  /** Internal Office workflows use this while producing non-user-facing intermediates. */
+  suppressOfficePreview?: boolean
 }
 
 export interface IToolExecutor {

@@ -203,6 +203,93 @@ $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { New-Object S
   return stdout.trim().includes('OK')
 }
 
+export interface DesktopElementMatch {
+  name: string
+  automationId: string
+  controlType: string
+  processId: number
+  processName: string
+  isEnabled: boolean
+  isOffscreen: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export async function findDesktopElements(target: {
+  processId?: number
+  processName?: string
+  nameContains?: string
+  controlType?: string
+  limit?: number
+}): Promise<DesktopElementMatch[]> {
+  if (process.platform !== 'win32') return []
+  const processId = Number.isFinite(target.processId) ? Math.trunc(Number(target.processId)) : 0
+  const processName = String(target.processName || '').replace(/'/g, "''")
+  const nameContains = String(target.nameContains || '').replace(/'/g, "''")
+  const controlType = String(target.controlType || '').replace(/'/g, "''")
+  const limit = Math.min(80, Math.max(1, Math.trunc(Number(target.limit) || 30)))
+  const script = `
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$conditions = New-Object System.Collections.Generic.List[System.Windows.Automation.Condition]
+if (${processId} -gt 0) {
+  $conditions.Add((New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, ${processId})))
+}
+$condition = if ($conditions.Count -eq 0) { [System.Windows.Automation.Condition]::TrueCondition } elseif ($conditions.Count -eq 1) { $conditions[0] } else { New-Object System.Windows.Automation.AndCondition($conditions.ToArray()) }
+$elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+$results = New-Object System.Collections.Generic.List[object]
+foreach ($element in $elements) {
+  if ($results.Count -ge ${limit}) { break }
+  try {
+    $current = $element.Current
+    $elementName = [string]$current.Name
+    $elementType = [string]$current.ControlType.ProgrammaticName
+    $elementProcessName = ''
+    try { $elementProcessName = (Get-Process -Id $current.ProcessId -ErrorAction Stop).ProcessName } catch {}
+    $bounds = $current.BoundingRectangle
+    $nameMatch = ('${nameContains}' -eq '' -or $elementName.IndexOf('${nameContains}', [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    $typeMatch = ('${controlType}' -eq '' -or $elementType -ieq '${controlType}')
+    $processMatch = ('${processName}' -eq '' -or $elementProcessName -ieq '${processName}')
+    if ($nameMatch -and $typeMatch -and $processMatch -and -not $bounds.IsEmpty -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+      $results.Add([pscustomobject]@{
+        name = $elementName; automationId = [string]$current.AutomationId; controlType = $elementType
+        processId = [int]$current.ProcessId; processName = $elementProcessName
+        isEnabled = [bool]$current.IsEnabled; isOffscreen = [bool]$current.IsOffscreen
+        x = [int]$bounds.Left; y = [int]$bounds.Top
+        width = [int]$bounds.Width; height = [int]$bounds.Height
+      })
+    }
+  } catch {}
+}
+if ($results.Count -eq 0) { '[]' } else { $results.ToArray() | ConvertTo-Json -Compress -Depth 4 }
+`
+  const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', script], { timeout: 10000 })
+  try {
+    const parsed = JSON.parse(stdout.trim() || '[]')
+    const items = Array.isArray(parsed) ? parsed : [parsed]
+    return items.filter(item => item && typeof item === 'object').map(item => ({
+      name: String(item.name || ''),
+      automationId: String(item.automationId || ''),
+      controlType: String(item.controlType || ''),
+      processId: Number(item.processId) || 0,
+      processName: String(item.processName || ''),
+      isEnabled: Boolean(item.isEnabled),
+      isOffscreen: Boolean(item.isOffscreen),
+      x: Number(item.x) || 0,
+      y: Number(item.y) || 0,
+      width: Number(item.width) || 0,
+      height: Number(item.height) || 0
+    }))
+  } catch {
+    return []
+  }
+}
+
 export async function findDesktopElementPoint(target: {
   name: string
   x: number
@@ -329,11 +416,12 @@ for ($i = 0; $i -lt ${amount}; $i++) {
   return stdout.trim().includes('OK')
 }
 
-export async function focusDesktopElement(target: Pick<DesktopTargetSnapshot, 'automationId' | 'name' | 'processName'>): Promise<boolean> {
+export async function focusDesktopElement(target: Pick<DesktopTargetSnapshot, 'automationId' | 'name' | 'processName' | 'processId'>): Promise<boolean> {
   if (process.platform !== 'win32' || (!target.automationId && !target.name)) return false
   const automationId = String(target.automationId || '').replace(/'/g, "''")
   const name = String(target.name || '').replace(/'/g, "''")
   const processName = String(target.processName || '').replace(/'/g, "''")
+  const processId = Number.isFinite(target.processId) ? Math.trunc(Number(target.processId)) : 0
   const elementCondition = automationId
     ? `$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '${automationId}')`
     : `$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '${name}')`
@@ -345,7 +433,8 @@ ${elementCondition}
 $elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
 foreach ($element in $elements) {
   $matchesProcess = $true
-  if ('${processName}' -ne '') {
+  if (${processId} -gt 0) { $matchesProcess = ($element.Current.ProcessId -eq ${processId}) }
+  if ($matchesProcess -and '${processName}' -ne '') {
     $elementProcess = ''
     try { $elementProcess = (Get-Process -Id $element.Current.ProcessId -ErrorAction Stop).ProcessName } catch {}
     $matchesProcess = ($elementProcess -ieq '${processName}')

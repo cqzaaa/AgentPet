@@ -125,6 +125,8 @@ declare global {
       onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       getTaskRun: (taskRunId: string) => Promise<any | null>
+      listTaskRuns: (sessionId?: string) => Promise<any[]>
+      listSubagentTasks: (taskRunId: string) => Promise<any[]>
       controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel') => Promise<any | null>
       retryTaskStep: (taskRunId: string, taskStepId: string) => Promise<any | null>
       onTaskRunUpdated: (callback: (data: any) => void) => () => void

@@ -21,6 +21,11 @@ const GlobalAssistantWindow = lazy(() =>
     default: module.GlobalAssistantWindow
   }))
 )
+const OfficePreviewCaptureWindow = lazy(() =>
+  import('./components/OfficePreviewCaptureWindow').then((module) => ({
+    default: module.OfficePreviewCaptureWindow
+  }))
+)
 
 function WindowLoadingFallback(): React.JSX.Element {
   return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
@@ -70,6 +75,8 @@ function App(): React.JSX.Element {
       <AutomationOverlay />
     ) : currentHash === '#/global-assistant' ? (
       <GlobalAssistantWindow />
+    ) : currentHash === '#/office-preview-capture' ? (
+      <OfficePreviewCaptureWindow />
     ) : (
       <PetWidget />
     )

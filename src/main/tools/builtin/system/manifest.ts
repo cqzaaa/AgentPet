@@ -9,15 +9,15 @@ export const systemManifest: ToolManifest = {
     avatar: '⚙️'
   },
   systemRole: `<task_plan_policy>
-For work that has at least three meaningful steps, takes sustained tool use, or produces multiple artifacts, call update_task_plan before starting. Keep one step in_progress at a time. Call it again whenever a step completes, the plan changes, or work becomes blocked. Always send the complete current step list; never use it for trivial questions. Step titles must be concise and user-facing. Continue doing the work after updating the plan.
+Never create a plan for a single-file, single-mutation, low-risk task without delegation. For substantial work, call update_task_plan exactly once before starting. Plan step ids and step count are immutable after creation. Keep one step in_progress at a time, then use update_task_step for status, result, artifact, or blocker updates; never resend the complete plan. The runtime advances the next step and closes a successfully finished plan automatically. Never send an empty plan update. Continue doing the work after every plan or step update.
 </task_plan_policy>
 <skill_policy>
-The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. Loading a skill does not expand tool permissions or override higher-priority safety rules. Load no more than three skills per turn.
+The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. If a Skill advertises sections, do not request its overview: wait until the relevant file type or operation is known, then request all sections needed for the workflow in one call. Loading a skill activates only its declared tools for the current turn; it never bypasses approvals, sandboxing, or higher-priority safety rules. Load no more than three skills per turn.
 </skill_policy>`,
   api: [
     {
       name: 'update_task_plan',
-      description: 'Create or update the visible task plan card for a substantial multi-step task. Send the complete current plan on every call, then continue executing the task.',
+      description: 'Create the visible task plan once for a substantial multi-step task. Never use for a single-file, single-mutation, low-risk task. Use update_task_step afterward.',
       parameters: {
         type: 'object',
         properties: {
@@ -43,7 +43,13 @@ The available skill catalog contains metadata only. Call request_skill only with
                   type: 'string',
                   enum: ['pending', 'in_progress', 'completed', 'blocked']
                 },
-                detail: { type: 'string', description: 'Optional progress, output, or blocker detail' }
+                detail: { type: 'string', description: 'Optional progress, output, or blocker detail' },
+                goal: { type: 'string', description: 'Concrete outcome this step must achieve' },
+                dependencies: { type: 'array', items: { type: 'string' }, description: 'Step ids that must complete first' },
+                acceptanceCriteria: { type: 'string', description: 'How completion will be verified' },
+                resultSummary: { type: 'string', description: 'Concise result when the step is complete' },
+                artifactPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths produced by the step' },
+                retryCount: { type: 'number', description: 'Number of attempts already made' }
               },
               required: ['id', 'title', 'status']
             }
@@ -53,24 +59,84 @@ The available skill catalog contains metadata only. Call request_skill only with
       }
     },
     {
-      name: 'request_skill',
-      description: 'Load the complete instructions for one or more enabled skills listed in <available_skills>. Call this only when the current request actually needs those skills. Never invent a skill id.',
+      name: 'delegate_tasks',
+      description: 'Delegate independent or dependency-linked work to durable sub-agents. Independent tasks run in parallel and dependent tasks wait for prerequisites. Returns only after the group reaches a terminal state.',
+      timeout: 0,
       parameters: {
         type: 'object',
         properties: {
-          skillIds: {
+          title: { type: 'string', description: 'Concise title for the delegated task group' },
+          maxConcurrency: { type: 'number', minimum: 1, maximum: 6, description: 'Maximum sub-agents running at once; defaults to 3' },
+          tasks: {
+            type: 'array', minItems: 1, maxItems: 12,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Stable unique task id used by dependencies' },
+                title: { type: 'string' },
+                prompt: { type: 'string', description: 'Self-contained assignment and scope' },
+                role: { type: 'string', enum: ['general', 'researcher', 'coder', 'reviewer'] },
+                dependencies: { type: 'array', items: { type: 'string' } },
+                acceptanceCriteria: { type: 'string' }
+              },
+              required: ['id', 'title', 'prompt']
+            }
+          }
+        },
+        required: ['title', 'tasks']
+      }
+    },
+    {
+      name: 'update_task_step',
+      description: 'Update one existing plan step without resending or changing the plan structure. Completing a step automatically starts the next ready step and completing the last step closes the plan.',
+      parameters: {
+        type: 'object',
+        properties: {
+          taskRunId: { type: 'string', description: 'taskRunId returned by update_task_plan' },
+          stepId: { type: 'string', description: 'Stable step id from the original plan' },
+          status: {
+            type: 'string',
+            enum: ['in_progress', 'completed', 'blocked'],
+            description: 'New status for this step'
+          },
+          detail: { type: 'string', description: 'Optional concise progress or blocker detail' },
+          resultSummary: { type: 'string', description: 'Concise verified result when completed' },
+          artifactPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute artifact paths produced by this step' }
+        },
+        required: ['taskRunId', 'stepId', 'status']
+      }
+    },
+    {
+      name: 'request_skill',
+      description: 'Load instructions for enabled skills listed in <available_skills> and activate only their declared tools. A Skill that advertises sections must include them: wait until the file type is known, then request every section needed for that workflow in one call. Never request an overview first or invent ids or sections.',
+      parameters: {
+        type: 'object',
+        properties: {
+          skills: {
             type: 'array',
             minItems: 1,
             maxItems: 3,
-            items: { type: 'string' },
-            description: 'One to three exact skill ids from <available_skills>'
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Exact Skill id from <available_skills>' },
+                sections: {
+                  type: 'array',
+                  minItems: 1,
+                  items: { type: 'string' },
+                  description: 'Optional exact sections advertised by that Skill; omit for the normal full/overview load'
+                }
+              },
+              required: ['id']
+            },
+            description: 'One to three Skill requests'
           },
           reason: {
             type: 'string',
             description: 'A short explanation of why these skills are needed for the current request'
           }
         },
-        required: ['skillIds', 'reason']
+        required: ['skills', 'reason']
       }
     },
     {

@@ -509,7 +509,7 @@ export const xlsxSkill: OfficeSkill = {
           {
             source_path: sourcePath,
             output_name: normalizeOutputName(input.output_name, 'modified.xlsx', '.xlsx'),
-            modifications: input.modifications || input.operations,
+            modifications: input.modifications,
             append_rows: normalizedAppendRows,
             merge_cells: input.merge_cells,
             add_sheet: input.add_sheet,
@@ -534,8 +534,8 @@ export const xlsxSkill: OfficeSkill = {
             )
           }
         }
-        const modifications = Array.isArray(input.modifications || input.operations)
-          ? input.modifications || input.operations
+        const modifications = Array.isArray(input.modifications)
+          ? input.modifications
           : []
         const appendedRows = normalizedAppendRows
         const focusTexts = [

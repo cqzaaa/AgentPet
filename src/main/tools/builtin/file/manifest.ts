@@ -11,7 +11,7 @@ export const fileManifest: ToolManifest = {
   api: [
     {
       name: 'read_file',
-      description: '读取任意文件内容。支持 PDF、Word、Excel、CSV 及文本文件。支持使用 start_line 和 end_line 进行精确分页按行读取（对于文本和长网页 markdown 非常有用）。默认对大文件只读取前 30000 字符。',
+      description: '读取文件的语义文本。支持 PDF、Word、Excel、CSV 及文本文件，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。支持使用 start_line 和 end_line 分页读取，默认最多返回 30000 字符。',
       parameters: {
         type: 'object',
         properties: {
@@ -70,12 +70,22 @@ export const fileManifest: ToolManifest = {
     },
     {
       name: 'find_files',
-      description: '在当前会话已授权目录内按文件名查找文件。用于“帮我找 xxx.txt”这类请求；搜索被限制在同一授权目录，不会自动切换磁盘。',
+      description: '在明确位置或当前会话已授权目录内按文件名查找文件。用户说明桌面、文档或下载目录时直接传 location；不要询问 Windows 用户名，也不要用终端解析这些系统目录。',
       parameters: {
         type: 'object',
         properties: {
-          file_name: { type: 'string', description: '待查找的完整文件名，例如 erro.txt' },
-          directory_path: { type: 'string', description: '已授权的起始目录；省略时使用当前会话附件目录' },
+          file_name: { type: 'string', description: '文件名、文件主名或部分名称；可以省略扩展名' },
+          location: {
+            type: 'string',
+            enum: ['desktop', 'documents', 'downloads', 'workspace', 'session'],
+            description: '常用起始位置。用户已说明位置时优先使用；directory_path 优先级更高'
+          },
+          directory_path: { type: 'string', description: '已授权的绝对起始目录；省略时按 location 解析，二者都省略则使用当前会话附件目录' },
+          match_mode: {
+            type: 'string',
+            enum: ['auto', 'exact', 'contains', 'glob'],
+            description: '匹配方式，默认 auto；auto 支持省略扩展名和部分名称'
+          },
           max_depth: { type: 'number', description: '最大递归层级，默认 4，上限 8' },
           max_results: { type: 'number', description: '最多返回结果数，默认 20，上限 100' }
         },
@@ -85,7 +95,7 @@ export const fileManifest: ToolManifest = {
     {
       name: 'write_file',
       description: '向指定路径写入文件。',
-      humanIntervention: 'required',
+      humanIntervention: 'never',
       parameters: {
         type: 'object',
         properties: {

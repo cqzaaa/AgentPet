@@ -10,28 +10,11 @@ export const officeSkillManifest: ToolManifest = {
   },
   api: [
     {
-      name: 'load_office_skill',
-      humanIntervention: 'never',
-      description:
-        '处理 DOCX、XLSX、PDF 或 PPTX 文件时必须先调用，加载对应 Office Skill 的详细操作说明。除非用户明确要求用脚本实现，否则不要改用终端、Python、pandas 或 openpyxl。',
-      parameters: {
-        type: 'object',
-        properties: {
-          skill: {
-            type: 'string',
-            enum: ['docx', 'xlsx', 'pdf', 'pptx'],
-            description: '要加载的文件 Skill'
-          }
-        },
-        required: ['skill']
-      }
-    },
-    {
       name: 'run_office_skill',
       humanIntervention: 'auto',
       timeout: 2_400_000,
       description:
-        '创建、检查、修改、验证或预览 Office 文件的首选执行工具。先用 load_office_skill 获取 input schema；修改已有文件时先 inspect，完成后必须 validate。',
+        '创建、检查、修改、验证、预览或转换 Office 文件的统一执行工具。先用 request_skill 加载 office 及所需格式 sections；严格使用返回的 action.inputSchema，修改后必须 validate 或 render。',
       parameters: {
         type: 'object',
         properties: {
@@ -41,11 +24,11 @@ export const officeSkillManifest: ToolManifest = {
           },
           action: {
             type: 'string',
-            enum: ['create', 'inspect', 'modify', 'validate', 'render', 'convert']
+            enum: ['create', 'inspect', 'modify', 'validate', 'render', 'convert', 'semantic_edit']
           },
           input: {
             type: 'object',
-            description: '参数结构由 load_office_skill 返回的对应 action.inputSchema 决定'
+            description: '参数结构由 request_skill 返回的对应 action.inputSchema 决定'
           }
         },
         required: ['skill', 'action', 'input']

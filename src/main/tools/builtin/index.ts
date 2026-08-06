@@ -1,4 +1,6 @@
 import { toolRegistry } from '../core/tool-registry'
+import { BOOTSTRAP_TOOL_NAMES } from '../../agent-runtime/skill-tool-routing'
+import { listBuiltinSkills } from '../../skills/builtin-skills'
 
 import { terminalManifest } from './terminal/manifest'
 import { terminalExecutor } from './terminal/executor'
@@ -12,8 +14,6 @@ import { searchExecutor } from './search/executor'
 import { webManifest } from './web/manifest'
 import { webExecutor } from './web/executor'
 
-import { officeManifest } from './office/manifest'
-import { officeExecutor } from './office/executor'
 import { officeSkillManifest } from './office/skills/manifest'
 import { officeSkillExecutor } from './office/skills/executor'
 
@@ -31,9 +31,18 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(fileManifest, fileExecutor)
   toolRegistry.register(searchManifest, searchExecutor)
   toolRegistry.register(webManifest, webExecutor)
-  toolRegistry.register(officeManifest, officeExecutor)
   toolRegistry.register(officeSkillManifest, officeSkillExecutor)
   toolRegistry.register(systemManifest, systemExecutor)
   toolRegistry.register(computerManifest, computerExecutor)
   toolRegistry.register(rpaManifest, rpaToolExecutor)
+
+  const classifiedToolNames = new Set([
+    ...BOOTSTRAP_TOOL_NAMES,
+    ...listBuiltinSkills().flatMap(skill => skill.allowedTools)
+  ])
+  const unclassified = Object.keys(toolRegistry.getAllToolsInfo())
+    .filter(toolName => !classifiedToolNames.has(toolName))
+  if (unclassified.length > 0) {
+    throw new Error(`Built-in tools missing a Skill classification: ${unclassified.join(', ')}`)
+  }
 }

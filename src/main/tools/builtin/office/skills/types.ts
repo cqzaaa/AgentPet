@@ -4,7 +4,7 @@ import type { ToolContext, ToolResult } from '../../../core/types'
 
 export type OfficeSkillName = 'docx' | 'xlsx' | 'pdf' | 'pptx'
 export type OfficeCoreSkillAction = 'create' | 'inspect' | 'modify' | 'validate' | 'render'
-export type OfficeSkillAction = OfficeCoreSkillAction | 'convert'
+export type OfficeSkillAction = OfficeCoreSkillAction | 'convert' | 'semantic_edit'
 
 export interface OfficeSkillOperation {
   description: string

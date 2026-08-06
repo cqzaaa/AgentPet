@@ -229,6 +229,8 @@ const api = {
     }
   },
   getTaskRun: (taskRunId: string): Promise<any | null> => ipcRenderer.invoke('api:get-task-run', taskRunId),
+  listTaskRuns: (sessionId?: string): Promise<any[]> => ipcRenderer.invoke('api:list-task-runs', sessionId),
+  listSubagentTasks: (taskRunId: string): Promise<any[]> => ipcRenderer.invoke('api:list-subagent-tasks', taskRunId),
   controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel'): Promise<any | null> =>
     ipcRenderer.invoke('api:control-task-run', taskRunId, action),
   retryTaskStep: (taskRunId: string, taskStepId: string): Promise<any | null> =>

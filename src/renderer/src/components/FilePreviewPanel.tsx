@@ -25,6 +25,7 @@ import type { LucideIcon } from 'lucide-react'
 
 interface FilePreviewPanelProps {
   store: AppStore
+  captureOnly?: boolean
 }
 
 interface SpreadsheetValidation {
@@ -217,7 +218,7 @@ function FileTypeIcon({ fileName, size = 18 }: { fileName: string; size?: number
   return <Icon size={size} strokeWidth={2} color={color} aria-hidden="true" />
 }
 
-export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.Element {
+export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPanelProps): React.JSX.Element {
   const {
     generatedFiles,
     setShowFilePanel,
@@ -722,7 +723,8 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
       overflow: 'hidden'
     }
     : {
-      width: `${filePanelWidth}px`,
+      width: captureOnly ? '100vw' : `${filePanelWidth}px`,
+      height: captureOnly ? '100vh' : undefined,
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--bg-card)',
@@ -733,7 +735,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
   return (
     <>
       {/* 拖拽调整条 */}
-      {!isFakeFullscreen && (
+      {!isFakeFullscreen && !captureOnly && (
         <div
           onMouseDown={(e) => {
             e.preventDefault()
@@ -757,7 +759,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
       )}
       <div style={panelStyle}>
         {/* 面板头部 */}
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        {!captureOnly && <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center' }}>
             <FolderOpen size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
             已生成的文件 ({visibleFileCount})
@@ -766,13 +768,13 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
             onClick={() => { setShowFilePanel(false); setPreviewFile(null); setOpenTabs([]) }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
           ><X size={15} strokeWidth={2} aria-hidden="true" /></button>
-        </div>
+        </div>}
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {openTabs.length > 0 ? (
             <>
               {/* 有已打开的 Tab 时：上方 Tab 栏 + 下方预览区域 */}
-              <div style={{
+              {!captureOnly && <div style={{
                 display: 'flex',
                 flexWrap: 'nowrap',
                 overflowX: 'auto',
@@ -848,7 +850,7 @@ export function FilePreviewPanel({ store }: FilePreviewPanelProps): React.JSX.El
                     </div>
                   )
                 })}
-              </div>
+              </div>}
 
               {/* 预览区域 */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>

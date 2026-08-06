@@ -228,7 +228,7 @@ export function useChatSend({
         .slice(-state.contextRounds * 2)
         .map(toLlmMessage)
 
-      const retrievalQuery = text || fileNames
+      const retrievalQuery = [text, fileNames].filter(Boolean).join('\n')
       const [profileContent, recallResponse, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([
         window.api.getMemoryProfile().catch((error: any) => { console.error('获取人物画像失败:', error); return '' }),
         window.api.recallExperiences(text).catch((error: any) => { console.error('获取避坑经验失败:', error); return [] }),
@@ -266,8 +266,8 @@ export function useChatSend({
           : '')
       const knowledgeContext = formatKnowledgeEvidence(state.selectedKnowledgeBaseName, knowledgeEvidence as any[])
       const skillsContext = String(skillCatalogResult.catalog || '').trim()
-        ? `以下是当前请求可使用的 Skill 基础目录。目录不是完整规范；只有确实需要时才调用 request_skill 读取完整内容，每轮最多加载 3 个：\n\n${skillCatalogResult.catalog}`
-        : '当前请求没有可用的第三方 Skill。不要调用 request_skill。'
+        ? `以下是所有已启用本地 Skill 的业务能力目录。目录不是完整规范；请根据业务简介自行选择，只有确实需要时才调用 request_skill 读取完整内容，每轮最多加载 3 个：\n\n${skillCatalogResult.catalog}`
+        : '当前没有已启用的 Skill。请直接回答，不要猜测 Skill id 或调用 request_skill。'
       const avatar = getAvatar(state)
       const stylePrompt = avatar.style === 'cute'
         ? '你需要使用可爱、萌系、活泼的语气与主人（用户）对话。'
@@ -308,15 +308,16 @@ ${knowledgeContext}
 ${skillsContext}
 
 <tool_use_rules>
-- 工具授权：主进程已为你绑定了本地系统操作工具（文件读写、终端命令执行、系统状态获取）与外部 MCP 扩展工具。
+- 工具加载：本地能力初始仅提供基础工具。文件、终端、浏览器、桌面、Office、RPA、系统、定时任务与记忆能力必须先从 <available_skills> 选择精确 Skill，并调用 request_skill 加载；Skill 声明 sections 时只请求当前工作流需要的 section。加载成功后才会开放该 Skill 声明的本地工具。外部 MCP 工具继续按 MCP 服务授权状态提供。
 - ⚠️ 调用原则：普通的打招呼（例如 hi、你好）、日常闲聊、常识问答等，请直接以文字回复，【严禁】无意义地调用系统工具。
 - 🚫 调用约束：你只能使用已提供给你的工具，绝对不允许编造任何不存在的工具名称。
-- 💡 变通调用：如果遇到未提供专用工具的需求（例如获取当前时间），请通过 'run_terminal_command' 执行相应的系统指令；本机 Windows 请指定 shell='powershell'，例如 \`Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'\`。${mcpContext}
+- 💡 变通调用：如果遇到未提供专用工具的需求（例如获取当前时间），先调用 request_skill 加载 terminal，再使用 run_terminal_command；本机 Windows 请指定 shell='powershell'，例如 \`Get-Date -Format 'yyyy-MM-dd HH:mm:ss K'\`。${mcpContext}
 - 后台进程：启动数据库、Web 服务、开发服务器或其他常驻进程时必须使用异步 \`run_command\`，再用 \`get_command_output\` 查看状态；禁止使用同步终端工具等待常驻进程。
 - 权限失败：遇到 Access is denied、拒绝访问、System error 5 等错误时必须停止等价命令重试，直接说明需要管理员权限。不得擅自绕过 Windows 服务管理器启动底层进程。
 - Windows 命令：PowerShell 中调用传统程序必须写完整可执行名，例如 \`sc.exe\`、\`where.exe\`，避免与 PowerShell 别名冲突。
 - 结果判断：非零退出码不一定是系统异常；查询无匹配或状态检查未命中时，应结合输出和命令语义判断。
-- 附件预读：上传时抽取的 PDF 内容只是语义文本预览。PDF 转 DOCX/PPTX 必须调用 run_office_skill 的 pdf.convert；转换失败或用户取消配置后，禁止使用预读文本调用 docx.create/pptx.create 冒充转换结果。
+- Office 文件：涉及 PDF、DOCX、XLSX 或 PPTX 的内容、格式、版式或转换时，先调用 request_skill 加载 office。Office Skill 内部自带受管 Python、转换器和原生 Office 导出能力；禁止为这些操作转去 terminal 检查 pip、安装包或临时编写 Python。
+- 附件预读：上传时抽取的 PDF 内容只是语义文本预览。PDF 转 DOCX/PPTX 必须使用 run_office_skill 的 pdf.convert；转换失败或用户取消配置后，禁止使用预读文本调用 docx.create/pptx.create 冒充转换结果。
 - 生成文件：工具返回 file_path 后，最终回复只需简短说明转换完成并给出完整绝对路径的 Markdown 文件链接，例如 \`[文件名.docx](<C:/完整路径/generated_files/文件名.docx>)\`。禁止只写 \`generated_files\`、目录简称或不可点击的文件名；禁止向用户罗列转换引擎、Python 包、解析过程、质量检查或内部验证项。
 
 </tool_use_rules>

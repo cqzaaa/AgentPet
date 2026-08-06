@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { join, relative, resolve, sep } from 'path'
 import { getActiveStorageDir } from '../tools/utils/paths'
+import { getBuiltinSkill, listBuiltinSkills } from './builtin-skills'
 
 export type SkillSourceType = 'import' | 'skillhub' | 'legacy'
 
@@ -25,6 +26,26 @@ export type SkillIndexRecord = {
   updatedAt: number
 }
 
+export type SkillCatalogRecord = Pick<
+  SkillIndexRecord,
+  'id' | 'name' | 'description' | 'triggers' | 'allowedTools' | 'estimatedTokens'
+> & { sections?: string[] }
+
+export type SkillLoadRequest = {
+  id: string
+  sections?: string[]
+}
+
+export type LoadedSkill = {
+  id: string
+  name: string
+  instructions: string
+  estimatedTokens: number
+  artifactRoot: string
+  allowedTools: string[]
+  sections?: string[]
+}
+
 type ParsedFrontmatter = {
   name?: string
   description?: string
@@ -36,6 +57,8 @@ type ParsedFrontmatter = {
   allowedTools?: string[]
   'allowed-tools'?: string[]
 }
+
+const MAX_SKILL_TOKENS_PER_TURN = 16_000
 
 function skillsDirectory(): string {
   return join(getActiveStorageDir(), 'skills')
@@ -149,46 +172,8 @@ async function readIndex(path: string): Promise<SkillIndexRecord | null> {
   try { return JSON.parse(await fs.promises.readFile(path, 'utf8')) as SkillIndexRecord } catch { return null }
 }
 
-function tokenize(text: string): string[] {
-  const normalized = text.toLowerCase()
-  const latin = normalized.match(/[a-z0-9][a-z0-9._-]*/g) || []
-  const cjkRuns = normalized.match(/[\u3400-\u9fff]+/g) || []
-  const cjk: string[] = []
-  for (const run of cjkRuns) {
-    if (run.length === 1) cjk.push(run)
-    else for (let index = 0; index < run.length - 1; index += 1) cjk.push(run.slice(index, index + 2))
-  }
-  return [...latin, ...cjk]
-}
-
-function bm25(query: string, records: SkillIndexRecord[]): SkillIndexRecord[] {
-  const queryTokens = [...new Set(tokenize(query))]
-  if (queryTokens.length === 0) return records.slice(0, 10)
-  const documents = records.map(record => {
-    const weightedText = `${record.name} ${record.name} ${record.name} ${record.description} ${record.triggers.join(' ')} ${record.triggers.join(' ')} ${record.triggers.join(' ')} ${record.triggers.join(' ')} ${record.triggers.join(' ')}`
-    return tokenize(weightedText)
-  })
-  const averageLength = documents.reduce((sum, document) => sum + document.length, 0) / Math.max(1, documents.length)
-  const scores = records.map((record, recordIndex) => {
-    const document = documents[recordIndex]
-    const frequencies = new Map<string, number>()
-    for (const token of document) frequencies.set(token, (frequencies.get(token) || 0) + 1)
-    let score = record.triggers.some(trigger => query.toLowerCase().includes(trigger.toLowerCase())) ? 25 : 0
-    for (const token of queryTokens) {
-      const frequency = frequencies.get(token) || 0
-      if (!frequency) continue
-      const documentFrequency = documents.filter(candidate => candidate.includes(token)).length
-      const idf = Math.log(1 + (records.length - documentFrequency + 0.5) / (documentFrequency + 0.5))
-      const denominator = frequency + 1.2 * (1 - 0.75 + 0.75 * document.length / Math.max(1, averageLength))
-      score += idf * frequency * 2.2 / denominator
-    }
-    return { record, score }
-  })
-  return scores.filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 10).map(item => item.record)
-}
-
 export class SkillRegistry {
-  private loadedByTurn = new Map<string, { ids: Set<string>; tokens: number }>()
+  private loadedByTurn = new Map<string, { ids: Set<string>; loads: Set<string>; tokens: number }>()
 
   public async indexArchive(archiveName: string, folderPath: string, source: SkillIndexRecord['source'] = { type: 'import' }): Promise<SkillIndexRecord | null> {
     const id = safeId(archiveName)
@@ -247,13 +232,27 @@ export class SkillRegistry {
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  public async buildCatalog(query: string): Promise<{ catalog: string; candidates: SkillIndexRecord[]; enabledCount: number }> {
-    const enabled = (await this.listIndexed()).filter(record => record.enabled)
-    const candidates = enabled.length > 10 ? bm25(query, enabled) : enabled
+  public async buildCatalog(_query = ''): Promise<{ catalog: string; candidates: SkillCatalogRecord[]; enabledCount: number }> {
+    const installed = (await this.listIndexed()).filter(record => record.enabled)
+    const enabled: SkillCatalogRecord[] = [
+      ...listBuiltinSkills().map(skill => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        triggers: skill.triggers,
+        allowedTools: skill.allowedTools,
+        estimatedTokens: skill.estimatedTokens,
+        sections: skill.sections
+      })),
+      ...installed
+    ]
+    // Skill metadata is the model's routing table. Keep every enabled Skill visible;
+    // lexical retrieval must never make a capability impossible to discover.
+    const candidates = enabled
     if (candidates.length === 0) return { catalog: '', candidates, enabledCount: enabled.length }
     const lines = candidates.map(record => {
-      const triggers = record.triggers.slice(0, 10).join(', ')
-      return `- id: ${record.id}\n  name: ${record.name}\n  description: ${record.description.slice(0, 240)}${triggers ? `\n  triggers: ${triggers}` : ''}\n  estimated_tokens: ${record.estimatedTokens}`
+      const sections = record.sections?.length ? `\n  sections: ${record.sections.join(', ')}` : ''
+      return `- id: ${record.id}\n  name: ${record.name}\n  description: ${record.description.slice(0, 360)}${sections}\n  estimated_tokens: ${record.estimatedTokens}`
     })
     return {
       catalog: `<available_skills>\n${lines.join('\n')}\n</available_skills>\n需要完整技能规范时调用 request_skill；不要根据名称猜测未加载的规则。`,
@@ -262,22 +261,65 @@ export class SkillRegistry {
     }
   }
 
-  public async requestSkills(ids: string[], sessionId?: string, messageId?: number): Promise<{ loaded: Array<{ id: string; name: string; instructions: string; estimatedTokens: number; artifactRoot: string }>; rejected: Array<{ id: string; reason: string }>; remainingSkillBudget: number }> {
+  public async requestSkills(requests: SkillLoadRequest[], sessionId?: string, messageId?: number): Promise<{ loaded: LoadedSkill[]; rejected: Array<{ id: string; reason: string }>; remainingSkillBudget: number }> {
     const turnKey = `${sessionId || 'default'}:${messageId || 'unknown'}`
     if (!this.loadedByTurn.has(turnKey)) {
       if (this.loadedByTurn.size >= 200) this.loadedByTurn.delete(this.loadedByTurn.keys().next().value as string)
-      this.loadedByTurn.set(turnKey, { ids: new Set(), tokens: 0 })
+      this.loadedByTurn.set(turnKey, { ids: new Set(), loads: new Set(), tokens: 0 })
     }
     const turnState = this.loadedByTurn.get(turnKey)!
-    const loaded: Array<{ id: string; name: string; instructions: string; estimatedTokens: number; artifactRoot: string }> = []
+    const loaded: LoadedSkill[] = []
     const rejected: Array<{ id: string; reason: string }> = []
-    let remainingSkillBudget = Math.max(0, 6000 - turnState.tokens)
-    for (const rawId of [...new Set(ids.map(safeId))].slice(0, 3)) {
-      if (turnState.ids.size >= 3) { rejected.push({ id: rawId, reason: '本轮最多加载 3 个 Skill' }); continue }
+    let remainingSkillBudget = Math.max(0, MAX_SKILL_TOKENS_PER_TURN - turnState.tokens)
+    const normalizedRequests = requests.slice(0, 3).map(request => ({
+      id: safeId(request.id),
+      sections: [...new Set((request.sections || []).map(safeId).filter(Boolean))].sort()
+    }))
+    for (const request of normalizedRequests) {
+      const rawId = request.id
+      const isNewSkill = !turnState.ids.has(rawId)
+      if (isNewSkill && turnState.ids.size >= 3) { rejected.push({ id: rawId, reason: '本轮最多加载 3 个 Skill' }); continue }
+      const builtin = getBuiltinSkill(rawId)
+      if (builtin) {
+        if (builtin.sections?.length && request.sections.length === 0) {
+          rejected.push({ id: rawId, reason: `该 Skill 必须指定 sections：${builtin.sections.join(', ')}。请先确认文件类型，再一次性请求所需章节。` })
+          continue
+        }
+        const unknownSections = request.sections.filter(section => !builtin.sections?.includes(section))
+        if (unknownSections.length > 0) {
+          rejected.push({ id: rawId, reason: `未知 section：${unknownSections.join(', ')}` })
+          continue
+        }
+        const loadKey = `${builtin.id}:${request.sections.join(',') || 'overview'}`
+        if (turnState.loads.has(loadKey)) { rejected.push({ id: rawId, reason: '本轮已经加载相同 section' }); continue }
+        try {
+          const instructions = await builtin.loadInstructions(request.sections)
+          const actualTokens = estimateTokens(instructions)
+          if (actualTokens > remainingSkillBudget) { rejected.push({ id: rawId, reason: '超过本轮 Skill token 预算' }); continue }
+          remainingSkillBudget -= actualTokens
+          turnState.tokens += actualTokens
+          turnState.ids.add(builtin.id)
+          turnState.loads.add(loadKey)
+          loaded.push({
+            id: builtin.id,
+            name: builtin.name,
+            instructions,
+            estimatedTokens: actualTokens,
+            artifactRoot: `builtin:${builtin.id}`,
+            allowedTools: [...builtin.allowedTools],
+            sections: request.sections.length > 0 ? [...request.sections] : undefined
+          })
+        } catch (error: any) {
+          rejected.push({ id: rawId, reason: `Builtin Skill load failed: ${error?.message || String(error)}` })
+        }
+        continue
+      }
       const record = await this.getRecord(rawId)
       if (!record) { rejected.push({ id: rawId, reason: 'Skill 不存在' }); continue }
       if (!record.enabled) { rejected.push({ id: rawId, reason: 'Skill 未启用' }); continue }
-      if (turnState.ids.has(record.id)) { rejected.push({ id: rawId, reason: '本轮已经加载' }); continue }
+      if (request.sections.length > 0) { rejected.push({ id: rawId, reason: '该 Skill 不支持 sections' }); continue }
+      const loadKey = `${record.id}:full`
+      if (turnState.loads.has(loadKey)) { rejected.push({ id: rawId, reason: '本轮已经加载' }); continue }
       if (record.estimatedTokens > remainingSkillBudget) { rejected.push({ id: rawId, reason: '超过本轮 Skill token 预算' }); continue }
       const folderRoot = resolve(skillsDirectory(), record.archiveName.replace(/\.zip$/i, ''))
       const rootPrefix = `${folderRoot}${sep}`
@@ -292,7 +334,15 @@ export class SkillRegistry {
       remainingSkillBudget -= record.estimatedTokens
       turnState.tokens += record.estimatedTokens
       turnState.ids.add(record.id)
-      loaded.push({ id: record.id, name: record.name, instructions: contents.join('\n\n---\n\n'), estimatedTokens: record.estimatedTokens, artifactRoot: folderRoot })
+      turnState.loads.add(loadKey)
+      loaded.push({
+        id: record.id,
+        name: record.name,
+        instructions: contents.join('\n\n---\n\n'),
+        estimatedTokens: record.estimatedTokens,
+        artifactRoot: folderRoot,
+        allowedTools: [...record.allowedTools]
+      })
     }
     return { loaded, rejected, remainingSkillBudget }
   }

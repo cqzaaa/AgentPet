@@ -6,9 +6,11 @@ import {
   type Rectangle,
   type WebContents
 } from 'electron'
+import { is } from '@electron-toolkit/utils'
 import * as fs from 'fs'
 import { randomUUID } from 'crypto'
 import { basename, extname, join } from 'path'
+import { pathToFileURL } from 'url'
 
 import type { ToolContext } from '../../core/types'
 import { getGeneratedFilesDir } from '../../utils/paths'
@@ -63,6 +65,53 @@ interface CompleteCapturePayload {
 
 const pendingCaptures = new Map<string, PendingCapture>()
 let handlersRegistered = false
+let captureWindow: BrowserWindow | null = null
+let captureWindowReady: Promise<BrowserWindow> | null = null
+
+async function getCaptureWindow(): Promise<BrowserWindow> {
+  if (captureWindow && !captureWindow.isDestroyed()) return captureWindow
+  if (captureWindowReady) return captureWindowReady
+
+  captureWindowReady = new Promise<BrowserWindow>((resolve, reject) => {
+    const window = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      show: false,
+      frame: false,
+      paintWhenInitiallyHidden: true,
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        backgroundThrottling: false
+      }
+    })
+    captureWindow = window
+    window.setMenu(null)
+    window.webContents.setAudioMuted(true)
+    window.once('closed', () => {
+      captureWindow = null
+      captureWindowReady = null
+    })
+    window.webContents.once('did-fail-load', (_event, code, description) => {
+      captureWindowReady = null
+      reject(new Error(`Office preview renderer failed to load (${code}): ${description}`))
+    })
+    window.webContents.once('did-finish-load', () => resolve(window))
+    const url = is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? `${process.env['ELECTRON_RENDERER_URL']}/#/office-preview-capture`
+      : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/office-preview-capture`
+    void window.loadURL(url)
+  })
+
+  try {
+    return await captureWindowReady
+  } catch (error) {
+    captureWindow?.destroy()
+    captureWindow = null
+    captureWindowReady = null
+    throw error
+  }
+}
 
 function finishCapture(requestId: string, result: OfficePreviewCaptureResult): void {
   const pending = pendingCaptures.get(requestId)
@@ -196,13 +245,15 @@ export async function requestVisibleOfficePreview(
   } = {}
 ): Promise<OfficePreviewCaptureResult> {
   ensurePreviewCaptureHandlers()
-  const sender = context.event?.sender
-  if (!sender || sender.isDestroyed()) {
+  let sender: WebContents
+  try {
+    sender = (await getCaptureWindow()).webContents
+  } catch (error) {
     return {
       status: 'unavailable',
       renderer: 'open-file-viewer',
       imagePaths: [],
-      message: 'This task has no visible chat window; visual preview was skipped'
+      message: error instanceof Error ? error.message : String(error)
     }
   }
   if (!fs.existsSync(filePath)) {
