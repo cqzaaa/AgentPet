@@ -813,6 +813,15 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       ].join('\n')
     })
 
+    const workspaceAlreadyDeclared = chatHistory.some(message =>
+      typeof message.content === 'string' && message.content.includes('<workspace_context>')
+    )
+    if (!workspaceAlreadyDeclared && typeof chatHistory[0].content === 'string') {
+      chatHistory[0].content += workspacePath
+        ? '\n\n<workspace_context>当前会话已绑定本地工作区。文件、代码搜索、终端和 Python 工具未传目录时默认使用该工作区；相对路径均相对于工作区解析。</workspace_context>'
+        : '\n\n<workspace_context>当前会话未绑定工作区；普通文件操作默认使用会话附件目录。</workspace_context>'
+    }
+
     // Keep only the bootstrap policy in the initial prompt. Non-bootstrap tools,
     // including delegation, become callable only after request_skill activates
     // the owning built-in skill for this turn.
@@ -1158,7 +1167,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       if (toolCalls && toolCalls.length > 0) {
 
 
-        // 第二阶段参数填充逻辑：对 MCP 等简化工具调用补充 Schema
+        // 第二阶段参数填充逻辑：为缺少必填字段的本地或 MCP 工具调用补全 Schema。
         for (let i = 0; i < toolCalls.length; i++) {
           const toolCall = toolCalls[i]
           const toolName = toolCall.function.name
@@ -1168,10 +1177,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             : null
           const parameterSchema = fullTool?.function.parameters
 
-          const isMcpTool = mcpManager.hasTool(toolName)
-          // 简化 Schema 仅用于帮助模型在大量 MCP 工具中选择目标。部分模型即使
-          // 面对空 Schema 也会返回完整参数；这种情况下无需再发一次参数补全请求。
-          // 否则，兼容性较弱的网关会在第二次请求报 400，尽管原始 MCP 调用可正常执行。
+          // 无参数工具的空对象是合法调用；只有 Schema 要求的字段缺失或类型错误时才补全。
           let hasArguments = false
           try {
             const parsedArguments = this.parseJsonObject(toolCall.function.arguments)
@@ -1180,8 +1186,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             // 无法解析的参数仍交由第二阶段尝试修复。
           }
 
-          if (isMcpTool && !hasArguments && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
-            console.log(`[Two-Stage] 检测到简化工具调用: ${toolName}，正在启动第二阶段参数填充...`)
+          if (!hasArguments && fullTool && fullTool.function.parameters && Object.keys(fullTool.function.parameters.properties || {}).length > 0) {
+            console.log(`[Two-Stage] 检测到不完整工具调用: ${toolName}，正在启动第二阶段参数填充...`)
             try {
               const compactSchema = this.compactJsonSchema(parameterSchema)
               fullTool.function.parameters = compactSchema
@@ -1193,7 +1199,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 },
                 {
                   role: 'user' as const,
-                  content: `Return only a valid JSON object of arguments for the selected MCP tool "${toolName}". Do not call a tool and do not add explanation.`
+                  content: `Return only a valid JSON object of arguments for the selected tool "${toolName}". Do not call a tool and do not add explanation.`
                 }
               ]
 
@@ -1238,8 +1244,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 console.warn(`[Two-Stage] 未能从模型返回中获取到匹配的参数`)
               }
             } catch (fillErr) {
-              // 参数补全是兼容性优化；保留初始调用，让 MCP 自身决定是否接受参数。
-              console.warn(`[Two-Stage] 参数补全不可用，将继续执行初始 MCP 调用:`, fillErr)
+              console.warn(`[Two-Stage] 参数补全不可用，将由执行前校验阻止不完整调用:`, fillErr)
             }
           }
         }
@@ -1298,12 +1303,12 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             }
 
             const toolName = toolCall.function.name
-            let toolArgs: any = {}
-            try {
-              toolArgs = JSON.parse(toolCall.function.arguments || '{}')
-            } catch (pe) {
-              console.error('解析工具参数失败', pe)
-            }
+            const parameterSchema = this.getFullToolDefinitionByName(toolName, isFrontend)?.function?.parameters
+            const parsedToolArguments = this.parseJsonObject(toolCall.function.arguments || '{}')
+            const argumentsAreValid = parameterSchema
+              ? this.hasValidToolArguments(parsedToolArguments, parameterSchema)
+              : parsedToolArguments !== null
+            let toolArgs: any = parsedToolArguments || {}
 
             let toolResult: string
             let toolSuccess = true
@@ -1314,7 +1319,11 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             const inputFingerprint = toolName === 'type_text'
               ? `${currentInputTarget}\n${String(toolArgs.text ?? '')}`
               : ''
-            if (config.dedupeMutatingToolCalls && inputFingerprint && successfulInputFingerprints.has(inputFingerprint)) {
+            if (!argumentsAreValid) {
+              const required = Array.isArray(parameterSchema?.required) ? parameterSchema.required.join(', ') : ''
+              toolResult = `[工具参数校验失败] ${toolName} 的参数不完整或类型错误${required ? `；必填字段：${required}` : ''}。请根据工具 Schema 重新生成完整参数后重试，不要重复发送空对象。`
+              toolSuccess = false
+            } else if (config.dedupeMutatingToolCalls && inputFingerprint && successfulInputFingerprints.has(inputFingerprint)) {
               toolResult = '[操作去重] 已阻止对同一焦点重复输入相同文本。上一次输入工具已成功返回；只有在截图明确证明失败后，才应重新定位目标并重试。'
               toolSuccess = false
             } else if (toolName === 'trigger_memory_purify') {

@@ -238,11 +238,11 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const queryEmbedding = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
 
       const linkRows = await database.all(`
-        SELECT memory_id, entity_name
+        SELECT memory_id, entity_name, entity_type, confidence
         FROM memory_entity_links
-        WHERE entity_type IN ('person', 'work', 'program', 'organization', 'product', 'location', 'topic')
-          AND confidence >= 0.6
-      `) as { memory_id: string, entity_name: string }[]
+        WHERE entity_type IN ('person', 'work', 'program', 'organization', 'product', 'location')
+          AND confidence >= 0.75
+      `) as { memory_id: string, entity_name: string, entity_type: string, confidence: number }[]
       
       // 构建每个记忆与其包含的实体的映射 Map<memoryId, Set<entityName>>
       const memoryToEntities = new Map<string, Set<string>>()
@@ -259,7 +259,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       const lowerQuery = queryText.toLowerCase()
       const firstOrderActive = new Set<string>()
       uniqueEntities.forEach(ent => {
-        if (lowerQuery.includes(ent)) {
+        if (queryContainsEntity(lowerQuery, ent)) {
           firstOrderActive.add(ent)
         }
       })
@@ -279,42 +279,27 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
         })
 
         // B. 找出这些一阶记忆关联的、不属于一阶激活实体的其它实体作为二阶实体
+        const secondOrderCounts = new Map<string, number>()
         firstOrderMemories.forEach(memId => {
           const entitiesSet = memoryToEntities.get(memId)
           if (entitiesSet) {
             entitiesSet.forEach(ent => {
               if (!firstOrderActive.has(ent)) {
-                secondOrderActive.add(ent)
+                secondOrderCounts.set(ent, (secondOrderCounts.get(ent) || 0) + 1)
               }
             })
           }
         })
+        ;[...secondOrderCounts.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 10)
+          .forEach(([entity]) => secondOrderActive.add(entity))
       }
 
-      // 6. 关键词预过滤：提取 query 关键词，快速排除完全无关的记忆，减少后续向量/图谱计算量
-      const queryKeywords = new Set(
-        (queryText.toLowerCase().match(/[\w\-]+|[一-龥]+/g) || [])
-          .filter(t => t.length >= 2)
-      )
-      const MAX_SCORING_CANDIDATES = 100
-      let candidateRows = queryEmbedding ? rows.slice(0, 500) : rows
-      if (!queryEmbedding && queryKeywords.size > 0) {
-        const withHits = rows.map(row => {
-          const factLower = (row.fact || '').toLowerCase()
-          let hits = 0
-          for (const kw of queryKeywords) {
-            if (factLower.includes(kw)) hits++
-          }
-          return { row, hits }
-        })
-        const filtered = withHits.filter(r => r.hits > 0)
-        if (filtered.length > 0) {
-          filtered.sort((a, b) => b.hits - a.hits)
-          candidateRows = filtered.slice(0, MAX_SCORING_CANDIDATES).map(r => r.row)
-        }
-      } else {
-        candidateRows = [...rows].sort((a, b) => (b.strength || 0) - (a.strength || 0)).slice(0, MAX_SCORING_CANDIDATES)
-      }
+      // Score the complete local corpus. The previous if/else structure sent
+      // embedding-enabled queries through a raw-strength top-100 cutoff, which
+      // excluded newer exact matches before lexical/vector scoring.
+      const candidateRows = rows
 
       const now = Date.now()
       // Pure-local retrieval is driven by lexical evidence. Graph links can only
@@ -503,6 +488,7 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       return {
         results: finalTop3,
         debug: {
+          selectedIds: finalTop3.map(item => item.id),
           firstOrderActive: Array.from(firstOrderActive),
           secondOrderActive: Array.from(secondOrderActive),
           allScored: scoredResults
@@ -578,42 +564,23 @@ async function getEmbeddingInternal(
   return embedText(text)
 }
 
-// 纯本地检索模式只需要保证关键词实体关系完整，不再执行无效的向量迁移探测。
+// Keywords and n-grams belong to lexical retrieval, not the entity graph.
+// Keep only explicitly typed, high-confidence named entities.
 async function repairMemoryEntityLinks(db: any) {
-  if (!memoryDeps) return
   try {
-    const rows = await db.all("SELECT id, fact, keywords FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
-    if (rows.length === 0) return
-
-    // 1. 增量自动扫描并补建实体多对多关联图谱
-    let linkRebuiltCount = 0
-    for (const row of rows) {
-      let keywordsList: string[] = []
-      try {
-        if (row.keywords) {
-          const parsedKw = JSON.parse(row.keywords)
-          keywordsList = Array.isArray(parsedKw) ? parsedKw : []
-        }
-      } catch {}
-
-      if (keywordsList.length > 0) {
-        const linkCount = await db.get("SELECT COUNT(*) as cnt FROM memory_entity_links WHERE memory_id = ?", row.id) as { cnt: number }
-        if (linkCount && linkCount.cnt === 0) {
-          const now = Date.now()
-          for (const kw of keywordsList) {
-            if (kw && typeof kw === 'string' && kw.trim()) {
-              await db.run("INSERT OR REPLACE INTO memory_entity_links (memory_id, entity_name, created_at) VALUES (?, ?, ?)", row.id, kw.trim(), now)
-            }
-          }
-          linkRebuiltCount++
-        }
-      }
-    }
-    if (linkRebuiltCount > 0) {
-      console.log(`[Migration] 成功为 ${linkRebuiltCount} 条历史经验自动完成了实体多对多关联图谱的重建补建`)
-    }
+    await db.run(`
+      DELETE FROM memory_entity_links
+      WHERE entity_type NOT IN ('person', 'work', 'program', 'organization', 'product', 'location')
+         OR confidence < 0.75
+         OR length(trim(entity_name)) < 2
+         OR length(trim(entity_name)) > 80
+         OR lower(trim(entity_name)) IN (
+           'id', 'web_search', 'web_fetch', 'read_file', 'write_file',
+           'get-current-date', 'debug', 'workflow', 'tool'
+         )
+    `)
   } catch (migrationErr) {
-    console.error('[Migration] 修复历史记忆实体关系失败:', migrationErr)
+    console.error('[Migration] 清理无效记忆实体关系失败:', migrationErr)
   }
 }
 
@@ -626,12 +593,17 @@ type LocalMemoryFact = {
 
 type MemoryEntity = {
   name: string
-  type: 'person' | 'work' | 'program' | 'organization' | 'product' | 'location' | 'topic'
+  type: 'person' | 'work' | 'program' | 'organization' | 'product' | 'location'
   confidence: number
 }
 
 const MEMORY_ENTITY_TYPES = new Set<MemoryEntity['type']>([
-  'person', 'work', 'program', 'organization', 'product', 'location', 'topic'
+  'person', 'work', 'program', 'organization', 'product', 'location'
+])
+
+const BLOCKED_MEMORY_ENTITY_NAMES = new Set([
+  'id', 'web_search', 'web_fetch', 'read_file', 'write_file',
+  'get-current-date', 'debug', 'workflow', 'tool'
 ])
 
 function normalizeMemoryEntities(value: unknown): MemoryEntity[] {
@@ -644,7 +616,8 @@ function normalizeMemoryEntities(value: unknown): MemoryEntity[] {
     const type = typeof raw.type === 'string' ? raw.type.toLowerCase().trim() : ''
     const confidence = typeof raw.confidence === 'number' ? raw.confidence : 0
     if (name.length < 2 || name.length > 80 || !MEMORY_ENTITY_TYPES.has(type as MemoryEntity['type'])) continue
-    if (!Number.isFinite(confidence) || confidence < 0.6 || confidence > 1) continue
+    if (BLOCKED_MEMORY_ENTITY_NAMES.has(name.toLowerCase())) continue
+    if (!Number.isFinite(confidence) || confidence < 0.75 || confidence > 1) continue
     const entity = { name, type: type as MemoryEntity['type'], confidence }
     const existing = unique.get(`${entity.type}:${entity.name.toLowerCase()}`)
     if (!existing || existing.confidence < entity.confidence) unique.set(`${entity.type}:${entity.name.toLowerCase()}`, entity)
@@ -679,7 +652,7 @@ function extractRetrievalTerms(value: string): Set<string> {
   }
   for (const match of normalized.matchAll(/[\u3400-\u9fff]{2,}/g)) {
     const sequence = match[0]
-    for (let size = 2; size <= Math.min(4, sequence.length); size++) {
+    for (let size = 2; size <= Math.min(3, sequence.length); size++) {
       for (let index = 0; index <= sequence.length - size; index++) {
         terms.add(sequence.slice(index, index + size))
       }
@@ -690,6 +663,15 @@ function extractRetrievalTerms(value: string): Set<string> {
 
 function inverseDocumentFrequency(documentCount: number, documentFrequency: number): number {
   return Math.log(1 + (documentCount - documentFrequency + 0.5) / (documentFrequency + 0.5))
+}
+
+function queryContainsEntity(normalizedQuery: string, normalizedEntity: string): boolean {
+  if (!normalizedEntity) return false
+  if (/[㐀-鿿]/.test(normalizedEntity)) {
+    return normalizedQuery.includes(normalizedEntity)
+  }
+  const escaped = normalizedEntity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`, 'i').test(normalizedQuery)
 }
 
 function extractLocalKeywords(text: string): string[] {
@@ -710,7 +692,7 @@ function extractLocalKeywords(text: string): string[] {
   for (const match of sanitizedText.matchAll(/[\u3400-\u9fff]{2,}/g)) {
     const sequence = match[0]
     if (sequence.length <= 10 && !stopWords.has(sequence)) keywords.add(sequence)
-    for (const size of [4, 3, 2]) {
+    for (const size of [3, 2]) {
       for (let index = 0; index <= sequence.length - size; index++) {
         const value = sequence.slice(index, index + size)
         if (!stopWords.has(value)) keywords.add(value)
@@ -909,7 +891,7 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
         { role: 'system', content: experienceSystemPrompt },
         {
           role: 'system',
-          content: 'For every memory item, also return an "entities" array. Each entry must be {"name":"...","type":"person|work|program|organization|product|location|topic","confidence":0.0-1.0}. Include only concrete named entities or clearly bounded topics (confidence >= 0.6). Do not include dates, years, recency words, rankings, statuses, actions, or generic descriptive keywords as entities.'
+          content: 'For every memory item, also return an "entities" array. Each entry must be {"name":"...","type":"person|work|program|organization|product|location","confidence":0.0-1.0}. Include only concrete named entities with confidence >= 0.75. Do not include topics, dates, years, recency words, rankings, statuses, actions, tool names, or generic descriptive keywords as entities.'
         },
         { role: 'user', content: `【最近收集的对话摘要历史】\n${allSummariesCombined}\n\n请从中提取有价值的避坑经验、技术事实、生活喜好或习惯并输出为 JSON 数组。` }
       ]
@@ -923,8 +905,11 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
       }
       
       let experiences: any[] = []
+      let extractionSucceeded = false
       try {
-        experiences = JSON.parse(jsonText)
+        const parsed = JSON.parse(jsonText)
+        experiences = Array.isArray(parsed) ? parsed : []
+        extractionSucceeded = experiences.some(item => item && typeof item.fact === 'string' && item.fact.trim())
       } catch (je) {
         console.error('[Purify] 解析避坑经验 JSON 失败, raw response:', experienceRawJson, je)
       }
@@ -1021,13 +1006,17 @@ export async function runPurifyMemoryPipeline(targetSessionId?: string) {
       }
 
       // 全部提纯并抽取完成，标记已处理文件
-      for (const filePath of processedFiles) {
-        try {
-          const newFilePath = filePath.replace(/\.md$/i, '_已更新.md')
-          await fs.promises.rename(filePath, newFilePath)
-        } catch (renameErr) {
-          console.error(`[Purify] 标记文件为已更新失败: ${filePath}`, renameErr)
+      if (extractionSucceeded) {
+        for (const filePath of processedFiles) {
+          try {
+            const newFilePath = filePath.replace(/\.md$/i, '_已更新.md')
+            await fs.promises.rename(filePath, newFilePath)
+          } catch (renameErr) {
+            console.error(`[Purify] 标记文件为已更新失败: ${filePath}`, renameErr)
+          }
         }
+      } else if (processedFiles.length > 0) {
+        console.warn(`[Purify] 本轮未提取到有效事实，保留 ${processedFiles.length} 个源文件以便下次重试。`)
       }
     } else {
       let locallyProcessed = 0

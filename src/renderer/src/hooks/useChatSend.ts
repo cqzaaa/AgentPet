@@ -288,6 +288,9 @@ export function useChatSend({
 ${activeMcpServers.map((server: any, index: number) => `${index + 1}. ${server.name} — ${server.description || '外部 MCP 服务'} (包含 ${server.toolsCount} 个工具)`).join('\n')}
 当主人的问题涉及上述 MCP 服务领域时，请务必主动调用对应的扩展工具来完成任务。`
         : ''
+      const workspaceContext = String(workspacePath || '').trim()
+        ? '<workspace_context>当前会话已绑定本地工作区。文件、代码搜索、终端和 Python 工具未传目录时默认使用该工作区；相对路径均相对于工作区解析。</workspace_context>'
+        : '<workspace_context>当前会话未绑定工作区；普通文件操作默认使用会话附件目录。</workspace_context>'
 
       const systemPrompt = `# [角色设定]
 你是一只名为 ${avatar.name} 的桌面智能助理宠物（智能体）。
@@ -303,6 +306,7 @@ ${activeMcpServers.map((server: any, index: number) => `${index + 1}. ${server.n
 - “今天 / 明天 / 昨天 / 本周”等相对日期必须以本段时间为准，禁止自行猜测日期。
 - 处理天气、台风、新闻、行情、赛程等实时问题时，必须先通过终端获取当前系统时间，再使用工具返回的明确日期检索和回答；不得直接用臆测的日期搜索。
 </runtime_context>
+${workspaceContext}
 ${memoryContext}
 ${knowledgeContext}
 ${skillsContext}

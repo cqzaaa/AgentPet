@@ -25,7 +25,7 @@ export const terminalManifest: ToolManifest = {
           },
           cwd: {
             type: 'string',
-            description: '工作目录（可选）'
+            description: '工作目录（可选）；省略时优先使用当前工作区'
           },
           shell: {
             type: 'string',
@@ -87,11 +87,50 @@ export const terminalManifest: ToolManifest = {
           timeout_seconds: {
             type: 'number',
             description: '可选。命令执行的超时秒数。如果是如拉取镜像、编译打包等长耗时操作，请传入合适的值（例如 600 代表10分钟，或传入 0 代表无超时限制）。默认 120。'
+          },
+          cwd: {
+            type: 'string',
+            description: '可选。命令工作目录；省略时优先使用当前工作区。'
           }
         },
         required: ['command']
       }
-    }
+    },
+    {
+      name: 'run_python',
+      description: '使用 AgentPet 管理的嵌入式 Python 运行短代码或工作区内的 .py 脚本，不依赖用户安装系统 Python。运行时缺失时沿用应用内安装确认与下载流程。code 与 script_path 必须且只能提供一个。',
+      timeout: 120000,
+      humanIntervention: 'required',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: '要执行的短 Python 代码；复杂逻辑应先使用 write_file 写成脚本。'
+          },
+          script_path: {
+            type: 'string',
+            description: '当前会话已授权路径中的 Python 脚本。'
+          },
+          arguments: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 100,
+            description: '传给 Python 代码或脚本的命令行参数。'
+          },
+          cwd: {
+            type: 'string',
+            description: '可选。执行工作目录；省略时优先使用当前工作区。'
+          },
+          timeout_seconds: {
+            type: 'number',
+            minimum: 0,
+            description: '可选。执行超时秒数，默认 120；0 表示不设置超时。'
+          }
+        },
+        required: []
+      }
+    },
   ],
   systemRole: `<tool_instructions>
 你有一组终端工具可以执行系统命令。
@@ -112,7 +151,7 @@ export const terminalManifest: ToolManifest = {
 - 验证数据库端口是否可用时优先使用 Test-NetConnection 或数据库自带的 readiness 工具；不要直接运行可能等待密码输入的交互式客户端
 - 仅在需要 POSIX 语法或 Unix 工具链时显式使用 shell=bash，例如 date +"%Y-%m-%d"、grep、sed、awk。
 - shell=cmd 仅用于 .bat 文件或明确的传统 CMD 命令。不要依赖命令文本自动猜测 shell。
-- git、node、npm、python、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。
+- git、node、npm、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。本机 Python 任务使用 run_python，不要假设系统已安装 python 命令。
 - SSH 远程会话默认 shell=bash；除非远程主机明确是 Windows，才指定 shell=powershell 或 shell=cmd。
 </rules>
 </tool_instructions>`

@@ -18,6 +18,32 @@ function normalizeVector(value: unknown): number[] | null {
   return vector.every(Number.isFinite) ? vector : null
 }
 
+function extractRawVectors(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    // Single-input services often return one vector directly.
+    if (payload.length === EMBEDDING_DIMENSIONS && payload.every(value => typeof value === 'number')) {
+      return [payload]
+    }
+    return payload
+  }
+  if (!payload || typeof payload !== 'object') return []
+  const record = payload as Record<string, unknown>
+  if (Array.isArray(record.embedding)) return [record.embedding]
+  for (const key of ['embeddings', 'vectors', 'data', 'results']) {
+    const value = record[key]
+    if (value && typeof value === 'object' && !Array.isArray(value) && 'embedding' in value) {
+      return [(value as { embedding?: unknown }).embedding]
+    }
+    if (Array.isArray(value)) {
+      // OpenAI-compatible APIs may wrap each vector as { embedding: [...] }.
+      return value.map(item => item && typeof item === 'object' && 'embedding' in item
+        ? (item as { embedding?: unknown }).embedding
+        : item)
+    }
+  }
+  return []
+}
+
 export async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
   const normalized = texts.map(text => String(text || '').trim())
   if (normalized.length === 0) return []
@@ -55,9 +81,7 @@ export async function embedTexts(texts: string[]): Promise<Array<number[] | null
       return normalized.map(() => null)
     }
     const payload = await response.json() as unknown
-    const rawVectors = inputs.length === 1 && Array.isArray(payload) && !Array.isArray(payload[0])
-      ? [payload]
-      : Array.isArray(payload) ? payload : []
+    const rawVectors = extractRawVectors(payload)
     const results = normalized.map<number[] | null>(() => null)
     nonEmptyIndexes.forEach((originalIndex, resultIndex) => {
       results[originalIndex] = normalizeVector(rawVectors[resultIndex])

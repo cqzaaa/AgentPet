@@ -17,7 +17,7 @@ export const fileManifest: ToolManifest = {
         properties: {
           file_path: {
             type: 'string',
-            description: '文件绝对路径'
+            description: '文件路径；可使用绝对路径，或相对于当前工作区的路径'
           },
           start_line: {
             type: 'number',
@@ -49,7 +49,7 @@ export const fileManifest: ToolManifest = {
       parameters: {
         type: 'object',
         properties: {
-          directory_path: { type: 'string', description: '目录绝对路径；省略时列出当前会话附件目录' },
+          directory_path: { type: 'string', description: '目录路径；省略时优先列出当前工作区，未绑定工作区时列出会话附件目录' },
           recursive: { type: 'boolean', description: '是否递归列出子目录，默认 false' },
           limit: { type: 'number', description: '最多返回条目数，默认 100，上限 500' },
           cursor: { type: 'number', description: '分页起始偏移量，默认 0' }
@@ -63,7 +63,7 @@ export const fileManifest: ToolManifest = {
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件绝对路径' }
+          file_path: { type: 'string', description: '文件路径；可使用绝对路径，或相对于当前工作区的路径' }
         },
         required: ['file_path']
       }
@@ -80,7 +80,7 @@ export const fileManifest: ToolManifest = {
             enum: ['desktop', 'documents', 'downloads', 'workspace', 'session'],
             description: '常用起始位置。用户已说明位置时优先使用；directory_path 优先级更高'
           },
-          directory_path: { type: 'string', description: '已授权的绝对起始目录；省略时按 location 解析，二者都省略则使用当前会话附件目录' },
+          directory_path: { type: 'string', description: '已授权的起始目录；省略时按 location 解析，二者都省略则优先使用当前工作区' },
           match_mode: {
             type: 'string',
             enum: ['auto', 'exact', 'contains', 'glob'],
@@ -101,7 +101,7 @@ export const fileManifest: ToolManifest = {
         properties: {
           file_path: {
             type: 'string',
-            description: '目标文件绝对路径'
+            description: '目标文件路径；可使用相对于当前工作区的路径'
           },
           content: {
             type: 'string',
@@ -124,7 +124,7 @@ export const fileManifest: ToolManifest = {
         properties: {
           file_path: {
             type: 'string',
-            description: '绝对路径'
+            description: '文件路径；可使用相对于当前工作区的路径'
           },
           old_string: {
             type: 'string',
@@ -151,11 +151,11 @@ export const fileManifest: ToolManifest = {
         properties: {
           source_path: {
             type: 'string',
-            description: '源文件绝对路径'
+            description: '源文件路径；可使用相对于当前工作区的路径'
           },
           destination_path: {
             type: 'string',
-            description: '目标文件绝对路径'
+            description: '目标文件路径；可使用相对于当前工作区的路径'
           }
         },
         required: ['source_path', 'destination_path']
@@ -170,7 +170,7 @@ export const fileManifest: ToolManifest = {
         properties: {
           file_path: {
             type: 'string',
-            description: '要删除的文件或目录绝对路径'
+            description: '要删除的文件或目录路径；可使用相对于当前工作区的路径'
           },
           recursive: {
             type: 'boolean',

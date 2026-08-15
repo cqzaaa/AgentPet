@@ -1,7 +1,10 @@
+import * as fs from 'fs'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { ShellKind, shellManager } from './shell-manager'
 import { sshManager } from './ssh-manager'
-import { getSessionFilesDir, resolveSessionPath } from '../../utils/paths'
+import { getAllowedFileRoots, getDefaultWorkingDirectory, isPathWithinRoots, resolveSessionPath } from '../../utils/paths'
+import { pythonRuntimeManager } from '../../interaction/python-runtime-manager'
+import { invokesPythonExecutable } from '../../security/safety-checker'
 
 /** Render terminal-style output for the chat card: remove ANSI controls and let CR replace a line. */
 function renderTerminalOutput(previous: string, chunk: string): string {
@@ -25,6 +28,20 @@ function resolveShell(value: unknown, fallback: ShellKind): ShellKind {
   if (value === undefined || value === null) return fallback
   if (value === 'powershell' || value === 'bash' || value === 'cmd') return value
   throw new Error(`不支持的 shell: ${String(value)}。可选值为 powershell、bash、cmd。`)
+}
+
+
+function resolveExecutionCwd(value: unknown, context: ToolContext): string {
+  const cwd = typeof value === 'string' && value.trim()
+    ? resolveSessionPath(value, context.sessionId, context.workspacePath)
+    : getDefaultWorkingDirectory(context)
+  if (!isPathWithinRoots(cwd, getAllowedFileRoots(context))) {
+    throw new Error('工作目录不在当前会话已授权的路径内。')
+  }
+  if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+    throw new Error(`工作目录不存在或不是目录：${cwd}`)
+  }
+  return cwd
 }
 
 export class TerminalExecutor implements IToolExecutor {
@@ -81,7 +98,14 @@ export class TerminalExecutor implements IToolExecutor {
           }
         }
 
-        const execCwd = getSessionFilesDir(context.sessionId)
+        if (invokesPythonExecutable(command)) {
+          return {
+            content: '错误：本机终端禁止直接调用 python、py 或 pip，以免使用用户系统 Python。请改用 run_python；它会固定使用 AgentPet 管理的隔离 Python 运行时。',
+            success: false
+          }
+        }
+
+        const execCwd = resolveExecutionCwd(args.cwd, context)
         // run_terminal_command 同步执行，传入动态超时与中止信号
         const reportLiveOutput = this.createLiveOutputReporter(context, api)
         const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
@@ -114,6 +138,61 @@ export class TerminalExecutor implements IToolExecutor {
         }
       }
 
+
+      if (api === 'run_python') {
+        const code = typeof args.code === 'string' ? args.code : ''
+        const rawScriptPath = typeof args.script_path === 'string' ? args.script_path.trim() : ''
+        if (Boolean(code) === Boolean(rawScriptPath)) {
+          return { content: '错误：必须且只能提供 code 或 script_path 其中一个', success: false }
+        }
+        if (code.length > 100_000) {
+          return { content: '错误：code 超过 100000 字符；请先写入脚本文件再执行', success: false }
+        }
+
+        const cwd = resolveExecutionCwd(args.cwd, context)
+        let scriptPath = ''
+        if (rawScriptPath) {
+          scriptPath = resolveSessionPath(rawScriptPath, context.sessionId, context.workspacePath)
+          if (!isPathWithinRoots(scriptPath, getAllowedFileRoots(context))) {
+            return { content: '错误：Python 脚本不在当前会话已授权的路径内', success: false }
+          }
+          if (!fs.existsSync(scriptPath) || !fs.statSync(scriptPath).isFile()) {
+            return { content: `错误：Python 脚本不存在：${scriptPath}`, success: false }
+          }
+        }
+
+        const runtime = await pythonRuntimeManager.ensure(context)
+        const extraArgs = Array.isArray(args.arguments)
+          ? args.arguments.slice(0, 100).map((value: unknown) => String(value))
+          : []
+        const pythonArgs = code ? ['-c', code, ...extraArgs] : [scriptPath, ...extraArgs]
+        const timeout = typeof args.timeout_seconds === 'number'
+          ? Math.max(0, args.timeout_seconds * 1000)
+          : 120_000
+        const { stdout, stderr, exitCode } = await shellManager.execFile(
+          runtime.pythonPath,
+          pythonArgs,
+          {
+            cwd,
+            timeout,
+            signal: context.abortSignal,
+            onOutput: this.createLiveOutputReporter(context, api)
+          }
+        )
+        const renderedStdout = renderTerminalOutput('', stdout)
+        const renderedStderr = renderTerminalOutput('', stderr)
+        return {
+          content: [
+            `[AgentPet Python 执行完成 | Python ${runtime.pythonVersion} | exit_code: ${exitCode}]`,
+            renderedStdout,
+            renderedStderr ? `[stderr]\n${renderedStderr}` : '',
+            !renderedStdout && !renderedStderr ? '(无输出)' : ''
+          ].filter(Boolean).join('\n'),
+          state: { exitCode, stdout: renderedStdout, stderr: renderedStderr },
+          success: true
+        }
+      }
+
       if (api === 'run_command') {
         const { command, description, cwd } = args
         const isSsh = Boolean(context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh')
@@ -133,9 +212,14 @@ export class TerminalExecutor implements IToolExecutor {
           }
         }
 
-        const execCwd = cwd
-          ? resolveSessionPath(cwd, context.sessionId)
-          : getSessionFilesDir(context.sessionId)
+        if (invokesPythonExecutable(command)) {
+          return {
+            content: '错误：本机终端禁止直接调用 python、py 或 pip，以免使用用户系统 Python。请改用 run_python；它会固定使用 AgentPet 管理的隔离 Python 运行时。',
+            success: false
+          }
+        }
+
+        const execCwd = resolveExecutionCwd(cwd, context)
         const session = shellManager.startSession(command, shell, execCwd, this.createLiveOutputReporter(context, api))
         return {
           content: `[命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
@@ -183,7 +267,7 @@ export class TerminalExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return ['run_command', 'get_command_output', 'kill_command', 'run_terminal_command']
+    return ['run_command', 'get_command_output', 'kill_command', 'run_terminal_command', 'run_python']
   }
 
 }

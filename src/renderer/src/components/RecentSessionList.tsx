@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import type { Session } from '../hooks/useAppStore'
-import { ChevronDown, ChevronRight, Pencil, Pin, PinOff, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderOpen, Pencil, Pin, PinOff, Plus, Trash2, X } from 'lucide-react'
 
 // ── 分组定义 ──────────────────────────────────────────────────
 type GroupKey = 'pinned' | 'today' | 'yesterday' | 'thisWeek' | 'earlier'
@@ -69,6 +69,7 @@ function checkIsThinking(s: Session): boolean {
 // 扁平化的渲染单元
 type RenderRow =
   | { type: 'header'; key: string; groupKey: GroupKey; label: string }
+  | { type: 'workspace'; key: string; path: string; count: number }
   | { type: 'item'; key: string; session: Session }
 
 interface Props {
@@ -78,10 +79,16 @@ interface Props {
   onDelete: (id: string) => void
   onTogglePin: (id: string) => void
   onRename: (id: string, name: string) => void
+  onCreateInWorkspace: (workspacePath: string) => void
+}
+
+function getWorkspaceName(path: string): string {
+  const segments = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean)
+  return segments[segments.length - 1] || path
 }
 
 export function RecentSessionList(props: Props): React.JSX.Element {
-  const { sessions, activeSessionId, onSelect, onDelete, onTogglePin, onRename } = props
+  const { sessions, activeSessionId, onSelect, onDelete, onTogglePin, onRename, onCreateInWorkspace } = props
 
   const [searchQuery, setSearchQuery] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Record<GroupKey, boolean>>({
@@ -91,6 +98,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     thisWeek: true,
     earlier: true
   })
+  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
 
   const toggleGroup = (g: GroupKey) => {
     setCollapsedGroups(prev => ({
@@ -119,14 +127,45 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     if (hasQuery) {
       return filteredSessions.map(s => ({ type: 'item' as const, key: `item-${s.id}`, session: s }))
     }
-    const buckets: Record<GroupKey, Session[]> = { pinned: [], today: [], yesterday: [], thisWeek: [], earlier: [] }
+    const pinnedSessions: Session[] = []
+    const workspaceBuckets = new Map<string, Session[]>()
+    const chatSessions: Session[] = []
     for (const s of filteredSessions) {
-      // 置顶的归到 pinned，其余按时间
+      if (s.pinned) {
+        pinnedSessions.push(s)
+      } else if (s.workspacePath) {
+        const workspaceSessions = workspaceBuckets.get(s.workspacePath) || []
+        workspaceSessions.push(s)
+        workspaceBuckets.set(s.workspacePath, workspaceSessions)
+      } else {
+        chatSessions.push(s)
+      }
+    }
+    const out: RenderRow[] = []
+    if (pinnedSessions.length > 0) {
+      out.push({ type: 'header', key: 'header-pinned', groupKey: 'pinned', label: GROUP_LABELS.pinned })
+      if (!collapsedGroups.pinned) {
+        for (const session of pinnedSessions) {
+          out.push({ type: 'item', key: `item-${session.id}`, session })
+        }
+      }
+    }
+
+    for (const [path, workspaceSessions] of workspaceBuckets) {
+      out.push({ type: 'workspace', key: `workspace-${path}`, path, count: workspaceSessions.length })
+      if (!collapsedWorkspaces[path]) {
+        for (const session of workspaceSessions) {
+          out.push({ type: 'item', key: `item-${session.id}`, session })
+        }
+      }
+    }
+
+    const buckets: Record<GroupKey, Session[]> = { pinned: [], today: [], yesterday: [], thisWeek: [], earlier: [] }
+    for (const s of chatSessions) {
       const k = getGroupKey(s)
       buckets[k].push(s)
     }
-    const out: RenderRow[] = []
-    for (const g of GROUP_ORDER) {
+    for (const g of GROUP_ORDER.filter(group => group !== 'pinned')) {
       if (buckets[g].length === 0) continue
       out.push({ type: 'header', key: `header-${g}`, groupKey: g, label: GROUP_LABELS[g] })
       if (!collapsedGroups[g]) {
@@ -136,7 +175,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
       }
     }
     return out
-  }, [filteredSessions, searchQuery, collapsedGroups])
+  }, [filteredSessions, searchQuery, collapsedGroups, collapsedWorkspaces])
 
   // 点击外部关闭右键菜单
   useEffect(() => {
@@ -185,6 +224,36 @@ export function RecentSessionList(props: Props): React.JSX.Element {
 
   const renderRow = (index: number): React.ReactNode => {
     const row = rows[index]
+    if (row.type === 'workspace') {
+      const isCollapsed = Boolean(collapsedWorkspaces[row.path])
+      return (
+        <div className="workspace-group-header" title={row.path}>
+          <button
+            className="workspace-group-toggle"
+            onClick={() => setCollapsedWorkspaces(prev => ({ ...prev, [row.path]: !prev[row.path] }))}
+            aria-label={isCollapsed ? '展开文件区' : '收起文件区'}
+          >
+            {isCollapsed
+              ? <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />
+              : <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />}
+          </button>
+          <FolderOpen className="workspace-group-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
+          <div className="workspace-group-copy">
+            <span className="workspace-group-name">{getWorkspaceName(row.path)}</span>
+            <span className="workspace-group-path">{row.path}</span>
+          </div>
+          <span className="workspace-group-count">{row.count}</span>
+          <button
+            className="workspace-group-add"
+            onClick={() => onCreateInWorkspace(row.path)}
+            title="在此文件区新建会话"
+            aria-label="在此文件区新建会话"
+          >
+            <Plus size={13} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+      )
+    }
     if (row.type === 'header') {
       const isCollapsed = collapsedGroups[row.groupKey]
       return (
@@ -208,11 +277,11 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     const isThinking = checkIsThinking(s)
     return (
       <div
-        className={`recent-item ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${isThinking ? 'thinking' : ''}`}
+        className={`recent-item ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${s.workspacePath && !s.pinned ? 'workspace-session' : ''} ${isThinking ? 'thinking' : ''}`}
         onClick={() => { if (!isRenaming) onSelect(s.id) }}
         onContextMenu={(e) => handleContextMenu(e, s.id)}
         onDoubleClick={() => startRename(s)}
-        title={s.name}
+        title={s.workspacePath ? `${s.name}\n${s.workspacePath}` : s.name}
       >
         <span className="recent-dot"></span>
         {s.pinned && <span className="recent-pin-icon" title="已置顶"><Pin size={12} strokeWidth={2} aria-hidden="true" /></span>}

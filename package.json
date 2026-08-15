@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test:security:compile": "tsc src/main/tools/security/safety-checker.ts src/main/tools/security/audit-pipeline.ts src/main/tools/core/types.ts --outDir node_modules/.cache/agentpet-security-tests --module commonjs --moduleResolution node --target ES2022 --types node,electron --esModuleInterop --skipLibCheck",
     "test:security": "npm run test:security:compile",
+    "test:python-command-guard": "tsc src/main/tools/security/safety-checker.ts --outDir node_modules/.cache/agentpet-python-command-guard-tests --module commonjs --moduleResolution node --target ES2022 --types node --skipLibCheck && node scripts/python-command-guard.test.cjs",
     "test:tool-routing": "tsc src/main/agent-runtime/tool-routing.ts --outDir node_modules/.cache/agentpet-tool-routing-tests --module commonjs --moduleResolution node --target ES2022 --types node --skipLibCheck && node scripts/tool-routing.test.cjs",
     "test:skill-tool-routing": "tsc src/main/agent-runtime/skill-tool-routing.ts --outDir node_modules/.cache/agentpet-skill-tool-routing-tests --module commonjs --moduleResolution node --target ES2022 --types node --skipLibCheck && node scripts/skill-tool-routing.test.cjs",
     "test:computer-action-guard": "tsc src/main/tools/builtin/computer/action-guard.ts --outDir node_modules/.cache/agentpet-computer-tests --module commonjs --moduleResolution node --target ES2022 --types node --skipLibCheck && node scripts/computer-action-guard.test.cjs",

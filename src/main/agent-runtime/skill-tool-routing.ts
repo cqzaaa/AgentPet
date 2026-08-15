@@ -8,6 +8,9 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
 const DESKTOP_APPLICATION_PATTERN = /(?:微信|weixin|钉钉|dingtalk|qq|企业微信|word|excel|powerpoint|ppt|记事本|notepad|计算器|calculator|文件管理器|资源管理器|explorer|浏览器|chrome|edge)/i
 const DESKTOP_SURFACE_PATTERN = /(?:当前屏幕|屏幕上|当前窗口|这个窗口|桌面上|任务栏|鼠标|键盘)/i
 const DESKTOP_ACTION_PATTERN = /(?:打开|启动|切换|聚焦|点击|双击|输入|键入|发送|按下|滚动|拖动|关闭|最小化|最大化|截图|查看)/i
+const CODING_ACTION_PATTERN = /(?:帮我|请你?|给我|替我|创建|新建|编写|写一个|做一个|开发一个|实现|修复|修改|重构|调试|测试|构建|搭建)/i
+const CODING_TARGET_PATTERN = /(?:代码|源码|仓库|repo|项目|程序|脚本|网页|网站|web\s*app|应用|app|游戏|组件|接口|api|功能|bug|配置)/i
+const OFFICE_TARGET_PATTERN = /(?:pdf|docx|xlsx|pptx|word|excel|powerpoint|文档|表格|幻灯片)/i
 
 /**
  * Preload only high-confidence desktop-control requests. Generic engineering
@@ -16,7 +19,13 @@ const DESKTOP_ACTION_PATTERN = /(?:打开|启动|切换|聚焦|点击|双击|输
  */
 export function inferPreloadedSkillIds(userText: string): string[] {
   const text = String(userText || '').trim()
-  if (!text || !DESKTOP_ACTION_PATTERN.test(text)) return []
+  if (!text) return []
+
+  const isCodingMutation = CODING_ACTION_PATTERN.test(text) && CODING_TARGET_PATTERN.test(text)
+  const isOfficeOnly = OFFICE_TARGET_PATTERN.test(text) && !/(?:代码|源码|脚本|程序|项目|仓库|repo)/i.test(text)
+  if (isCodingMutation && !isOfficeOnly) return ['agentpet-coding']
+
+  if (!DESKTOP_ACTION_PATTERN.test(text)) return []
   if (/(?:代码|源码|函数|模块|实现|优化|方案|测试|bug)/i.test(text) && !DESKTOP_APPLICATION_PATTERN.test(text)) return []
   if (DESKTOP_APPLICATION_PATTERN.test(text) || DESKTOP_SURFACE_PATTERN.test(text)) {
     return ['desktop-control']

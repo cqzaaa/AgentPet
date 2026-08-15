@@ -7,7 +7,6 @@ import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -84,11 +83,10 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
     <div
       className="modern-code-container"
       style={{
-        border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
+        border: '1px solid var(--code-border, rgba(128,128,128,0.18))',
         borderRadius: '8px',
         overflow: 'hidden',
         margin: '12px 0',
-        backgroundColor: 'var(--bg-card, #ffffff)',
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
       }}
     >
@@ -99,8 +97,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           justifyContent: 'space-between',
           alignItems: 'center',
           padding: '8px 16px',
-          background: 'var(--bg-card-sub, #f8fafc)',
-          borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color, rgba(128,128,128,0.12))',
+          borderBottom: isCollapsed ? 'none' : '1px solid var(--code-border, rgba(128,128,128,0.12))',
           userSelect: 'none'
         }}
       >
@@ -109,7 +106,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           style={{
             fontSize: '12px',
             fontWeight: 600,
-            color: 'var(--text-muted, #64748b)',
+            color: 'var(--code-muted, #64748b)',
             fontFamily: 'monospace',
             textTransform: 'lowercase'
           }}
@@ -125,7 +122,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
               alignItems: 'center',
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-muted, #64748b)',
+              color: 'var(--code-muted, #64748b)',
               fontSize: '12px',
               fontWeight: 500,
               cursor: 'pointer',
@@ -138,7 +135,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
               e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--text-muted, #64748b)'
+              e.currentTarget.style.color = 'var(--code-muted, #64748b)'
               e.currentTarget.style.backgroundColor = 'transparent'
             }}
           >
@@ -155,14 +152,14 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
             )}
           </button>
 
-          <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--border-color, rgba(128,128,128,0.18))' }} />
+          <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--code-border, rgba(128,128,128,0.18))' }} />
 
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-muted, #64748b)',
+              color: 'var(--code-muted, #64748b)',
               cursor: 'pointer',
               padding: '4px',
               borderRadius: '4px',
@@ -176,7 +173,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
               e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--text-muted, #64748b)'
+              e.currentTarget.style.color = 'var(--code-muted, #64748b)'
               e.currentTarget.style.backgroundColor = 'transparent'
             }}
             title={isCollapsed ? '展开代码' : '折叠代码'}
@@ -201,16 +198,15 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
           margin: 0,
           overflow: 'auto',
           transition: 'all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1)',
-          background: 'var(--bg-code, #fdfdfd)',
           borderTop: 'none'
         }}
       >
         <code
+          className="hljs"
           style={{
             fontFamily: "Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace",
-            fontSize: '12.5px',
+            fontSize: '13px',
             lineHeight: '1.6',
-            color: 'var(--text-secondary, #334155)',
             display: 'block',
             whiteSpace: 'pre',
             wordBreak: 'normal',
@@ -853,7 +849,13 @@ function renderSvgGraph(debug: any) {
 
   const firstOrder = debug.firstOrderActive || []
   const secondOrder = debug.secondOrderActive || []
-  const recalledFacts = (debug.allScored || []).filter((c: any, idx: number) => idx < 2 && c.score > 0.4)
+  const hasSelectedIds = Array.isArray(debug.selectedIds)
+  const selectedIds = new Set<string>(debug.selectedIds || [])
+  const recalledFacts = (debug.allScored || [])
+    .filter((candidate: any, index: number) => hasSelectedIds
+      ? selectedIds.has(candidate.id)
+      : index < 2 && candidate.score > 0.4)
+    .slice(0, 2)
 
   if (firstOrder.length === 0 && secondOrder.length === 0) {
     return (
@@ -1993,6 +1995,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               {activePromptTab === 'recall' && (() => {
                 const debug = promptInfo.recallDebug
                 const candidates = debug?.allScored || []
+                const hasSelectedIds = Array.isArray(debug?.selectedIds)
+                const selectedIds = new Set<string>(debug?.selectedIds || [])
                 return (
                   <div>
                     <div
@@ -2007,7 +2011,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       }}
                     >
                       <Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                      本面板展示基于仿 SAG 机制的本地关系图谱与多路混合检索打分结果。最终排名前三且总分大于 0.05 的经验事实将被召回并注入系统提示词尾部。
+                      本面板展示本地关系图谱与多路混合检索结果。召回标记以本次后端实际选中的记忆为准，最多注入 3 条。
                     </div>
 
                     {/* SVG 拓扑网络图 */}
@@ -2022,7 +2026,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                       {candidates.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           {candidates.slice(0, 5).map((c: any, idx: number) => {
-                            const isRecalled = idx < 3 && c.score > 0.4
+                            const isRecalled = hasSelectedIds
+                              ? selectedIds.has(c.id)
+                              : idx < 3 && c.score > 0.4
                             return (
                               <div
                                 key={c.id || idx}

@@ -194,6 +194,64 @@ export class ShellManager {
     }
   }
 
+
+  /** Execute a trusted executable with an argument vector and no command shell. */
+  public async execFile(
+    executable: string,
+    args: string[],
+    options: { cwd: string; timeout?: number; signal?: AbortSignal; onOutput?: ShellOutputHandler }
+  ): Promise<ShellExecResult> {
+    return await new Promise((resolvePromise, reject) => {
+      const child = spawn(executable, args, {
+        cwd: options.cwd,
+        windowsHide: true,
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PYTHONUTF8: '1',
+          PYTHONNOUSERSITE: '1',
+          PIP_DISABLE_PIP_VERSION_CHECK: '1',
+          PIP_NO_INPUT: '1'
+        }
+      })
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      const finish = (callback: () => void): void => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        options.signal?.removeEventListener('abort', abort)
+        callback()
+      }
+      const abort = (): void => {
+        child.kill()
+        finish(() => reject(new Error('UserAborted')))
+      }
+      const timer = options.timeout && options.timeout > 0
+        ? setTimeout(() => {
+            child.kill()
+            finish(() => reject(new Error(`命令执行超时（限制 ${options.timeout! / 1000} 秒）`)))
+          }, options.timeout)
+        : undefined
+
+      options.signal?.addEventListener('abort', abort, { once: true })
+      child.stdout.on('data', data => {
+        const chunk = decodeOutputBuffer(data)
+        stdout += chunk
+        options.onOutput?.(chunk)
+      })
+      child.stderr.on('data', data => {
+        const chunk = decodeOutputBuffer(data)
+        stderr += chunk
+        options.onOutput?.(chunk)
+      })
+      child.on('error', error => finish(() => reject(error)))
+      child.on('close', code => finish(() => resolvePromise({ stdout, stderr, exitCode: code ?? -1 })))
+    })
+  }
+
   // 启动异步 shell 会话
   public startSession(command: string, shell: ShellKind = 'powershell', cwd: string, onOutput?: ShellOutputHandler): ShellSession {
     const shellId = `shell_${this.nextShellId++}`

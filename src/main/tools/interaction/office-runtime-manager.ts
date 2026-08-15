@@ -45,7 +45,11 @@ interface InstallEventContext {
 }
 
 function runtimeRoot(): string {
-  return join(app.getPath('userData'), 'runtimes', 'office-components')
+  const runtimesDir = join(app.getPath('userData'), 'runtimes')
+  const sharedRoot = join(runtimesDir, 'python-runtime')
+  const legacyRoot = join(runtimesDir, 'office-components')
+  const legacyPython = join(legacyRoot, `python-${PYTHON_VERSION}`, 'python.exe')
+  return !fs.existsSync(sharedRoot) && fs.existsSync(legacyPython) ? legacyRoot : sharedRoot
 }
 
 function runtimeInfo(): OfficeRuntimeInfo {
@@ -122,7 +126,7 @@ async function runProcess(
       clearTimeout(timer)
       options.signal?.removeEventListener('abort', abort)
       if (options.signal?.aborted) {
-        reject(new Error('Office 组件包安装已取消'))
+        reject(new Error('AgentPet Python 运行环境安装已取消'))
       } else if (code === 0) {
         resolvePromise(stdout.trim())
       } else {
@@ -546,7 +550,7 @@ class OfficeRuntimeManager {
     context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal }
   ): Promise<OfficeRuntimeInfo> {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
-      throw new Error('当前 Office 组件包安装器暂仅支持 Windows x64')
+      throw new Error('当前 AgentPet Python 运行环境暂仅支持 Windows x64')
     }
     const info = runtimeInfo()
     if (fs.existsSync(info.pythonPath)) {
@@ -557,7 +561,7 @@ class OfficeRuntimeManager {
     const target = context.event?.sender
       ? BrowserWindow.fromWebContents(context.event.sender)
       : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-    if (!target || target.isDestroyed()) throw new Error('无法显示 Office 组件包安装卡片')
+    if (!target || target.isDestroyed()) throw new Error('无法显示 AgentPet Python 运行环境安装卡片')
 
     const requestId = this.nextRequestId++
     const approved = await new Promise<boolean>(resolvePromise => {
@@ -570,9 +574,9 @@ class OfficeRuntimeManager {
         type: 'office_runtime_request',
         requestId,
         request: {
-          title: '安装 Office 组件包',
+          title: '安装 AgentPet Python 运行环境',
           description:
-            '用于增强 Office 文档转换与排版能力。组件安装在 AgentPet 独立目录中，不修改系统环境，不需要管理员权限。',
+            '供 AgentPet 的代码执行、自动化、数据处理和 Office/PDF 能力共同使用。运行环境安装在独立目录中，不修改系统 Python，不需要管理员权限。',
           downloadSize: '预计下载 120–180 MB，安装后约占用 350–500 MB',
           installPath: info.rootDir
         },
@@ -581,7 +585,7 @@ class OfficeRuntimeManager {
         sessionId: context.sessionId
       })
     })
-    if (!approved) throw new Error('OFFICE_RUNTIME_INSTALL_CANCELLED: 用户取消了 Office 组件包安装')
+    if (!approved) throw new Error('PYTHON_RUNTIME_INSTALL_CANCELLED: 用户取消了 AgentPet Python 运行环境安装')
 
     const eventContext: InstallEventContext = {
       requestId,
@@ -618,16 +622,16 @@ class OfficeRuntimeManager {
       if (fs.existsSync(info.rootDir)) await fs.promises.rm(info.rootDir, { recursive: true, force: true })
       await fs.promises.mkdir(pythonDir, { recursive: true })
 
-      sendInstallEvent(eventContext, 'office_runtime_progress', '正在下载 Office 运行组件', 8)
+      sendInstallEvent(eventContext, 'office_runtime_progress', '正在下载 AgentPet Python 运行环境', 8)
       const pythonArchive = await downloadBuffer(PYTHON_EMBED_URL, signal, ratio => {
         sendInstallEvent(
           eventContext,
           'office_runtime_progress',
-          `正在下载 Office 运行组件（${Math.round(ratio * 100)}%）`,
+          `正在下载 AgentPet Python 运行环境（${Math.round(ratio * 100)}%）`,
           8 + ratio * 20
         )
       })
-      sendInstallEvent(eventContext, 'office_runtime_progress', '正在配置 Office 运行环境', 30)
+      sendInstallEvent(eventContext, 'office_runtime_progress', '正在配置 Python 运行环境', 30)
       await extractPythonArchive(pythonArchive, pythonDir)
       await configureEmbeddedPython(pythonDir)
 
@@ -671,18 +675,18 @@ class OfficeRuntimeManager {
       )
       if (!(await validateRuntime(info))) throw new Error('Office 组件包安装后验证失败')
       await fs.promises.rm(join(info.rootDir, 'get-pip.py'), { force: true })
-      sendInstallEvent(eventContext, 'office_runtime_complete', 'Office 组件包安装完成，正在继续转换', 100)
+      sendInstallEvent(eventContext, 'office_runtime_complete', 'AgentPet Python 运行环境安装完成', 100)
       return info
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      console.error('[OfficeRuntime] Office 组件包安装失败：', message)
+      console.error('[PythonRuntime] AgentPet Python 运行环境安装失败：', message)
       sendInstallEvent(
         eventContext,
         'office_runtime_error',
-        'Office 组件包安装失败，请检查网络连接后重新转换',
+        'AgentPet Python 运行环境安装失败，请检查网络连接后重试',
         100
       )
-      throw new Error('Office 组件包安装失败，请检查网络连接后重新转换')
+      throw new Error('AgentPet Python 运行环境安装失败，请检查网络连接后重试')
     }
   }
 }

@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import { execFile } from 'child_process'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots, resolveSessionPath } from '../../utils/paths'
+import { getAllowedFileRoots, getDefaultWorkingDirectory, isPathWithinRoots, resolveSessionPath } from '../../utils/paths'
 const { rgPath } = require('vscode-ripgrep')
 
 export class SearchExecutor implements IToolExecutor {
@@ -17,8 +17,8 @@ export class SearchExecutor implements IToolExecutor {
 
         // 解析可能的相对路径
         const searchDir = scope
-          ? resolveSessionPath(scope, context.sessionId)
-          : getSessionFilesDir(context.sessionId)
+          ? resolveSessionPath(scope, context.sessionId, context.workspacePath)
+          : getDefaultWorkingDirectory(context)
         if (!isPathWithinRoots(searchDir, getAllowedFileRoots(context))) {
           return { content: '错误：搜索范围不在当前会话已授权的文件夹内。请先上传文件，或在设置中选择允许访问的文件夹。', success: false }
         }

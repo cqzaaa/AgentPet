@@ -176,6 +176,16 @@ body {
   --border-input: rgba(255, 255, 255, 0.08);
   --bg-table-header: rgba(255, 255, 255, 0.01);
 
+  --code-bg: #0d1117;
+  --code-header-bg: #161b22;
+  --code-border: #30363d;
+  --code-text: #d6dee8;
+  --code-muted: #8b949e;
+  --code-key: #79c0ff;
+  --code-string: #7ee787;
+  --code-number: #d2a8ff;
+  --code-keyword: #ff7b72;
+
   --bg-btn-newchat: rgba(96, 165, 250, 0.1);
   --border-btn-newchat: rgba(96, 165, 250, 0.3);
   --text-btn-newchat: #bfdbfe;
@@ -216,6 +226,16 @@ body {
   --bg-input: #ffffff;
   --border-input: #cbd5e1;
   --bg-table-header: #f1f5f9;
+
+  --code-bg: #f6f8fb;
+  --code-header-bg: #eef2f7;
+  --code-border: #d8e0ea;
+  --code-text: #1f2937;
+  --code-muted: #667085;
+  --code-key: #0550ae;
+  --code-string: #087f5b;
+  --code-number: #6f42c1;
+  --code-keyword: #cf222e;
 
   --bg-btn-newchat: rgba(96, 165, 250, 0.04);
   --border-btn-newchat: rgba(96, 165, 250, 0.25);
@@ -780,6 +800,14 @@ body {
   transform: translateY(-1px);
 }
 
+.new-chat-btn:focus-visible,
+.workspace-group-add:focus-visible,
+.workspace-group-toggle:focus-visible,
+.new-session-dialog button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
 .agent-sidebar.collapsed .new-chat-btn {
   padding: 10px 0;
   border-radius: 50%;
@@ -937,6 +965,79 @@ body {
   flex-shrink: 0;
 }
 
+.workspace-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  margin: 4px 0 3px;
+  padding: 5px 6px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.1), transparent 75%);
+  color: var(--text-primary);
+}
+
+.workspace-group-toggle,
+.workspace-group-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workspace-group-toggle:hover,
+.workspace-group-add:hover {
+  background: rgba(96, 165, 250, 0.16);
+  color: #60a5fa;
+}
+
+.workspace-group-icon {
+  flex: 0 0 auto;
+  color: #60a5fa;
+}
+
+.workspace-group-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.workspace-group-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-group-path {
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-group-count {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 空状态 */
 .recent-empty {
   font-size: 12px;
@@ -972,6 +1073,12 @@ body {
 
 .recent-item.pinned {
   border-left: 2px solid #60a5fa;
+}
+
+.recent-item.workspace-session {
+  margin-left: 11px;
+  border-left: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 0 8px 8px 0;
 }
 
 .recent-dot {
@@ -1135,6 +1242,219 @@ body {
   height: 1px;
   background: var(--border-color, rgba(255, 255, 255, 0.08));
   margin: 4px 2px;
+}
+
+.active-workspace-path {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(680px, 62vw);
+}
+
+.active-workspace-path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-session-overlay {
+  z-index: 10020;
+}
+
+.new-session-dialog {
+  width: min(520px, calc(100vw - 36px));
+  max-height: min(620px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  color: var(--text-primary);
+}
+
+.new-session-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.new-session-dialog-title {
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.new-session-dialog-subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.new-session-dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.new-session-dialog-close:hover {
+  background: var(--bg-menu-hover);
+  color: var(--text-primary);
+}
+
+.new-session-primary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 18px 22px;
+}
+
+.new-session-choice {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.new-session-choice:hover {
+  border-color: rgba(96, 165, 250, 0.65);
+  background: rgba(96, 165, 250, 0.09);
+  transform: translateY(-1px);
+}
+
+.new-session-choice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+
+.new-session-choice-icon.chat {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-secondary);
+}
+
+.new-session-choice-icon.workspace {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.new-session-choice-copy,
+.new-session-workspace-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.new-session-choice-copy strong {
+  font-size: 13px;
+}
+
+.new-session-choice-copy small,
+.new-session-workspace-copy small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-session-recent-workspaces {
+  padding: 0 22px 20px;
+}
+
+.new-session-section-label {
+  margin-bottom: 7px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.new-session-workspace-list {
+  max-height: 210px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+}
+
+.new-session-workspace-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.new-session-workspace-row:last-child {
+  border-bottom: 0;
+}
+
+.new-session-workspace-row:hover {
+  background: rgba(96, 165, 250, 0.09);
+}
+
+.new-session-workspace-row > svg:first-child,
+.new-session-workspace-row > svg:last-child {
+  color: #60a5fa;
+}
+
+.new-session-workspace-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .new-session-primary-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-session-choice,
+  .new-chat-btn {
+    transition: none;
+  }
+
+  .new-session-choice:hover,
+  .new-chat-btn:hover {
+    transform: none;
+  }
 }
 
 /* 侧边栏菜单折叠头 */
@@ -2094,8 +2414,8 @@ body {
 
 /* 代码卡片容器 */
 .modern-code-container {
-  background: #0d0e14;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 8px;
   margin-top: 10px;
   margin-bottom: 10px;
@@ -2108,22 +2428,22 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #161822;
+  background: var(--code-header-bg);
   padding: 6px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--code-border);
 }
 
 .code-lang {
   font-size: 11px;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--code-muted);
   text-transform: uppercase;
 }
 
 .code-copy-btn {
   background: transparent;
   border: none;
-  color: #94a3b8;
+  color: var(--code-muted);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -2133,8 +2453,8 @@ body {
 }
 
 .code-copy-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f8fafc;
+  background: var(--bg-menu-hover);
+  color: var(--text-primary);
 }
 
 /* 代码正文 */
@@ -2144,8 +2464,69 @@ body {
   overflow-x: auto;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12.5px;
-  color: #e2e8f0;
+  background: var(--code-bg);
+  color: var(--code-text);
   line-height: 1.5;
+}
+
+.code-body .hljs {
+  background: transparent;
+  color: var(--code-text);
+}
+
+.code-body .hljs-comment,
+.code-body .hljs-quote {
+  color: var(--code-muted);
+  font-style: italic;
+}
+
+.code-body .hljs-attr,
+.code-body .hljs-attribute,
+.code-body .hljs-property,
+.code-body .hljs-selector-class,
+.code-body .hljs-selector-id,
+.code-body .hljs-title,
+.code-body .hljs-section {
+  color: var(--code-key);
+}
+
+.code-body .hljs-string,
+.code-body .hljs-doctag,
+.code-body .hljs-regexp,
+.code-body .hljs-addition {
+  color: var(--code-string);
+}
+
+.code-body .hljs-number,
+.code-body .hljs-symbol,
+.code-body .hljs-bullet,
+.code-body .hljs-variable,
+.code-body .hljs-template-variable {
+  color: var(--code-number);
+}
+
+.code-body .hljs-keyword,
+.code-body .hljs-literal,
+.code-body .hljs-selector-tag,
+.code-body .hljs-type,
+.code-body .hljs-deletion {
+  color: var(--code-keyword);
+}
+
+.code-body .hljs-built_in,
+.code-body .hljs-meta,
+.code-body .hljs-link,
+.code-body .hljs-selector-attr,
+.code-body .hljs-selector-pseudo {
+  color: var(--code-key);
+}
+
+.code-body .hljs-emphasis {
+  font-style: italic;
+}
+
+.code-body .hljs-strong {
+  font-weight: 700;
 }
 
 .api-warn-banner {

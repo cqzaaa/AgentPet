@@ -143,12 +143,12 @@ function splitCommandSegments(command: string): string[] {
 
 function parseSegment(raw: string): CommandSegment {
   const trimmed = raw.trim()
-  const match = trimmed.match(/^&?\s*([^\s]+)(?:\s+([\s\S]*))?$/)
-  const command = (match?.[1] || '').replace(/^["']|["']$/g, '').toLowerCase()
+  const match = trimmed.match(/^&?\s*(?:"([^"]+)"|'([^']+)'|([^\s]+))(?:\s+([\s\S]*))?$/)
+  const command = (match?.[1] || match?.[2] || match?.[3] || '').toLowerCase()
   return {
     raw: trimmed,
     command,
-    args: match?.[2]?.trim() || ''
+    args: match?.[4]?.trim() || ''
   }
 }
 
@@ -176,6 +176,26 @@ function isReadOnlySegment(segment: CommandSegment): boolean {
 
 export function getCommandSegments(command: string): CommandSegment[] {
   return splitCommandSegments(command).map(parseSegment)
+}
+
+function executableBasename(command: string): string {
+  const normalized = command.replace(/\\/g, '/')
+  return normalized.slice(normalized.lastIndexOf('/') + 1)
+}
+
+/**
+ * Detect local shell commands that would select a Python installation through
+ * PATH (or an explicitly supplied executable path). Local Python work must use
+ * run_python so it stays on AgentPet's managed runtime. This intentionally
+ * examines executable positions only, not arbitrary arguments containing the
+ * word "python".
+ */
+export function invokesPythonExecutable(command: string): boolean {
+  return getCommandSegments(command).some(segment => {
+    const executable = executableBasename(segment.command)
+    return /^(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?$/.test(executable) ||
+      /^(?:pip(?:\d+(?:\.\d+)*)?)(?:\.exe)?$/.test(executable)
+  })
 }
 
 export function looksLikeReadOnlyInspection(command: string): boolean {

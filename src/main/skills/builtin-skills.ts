@@ -1,6 +1,7 @@
 import { loadOfficeSkill } from '../tools/builtin/office/skills/registry'
 import type { OfficeSkillName } from '../tools/builtin/office/skills/types'
 import { DESKTOP_CONTROL_INSTRUCTIONS } from '../tools/builtin/computer/policy'
+import agentPetCodingSkill from '../tools/builtin/agentpet-coding/SKILL.md?raw'
 
 export interface BuiltinSkillDefinition {
   id: string
@@ -101,6 +102,18 @@ function officeSkill(): BuiltinSkillDefinition {
 
 const builtinSkills: BuiltinSkillDefinition[] = [
   staticSkill({
+    id: 'agentpet-coding',
+    name: 'AgentPet coding',
+    description: 'Inspect, create, understand, modify, debug, refactor, test, and review code. Use for source-code repositories, feature implementation, bug fixes, configuration, engineering verification, or creating an application, website, game, component, API, program, or script from scratch.',
+    triggers: ['code', 'coding', 'repository', 'repo', 'implement', 'debug', 'bug', 'fix', 'refactor', 'test', 'lint', 'typecheck', 'build', 'diff', 'source', 'app', 'website', 'game', 'script', '代码', '编码', '源码', '仓库', '项目', '实现', '开发', '调试', '修复', '重构', '测试', '构建', '应用', '网站', '网页', '游戏', '程序', '脚本'],
+    allowedTools: [
+      'read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content',
+      'write_file', 'edit_file', 'move_file', 'delete_file',
+      'run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'
+    ],
+    instructions: agentPetCodingSkill
+  }),
+  staticSkill({
     id: 'agent-workflow',
     name: 'Agent workflow',
     description: 'Plan substantial work and delegate independent or dependency-linked subtasks.',
@@ -120,9 +133,9 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     id: 'terminal',
     name: 'Terminal commands',
     description: 'Run and monitor PowerShell, cmd, bash, SSH, and other terminal commands.',
-    triggers: ['terminal', 'command', 'shell', 'powershell', 'cmd', 'bash', 'ssh', '命令', '终端', '脚本'],
-    allowedTools: ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command'],
-    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls.`
+    triggers: ['terminal', 'command', 'shell', 'powershell', 'cmd', 'bash', 'ssh', 'python', '命令', '终端', '脚本'],
+    allowedTools: ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'],
+    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls.`
   }),
   staticSkill({
     id: 'web-research',

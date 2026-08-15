@@ -102,15 +102,26 @@ export function getSessionFilesDir(sessionId?: string): string {
   return dir
 }
 
+/** Default directory for relative tool paths in the current conversation. */
+export function getDefaultWorkingDirectory(context: Pick<ToolContext, 'workspacePath' | 'sessionId'>): string {
+  const workspacePath = typeof context.workspacePath === 'string' ? context.workspacePath.trim() : ''
+  if (workspacePath && fs.existsSync(workspacePath)) {
+    const stat = fs.statSync(workspacePath)
+    if (stat.isDirectory()) return resolve(workspacePath)
+  }
+  return getSessionFilesDir(context.sessionId)
+}
+
 /**
- * Resolve a tool-provided path against the current conversation directory.
+ * Resolve a tool-provided path against the current workspace when available,
+ * otherwise against the current conversation directory.
  * Explicit paths and supported aliases/URIs remain unchanged.
  */
-export function resolveSessionPath(filePath: string, sessionId?: string): string {
+export function resolveSessionPath(filePath: string, sessionId?: string, workspacePath?: string): string {
   const localPath = resolveLocalPath(filePath)
   if (!localPath || typeof localPath !== 'string') return localPath
   if (isAbsolute(localPath) || localPath.includes(':')) return localPath
-  return join(getSessionFilesDir(sessionId), localPath)
+  return join(getDefaultWorkingDirectory({ sessionId, workspacePath: workspacePath || '' }), localPath)
 }
 
 /** Paths the user has explicitly placed in scope for this conversation. */

@@ -3,7 +3,7 @@ import { auditPipeline } from '../security/audit-pipeline'
 import { permissionManager } from '../security/permission-manager'
 import { ToolContext, ToolResult } from './types'
 import { mcpManager } from '../mcp/mcp-manager'
-import { getSessionFilesDir, resolveSessionPath } from '../utils/paths'
+import { getDefaultWorkingDirectory, resolveSessionPath } from '../utils/paths'
 import { resolveToolTimeout } from './tool-timeout'
 
 export class UnifiedToolExecutor {
@@ -69,8 +69,8 @@ export class UnifiedToolExecutor {
       const approved = await permissionManager.requestCommandPermission({
         command: approvalCommand,
         execCwd: args.cwd
-          ? resolveSessionPath(args.cwd, context.sessionId)
-          : getSessionFilesDir(context.sessionId),
+          ? resolveSessionPath(args.cwd, context.sessionId, context.workspacePath)
+          : getDefaultWorkingDirectory(context),
         sessionId: context.sessionId,
         warning: auditResult.warning,
         sender: context.event?.sender

@@ -1,5 +1,40 @@
 import { net } from 'electron'
 import { ChatMessage, ChatOptions, ModelProvider } from './types'
+import { mergeStreamingToolCall } from './tool-call-stream'
+
+const TRANSIENT_HTTP_ATTEMPTS = 3
+
+export function isTransientHttpStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+}
+
+export function getTransientRetryDelayMs(attempt: number, retryAfter: string | null): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter)
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 10_000)
+
+    const retryAt = Date.parse(retryAfter)
+    if (Number.isFinite(retryAt)) return Math.min(Math.max(0, retryAt - Date.now()), 10_000)
+  }
+
+  return Math.min(750 * 2 ** attempt, 4_000)
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason || new Error('UserAborted'))
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason || new Error('UserAborted'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 export class OpenAICompatibleProvider implements ModelProvider {
   protected defaultBaseUrl: string = ''
@@ -9,6 +44,30 @@ export class OpenAICompatibleProvider implements ModelProvider {
     protected apiKey: string,
     protected baseUrl: string
   ) {}
+
+  private async fetchWithTransientRetry(
+    url: string,
+    init: Parameters<typeof net.fetch>[1]
+  ): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      const response = await net.fetch(url, init)
+      if (!isTransientHttpStatus(response.status) || attempt >= TRANSIENT_HTTP_ATTEMPTS - 1) {
+        return response
+      }
+
+      const delayMs = getTransientRetryDelayMs(attempt, response.headers.get('retry-after'))
+      console.warn(
+        `[ModelProvider] HTTP ${response.status}; retrying request ` +
+        `(${attempt + 2}/${TRANSIENT_HTTP_ATTEMPTS}) in ${delayMs}ms`
+      )
+      try {
+        await response.body?.cancel()
+      } catch {
+        // The error response may already be closed by the runtime.
+      }
+      await waitForRetry(delayMs, init?.signal || undefined)
+    }
+  }
 
   public async chat(messages: ChatMessage[], options: ChatOptions): Promise<ChatMessage> {
     const cleanApiKey = (this.apiKey || '').trim()
@@ -44,7 +103,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestBody.tool_choice = options.tool_choice || 'auto'
     }
 
-    const response = await net.fetch(url, {
+    const response = await this.fetchWithTransientRetry(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
@@ -148,7 +207,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestBody.tool_choice = options.tool_choice || 'auto'
     }
 
-    const response = await net.fetch(`${cleanBaseUrl}/chat/completions`, {
+    const response = await this.fetchWithTransientRetry(`${cleanBaseUrl}/chat/completions`, {
       method: 'POST', headers, body: JSON.stringify(requestBody), signal: options.signal
     })
     if (!response.ok) {
@@ -191,12 +250,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (typeof delta.content === 'string') content += delta.content
       if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content
       for (const partial of delta.tool_calls || []) {
-        const index = partial.index ?? toolCalls.length
-        const current = toolCalls[index] || (toolCalls[index] = { id: '', type: 'function', function: { name: '', arguments: '' } })
-        if (partial.id) current.id = partial.id
-        if (partial.type) current.type = partial.type
-        if (partial.function?.name) current.function.name += partial.function.name
-        if (partial.function?.arguments) current.function.arguments += partial.function.arguments
+        mergeStreamingToolCall(toolCalls, partial)
       }
       return typeof delta.content === 'string' ? delta.content : null
     }

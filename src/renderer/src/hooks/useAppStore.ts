@@ -73,6 +73,7 @@ export interface Session {
   messages: any[]
   pinned?: boolean
   contextSummary?: string
+  workspacePath?: string
 }
 
 export interface TokenLog {
@@ -600,6 +601,10 @@ export function useAppStore() {
     isSessionSwitching, setIsSessionSwitching,
     isSessionsInitialized, setIsSessionsInitialized
   } = store
+  const workspacePath = useAppStoreRaw((state: any) => {
+    const active = (state.sessions as Session[]).find(session => session.id === activeSessionId)
+    return active?.workspacePath || ''
+  })
   const dropdownRef = useRef<HTMLDivElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const cronRunningLogsRef = useRef<Record<string, CronLog>>({})
@@ -1452,10 +1457,11 @@ export function useAppStore() {
     await window.api.updateSession(id, { name: trimmed })
   }
 
-  const handleCreateNewSession = async (): Promise<void> => {
+  const handleCreateNewSession = async (requestedWorkspacePath?: string): Promise<void> => {
     const currentSessions = useAppStoreRaw.getState().sessions as Session[]
     const currentActiveId = useAppStoreRaw.getState().activeSessionId
     const currentActiveSession = currentSessions.find(session => session.id === currentActiveId)
+    const nextWorkspacePath = requestedWorkspacePath?.trim() || ''
     const canReuseCurrentDraft =
       currentActiveSession &&
       (currentActiveSession.name === '(未命名)' || currentActiveSession.name === '新会话') &&
@@ -1463,6 +1469,12 @@ export function useAppStore() {
       !currentActiveSession.contextSummary &&
       !useAppStoreRaw.getState().sendingSessionIds[currentActiveSession.id]
     if (canReuseCurrentDraft) {
+      if ((currentActiveSession.workspacePath || '') !== nextWorkspacePath) {
+        setSessions(prev => prev.map(session => session.id === currentActiveSession.id
+          ? { ...session, workspacePath: nextWorkspacePath || undefined }
+          : session))
+        await window.api.updateSession(currentActiveSession.id, { workspacePath: nextWorkspacePath })
+      }
       setAttachedFiles([])
       setInputValue('')
       setActiveTab('chat')
@@ -1477,7 +1489,8 @@ export function useAppStore() {
       time: timeStr,
       createdAt: timeStr,
       messages: [],
-      pinned: false
+      pinned: false,
+      workspacePath: nextWorkspacePath || undefined
     }
     creatingSessionIdsRef.current.add(newId)
     setSessions([...currentSessions, newSess])
@@ -1493,17 +1506,21 @@ export function useAppStore() {
   }
 
   // ── 工作空间与文件上传管理 ────────────────────────────────────
-  const [workspacePath, setWorkspacePath] = useState<string>(() => {
-    return localStorage.getItem('agentpet_workspace_path') || ''
-  })
-  
+  const bindActiveSessionWorkspace = async (path: string): Promise<void> => {
+    const normalizedPath = path.trim()
+    const sessionId = useAppStoreRaw.getState().activeSessionId
+    setSessions(prev => prev.map(session => session.id === sessionId
+      ? { ...session, workspacePath: normalizedPath || undefined }
+      : session))
+    await window.api.updateSession(sessionId, { workspacePath: normalizedPath })
+  }
+
   const handleSelectWorkspace = async (): Promise<void> => {
     try {
-      const path = await window.api.selectDirectory({ title: '选择工作空间/项目目录' })
+      const path = await window.api.selectDirectory({ title: '选择文件区/项目目录' })
       if (path) {
-        setWorkspacePath(path)
-        localStorage.setItem('agentpet_workspace_path', path)
-        showToast(`工作空间已设置为：${path}`, 'success')
+        await bindActiveSessionWorkspace(path)
+        showToast(`当前会话已加入文件区：${path}`, 'success')
       }
     } catch (e: any) {
       showToast(`选择工作空间失败: ${e.message}`, 'error')
@@ -1512,10 +1529,14 @@ export function useAppStore() {
 
   const handleClearWorkspace = (e: any): void => {
     e.stopPropagation()
-    setWorkspacePath('')
-    localStorage.removeItem('agentpet_workspace_path')
-    showToast('工作空间已清除', 'info')
+    void bindActiveSessionWorkspace('')
+    showToast('当前会话已移出文件区', 'info')
   }
+
+  useEffect(() => {
+    if (workspacePath) localStorage.setItem('agentpet_workspace_path', workspacePath)
+    else localStorage.removeItem('agentpet_workspace_path')
+  }, [workspacePath])
 
   const handleUploadFile = async (): Promise<void> => {
     try {
@@ -1994,7 +2015,7 @@ ${skillsContext}`
     chatEndRef,
     handleCreateNewSession, handleDeleteSession, handleTogglePinSession, handleRenameSession, handleSendChat,
     // workspace & attached file
-    workspacePath, setWorkspacePath, handleSelectWorkspace, handleClearWorkspace,
+    workspacePath, handleSelectWorkspace, handleClearWorkspace,
     attachedFiles, setAttachedFiles, handlePasteFiles, handleUploadFile,
     selectedKnowledgeBaseId, selectedKnowledgeBaseName, setSelectedKnowledgeBase,
     // generated files & preview

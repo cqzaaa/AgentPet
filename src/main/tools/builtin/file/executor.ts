@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import { dirname, basename, join, extname, relative } from 'path'
 import { app, shell } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
+import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getDefaultWorkingDirectory, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024
 const MAX_ROWS = 2000
@@ -42,8 +42,8 @@ function resolveFilePath(filePath: string, context: ToolContext): string {
   }
 
   // 2. All relative file-tool paths share the same base as list_directory:
-  // the current conversation directory. Explicit paths and aliases remain available.
-  return resolveSessionPath(resolved, context.sessionId)
+  // the current workspace when bound, otherwise the conversation directory.
+  return resolveSessionPath(resolved, context.sessionId, context.workspacePath)
 }
 
 export class FileExecutor implements IToolExecutor {
@@ -186,7 +186,7 @@ export class FileExecutor implements IToolExecutor {
       }
 
       if (api === 'list_directory') {
-        const directoryPath = args.directory_path ? await assertAllowedPath(args.directory_path, context) : getSessionFilesDir(context.sessionId)
+        const directoryPath = args.directory_path ? await assertAllowedPath(args.directory_path, context) : getDefaultWorkingDirectory(context)
         const stat = await fs.promises.stat(directoryPath)
         if (!stat.isDirectory()) return { content: `错误：该路径不是目录：${directoryPath}`, success: false }
         const recursive = Boolean(args.recursive)
@@ -215,7 +215,7 @@ export class FileExecutor implements IToolExecutor {
           workspace: () => context.workspacePath,
           session: () => getSessionFilesDir(context.sessionId)
         }
-        const requestedLocation = String(args.location || 'session').toLowerCase()
+        const requestedLocation = String(args.location || (context.workspacePath ? 'workspace' : 'session')).toLowerCase()
         if (!args.directory_path && !locations[requestedLocation]) {
           return { content: `错误：不支持的位置 ${String(args.location)}`, success: false }
         }

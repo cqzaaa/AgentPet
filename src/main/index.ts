@@ -3208,6 +3208,7 @@ app.whenReady().then(() => {
           pinned INTEGER DEFAULT 0,
           user_id TEXT DEFAULT 'system',
           context_summary TEXT DEFAULT '',
+          workspace_path TEXT DEFAULT '',
           created_at TEXT
         );
         CREATE TABLE IF NOT EXISTS messages (
@@ -3465,6 +3466,17 @@ app.whenReady().then(() => {
           console.error("升级 persona_memories 表结构添加 link 失败", alterErr)
         }
       }
+      // 动态升级：为会话添加可选文件区绑定
+      try {
+        await db.get("SELECT workspace_path FROM sessions LIMIT 1")
+      } catch (e) {
+        try {
+          await db.exec("ALTER TABLE sessions ADD COLUMN workspace_path TEXT DEFAULT ''")
+          console.log("成功升级 SQLite sessions 表结构，加入 workspace_path 列")
+        } catch (alterErr) {
+          console.error("升级 sessions 表结构添加 workspace_path 失败", alterErr)
+        }
+      }
       for (const migration of [
         "ALTER TABLE persona_memories ADD COLUMN embedding_model TEXT",
         "ALTER TABLE persona_memories ADD COLUMN embedding_hash TEXT"
@@ -3495,6 +3507,19 @@ app.whenReady().then(() => {
           console.error("升级 memory_entity_links 表结构添加置信度失败", alterErr)
         }
       }
+      // Legacy keyword fragments and broad topics are lexical features, not
+      // graph entities. Memory facts and lexical keywords remain untouched.
+      await db.exec(`
+        DELETE FROM memory_entity_links
+        WHERE entity_type NOT IN ('person', 'work', 'program', 'organization', 'product', 'location')
+           OR confidence < 0.75
+           OR length(trim(entity_name)) < 2
+           OR length(trim(entity_name)) > 80
+           OR lower(trim(entity_name)) IN (
+             'id', 'web_search', 'web_fetch', 'read_file', 'write_file',
+             'get-current-date', 'debug', 'workflow', 'tool'
+           )
+      `)
       await db.exec("CREATE INDEX IF NOT EXISTS idx_memory_entity_links_type_name ON memory_entity_links(entity_type, entity_name)")
     }
 
@@ -3517,8 +3542,8 @@ app.whenReady().then(() => {
           try {
             for (const s of sessions) {
               await database.run(
-                'INSERT OR REPLACE INTO sessions (id, name, time, user_id, created_at) VALUES (?, ?, ?, ?, ?)',
-                s.id, s.name || '新会话', s.time || '', s.userId || 'system', s.createdAt || s.time || ''
+                'INSERT OR REPLACE INTO sessions (id, name, time, user_id, workspace_path, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                s.id, s.name || '新会话', s.time || '', s.userId || 'system', s.workspacePath || '', s.createdAt || s.time || ''
               )
               if (Array.isArray(s.messages)) {
                 for (const m of s.messages) {
@@ -3577,7 +3602,7 @@ app.whenReady().then(() => {
         ? [`${todayDash}%`, `${todaySlash}%`, `${todayDash}%`, `${todaySlash}%`]
         : []
       const dbSessions = await database.all(`
-        SELECT id, name, time, pinned, user_id, context_summary, created_at
+        SELECT id, name, time, pinned, user_id, context_summary, workspace_path, created_at
         FROM sessions
         ${sessionDateFilter}
         ORDER BY created_at DESC
@@ -3692,6 +3717,7 @@ app.whenReady().then(() => {
           pinned: s.id.startsWith('wechat:') ? true : (s.pinned === 1),
           userId: s.user_id || 'system',
           contextSummary: s.context_summary || '',
+          workspacePath: s.workspace_path || undefined,
           messages: msgs
         })
       }
@@ -3739,12 +3765,13 @@ app.whenReady().then(() => {
       const isWechat = session.id?.startsWith('wechat:')
       const createdAt = session.createdAt || session.time || new Date().toLocaleString('zh-CN', { hour12: false })
       const insertResult = await database.run(
-        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT OR IGNORE INTO sessions (id, name, time, pinned, user_id, workspace_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         session.id,
         session.name || '(未命名)',
         session.time,
         (session.pinned || isWechat) ? 1 : 0,
         session.userId || 'system',
+        session.workspacePath || '',
         createdAt
       )
       if (!insertResult?.changes) {
@@ -3780,6 +3807,7 @@ app.whenReady().then(() => {
         let dbKey = key
         if (key === 'userId') dbKey = 'user_id'
         if (key === 'contextSummary') dbKey = 'context_summary'
+        if (key === 'workspacePath') dbKey = 'workspace_path'
         let val = updates[key]
         if (key === 'pinned') {
           val = (val || sessionId.startsWith('wechat:')) ? 1 : 0

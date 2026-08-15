@@ -10,11 +10,13 @@ import {
   ChevronRight,
   CircleX,
   Copy,
+  FolderOpen,
   KeyRound,
   Library,
   Lightbulb,
   List,
   Minus,
+  MessageSquareText,
   Moon,
   MoreHorizontal,
   PanelLeftClose,
@@ -121,6 +123,7 @@ function createShellSessionsSelector(): (state: { sessions: Session[] }) => Sess
       session.id,
       session.name,
       session.pinned ? '1' : '0',
+      session.workspacePath || '',
       session.createdAt || session.time,
       checkIsThinking(session) ? '1' : '0',
       getSessionPreview(session)
@@ -294,6 +297,7 @@ export function AgentWindow(): React.JSX.Element {
 
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([])
   const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null)
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [hiddenTabKeys, setHiddenTabKeys] = useState<string[]>([])
   const [showTabOverflowMenu, setShowTabOverflowMenu] = useState(false)
   const tabsViewportRef = useRef<HTMLDivElement>(null)
@@ -314,6 +318,26 @@ export function AgentWindow(): React.JSX.Element {
       return `设置-${SETTINGS_SUB_TAB_LABELS[settingsSubTab] || '模型配置'}`
     }
     return FUNCTION_PAGE_LABELS[tab.pageId]
+  }
+
+  const workspacePaths = useMemo(
+    () => Array.from(new Set(sessions.map(session => session.workspacePath).filter(Boolean) as string[])),
+    [sessions]
+  )
+
+  const workspaceName = (path: string): string => {
+    const segments = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean)
+    return segments[segments.length - 1] || path
+  }
+
+  const createSessionFromDialog = async (workspacePath?: string): Promise<void> => {
+    setShowNewSessionDialog(false)
+    await handleCreateNewSession(workspacePath)
+  }
+
+  const chooseWorkspaceForSession = async (): Promise<void> => {
+    const path = await window.api.selectDirectory({ title: '选择文件区/项目目录' })
+    if (path) await createSessionFromDialog(path)
   }
 
   const workspaceTabLabelSignature = workspaceTabs
@@ -520,7 +544,7 @@ export function AgentWindow(): React.JSX.Element {
 
           {/* + 新会话 */}
           <div className="new-chat-btn-wrapper">
-            <button className="new-chat-btn" onClick={handleCreateNewSession} title="创建新会话">
+            <button className="new-chat-btn" onClick={() => setShowNewSessionDialog(true)} title="创建新会话">
               <Plus size={17} strokeWidth={2} aria-hidden="true" />
               {!isCollapsed && <span>新会话</span>}
             </button>
@@ -543,6 +567,7 @@ export function AgentWindow(): React.JSX.Element {
               onDelete={setSessionToDeleteId}
               onTogglePin={handleTogglePinSession}
               onRename={handleRenameSession}
+              onCreateInWorkspace={(path) => { void handleCreateNewSession(path) }}
             />
           )}
 
@@ -612,7 +637,7 @@ export function AgentWindow(): React.JSX.Element {
         {/* ── 自定义标题栏 (Custom Titlebar) ── */}
         <div className="window-titlebar">
           <div className="titlebar-tabs-shell">
-          <div ref={tabsViewportRef} className="titlebar-tabs" onDoubleClick={() => handleCreateNewSession()}>
+          <div ref={tabsViewportRef} className="titlebar-tabs" onDoubleClick={() => setShowNewSessionDialog(true)}>
             {workspaceTabs.map(tab => {
               const session = tab.kind === 'session'
                 ? sessionsById.get(tab.sessionId)
@@ -646,7 +671,7 @@ export function AgentWindow(): React.JSX.Element {
 
             <button
               className="titlebar-new-tab-btn"
-              onClick={() => handleCreateNewSession()}
+              onClick={() => setShowNewSessionDialog(true)}
               title="新建会话"
             >
               <Plus size={15} strokeWidth={2} aria-hidden="true" />
@@ -736,6 +761,12 @@ export function AgentWindow(): React.JSX.Element {
               {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
               {activeTab === 'settings' && '系统设置'}
             </div>
+            {activeTab === 'chat' && activeSession.workspacePath && (
+              <div className="content-subtitle active-workspace-path" title={activeSession.workspacePath}>
+                <FolderOpen size={12} strokeWidth={1.8} aria-hidden="true" />
+                <span>{activeSession.workspacePath}</span>
+              </div>
+            )}
             {activeTab !== 'chat' && (
               <div className="content-subtitle">
                 {activeTab === 'control' && '配置和管理您的订阅渠道'}
@@ -820,6 +851,65 @@ export function AgentWindow(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {showNewSessionDialog && (
+        <div className="mcp-modal-overlay new-session-overlay" onMouseDown={() => setShowNewSessionDialog(false)}>
+          <div
+            className="new-session-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-session-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="new-session-dialog-header">
+              <div>
+                <div id="new-session-title" className="new-session-dialog-title">新建会话</div>
+                <div className="new-session-dialog-subtitle">直接聊天，或让会话持续绑定一个项目文件夹。</div>
+              </div>
+              <button className="new-session-dialog-close" onClick={() => setShowNewSessionDialog(false)} title="关闭">
+                <X size={17} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="new-session-primary-actions">
+              <button className="new-session-choice" onClick={() => { void createSessionFromDialog() }}>
+                <span className="new-session-choice-icon chat"><MessageSquareText size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+                <span className="new-session-choice-copy">
+                  <strong>普通聊天</strong>
+                  <small>不绑定文件夹，保持当前聊天方式</small>
+                </span>
+                <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
+              <button className="new-session-choice" onClick={() => { void chooseWorkspaceForSession() }}>
+                <span className="new-session-choice-icon workspace"><FolderOpen size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+                <span className="new-session-choice-copy">
+                  <strong>选择文件区</strong>
+                  <small>选择项目目录，工具将以它作为工作区</small>
+                </span>
+                <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+
+            {workspacePaths.length > 0 && (
+              <div className="new-session-recent-workspaces">
+                <div className="new-session-section-label">最近文件区</div>
+                <div className="new-session-workspace-list">
+                  {workspacePaths.map(path => (
+                    <button key={path} className="new-session-workspace-row" onClick={() => { void createSessionFromDialog(path) }} title={path}>
+                      <FolderOpen size={14} strokeWidth={1.8} aria-hidden="true" />
+                      <span className="new-session-workspace-copy">
+                        <strong>{workspaceName(path)}</strong>
+                        <small>{path}</small>
+                      </span>
+                      <Plus size={13} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 删除会话二次确认弹框 */}
       {sessionToDeleteId && (

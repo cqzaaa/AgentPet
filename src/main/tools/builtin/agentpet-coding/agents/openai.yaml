@@ -1,0 +1,4 @@
+interface:
+  display_name: 'AgentPet Coding'
+  short_description: 'Create, inspect, edit, and verify code safely'
+  default_prompt: 'Use $agentpet-coding to create or inspect the requested code in the current workspace, implement the change, and verify it.'
