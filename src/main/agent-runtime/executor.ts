@@ -1076,12 +1076,28 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         chatOptions.tool_choice = 'auto'
       }
 
+      // The caller persists and flushes this exact request boundary before the
+      // generator is resumed, so model-visible state cannot outrun its trace.
+      yield {
+        type: 'request_start',
+        step: loopCount,
+        messages: chatHistory,
+        options: {
+          model: chatOptions.model,
+          temperature: chatOptions.temperature,
+          maxTokens: chatOptions.maxTokens,
+          tools: chatOptions.tools,
+          tool_choice: chatOptions.tool_choice
+        }
+      }
+
       let responseMsg: ChatMessage
       try {
         if (modelProvider.chatStream) {
           let streamedMessage: ChatMessage | null = null
           for await (const event of modelProvider.chatStream(chatHistory, chatOptions)) {
             if (event.type === 'delta') {
+              yield { type: 'assistant_chunk', step: loopCount, content: event.content }
               if (effectiveTools.length === 0) {
                 yield { type: 'text_delta', content: event.content }
               }
@@ -1094,6 +1110,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         } else {
           responseMsg = await modelProvider.chat(chatHistory, chatOptions)
         }
+
+        yield { type: 'assistant_message', step: loopCount, message: responseMsg }
       } catch (err: any) {
         const errorText = err.message || String(err)
         const mayRejectImages =
@@ -1288,7 +1306,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             type: 'tool_call',
             name: toolName,
             args: safeToolArgs,
-            id: toolCall.id
+            id: toolCall.id,
+            rawArguments: toolCall.function.arguments || '{}'
           }
         }
 
@@ -1534,6 +1553,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             type: 'tool_result',
             name: res.toolName,
             result: res.displayResult,
+            modelResult: res.contextToolResult,
+            callId: res.toolCallId,
             contextTokens: countTokens(res.contextToolResult)
           }
           if (normalizedSources.length) {

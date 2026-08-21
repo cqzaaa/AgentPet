@@ -88,6 +88,15 @@ const api = {
     ipcRenderer.invoke('api:get-active-skills-prompt', enabledSkillNames),
   callLLM: (config: any, messages: any[], workspacePath?: string): Promise<string> =>
     ipcRenderer.invoke('api:call-llm', config, messages, workspacePath),
+  getSessionEvents: (sessionId: string, options?: any): Promise<any> =>
+    ipcRenderer.invoke('api:get-session-events', sessionId, options),
+  getSessionEvent: (sessionId: string, seq: number): Promise<any> =>
+    ipcRenderer.invoke('api:get-session-event', sessionId, seq),
+  onSessionEventsAppended: (callback: (events: any[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any[]): void => callback(data)
+    ipcRenderer.on('api:session-events-appended', handler)
+    return (): void => { ipcRenderer.removeListener('api:session-events-appended', handler) }
+  },
   selectFile: (): Promise<{ name: string; path: string; content: string } | null> =>
     ipcRenderer.invoke('api:select-file'),
   selectAttachmentFiles: (): Promise<string[]> =>

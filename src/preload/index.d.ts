@@ -50,6 +50,9 @@ declare global {
       getActiveSkillsPrompt: (enabledSkillNames: string[]) => Promise<string>
       getToolsDefinition: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
+      getSessionEvents: (sessionId: string, options?: { beforeSeq?: number; limit?: number; types?: string[]; sources?: string[]; search?: string }) => Promise<any>
+      getSessionEvent: (sessionId: string, seq: number) => Promise<any | null>
+      onSessionEventsAppended: (callback: (events: any[]) => void) => () => void
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
       selectAttachmentFiles: () => Promise<string[]>
       parseFileContent: (filePath: string) => Promise<string>

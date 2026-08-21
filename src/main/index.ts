@@ -41,6 +41,8 @@ import { getSubagentToolNames, nextWithIdleTimeout, SUBAGENT_IDLE_TIMEOUT_MS } f
 import { handleSkillHubDownload } from './skills/skillhub-download-installer'
 import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
+import { SessionEventStore } from './session-events/session-event-store'
+import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
 import globalAssistantPageContextSkill from './tools/builtin/global-assistant-page-context/SKILL.md?raw'
 
 
@@ -215,6 +217,7 @@ const windowsAppUserModelId = 'com.electron.app'
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
+const sessionEventStore = new SessionEventStore()
 let automationOverlayWindow: BrowserWindow | null = null
 let globalAssistantWindow: BrowserWindow | null = null
 let globalAssistantOpacity = 1
@@ -1328,6 +1331,33 @@ app.whenReady().then(() => {
   taskRunner.subscribe((update) => {
     if (agentWindow && !agentWindow.isDestroyed()) agentWindow.webContents.send('api:task-run-updated', update)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('api:task-run-updated', update)
+    void sessionEventStore.append(update.run.sessionId, {
+      type: `subagent/${update.action}`,
+      source: 'subagent',
+      correlationId: update.taskRunId,
+      data: sanitizeTraceValue({
+        taskRunId: update.taskRunId,
+        action: update.action,
+        run: update.run,
+        steps: update.steps
+      }) as Record<string, unknown>
+    }).catch((error) => console.warn('[SessionEvents] Failed to trace task update', error))
+  })
+
+  ipcMain.handle('api:get-session-events', async (_event, sessionId: string, options?: any) => {
+    if (!sessionId || typeof sessionId !== 'string') return { events: [], hasMore: false, total: 0 }
+    return sessionEventStore.readPage(sessionId, options || {})
+  })
+
+  ipcMain.handle('api:get-session-event', async (_event, sessionId: string, seq: number) => {
+    if (!sessionId || typeof sessionId !== 'string' || !Number.isSafeInteger(seq)) return null
+    return sessionEventStore.readEvent(sessionId, seq)
+  })
+
+  sessionEventStore.subscribe((traceEvents) => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('api:session-events-appended', traceEvents)
+    }
   })
 
   ipcMain.handle('api:control-task-run', async (_event, taskRunId: string, action: 'pause' | 'resume' | 'cancel') => {
@@ -3885,6 +3915,7 @@ app.whenReady().then(() => {
     try {
       const database = await getDB()
       await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
+      await sessionEventStore.deleteSession(sessionId)
 
       // 如果删除的是微信会话，同步从微信活跃好友列表中清除该记录
       if (sessionId.startsWith('wechat:') && wechatBotManager) {
@@ -4700,6 +4731,32 @@ app.whenReady().then(() => {
     const executor = new AgentExecutor()
     let thisController: AbortController
     const sessionId = config.sessionId || 'default'
+    let traceTurn: number | undefined
+    let traceStep = 0
+    let traceHeaderFingerprint = ''
+    let tracePreviousMessageFingerprints: string[] | undefined
+
+    const appendTrace = async (
+      type: string,
+      source: 'user' | 'assistant' | 'model' | 'tool' | 'system' | 'context' | 'subagent',
+      data: Record<string, unknown>,
+      options: { step?: number; correlationId?: string } = {}
+    ): Promise<void> => {
+      if (traceTurn === undefined) return
+      try {
+        await sessionEventStore.append(sessionId, {
+          type,
+          source,
+          turn: traceTurn,
+          step: options.step ?? (traceStep || undefined),
+          correlationId: options.correlationId,
+          messageId: config.messageId,
+          data
+        })
+      } catch (traceError) {
+        console.warn('[SessionEvents] Failed to append trace event', type, traceError)
+      }
+    }
 
     // 检查此 session 在开始前是否已经被主动终止了
     if (abortedSessionIds.has(sessionId)) {
@@ -4719,6 +4776,20 @@ app.whenReady().then(() => {
     }
 
     try {
+      const latestUserMessage = [...messages].reverse().find((message: any) => message?.role === 'user')
+      try {
+        traceTurn = await sessionEventStore.beginTurn(sessionId, {
+          provider: config.provider,
+          model: config.model,
+          input: sanitizeTraceValue(latestUserMessage || null)
+        }, config.messageId)
+        await appendTrace('user/message', 'user', {
+          message: sanitizeTraceValue(latestUserMessage || null) as any
+        })
+      } catch (traceError) {
+        console.warn('[SessionEvents] Failed to begin turn', traceError)
+      }
+
       const stepStream = executor.run(
         {
           ...config,
@@ -4732,7 +4803,70 @@ app.whenReady().then(() => {
 
       let finalResponse = ''
       for await (const step of stepStream) {
-        if (step.type === 'think') {
+        if (step.type === 'request_start') {
+          traceStep = step.step
+          const sanitizedMessages = sanitizeTraceValue(step.messages) as any[]
+          const sanitizedOptions = sanitizeTraceValue(step.options) as Record<string, unknown>
+          const systemMessages = sanitizedMessages.filter((message: any) => message?.role === 'system')
+          const nonSystemMessages = sanitizedMessages.filter((message: any) => message?.role !== 'system')
+          const messageFingerprints = nonSystemMessages.map(message => traceFingerprint(message))
+          const header = {
+            provider: config.provider,
+            model: config.model,
+            temperature: sanitizedOptions.temperature,
+            maxTokens: sanitizedOptions.maxTokens,
+            system: systemMessages,
+            tools: sanitizedOptions.tools,
+            toolChoice: sanitizedOptions.tool_choice
+          }
+          const fingerprint = traceFingerprint(header)
+          if (fingerprint !== traceHeaderFingerprint) {
+            await appendTrace('request/header', 'model', {
+              reason: traceHeaderFingerprint ? 'change' : 'initial',
+              fingerprint,
+              header
+            }, { step: step.step })
+            traceHeaderFingerprint = fingerprint
+          }
+          const requestId = `${sessionId}:${traceTurn ?? 0}:${step.step}:${config.messageId ?? 'background'}`
+          let keepMessages = 0
+          if (tracePreviousMessageFingerprints) {
+            const sharedLength = Math.min(tracePreviousMessageFingerprints.length, messageFingerprints.length)
+            while (
+              keepMessages < sharedLength &&
+              tracePreviousMessageFingerprints[keepMessages] === messageFingerprints[keepMessages]
+            ) keepMessages += 1
+          }
+          const context = tracePreviousMessageFingerprints
+            ? {
+                kind: 'patch',
+                keep: keepMessages,
+                remove: tracePreviousMessageFingerprints.length - keepMessages,
+                append: nonSystemMessages.slice(keepMessages)
+              }
+            : { kind: 'snapshot', messages: nonSystemMessages }
+          await appendTrace('request/start', 'model', {
+            requestId,
+            headerFingerprint: fingerprint,
+            messageCount: sanitizedMessages.length,
+            context
+          }, { step: step.step, correlationId: requestId })
+          tracePreviousMessageFingerprints = messageFingerprints
+          // Semantic checkpoint: the exact request boundary is durable before
+          // AgentExecutor resumes and dispatches it to the provider.
+          try { await sessionEventStore.flush(sessionId) } catch (traceError) {
+            console.warn('[SessionEvents] Request checkpoint failed', traceError)
+          }
+        } else if (step.type === 'assistant_chunk') {
+          await appendTrace('assistant/chunk', 'assistant', {
+            content: step.content
+          }, { step: step.step })
+        } else if (step.type === 'assistant_message') {
+          await appendTrace('assistant/message', 'assistant', {
+            message: sanitizeTraceValue(step.message) as any
+          }, { step: step.step })
+        } else if (step.type === 'think') {
+          await appendTrace('assistant/reasoning', 'assistant', { detail: step.detail })
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'think',
@@ -4747,6 +4881,18 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'think', name: '深度思考过程', detail: step.detail })
           }
         } else if (step.type === 'tool_call') {
+          let canonicalArguments: unknown = step.rawArguments || step.args
+          if (typeof step.rawArguments === 'string') {
+            try { canonicalArguments = JSON.parse(step.rawArguments) } catch { canonicalArguments = step.rawArguments }
+          }
+          await appendTrace('tool/call', 'tool', {
+            callId: step.id,
+            name: step.name,
+            arguments: sanitizeTraceValue(canonicalArguments)
+          }, { correlationId: step.id })
+          try { await sessionEventStore.flush(sessionId) } catch (traceError) {
+            console.warn('[SessionEvents] Tool checkpoint failed', traceError)
+          }
           if (!config.suppressAutomationOverlay) {
             publishAutomationProgress({ type: 'tool_call', name: step.name, args: step.args })
           }
@@ -4764,6 +4910,13 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'tool_call', name: step.name, args: step.args })
           }
         } else if (step.type === 'tool_result') {
+          await appendTrace('tool/result', 'tool', {
+            callId: step.callId,
+            name: step.name,
+            modelResult: sanitizeTraceValue(step.modelResult ?? step.result),
+            displayResult: sanitizeTraceValue(step.result),
+            contextTokens: step.contextTokens
+          }, { correlationId: step.callId })
           if (!config.suppressAutomationOverlay) {
             publishAutomationProgress({ type: 'tool_result', name: step.name, result: step.result })
           }
@@ -4782,6 +4935,14 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'tool_result', name: step.name, result: step.result, contextTokens: step.contextTokens })
           }
         } else if (step.type === 'context_compaction') {
+          await appendTrace(`compaction/${step.status}`, 'context', {
+            beforeTokens: step.beforeTokens,
+            afterTokens: step.afterTokens,
+            activeToolContextTokens: step.activeToolContextTokens,
+            archivePath: step.archivePath,
+            removedMessages: step.removedMessages,
+            detail: step.detail
+          })
           const payload = {
             type: 'context_compaction',
             name: '上下文压缩',
@@ -4799,6 +4960,7 @@ app.whenReady().then(() => {
           if (event) event.sender.send('api:llm-tool-event', payload)
           if (onToolEvent) onToolEvent(payload)
         } else if (step.type === 'generated_files') {
+          await appendTrace('artifact/generated', 'tool', { files: sanitizeTraceValue(step.files) as any })
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'generated_files',
@@ -4823,6 +4985,12 @@ app.whenReady().then(() => {
             onToolEvent({ type: 'web_sources', name: 'web_sources', sources: step.sources })
           }
         } else if (step.type === 'token') {
+          await appendTrace('usage/tokens', 'model', {
+            provider: config.provider,
+            model: config.model,
+            promptTokens: step.promptTokens,
+            completionTokens: step.completionTokens
+          })
           const payload = {
             model: config.model,
             provider: config.provider,
@@ -4856,6 +5024,11 @@ app.whenReady().then(() => {
         }
       }
 
+      await appendTrace('turn/end', 'system', { reason: 'completed', turn: traceTurn })
+      try { await sessionEventStore.flush(sessionId) } catch (traceError) {
+        console.warn('[SessionEvents] Turn checkpoint failed', traceError)
+      }
+
       if (activeLlmAbortControllers.get(sessionId) === thisController) {
         activeLlmAbortControllers.delete(sessionId)
       }
@@ -4863,6 +5036,18 @@ app.whenReady().then(() => {
       if (!config.suppressAutomationOverlay) dismissAutomationOverlay()
       return finalResponse
     } catch (e: any) {
+      await appendTrace('error', 'system', {
+        name: e?.name || 'Error',
+        message: e?.message || String(e),
+        aborted: Boolean(thisController?.signal.aborted)
+      })
+      await appendTrace('turn/end', 'system', {
+        reason: thisController?.signal.aborted ? 'interrupted' : 'failed',
+        turn: traceTurn
+      })
+      try { await sessionEventStore.flush(sessionId) } catch (traceError) {
+        console.warn('[SessionEvents] Failure checkpoint failed', traceError)
+      }
       if (activeLlmAbortControllers.get(sessionId) === thisController) {
         activeLlmAbortControllers.delete(sessionId)
       }
@@ -5270,6 +5455,9 @@ app.whenReady().then(() => {
     // any step that could have side effects.
     taskRunner.checkpointActiveRuns().catch((error) => {
       console.error('[TaskRunner] Failed to save task checkpoints before exit', error)
+    })
+    sessionEventStore.flush().catch((error) => {
+      console.error('[SessionEvents] Failed to flush trajectory before exit', error)
     })
 
     // 2. 解除所有等待授权的阻塞，避免 loading 挂起

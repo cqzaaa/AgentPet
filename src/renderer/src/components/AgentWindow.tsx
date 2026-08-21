@@ -24,6 +24,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Route,
   ScrollText,
   Square,
   Store,
@@ -41,6 +42,7 @@ const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ 
 const AgentPage = lazy(() => import('../pages/AgentPage').then(module => ({ default: module.AgentPage })))
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
 const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
+const TrajectoryPage = lazy(() => import('../pages/TrajectoryPage').then(module => ({ default: module.TrajectoryPage })))
 const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(module => ({ default: module.KnowledgeBasePage })))
 const RpaPage = lazy(() => import('../rpa/RpaPage').then(module => ({ default: module.RpaPage })))
 const SkillHubPage = lazy(() => import('../pages/SkillHubPage').then(module => ({ default: module.SkillHubPage })))
@@ -272,6 +274,7 @@ export function AgentWindow(): React.JSX.Element {
   ])
 
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
+  const [showTrajectory, setShowTrajectory] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
 
   // 侧边栏下方菜单组（控制/代理/日志/设置）默认收起，把空间让给最近会话
@@ -351,13 +354,13 @@ export function AgentWindow(): React.JSX.Element {
       : `page:${activeTab}`
 
   useEffect(() => {
-    if (activeTab === 'chat' && activeSessionId) {
+    if (activeTab === 'chat' && activeSessionId && sessionsById.has(activeSessionId)) {
       const key = `session:${activeSessionId}`
       setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
         ? prev
         : [...prev, { key, kind: 'session', sessionId: activeSessionId }])
     }
-  }, [activeSessionId, activeTab])
+  }, [activeSessionId, activeTab, sessionsById])
 
   useEffect(() => {
     if (isFunctionPage(activeTab)) {
@@ -496,7 +499,9 @@ export function AgentWindow(): React.JSX.Element {
   const renderPage = (): React.JSX.Element => {
     let page: React.JSX.Element
     switch (activeTab) {
-      case 'chat': page = <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
+      case 'chat': page = showTrajectory
+        ? <TrajectoryPage />
+        : <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
       case 'control': page = <ControlPage store={store} />; break
       case 'agent': page = <AgentPage store={store} />; break
       case 'skillhub': page = <SkillHubPage />; break
@@ -806,6 +811,18 @@ export function AgentWindow(): React.JSX.Element {
                 >
                   <List size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
+                <button
+                  className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
+                  onClick={() => {
+                    setShowTrajectory(current => !current)
+                    setShowHistoryDropdown(false)
+                  }}
+                  title={showTrajectory ? '返回会话' : '查看当前会话执行轨迹'}
+                  aria-pressed={showTrajectory}
+                >
+                  <Route size={16} strokeWidth={2} aria-hidden="true" />
+                  <span>{showTrajectory ? '会话' : '轨迹'}</span>
+                </button>
               </div>
 
               {showHistoryDropdown && (
@@ -839,7 +856,7 @@ export function AgentWindow(): React.JSX.Element {
         </div>
         )}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div className={`content-body tab-${activeTab}`} style={{ flex: 1, minWidth: 0 }}>
+          <div className={`content-body tab-${activeTab} ${activeTab === 'chat' && showTrajectory ? 'trajectory-mode' : ''}`} style={{ flex: 1, minWidth: 0 }}>
             {renderPage()}
           </div>
 
