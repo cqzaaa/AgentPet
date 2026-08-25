@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import React, { Suspense, lazy, useState, useRef, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore, useAppStoreRaw } from '../hooks/useAppStore'
 import type { Session } from '../hooks/useAppStore'
 import { ChatControllerProvider } from '../hooks/useChatController'
@@ -276,6 +277,8 @@ export function AgentWindow(): React.JSX.Element {
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const [showTrajectory, setShowTrajectory] = useState(false)
   const historyDropdownRef = useRef<HTMLDivElement>(null)
+  const historyMenuRef = useRef<HTMLDivElement>(null)
+  const [historyMenuPosition, setHistoryMenuPosition] = useState({ top: 0, right: 0 })
 
   // 侧边栏下方菜单组（控制/代理/日志/设置）默认收起，把空间让给最近会话
   const [menuCollapsed, setMenuCollapsed] = useState(true)
@@ -484,7 +487,11 @@ export function AgentWindow(): React.JSX.Element {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
-      if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (
+        historyDropdownRef.current && !historyDropdownRef.current.contains(target) &&
+        historyMenuRef.current && !historyMenuRef.current.contains(target)
+      ) {
         setShowHistoryDropdown(false)
       }
     }
@@ -499,9 +506,18 @@ export function AgentWindow(): React.JSX.Element {
   const renderPage = (): React.JSX.Element => {
     let page: React.JSX.Element
     switch (activeTab) {
-      case 'chat': page = showTrajectory
-        ? <TrajectoryPage />
-        : <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>; break
+      case 'chat': page = (
+        <div className="chat-mode-stack">
+          <div className={`chat-mode-panel conversation ${showTrajectory ? 'inactive' : 'active'}`}>
+            <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>
+          </div>
+          {showTrajectory && (
+            <div className="chat-mode-panel trajectory active">
+              <TrajectoryPage />
+            </div>
+          )}
+        </div>
+      ); break
       case 'control': page = <ControlPage store={store} />; break
       case 'agent': page = <AgentPage store={store} />; break
       case 'skillhub': page = <SkillHubPage />; break
@@ -806,7 +822,16 @@ export function AgentWindow(): React.JSX.Element {
                 </button>
                 <button
                   className="history-btn"
-                  onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}
+                  onClick={() => {
+                    const rect = historyDropdownRef.current?.getBoundingClientRect()
+                    if (rect) {
+                      setHistoryMenuPosition({
+                        top: rect.bottom + 8,
+                        right: Math.max(12, window.innerWidth - rect.right)
+                      })
+                    }
+                    setShowHistoryDropdown(current => !current)
+                  }}
                   title="查看历史提问"
                 >
                   <List size={18} strokeWidth={2} aria-hidden="true" />
@@ -825,8 +850,13 @@ export function AgentWindow(): React.JSX.Element {
                 </button>
               </div>
 
-              {showHistoryDropdown && (
-                <div className="history-dropdown">
+              {showHistoryDropdown && createPortal(
+                <div
+                  ref={historyMenuRef}
+                  className="history-dropdown history-dropdown-portal"
+                  style={{ top: historyMenuPosition.top, right: historyMenuPosition.right }}
+                  onMouseDown={event => event.stopPropagation()}
+                >
                   <div className="history-dropdown-header">
                     历史提问 ({userMessages.length})
                   </div>
@@ -837,6 +867,7 @@ export function AgentWindow(): React.JSX.Element {
                           key={msg.id}
                           className="history-item"
                           onClick={() => {
+                            setShowTrajectory(false)
                             setHighlightedMessageId(msg.id)
                             setShowHistoryDropdown(false)
                           }}
@@ -849,14 +880,15 @@ export function AgentWindow(): React.JSX.Element {
                       <div className="history-empty">暂无提问记录</div>
                     )}
                   </div>
-                </div>
+                </div>,
+                document.querySelector<HTMLElement>('.agent-window-container') || document.body
               )}
             </div>
           )}
         </div>
         )}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div className={`content-body tab-${activeTab} ${activeTab === 'chat' && showTrajectory ? 'trajectory-mode' : ''}`} style={{ flex: 1, minWidth: 0 }}>
+          <div className={`content-body tab-${activeTab} ${activeTab === 'chat' ? 'chat-view-host' : ''}`} style={{ flex: 1, minWidth: 0 }}>
             {renderPage()}
           </div>
 

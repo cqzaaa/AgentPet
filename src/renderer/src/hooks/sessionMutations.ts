@@ -15,21 +15,10 @@ function messageId(message: SessionMessage): string {
   return String(message?.id ?? '')
 }
 
-function sortMessages(messages: SessionMessage[]): SessionMessage[] {
-  return [...messages].sort((left, right) => {
-    const leftNumber = Number(left?.id)
-    const rightNumber = Number(right?.id)
-    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-      return leftNumber - rightNumber
-    }
-    return messageId(left).localeCompare(messageId(right))
-  })
-}
-
 function upsertMessage(messages: SessionMessage[], message: SessionMessage): SessionMessage[] {
   const targetId = messageId(message)
   const existingIndex = messages.findIndex(item => messageId(item) === targetId)
-  if (existingIndex < 0) return sortMessages([...messages, message])
+  if (existingIndex < 0) return [...messages, message]
 
   const next = [...messages]
   next[existingIndex] = { ...next[existingIndex], ...message }

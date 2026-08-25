@@ -65,6 +65,7 @@ function officeSkill(): BuiltinSkillDefinition {
       const overview = [
         '# Office documents',
         'Use run_office_skill for PDF, DOCX, XLSX, and PPTX work. Load all format sections needed for the current workflow in one request after the file type is known: pdf, docx, xlsx, or pptx. Do not load an Office overview first.',
+        'Pass run_office_skill.input as a JSON object, never as a JSON-encoded string. Keep user text inside normal JSON string values so quotes are escaped by the tool-call serializer.',
         'The Office runtime already owns its managed Python packages, document converters, OCR helpers, and native Office export engines. Never request terminal, inspect pip, install packages, or write ad-hoc Python for an operation described here.',
         'Use files only when a path must first be found or inspected. Do not use generic file writes for Office edits: run_office_skill writes the generated artifact itself.',
         '',

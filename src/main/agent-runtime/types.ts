@@ -1,6 +1,9 @@
 export type AgentStepEvent =
   | { type: 'request_start'; step: number; messages: any[]; options: Record<string, any> }
-  | { type: 'assistant_chunk'; step: number; content: string }
+  | { type: 'assistant_chunk'; step: number; content: string; rawPayload?: any }
+  | { type: 'think_delta'; step: number; detail: string; rawPayload?: any }
+  | { type: 'model_request'; step: number; request: any }
+  | { type: 'model_response'; step: number; response: any }
   | { type: 'assistant_message'; step: number; message: any }
   | { type: 'think'; detail: string }
   | { type: 'tool_call'; name: string; args: any; id: string; rawArguments?: string }

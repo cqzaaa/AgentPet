@@ -1,14 +1,22 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Virtuoso } from 'react-virtuoso'
 import {
   Activity,
   Bot,
   Box,
   BrainCircuit,
+  Check,
+  ChevronDown,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   CircleAlert,
   Clock3,
+  Copy,
   GitBranch,
+  Maximize2,
+  Minimize2,
   Search,
   Sparkles,
   TerminalSquare,
@@ -48,7 +56,7 @@ const FILTERS: Array<{ id: FilterId; label: string }> = [
 ]
 
 function typesForFilter(filter: FilterId): string[] | undefined {
-  if (filter === 'model') return ['request/header', 'request/start', 'assistant/chunk', 'assistant/message', 'assistant/reasoning', 'usage/tokens']
+  if (filter === 'model') return ['request/start', 'model/request', 'model/response', 'assistant/chunk', 'assistant/message', 'assistant/reasoning', 'assistant/reasoning_chunk', 'usage/tokens']
   if (filter === 'tool') return ['tool/call', 'tool/result', 'artifact/generated']
   if (filter === 'context') return ['user/message', 'compaction/started', 'compaction/completed', 'compaction/failed']
   if (filter === 'errors') return ['error']
@@ -60,6 +68,7 @@ function sourcesForFilter(filter: FilterId): TraceSource[] | undefined {
 }
 
 function matchesFilter(event: TraceEvent, filter: FilterId): boolean {
+  if (event.type === 'request/header') return false
   if (filter === 'all') return true
   if (filter === 'subagent') return event.type.startsWith('subagent/')
   const types = typesForFilter(filter)
@@ -76,11 +85,21 @@ function eventSummary(event: TraceEvent): string {
   const data = event.data || {}
   if (data.truncated) return String(data.preview || '大型负载，选择后读取完整内容')
   if (event.type === 'user/message') return textFromContent(data.message?.content) || '用户输入进入本轮上下文'
-  if (event.type === 'request/header') return `${data.header?.provider || ''} / ${data.header?.model || ''} · ${Array.isArray(data.header?.tools) ? data.header.tools.length : 0} 个工具`
-  if (event.type === 'request/start') return `${data.messageCount || 0} 条消息进入模型请求`
+  if (event.type === 'request/start') return `${data.messageCount || 0} 条消息完成上下文准备`
+  if (event.type === 'model/request') {
+    const request = data.request || {}
+    const body = request.body || {}
+    return `${request.method || 'POST'} · ${body.model || ''} · ${Array.isArray(body.messages) ? body.messages.length : 0} 条消息`
+  }
+  if (event.type === 'model/response') {
+    const response = data.response || {}
+    const units = Array.isArray(response.events) ? `${response.events.length} 个 SSE 数据帧` : 'JSON 响应体'
+    return `${response.status || '—'} · ${units}`
+  }
   if (event.type === 'assistant/chunk') return String(data.content || '')
   if (event.type === 'assistant/message') return textFromContent(data.message?.content) || `${data.message?.tool_calls?.length || 0} 个工具调用`
   if (event.type === 'assistant/reasoning') return String(data.detail || '')
+  if (event.type === 'assistant/reasoning_chunk') return String(data.detail || '')
   if (event.type === 'tool/call') return `${data.name || '工具'}(${compactJson(data.arguments)})`
   if (event.type === 'tool/result') return String(data.displayResult || data.modelResult || '工具执行完成')
   if (event.type === 'usage/tokens') return `输入 ${data.promptTokens || 0} · 输出 ${data.completionTokens || 0} tokens`
@@ -107,11 +126,13 @@ function eventLabel(type: string): string {
     'turn/start': 'Turn 开始',
     'turn/end': 'Turn 结束',
     'user/message': '用户输入',
-    'request/header': '请求配置',
-    'request/start': '模型请求',
+    'request/start': '请求上下文准备',
+    'model/request': '模型网络请求',
+    'model/response': '模型网络响应',
     'assistant/chunk': '流式输出',
     'assistant/message': '模型回复',
     'assistant/reasoning': '推理过程',
+    'assistant/reasoning_chunk': '实时推理',
     'tool/call': '工具调用',
     'tool/result': '工具结果',
     'usage/tokens': 'Token 用量',
@@ -123,14 +144,20 @@ function eventLabel(type: string): string {
   return labels[type] || type
 }
 
+function eventBoundary(type: string): { kind: 'request' | 'response' | 'internal'; label: string } {
+  if (type === 'model/request') return { kind: 'request', label: '网络请求' }
+  if (type === 'model/response') return { kind: 'response', label: '网络响应' }
+  return { kind: 'internal', label: '内部事件' }
+}
+
 function category(event: TraceEvent): string {
   if (event.type === 'error') return 'error'
   if (event.type.startsWith('tool/') || event.type === 'artifact/generated') return 'tool'
   if (event.type.startsWith('subagent/')) return 'subagent'
   if (event.type.startsWith('compaction/')) return 'context'
   if (event.type === 'user/message') return 'user'
-  if (event.type.startsWith('assistant/')) return event.type === 'assistant/reasoning' ? 'reasoning' : 'assistant'
-  if (event.type.startsWith('request/') || event.type === 'usage/tokens') return 'model'
+  if (event.type.startsWith('assistant/')) return event.type.startsWith('assistant/reasoning') ? 'reasoning' : 'assistant'
+  if (event.type.startsWith('request/') || event.type.startsWith('model/') || event.type === 'usage/tokens') return 'model'
   return 'system'
 }
 
@@ -186,6 +213,240 @@ function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`
   if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`
   return `${(bytes / 1_048_576).toFixed(1)} MB`
+}
+
+function isContainer(value: unknown): value is Record<string, unknown> | unknown[] {
+  return value !== null && typeof value === 'object'
+}
+
+function collectContainerPaths(value: unknown, path = '$', paths = new Set<string>()): Set<string> {
+  if (!isContainer(value)) return paths
+  paths.add(path)
+  Object.entries(value).forEach(([key, child]) => collectContainerPaths(child, `${path}.${key}`, paths))
+  return paths
+}
+
+function initiallyExpandedPaths(value: unknown, path = '$', depth = 0, paths = new Set<string>()): Set<string> {
+  if (!isContainer(value)) return paths
+  if (depth <= 2) paths.add(path)
+  Object.entries(value).forEach(([key, child]) => initiallyExpandedPaths(child, `${path}.${key}`, depth + 1, paths))
+  return paths
+}
+
+function isConsumedPayloadPath(type: string, path: string[]): boolean {
+  const leaf = path[path.length - 1]
+  const providerField = leaf === 'content' || leaf === 'reasoning_content'
+  const providerPayload = providerField && path.includes('choices') && (path.includes('message') || path.includes('delta'))
+  if (type === 'model/response') return providerPayload
+  if (type === 'assistant/chunk') return path.join('.') === 'content' || providerPayload
+  if (type === 'assistant/reasoning' || type === 'assistant/reasoning_chunk') {
+    return path.join('.') === 'detail' || providerPayload
+  }
+  if (type === 'assistant/message') {
+    return path[0] === 'message' && (leaf === 'content' || leaf === 'reasoning_content' || leaf === 'tool_calls')
+  }
+  if (type === 'user/message') return path[0] === 'message' && leaf === 'content'
+  if (type === 'tool/call') return leaf === 'name' || leaf === 'arguments'
+  if (type === 'tool/result') return leaf === 'displayResult' || leaf === 'modelResult'
+  return false
+}
+
+function JsonPrimitive({ value }: { value: unknown }): React.JSX.Element {
+  if (typeof value === 'string') return <span className="json-string">{JSON.stringify(value)}</span>
+  if (typeof value === 'number') return <span className="json-number">{String(value)}</span>
+  if (typeof value === 'boolean') return <span className="json-boolean">{String(value)}</span>
+  if (value === null) return <span className="json-null">null</span>
+  return <span>{String(value)}</span>
+}
+
+async function copyTextToClipboard(value: string): Promise<void> {
+  if (window.api?.copyText) {
+    window.api.copyText(value)
+    return
+  }
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return
+    } catch {
+      // Fall through to the selection-based compatibility path.
+    }
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw new Error('复制 JSON 失败')
+}
+
+function JsonTreeNode({
+  value,
+  label,
+  path,
+  eventType,
+  expanded,
+  onToggle
+}: {
+  value: unknown
+  label?: string
+  path: string[]
+  eventType: string
+  expanded: Set<string>
+  onToggle: (path: string) => void
+}): React.JSX.Element {
+  const pathKey = path.length ? `$.${path.join('.')}` : '$'
+  const consumed = isConsumedPayloadPath(eventType, path)
+  if (!isContainer(value)) {
+    return (
+      <div className={`json-tree-leaf ${consumed ? 'frontend-consumed' : ''}`} role="treeitem">
+        {label !== undefined && <span className="json-key">{label}:</span>}
+        <JsonPrimitive value={value} />
+      </div>
+    )
+  }
+
+  const open = expanded.has(pathKey)
+  const entries = Object.entries(value)
+  const opening = Array.isArray(value) ? '[' : '{'
+  const closing = Array.isArray(value) ? ']' : '}'
+  return (
+    <div className={`json-tree-branch ${consumed ? 'frontend-consumed' : ''}`} role="treeitem">
+      <button className="json-tree-toggle" onClick={() => onToggle(pathKey)} aria-expanded={open}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {label !== undefined && <span className="json-key">{label}:</span>}
+        <span className="json-bracket">{opening}</span>
+        {!open && <span className="json-folded">{entries.length} 项</span>}
+        {!open && <span className="json-bracket">{closing}</span>}
+      </button>
+      {open && (
+        <div className="json-tree-children" role="group">
+          {entries.map(([key, child]) => (
+            <JsonTreeNode
+              key={`${pathKey}.${key}`}
+              value={child}
+              label={key}
+              path={[...path, key]}
+              eventType={eventType}
+              expanded={expanded}
+              onToggle={onToggle}
+            />
+          ))}
+          <div className="json-tree-close">{closing}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StructuredPayload({ value, eventType }: { value: unknown; eventType: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState<Set<string>>(() => initiallyExpandedPaths(value))
+  const [copied, setCopied] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const treeRef = useRef<HTMLDivElement>(null)
+  const horizontalAxisRef = useRef<HTMLDivElement>(null)
+  const [horizontalMetrics, setHorizontalMetrics] = useState({ content: 0, viewport: 0 })
+  const toggle = (path: string): void => setExpanded(current => {
+    const next = new Set(current)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    return next
+  })
+  useEffect(() => {
+    if (!fullscreen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setFullscreen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [fullscreen])
+
+  useEffect(() => {
+    const tree = treeRef.current
+    if (!tree) return
+    const update = (): void => {
+      setHorizontalMetrics({ content: tree.scrollWidth, viewport: tree.clientWidth })
+      if (horizontalAxisRef.current) horizontalAxisRef.current.scrollLeft = tree.scrollLeft
+    }
+    const frame = window.requestAnimationFrame(update)
+    const observer = new ResizeObserver(update)
+    observer.observe(tree)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [expanded, fullscreen, value])
+
+  const content = (
+    <div className={`payload-tree-content ${fullscreen ? 'is-fullscreen' : ''}`}>
+      <div className="payload-tree-toolbar">
+        <span>{fullscreen && <strong>原始事件负载</strong>}<i />红色为发送给前端渲染层的内容</span>
+        <div>
+          <button
+            className={copied ? 'copied' : ''}
+            title={copied ? '已复制' : '复制 JSON'}
+            aria-label={copied ? '已复制' : '复制 JSON'}
+            onClick={() => {
+              void copyTextToClipboard(JSON.stringify(value, null, 2) || String(value ?? '')).then(() => {
+                setCopied(true)
+                window.setTimeout(() => setCopied(false), 1600)
+              }).catch(console.error)
+            }}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button title="全部展开" aria-label="全部展开" onClick={() => setExpanded(collectContainerPaths(value))}>
+            <ChevronsDown size={14} />
+          </button>
+          <button title="全部折叠" aria-label="全部折叠" onClick={() => setExpanded(new Set())}>
+            <ChevronsUp size={14} />
+          </button>
+          <button
+            title={fullscreen ? '退出全屏' : '全屏查看'}
+            aria-label={fullscreen ? '退出全屏' : '全屏查看'}
+            onClick={() => setFullscreen(current => !current)}
+          >
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        </div>
+      </div>
+      {horizontalMetrics.content > horizontalMetrics.viewport + 1 && (
+        <div
+          ref={horizontalAxisRef}
+          className="payload-horizontal-axis"
+          aria-label="原始事件负载横向滚动"
+          onScroll={event => {
+            if (treeRef.current) treeRef.current.scrollLeft = event.currentTarget.scrollLeft
+          }}
+        >
+          <div style={{ width: horizontalMetrics.content }} />
+        </div>
+      )}
+      <div
+        ref={treeRef}
+        className="json-tree"
+        role="tree"
+        onScroll={event => {
+          if (horizontalAxisRef.current) horizontalAxisRef.current.scrollLeft = event.currentTarget.scrollLeft
+        }}
+      >
+        <JsonTreeNode value={value} path={[]} eventType={eventType} expanded={expanded} onToggle={toggle} />
+      </div>
+    </div>
+  )
+  if (!fullscreen) return content
+  return createPortal(
+    <div className="payload-fullscreen-backdrop" role="presentation" onMouseDown={() => setFullscreen(false)}>
+      <section className="payload-fullscreen-dialog" role="dialog" aria-modal="true" aria-label="原始事件负载全屏查看" onMouseDown={event => event.stopPropagation()}>
+        {content}
+      </section>
+    </div>,
+    document.querySelector<HTMLElement>('.agent-window-container') || document.body
+  )
 }
 
 export function TrajectoryPage(): React.JSX.Element {
@@ -344,6 +605,19 @@ export function TrajectoryPage(): React.JSX.Element {
   const selectedDuration = selectedIndex >= 0 && selectedIndex < events.length - 1
     ? events[selectedIndex + 1].time - events[selectedIndex].time
     : 0
+  const inspectedEvent = selectedFull?.seq === selected?.seq ? selectedFull : selected
+  const inspectedData = inspectedEvent?.data || {}
+  const inspectedRequest = selected?.type === 'model/request' ? inspectedData.request : undefined
+  const inspectedResponse = selected?.type === 'model/response' ? inspectedData.response : undefined
+  const inspectedPayload: unknown = Array.isArray(inspectedData.sourcePayloads)
+    ? inspectedData.sourcePayloads.length === 1 ? inspectedData.sourcePayloads[0] : inspectedData.sourcePayloads
+    : inspectedRequest?.body !== undefined
+      ? inspectedRequest.body
+      : inspectedResponse?.transport === 'sse' && Array.isArray(inspectedResponse.events)
+        ? inspectedResponse.events
+        : inspectedResponse?.transport === 'json' && inspectedResponse.body !== undefined
+          ? inspectedResponse.body
+          : inspectedData
 
   return (
     <div className="trajectory-page">
@@ -487,6 +761,7 @@ export function TrajectoryPage(): React.JSX.Element {
                           <span className="trace-main">
                             <span className="trace-row-title">
                               <strong>{eventLabel(event.type)}</strong>
+                              <span className={`trace-boundary boundary-${eventBoundary(event.type).kind}`}>{eventBoundary(event.type).label}</span>
                               <code>{event.type}</code>
                             </span>
                             <span className="trace-summary">{eventSummary(event)}</span>
@@ -517,26 +792,8 @@ export function TrajectoryPage(): React.JSX.Element {
             <div className="inspector-facts">
               <div><span>发生时间</span><strong>{formatClock(selected.time)}</strong></div>
               <div><span>至下一事件</span><strong>{selectedDuration ? formatDuration(selectedDuration) : '—'}</strong></div>
-              <div><span>来源</span><strong>{selected.source}</strong></div>
+              <div><span>来源 / 层级</span><strong>{selected.source} · {eventBoundary(selected.type).label}</strong></div>
               <div><span>负载</span><strong>{formatBytes(selected.payloadBytes)}</strong></div>
-            </div>
-
-            <div className="inspector-section">
-              <h3>位置</h3>
-              <div className="inspector-location">
-                <span>Session</span><code>{selected.sessionId}</code>
-                <span>Turn / Step</span><code>{selected.turn ?? '—'} / {selected.step ?? '—'}</code>
-                <span>Correlation</span><code>{selected.correlationId || '—'}</code>
-              </div>
-            </div>
-
-            <div className="inspector-section inspector-payload">
-              <h3>原始事件负载 {selected.compressed && <em>GZIP</em>}</h3>
-              {selected.data?.truncated && selectedFull?.seq === selected.seq && selectedFull.data?.truncated ? (
-                <div className="payload-loading">正在解压完整负载…</div>
-              ) : (
-                <pre>{JSON.stringify(selectedFull?.seq === selected.seq ? selectedFull.data : selected.data, null, 2)}</pre>
-              )}
             </div>
 
             {(selected.type === 'usage/tokens' || metrics.promptTokens + metrics.completionTokens > 0) && (
@@ -545,6 +802,20 @@ export function TrajectoryPage(): React.JSX.Element {
                 Loaded window · {(metrics.promptTokens + metrics.completionTokens).toLocaleString()} tokens
               </div>
             )}
+
+            <div className="inspector-section inspector-payload">
+              <h3>原始事件负载 {selected.compressed && <em>GZIP</em>}</h3>
+              {selected.data?.truncated && selectedFull?.seq === selected.seq && selectedFull.data?.truncated ? (
+                <div className="payload-loading">正在解压完整负载…</div>
+              ) : (
+                <StructuredPayload
+                  key={`${selected.sessionId}:${selected.seq}`}
+                  value={inspectedPayload}
+                  eventType={selected.type}
+                />
+              )}
+            </div>
+
           </aside>
         )}
       </main>

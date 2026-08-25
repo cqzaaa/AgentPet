@@ -872,21 +872,21 @@ function ChatPageImpl(): React.JSX.Element {
 
   // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
-    if (highlightedMessageId) {
-      const timer = setTimeout(() => {
-        const element = document.getElementById(`msg-${highlightedMessageId}`)
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          // 闪烁 2.5 秒后清除高亮标记
-          setTimeout(() => {
-            setHighlightedMessageId(null)
-          }, 2500)
-        }
-      }, 150)
-      return () => clearTimeout(timer)
+    if (highlightedMessageId == null) return () => {}
+    const messageIndex = activeSessMessages.findIndex(message => message.id === highlightedMessageId)
+    if (messageIndex < 0) return () => {}
+
+    const scrollTimer = window.setTimeout(() => {
+      // Virtuoso may not have mounted an old message in the DOM yet, so locate
+      // by data index first instead of relying on document.getElementById().
+      virtuosoRef.current?.scrollToIndex({ index: messageIndex, align: 'center', behavior: 'smooth' })
+    }, 80)
+    const clearTimer = window.setTimeout(() => setHighlightedMessageId(null), 2600)
+    return () => {
+      window.clearTimeout(scrollTimer)
+      window.clearTimeout(clearTimer)
     }
-    return () => { }
-  }, [highlightedMessageId, setHighlightedMessageId])
+  }, [activeSessMessages, highlightedMessageId, setHighlightedMessageId])
 
   useEffect(() => {
     // 全局阻止浏览器默认的拖拽打开文件行为，防止不小心把文件拖到页面空白处导致应用跳转

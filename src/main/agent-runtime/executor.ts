@@ -768,7 +768,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       console.error('[Memory] 长任务自动经验沉淀失败:', err)
     }
   }
-
+  // 真正agent执行的过程
   public async *run(
     config: {
       provider: string
@@ -1092,15 +1092,33 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       }
 
       let responseMsg: ChatMessage
+      let reasoningWasStreamed = false
       try {
         if (modelProvider.chatStream) {
           let streamedMessage: ChatMessage | null = null
           for await (const event of modelProvider.chatStream(chatHistory, chatOptions)) {
             if (event.type === 'delta') {
-              yield { type: 'assistant_chunk', step: loopCount, content: event.content }
+              yield {
+                type: 'assistant_chunk',
+                step: loopCount,
+                content: event.content,
+                rawPayload: event.rawPayload
+              }
               if (effectiveTools.length === 0) {
                 yield { type: 'text_delta', content: event.content }
               }
+            } else if (event.type === 'reasoning_delta') {
+              reasoningWasStreamed = true
+              yield {
+                type: 'think_delta',
+                step: loopCount,
+                detail: event.content,
+                rawPayload: event.rawPayload
+              }
+            } else if (event.type === 'raw_request') {
+              yield { type: 'model_request', step: loopCount, request: event.request }
+            } else if (event.type === 'raw_response') {
+              yield { type: 'model_response', step: loopCount, response: event.response }
             } else {
               streamedMessage = event.message
             }
@@ -1109,8 +1127,16 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           responseMsg = streamedMessage
         } else {
           responseMsg = await modelProvider.chat(chatHistory, chatOptions)
+          if (responseMsg.raw_request) {
+            yield { type: 'model_request', step: loopCount, request: responseMsg.raw_request }
+          }
+          if (responseMsg.raw_response) {
+            yield { type: 'model_response', step: loopCount, response: responseMsg.raw_response }
+          }
         }
 
+        const { raw_request: _rawRequest, raw_response: _rawResponse, ...normalizedMessage } = responseMsg
+        responseMsg = normalizedMessage
         yield { type: 'assistant_message', step: loopCount, message: responseMsg }
       } catch (err: any) {
         const errorText = err.message || String(err)
@@ -1174,7 +1200,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       }
 
       // 输出深度思考内容
-      if (responseMsg.reasoning_content) {
+      if (responseMsg.reasoning_content && !reasoningWasStreamed) {
         yield {
           type: 'think',
           detail: responseMsg.reasoning_content

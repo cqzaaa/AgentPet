@@ -725,9 +725,17 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     return
   }
 
+  const { workArea } = screen.getPrimaryDisplay()
+  const horizontalMargin = Math.min(80, Math.max(24, Math.round(workArea.width * 0.042)))
+  const verticalMargin = Math.min(24, Math.max(16, Math.round(workArea.height * 0.024)))
+  const defaultWidth = Math.max(900, workArea.width - horizontalMargin * 2)
+  const defaultHeight = Math.max(620, workArea.height - verticalMargin * 2)
+
   agentWindow = new BrowserWindow({
-    width: 1100,
-    height: 700,
+    width: Math.min(workArea.width, defaultWidth),
+    height: Math.min(workArea.height, defaultHeight),
+    x: workArea.x + Math.round((workArea.width - Math.min(workArea.width, defaultWidth)) / 2),
+    y: workArea.y + Math.round((workArea.height - Math.min(workArea.height, defaultHeight)) / 2),
     show: false,
     frame: false,
     resizable: true,
@@ -4733,8 +4741,9 @@ app.whenReady().then(() => {
     const sessionId = config.sessionId || 'default'
     let traceTurn: number | undefined
     let traceStep = 0
-    let traceHeaderFingerprint = ''
+    let traceRequestId = ''
     let tracePreviousMessageFingerprints: string[] | undefined
+    let liveReasoning = ''
 
     const appendTrace = async (
       type: string,
@@ -4805,6 +4814,7 @@ app.whenReady().then(() => {
       for await (const step of stepStream) {
         if (step.type === 'request_start') {
           traceStep = step.step
+          liveReasoning = ''
           const sanitizedMessages = sanitizeTraceValue(step.messages) as any[]
           const sanitizedOptions = sanitizeTraceValue(step.options) as Record<string, unknown>
           const systemMessages = sanitizedMessages.filter((message: any) => message?.role === 'system')
@@ -4820,15 +4830,8 @@ app.whenReady().then(() => {
             toolChoice: sanitizedOptions.tool_choice
           }
           const fingerprint = traceFingerprint(header)
-          if (fingerprint !== traceHeaderFingerprint) {
-            await appendTrace('request/header', 'model', {
-              reason: traceHeaderFingerprint ? 'change' : 'initial',
-              fingerprint,
-              header
-            }, { step: step.step })
-            traceHeaderFingerprint = fingerprint
-          }
           const requestId = `${sessionId}:${traceTurn ?? 0}:${step.step}:${config.messageId ?? 'background'}`
+          traceRequestId = requestId
           let keepMessages = 0
           if (tracePreviousMessageFingerprints) {
             const sharedLength = Math.min(tracePreviousMessageFingerprints.length, messageFingerprints.length)
@@ -4859,8 +4862,34 @@ app.whenReady().then(() => {
           }
         } else if (step.type === 'assistant_chunk') {
           await appendTrace('assistant/chunk', 'assistant', {
+            ...(step.rawPayload !== undefined ? { sourcePayloads: [sanitizeTraceValue(step.rawPayload)] } : {}),
             content: step.content
           }, { step: step.step })
+        } else if (step.type === 'think_delta') {
+          liveReasoning += step.detail
+          await appendTrace('assistant/reasoning_chunk', 'assistant', {
+            ...(step.rawPayload !== undefined ? { sourcePayloads: [sanitizeTraceValue(step.rawPayload)] } : {}),
+            detail: step.detail
+          }, { step: step.step })
+          const payload = {
+            type: 'tool_progress',
+            name: '深度思考过程',
+            detail: liveReasoning,
+            progress: 0,
+            timestamp: Date.now(),
+            messageId: config.messageId,
+            sessionId: config.sessionId
+          }
+          if (event) event.sender.send('api:llm-tool-event', payload)
+          if (onToolEvent) onToolEvent(payload)
+        } else if (step.type === 'model_request') {
+          await appendTrace('model/request', 'model', {
+            request: sanitizeTraceValue(step.request) as any
+          }, { step: step.step, correlationId: traceRequestId })
+        } else if (step.type === 'model_response') {
+          await appendTrace('model/response', 'model', {
+            response: sanitizeTraceValue(step.response) as any
+          }, { step: step.step, correlationId: traceRequestId })
         } else if (step.type === 'assistant_message') {
           await appendTrace('assistant/message', 'assistant', {
             message: sanitizeTraceValue(step.message) as any

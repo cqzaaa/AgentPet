@@ -1,8 +1,79 @@
 import { net } from 'electron'
-import { ChatMessage, ChatOptions, ModelProvider } from './types'
+import { ChatMessage, ChatOptions, ModelProvider, ModelRawRequest, ModelRawResponse } from './types'
 import { mergeStreamingToolCall } from './tool-call-stream'
 
 const TRANSIENT_HTTP_ATTEMPTS = 3
+const THINK_OPEN_TAGS = ['<think>', '<thinking>']
+const THINK_CLOSE_TAGS = ['</think>', '</thinking>']
+
+function partialTagSuffixLength(value: string, tags: string[]): number {
+  const lower = value.toLocaleLowerCase()
+  const maximum = Math.min(value.length, Math.max(...tags.map(tag => tag.length)) - 1)
+  for (let length = maximum; length > 0; length--) {
+    const suffix = lower.slice(-length)
+    if (tags.some(tag => tag.startsWith(suffix))) return length
+  }
+  return 0
+}
+
+class TaggedThinkingStream {
+  private buffer = ''
+  private thinking = false
+
+  public push(chunk: string): { content: string; reasoning: string } {
+    this.buffer += chunk
+    let content = ''
+    let reasoning = ''
+
+    while (this.buffer) {
+      const lower = this.buffer.toLocaleLowerCase()
+      const tags = this.thinking ? THINK_CLOSE_TAGS : THINK_OPEN_TAGS
+      const matches = tags
+        .map(tag => ({ tag, index: lower.indexOf(tag) }))
+        .filter(match => match.index >= 0)
+        .sort((left, right) => left.index - right.index)
+      const match = matches[0]
+      if (match) {
+        const before = this.buffer.slice(0, match.index)
+        if (this.thinking) reasoning += before
+        else content += before
+        this.buffer = this.buffer.slice(match.index + match.tag.length)
+        this.thinking = !this.thinking
+        continue
+      }
+
+      const retained = partialTagSuffixLength(this.buffer, tags)
+      const complete = this.buffer.slice(0, this.buffer.length - retained)
+      if (this.thinking) reasoning += complete
+      else content += complete
+      this.buffer = this.buffer.slice(this.buffer.length - retained)
+      break
+    }
+
+    return { content, reasoning }
+  }
+
+  public finish(): { content: string; reasoning: string } {
+    const result = this.thinking
+      ? { content: '', reasoning: this.buffer }
+      : { content: this.buffer, reasoning: '' }
+    this.buffer = ''
+    return result
+  }
+}
+
+function extractTaggedThinking(value: string): { content: string; reasoning: string } {
+  const reasoning: string[] = []
+  let content = value.replace(/<(think|thinking)>([\s\S]*?)<\/\1>/gi, (_match, _tag, detail) => {
+    reasoning.push(String(detail).trim())
+    return ''
+  })
+  content = content.replace(/<(?:think|thinking)>([\s\S]*)$/i, (_match, detail) => {
+    reasoning.push(String(detail).trim())
+    return ''
+  })
+  return { content: content.trim(), reasoning: reasoning.filter(Boolean).join('\n\n') }
+}
 
 export function isTransientHttpStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
@@ -103,6 +174,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestBody.tool_choice = options.tool_choice || 'auto'
     }
 
+    const rawRequest: ModelRawRequest = { method: 'POST', url, headers, body: requestBody }
+
     const response = await this.fetchWithTransientRetry(url, {
       method: 'POST',
       headers,
@@ -152,18 +225,24 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let reasoning_content = message.reasoning_content || ''
     let content = message.content || ''
 
-    if (!reasoning_content && content) {
-      const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i)
-      if (thinkMatch) {
-        reasoning_content = thinkMatch[1].trim()
-      }
+    if (content) {
+      const tagged = extractTaggedThinking(content)
+      content = tagged.content
+      if (!reasoning_content) reasoning_content = tagged.reasoning
     }
 
     const resultMessage: ChatMessage = {
       role: 'assistant',
       content,
       tool_calls: message.tool_calls,
-      reasoning_content
+      reasoning_content,
+      raw_request: rawRequest,
+      raw_response: {
+        transport: 'json',
+        status: response.status,
+        contentType: response.headers.get('content-type') || undefined,
+        body: data
+      }
     }
 
     if (data.usage) {
@@ -182,7 +261,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
   public async *chatStream(
     messages: ChatMessage[],
     options: ChatOptions
-  ): AsyncGenerator<{ type: 'delta'; content: string } | { type: 'message'; message: ChatMessage }, void, unknown> {
+  ): AsyncGenerator<
+    | { type: 'delta'; content: string; rawPayload?: unknown }
+    | { type: 'reasoning_delta'; content: string; rawPayload?: unknown }
+    | { type: 'raw_request'; request: ModelRawRequest }
+    | { type: 'raw_response'; response: ModelRawResponse }
+    | { type: 'message'; message: ChatMessage },
+    void,
+    unknown
+  > {
     const cleanApiKey = (this.apiKey || '').trim()
     const cleanBaseUrl = (this.baseUrl || this.defaultBaseUrl || '').trim().replace(/\/+$/, '')
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -207,7 +294,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestBody.tool_choice = options.tool_choice || 'auto'
     }
 
-    const response = await this.fetchWithTransientRetry(`${cleanBaseUrl}/chat/completions`, {
+    const url = `${cleanBaseUrl}/chat/completions`
+    yield { type: 'raw_request', request: { method: 'POST', url, headers, body: requestBody } }
+    const response = await this.fetchWithTransientRetry(url, {
       method: 'POST', headers, body: JSON.stringify(requestBody), signal: options.signal
     })
     if (!response.ok) {
@@ -215,7 +304,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       // Older OpenAI-compatible gateways sometimes reject only the stream flag.
       // Preserve chat availability by falling back to the established JSON path.
       if (response.status === 400 && /stream|unknown parameter|unsupported/i.test(text)) {
-        yield { type: 'message', message: await this.chat(messages, options) }
+        const message = await this.chat(messages, options)
+        if (message.raw_request) yield { type: 'raw_request', request: message.raw_request }
+        if (message.raw_response) yield { type: 'raw_response', response: message.raw_response }
+        yield { type: 'message', message }
         return
       }
       throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`)
@@ -226,9 +318,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
       const data: any = await response.json()
       const message = data.choices?.[0]?.message
       if (!message) throw new Error('未获取到有效的模型回答结果')
+      const tagged = extractTaggedThinking(message.content || '')
+      const reasoningContent = message.reasoning_content || tagged.reasoning
+      yield { type: 'raw_response', response: {
+        transport: 'json',
+        status: response.status,
+        contentType: response.headers.get('content-type') || undefined,
+        body: data
+      } }
+      if (reasoningContent) yield { type: 'reasoning_delta', content: reasoningContent }
       yield { type: 'message', message: {
-        role: 'assistant', content: message.content || '', tool_calls: message.tool_calls,
-        reasoning_content: message.reasoning_content || '', usage: data.usage
+        role: 'assistant', content: tagged.content, tool_calls: message.tool_calls,
+        reasoning_content: reasoningContent, usage: data.usage
       } }
       return
     }
@@ -239,20 +340,40 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let reasoning = ''
     let usage: ChatMessage['usage']
     const toolCalls: any[] = []
+    const rawEvents: unknown[] = []
 
-    const consume = (payload: string): string | null => {
-      if (!payload || payload === '[DONE]') return null
+    const taggedThinking = new TaggedThinkingStream()
+    const consume = (payload: string): { content: string; reasoning: string; rawPayload: unknown } | null => {
+      if (!payload) return null
+      if (payload === '[DONE]') return null
       let data: any
-      try { data = JSON.parse(payload) } catch { return null }
+      try {
+        data = JSON.parse(payload)
+        rawEvents.push(data)
+      } catch {
+        rawEvents.push(payload)
+        return null
+      }
       if (data.usage) usage = { prompt_tokens: data.usage.prompt_tokens || 0, completion_tokens: data.usage.completion_tokens || 0 }
       const delta = data.choices?.[0]?.delta
       if (!delta) return null
-      if (typeof delta.content === 'string') content += delta.content
-      if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content
+      let contentDelta = ''
+      let reasoningDelta = ''
+      if (typeof delta.content === 'string') {
+        const tagged = taggedThinking.push(delta.content)
+        contentDelta = tagged.content
+        reasoningDelta = tagged.reasoning
+        content += contentDelta
+        reasoning += reasoningDelta
+      }
+      if (typeof delta.reasoning_content === 'string') {
+        reasoning += delta.reasoning_content
+        reasoningDelta += delta.reasoning_content
+      }
       for (const partial of delta.tool_calls || []) {
         mergeStreamingToolCall(toolCalls, partial)
       }
-      return typeof delta.content === 'string' ? delta.content : null
+      return { content: contentDelta, reasoning: reasoningDelta, rawPayload: data }
     }
 
     for await (const chunk of response.body as any) {
@@ -262,12 +383,30 @@ export class OpenAICompatibleProvider implements ModelProvider {
       for (const event of events) {
         const payload = event.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
         const delta = consume(payload)
-        if (delta) yield { type: 'delta', content: delta }
+        if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
+        if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
       }
     }
+    buffer += decoder.decode()
     const trailing = buffer.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
     const delta = consume(trailing)
-    if (delta) yield { type: 'delta', content: delta }
+    if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
+    if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
+    const taggedTail = taggedThinking.finish()
+    if (taggedTail.reasoning) {
+      reasoning += taggedTail.reasoning
+      yield { type: 'reasoning_delta', content: taggedTail.reasoning }
+    }
+    if (taggedTail.content) {
+      content += taggedTail.content
+      yield { type: 'delta', content: taggedTail.content }
+    }
+    yield { type: 'raw_response', response: {
+      transport: 'sse',
+      status: response.status,
+      contentType: response.headers.get('content-type') || undefined,
+      events: rawEvents
+    } }
     yield { type: 'message', message: { role: 'assistant', content, reasoning_content: reasoning, tool_calls: toolCalls.length ? toolCalls : undefined, usage } }
   }
 }

@@ -27,8 +27,9 @@ export const officeSkillManifest: ToolManifest = {
             enum: ['create', 'inspect', 'modify', 'validate', 'render', 'convert', 'semantic_edit']
           },
           input: {
-            type: 'object',
-            description: '参数结构由 request_skill 返回的对应 action.inputSchema 决定'
+            anyOf: [{ type: 'object' }, { type: 'string' }],
+            description:
+              '参数结构由 request_skill 返回的对应 action.inputSchema 决定。必须优先直接传 JSON 对象；兼容内容为 JSON 对象的字符串。'
           }
         },
         required: ['skill', 'action', 'input']

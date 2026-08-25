@@ -4,6 +4,7 @@ import { join } from 'path'
 
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveSessionPath, getGeneratedFilesDir, sessionLastXlsxMap } from '../../utils/paths'
+import { normalizeXlsxStyles } from './xlsx-styles'
 
 export class OfficeExecutor implements IToolExecutor {
   public async execute(
@@ -28,7 +29,9 @@ export class OfficeExecutor implements IToolExecutor {
           const workbook = new ExcelJS.Workbook()
 
           let jsonData: any = null
-          try { jsonData = JSON.parse(content) } catch (e) {}
+          try {
+            jsonData = JSON.parse(content)
+          } catch (e) {}
 
           if (jsonData && jsonData.sheets && Array.isArray(jsonData.sheets)) {
             for (const sheetDef of jsonData.sheets) {
@@ -43,31 +46,52 @@ export class OfficeExecutor implements IToolExecutor {
                 }
               }
               if (sheetDef.styles) {
-                for (const [cellRef, style] of Object.entries(sheetDef.styles as Record<string, any>)) {
-                  const cell = ws.getCell(cellRef)
-                  const font: any = {}
-                  if (style.bold) font.bold = true
-                  if (style.italic) font.italic = true
-                  if (style.fontSize) font.size = style.fontSize
-                  if (style.fontColor) font.color = { argb: 'FF' + String(style.fontColor).replace(/^#/, '') }
-                  if (Object.keys(font).length > 0) cell.font = font
-                  if (style.bgColor) {
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + String(style.bgColor).replace(/^#/, '') } }
+                for (const styleDef of normalizeXlsxStyles(sheetDef.styles)) {
+                  const { style } = styleDef
+                  for (let row = styleDef.startRow; row <= styleDef.endRow; row++) {
+                    for (
+                      let column = styleDef.startColumn;
+                      column <= styleDef.endColumn;
+                      column++
+                    ) {
+                      const cell = ws.getCell(row, column)
+                      const font: any = {}
+                      if (style.bold) font.bold = true
+                      if (style.italic) font.italic = true
+                      if (style.fontSize) font.size = style.fontSize
+                      if (style.fontColor)
+                        font.color = { argb: 'FF' + String(style.fontColor).replace(/^#/, '') }
+                      if (Object.keys(font).length > 0) cell.font = font
+                      if (style.bgColor) {
+                        cell.fill = {
+                          type: 'pattern',
+                          pattern: 'solid',
+                          fgColor: { argb: 'FF' + String(style.bgColor).replace(/^#/, '') }
+                        }
+                      }
+                      if (style.borderStyle) {
+                        const side = {
+                          style: style.borderStyle,
+                          color: style.borderColor
+                            ? { argb: 'FF' + String(style.borderColor).replace(/^#/, '') }
+                            : undefined
+                        }
+                        cell.border = { top: side, bottom: side, left: side, right: side }
+                      }
+                      const alignment: any = {}
+                      if (style.align) alignment.horizontal = style.align
+                      if (style.valign) alignment.vertical = style.valign
+                      if (style.wrapText) alignment.wrapText = true
+                      if (Object.keys(alignment).length > 0) cell.alignment = alignment
+                      if (style.numberFormat) cell.numFmt = style.numberFormat
+                    }
                   }
-                  if (style.borderStyle) {
-                    const side = { style: style.borderStyle, color: style.borderColor ? { argb: 'FF' + String(style.borderColor).replace(/^#/, '') } : undefined }
-                    cell.border = { top: side, bottom: side, left: side, right: side }
-                  }
-                  const alignment: any = {}
-                  if (style.align) alignment.horizontal = style.align
-                  if (style.valign) alignment.vertical = style.valign
-                  if (style.wrapText) alignment.wrapText = true
-                  if (Object.keys(alignment).length > 0) cell.alignment = alignment
-                  if (style.numberFormat) cell.numFmt = style.numberFormat
                 }
               }
               if (sheetDef.formulas) {
-                for (const [cellRef, formula] of Object.entries(sheetDef.formulas as Record<string, string>)) {
+                for (const [cellRef, formula] of Object.entries(
+                  sheetDef.formulas as Record<string, string>
+                )) {
                   ws.getCell(cellRef).value = { formula: String(formula).replace(/^=/, '') }
                 }
               }
@@ -77,21 +101,25 @@ export class OfficeExecutor implements IToolExecutor {
                 }
               }
               if (sheetDef.colWidths) {
-                for (const [col, width] of Object.entries(sheetDef.colWidths as Record<string, number>)) {
+                for (const [col, width] of Object.entries(
+                  sheetDef.colWidths as Record<string, number>
+                )) {
                   ws.getColumn(col).width = width
                 }
               }
               if (sheetDef.dataValidations) {
-                for (const [range, dv] of Object.entries(sheetDef.dataValidations as Record<string, any>)) {
+                for (const [range, dv] of Object.entries(
+                  sheetDef.dataValidations as Record<string, any>
+                )) {
                   ws.dataValidations.add(range, {
-                     type: dv.type || 'list',
-                     formulae: dv.formulae || [],
-                     showErrorMessage: dv.showErrorMessage !== false,
-                     errorTitle: dv.errorTitle || '输入错误',
-                     error: dv.error || '请从下拉列表中选择',
-                     showInputMessage: dv.showInputMessage || false,
-                     promptTitle: dv.promptTitle || '',
-                     prompt: dv.prompt || ''
+                    type: dv.type || 'list',
+                    formulae: dv.formulae || [],
+                    showErrorMessage: dv.showErrorMessage !== false,
+                    errorTitle: dv.errorTitle || '输入错误',
+                    error: dv.error || '请从下拉列表中选择',
+                    showInputMessage: dv.showInputMessage || false,
+                    promptTitle: dv.promptTitle || '',
+                    prompt: dv.prompt || ''
                   })
                 }
               }
@@ -145,8 +173,14 @@ export class OfficeExecutor implements IToolExecutor {
           const getImageSize = (buffer: Buffer): { width: number; height: number } | null => {
             try {
               if (
-                buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
-                buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a
+                buffer[0] === 0x89 &&
+                buffer[1] === 0x50 &&
+                buffer[2] === 0x4e &&
+                buffer[3] === 0x47 &&
+                buffer[4] === 0x0d &&
+                buffer[5] === 0x0a &&
+                buffer[6] === 0x1a &&
+                buffer[7] === 0x0a
               ) {
                 const width = buffer.readUInt32BE(16)
                 const height = buffer.readUInt32BE(20)
@@ -197,49 +231,81 @@ export class OfficeExecutor implements IToolExecutor {
                       height = dimensions.height
                     }
                   }
-                  children.push(new Paragraph({
-                    children: [
-                      new ImageRun({
-                        data: imgBuffer,
-                        transformation: {
-                          width,
-                          height
-                        }
-                      })
-                    ]
-                  }))
+                  children.push(
+                    new Paragraph({
+                      children: [
+                        new ImageRun({
+                          data: imgBuffer,
+                          transformation: {
+                            width,
+                            height
+                          }
+                        })
+                      ]
+                    })
+                  )
                 } catch (readErr) {
                   console.error('[docx-generation] 读取图片失败:', imgPath, readErr)
-                  children.push(new Paragraph({
-                    children: [new TextRun({ text: `[读取图片失败: ${imgMatch[2]}]`, size: 24, color: 'FF0000' })]
-                  }))
+                  children.push(
+                    new Paragraph({
+                      children: [
+                        new TextRun({
+                          text: `[读取图片失败: ${imgMatch[2]}]`,
+                          size: 24,
+                          color: 'FF0000'
+                        })
+                      ]
+                    })
+                  )
                 }
               } else {
-                children.push(new Paragraph({
-                  children: [new TextRun({ text: `[图片文件未找到: ${imgMatch[2]}]`, size: 24, color: 'FF0000' })]
-                }))
+                children.push(
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: `[图片文件未找到: ${imgMatch[2]}]`,
+                        size: 24,
+                        color: 'FF0000'
+                      })
+                    ]
+                  })
+                )
               }
             } else if (line.startsWith('# ')) {
-              children.push(new Paragraph({
-                heading: HeadingLevel.HEADING_1,
-                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 32 })]
-              }))
+              children.push(
+                new Paragraph({
+                  heading: HeadingLevel.HEADING_1,
+                  children: [
+                    new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 32 })
+                  ]
+                })
+              )
             } else if (line.startsWith('## ')) {
-              children.push(new Paragraph({
-                heading: HeadingLevel.HEADING_2,
-                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 28 })]
-              }))
+              children.push(
+                new Paragraph({
+                  heading: HeadingLevel.HEADING_2,
+                  children: [
+                    new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 28 })
+                  ]
+                })
+              )
             } else if (line.startsWith('### ')) {
-              children.push(new Paragraph({
-                heading: HeadingLevel.HEADING_3,
-                children: [new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 24 })]
-              }))
+              children.push(
+                new Paragraph({
+                  heading: HeadingLevel.HEADING_3,
+                  children: [
+                    new TextRun({ text: line.replace(/^#+\s*/, ''), bold: true, size: 24 })
+                  ]
+                })
+              )
             } else if (line.trim() === '') {
               children.push(new Paragraph({ children: [] }))
             } else {
-              children.push(new Paragraph({
-                children: [new TextRun({ text: line, size: 24 })]
-              }))
+              children.push(
+                new Paragraph({
+                  children: [new TextRun({ text: line, size: 24 })]
+                })
+              )
             }
           }
 
@@ -253,11 +319,12 @@ export class OfficeExecutor implements IToolExecutor {
             const stream = fs.createWriteStream(filePath)
             pdf.pipe(stream)
             try {
-              const fontPath = process.platform === 'win32'
-                ? 'C:/Windows/Fonts/msyh.ttc'
-                : process.platform === 'darwin'
-                  ? '/System/Library/Fonts/PingFang.ttc'
-                  : '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc'
+              const fontPath =
+                process.platform === 'win32'
+                  ? 'C:/Windows/Fonts/msyh.ttc'
+                  : process.platform === 'darwin'
+                    ? '/System/Library/Fonts/PingFang.ttc'
+                    : '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc'
               if (fs.existsSync(fontPath)) {
                 pdf.registerFont('CJK', fontPath)
                 pdf.font('CJK')
@@ -298,15 +365,25 @@ export class OfficeExecutor implements IToolExecutor {
             if (line.startsWith('# ')) {
               currentSlide = pptx.addSlide()
               currentSlide.addText(line.replace(/^#+\s*/, ''), {
-                x: 0.5, y: 0.3, w: '90%', h: 0.8,
-                fontSize: 28, bold: true, color: '1a1a2e'
+                x: 0.5,
+                y: 0.3,
+                w: '90%',
+                h: 0.8,
+                fontSize: 28,
+                bold: true,
+                color: '1a1a2e'
               })
               lineCount = 0
             } else if (line.startsWith('## ')) {
               currentSlide = pptx.addSlide()
               currentSlide.addText(line.replace(/^#+\s*/, ''), {
-                x: 0.5, y: 0.3, w: '90%', h: 0.6,
-                fontSize: 22, bold: true, color: '2d3436'
+                x: 0.5,
+                y: 0.3,
+                w: '90%',
+                h: 0.6,
+                fontSize: 22,
+                bold: true,
+                color: '2d3436'
               })
               lineCount = 0
             } else if (line.trim() === '') {
@@ -317,8 +394,12 @@ export class OfficeExecutor implements IToolExecutor {
                 lineCount = 0
               }
               ensureSlide().addText(line, {
-                x: 0.5, y: 1.0 + lineCount * 0.45, w: '90%', h: 0.4,
-                fontSize: 14, color: '333333'
+                x: 0.5,
+                y: 1.0 + lineCount * 0.45,
+                w: '90%',
+                h: 0.4,
+                fontSize: 14,
+                color: '333333'
               })
               lineCount++
             }
@@ -336,12 +417,16 @@ export class OfficeExecutor implements IToolExecutor {
         }
 
         return {
-          content: JSON.stringify({
-            status: 'success',
-            message: `文件 “${safeName}” 已生成`,
-            file_path: filePath,
-            file_name: safeName
-          }, null, 2),
+          content: JSON.stringify(
+            {
+              status: 'success',
+              message: `文件 “${safeName}” 已生成`,
+              file_path: filePath,
+              file_name: safeName
+            },
+            null,
+            2
+          ),
           success: true
         }
       }
@@ -362,7 +447,7 @@ export class OfficeExecutor implements IToolExecutor {
 
         const JSZip = require('jszip')
         const path = require('path')
-        
+
         let zip
         try {
           const buffer = await fs.promises.readFile(source_path)
@@ -398,22 +483,32 @@ export class OfficeExecutor implements IToolExecutor {
 
           if (style.bold !== undefined) {
             if (style.bold) upsert('<w:b', '<w:b/><w:bCs/>')
-            else { rPr = rPr.replace(/<w:b\/>/g, '').replace(/<w:bCs\/>/g, '') }
+            else {
+              rPr = rPr.replace(/<w:b\/>/g, '').replace(/<w:bCs\/>/g, '')
+            }
           }
           if (style.italic !== undefined) {
             if (style.italic) upsert('<w:i', '<w:i/><w:iCs/>')
-            else { rPr = rPr.replace(/<w:i\/>/g, '').replace(/<w:iCs\/>/g, '') }
+            else {
+              rPr = rPr.replace(/<w:i\/>/g, '').replace(/<w:iCs\/>/g, '')
+            }
           }
           if (style.underline !== undefined) {
             upsert('<w:u', `<w:u w:val="${style.underline ? 'single' : 'none'}"/>`)
           }
           if (style.color) upsert('<w:color', `<w:color w:val="${style.color}"/>`)
-          if (style.fontSize) upsert('<w:sz', `<w:sz w:val="${style.fontSize}"/><w:szCs w:val="${style.fontSize}"/>`)
+          if (style.fontSize)
+            upsert('<w:sz', `<w:sz w:val="${style.fontSize}"/><w:szCs w:val="${style.fontSize}"/>`)
           if (style.highlight) upsert('<w:highlight', `<w:highlight w:val="${style.highlight}"/>`)
           return rPr
         }
 
-        const replaceInXml = (xmlStr: string, search: string, replaceText: string, style?: any): string => {
+        const replaceInXml = (
+          xmlStr: string,
+          search: string,
+          replaceText: string,
+          style?: any
+        ): string => {
           const bodyMatch = xmlStr.match(/([\s\S]*?<w:body[^>]*>)([\s\S]*?)(<\/w:body>[\s\S]*)/)
           if (!bodyMatch) {
             return replaceInXmlCore(xmlStr, search, replaceText, style)
@@ -426,7 +521,12 @@ export class OfficeExecutor implements IToolExecutor {
           return xmlStr
         }
 
-        const replaceInXmlCore = (xmlStr: string, search: string, replaceText: string, style?: any): string => {
+        const replaceInXmlCore = (
+          xmlStr: string,
+          search: string,
+          replaceText: string,
+          style?: any
+        ): string => {
           if (xmlStr.includes(search)) {
             if (style) {
               const runStart = '<w:r '
@@ -453,9 +553,14 @@ export class OfficeExecutor implements IToolExecutor {
                     newBlock = newBlock.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, mergedRPr)
                   } else {
                     const rTagEnd = newBlock.indexOf('>')
-                    newBlock = newBlock.substring(0, rTagEnd + 1) + mergedRPr + newBlock.substring(rTagEnd + 1)
+                    newBlock =
+                      newBlock.substring(0, rTagEnd + 1) +
+                      mergedRPr +
+                      newBlock.substring(rTagEnd + 1)
                   }
-                  return xmlStr.substring(0, rStart) + newBlock + xmlStr.substring(rEnd + runEnd.length)
+                  return (
+                    xmlStr.substring(0, rStart) + newBlock + xmlStr.substring(rEnd + runEnd.length)
+                  )
                 }
                 pos = rEnd + runEnd.length
               }
@@ -492,7 +597,7 @@ export class OfficeExecutor implements IToolExecutor {
             scanPos = rEnd + runEnd.length
           }
 
-          const runNodes = nodes.filter(n => n.type === 'run')
+          const runNodes = nodes.filter((n) => n.type === 'run')
           let concat = ''
           const charOffsets: number[] = []
           for (const rn of runNodes) {
@@ -522,7 +627,10 @@ export class OfficeExecutor implements IToolExecutor {
             const rn = runNodes[i]
             if (i === first) {
               let newContent = rn.content
-              newContent = newContent.replace(/(<w:t[^>]*>)[\s\S]*?(<\/w:t>)/, `$1${prefix}${replaceText}${suffix}$2`)
+              newContent = newContent.replace(
+                /(<w:t[^>]*>)[\s\S]*?(<\/w:t>)/,
+                `$1${prefix}${replaceText}${suffix}$2`
+              )
               if (style) {
                 const existingRPrM = newContent.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)
                 const existingRPr = existingRPrM ? existingRPrM[0] : ''
@@ -531,7 +639,10 @@ export class OfficeExecutor implements IToolExecutor {
                   newContent = newContent.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, mergedRPr)
                 } else {
                   const rTagEnd = newContent.indexOf('>')
-                  newContent = newContent.substring(0, rTagEnd + 1) + mergedRPr + newContent.substring(rTagEnd + 1)
+                  newContent =
+                    newContent.substring(0, rTagEnd + 1) +
+                    mergedRPr +
+                    newContent.substring(rTagEnd + 1)
                 }
               }
               rn.content = newContent
@@ -575,7 +686,10 @@ export class OfficeExecutor implements IToolExecutor {
                 const styleMatch = paraBlock.match(/<w:pStyle\s+w:val="([^"]+)"/)
                 const paraStyle = styleMatch ? styleMatch[1] : 'Normal'
                 newXml += xml.slice(lastPEnd, paraStart)
-                if (paraStyle === pStyleVal || paraStyle.toLowerCase() === pStyleVal.toLowerCase()) {
+                if (
+                  paraStyle === pStyleVal ||
+                  paraStyle.toLowerCase() === pStyleVal.toLowerCase()
+                ) {
                   newXml += replaceInXml(paraBlock, mod.search, replacement, mod.style)
                 } else {
                   newXml += paraBlock
@@ -591,9 +705,10 @@ export class OfficeExecutor implements IToolExecutor {
             const changed = xml !== before
             if (changed) {
               replaceCount++
-              const expectedColor = typeof mod.style?.color === 'string'
-                ? `<w:color w:val="${mod.style.color.toUpperCase()}"/>`
-                : ''
+              const expectedColor =
+                typeof mod.style?.color === 'string'
+                  ? `<w:color w:val="${mod.style.color.toUpperCase()}"/>`
+                  : ''
               if (requestedStyle && (!expectedColor || xml.includes(expectedColor))) {
                 verifiedStyleCount++
               }
@@ -607,7 +722,8 @@ export class OfficeExecutor implements IToolExecutor {
           if (relsFile) {
             relsXml = await relsFile.async('string')
           } else {
-            relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+            relsXml =
+              '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
           }
 
           let contentTypes = ''
@@ -627,34 +743,48 @@ export class OfficeExecutor implements IToolExecutor {
             try {
               imgBuffer = await fs.promises.readFile(resolvedPath)
             } catch (e: any) {
-              return { content: `错误：读取图片失败，路径：${img.image_path}，详情：${e.message}`, success: false }
+              return {
+                content: `错误：读取图片失败，路径：${img.image_path}，详情：${e.message}`,
+                success: false
+              }
             }
-            
+
             const imgExt = path.extname(resolvedPath).toLowerCase().replace('.', '') || 'png'
             const contentTypeMap: Record<string, string> = {
-              png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-              gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp'
+              png: 'image/png',
+              jpg: 'image/jpeg',
+              jpeg: 'image/jpeg',
+              gif: 'image/gif',
+              bmp: 'image/bmp',
+              webp: 'image/webp'
             }
             const contentType = contentTypeMap[imgExt] || 'image/png'
 
-            const existingMedia = Object.keys(zip.files).filter(f => f.startsWith('word/media/image'))
+            const existingMedia = Object.keys(zip.files).filter((f) =>
+              f.startsWith('word/media/image')
+            )
             const imgIndex = existingMedia.length + 1
             const imgFileName = `image${imgIndex}.${imgExt}`
             const relId = `rIdImg${imgIndex}`
 
             zip.file(`word/media/${imgFileName}`, imgBuffer)
 
-            relsXml = relsXml.replace('</Relationships>',
-              `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${imgFileName}"/></Relationships>`)
+            relsXml = relsXml.replace(
+              '</Relationships>',
+              `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${imgFileName}"/></Relationships>`
+            )
 
             if (!contentTypes.includes(`Extension="${imgExt}"`)) {
-              contentTypes = contentTypes.replace('</Types>',
-                `<Default Extension="${imgExt}" ContentType="${contentType}"/></Types>`)
+              contentTypes = contentTypes.replace(
+                '</Types>',
+                `<Default Extension="${imgExt}" ContentType="${contentType}"/></Types>`
+              )
             }
 
             const widthEmu = Math.round((img.width || 10) * 360000)
             const heightEmu = Math.round((img.height || 8) * 360000)
-            const drawingXml = `<w:drawing>` +
+            const drawingXml =
+              `<w:drawing>` +
               `<wp:inline distT="0" distB="0" distL="0" distR="0">` +
               `<wp:extent cx="${widthEmu}" cy="${heightEmu}"/>` +
               `<wp:docPr id="${imgIndex}" name="Picture ${imgIndex}"/>` +
@@ -679,14 +809,21 @@ export class OfficeExecutor implements IToolExecutor {
         }
 
         if (replaceCount === 0 && imageCount === 0) {
-          return { content: '错误：没有匹配到任何待修改内容，未生成输出文件。请检查 search 或图片占位文字。', success: false }
+          return {
+            content:
+              '错误：没有匹配到任何待修改内容，未生成输出文件。请检查 search 或图片占位文字。',
+            success: false
+          }
         }
         if (requestedStyleCount > verifiedStyleCount) {
-          return { content: `错误：请求了 ${requestedStyleCount} 处样式修改，但仅验证通过 ${verifiedStyleCount} 处，未生成输出文件。`, success: false }
+          return {
+            content: `错误：请求了 ${requestedStyleCount} 处样式修改，但仅验证通过 ${verifiedStyleCount} 处，未生成输出文件。`,
+            success: false
+          }
         }
 
         zip.file('word/document.xml', xml)
-        
+
         let outputBuffer
         try {
           outputBuffer = await zip.generateAsync({ type: 'nodebuffer' })
@@ -697,7 +834,7 @@ export class OfficeExecutor implements IToolExecutor {
         const genDir = getGeneratedFilesDir(context.sessionId)
         const safeName = output_name.replace(/[<>:"/\\|?*]/g, '_')
         const filePath = join(genDir, safeName)
-        
+
         try {
           await fs.promises.writeFile(filePath, outputBuffer)
         } catch (e: any) {
@@ -714,28 +851,52 @@ export class OfficeExecutor implements IToolExecutor {
         if (imageCount > 0) parts.push(`${imageCount} 张图片`)
 
         return {
-          content: JSON.stringify({
-            status: 'success',
-            message: `文件 "${safeName}" 已生成，修改了 ${parts.join('、')}`,
-            file_path: filePath,
-            file_name: safeName,
-            replaced: replaceCount,
-            images: imageCount,
-            style_changes_verified: verifiedStyleCount
-          }, null, 2),
+          content: JSON.stringify(
+            {
+              status: 'success',
+              message: `文件 "${safeName}" 已生成，修改了 ${parts.join('、')}`,
+              file_path: filePath,
+              file_name: safeName,
+              replaced: replaceCount,
+              images: imageCount,
+              style_changes_verified: verifiedStyleCount
+            },
+            null,
+            2
+          ),
           success: true
         }
       }
 
       // 3. modify_xlsx_file
       if (api === 'modify_xlsx_file') {
-        let { source_path, output_name, modifications, append_rows, merge_cells, add_sheet, column_widths, data_validations } = args
+        let {
+          source_path,
+          output_name,
+          modifications,
+          append_rows,
+          merge_cells,
+          add_sheet,
+          column_widths,
+          data_validations
+        } = args
         source_path = resolveSessionPath(source_path, context.sessionId)
         if (!source_path || !output_name) {
           return { content: '错误：缺少必要参数 source_path 或 output_name', success: false }
         }
-        if (!modifications && !append_rows && !merge_cells && !add_sheet && !column_widths && !data_validations) {
-          return { content: '错误：未提供任何修改操作（modifications, append_rows, merge_cells 等至少需要提供一个）', success: false }
+        if (
+          !modifications &&
+          !append_rows &&
+          !merge_cells &&
+          !add_sheet &&
+          !column_widths &&
+          !data_validations
+        ) {
+          return {
+            content:
+              '错误：未提供任何修改操作（modifications, append_rows, merge_cells 等至少需要提供一个）',
+            success: false
+          }
         }
         if (!fs.existsSync(source_path)) {
           return { content: `错误：源文件不存在：${source_path}`, success: false }
@@ -757,7 +918,10 @@ export class OfficeExecutor implements IToolExecutor {
           workerPath = join(__dirname, '..', '..', '..', 'xlsx-worker.js')
         }
 
-        const { modCount, appendCount } = await new Promise<{ modCount: number; appendCount: number }>((resolve, reject) => {
+        const { modCount, appendCount } = await new Promise<{
+          modCount: number
+          appendCount: number
+        }>((resolve, reject) => {
           const child = utilityProcess.fork(workerPath, [], {
             serviceName: 'xlsx-worker',
             stdio: 'pipe',
@@ -765,10 +929,17 @@ export class OfficeExecutor implements IToolExecutor {
           })
 
           child.stdout?.on('data', (d: Buffer) => console.log('[xlsx-worker]', d.toString().trim()))
-          child.stderr?.on('data', (d: Buffer) => console.error('[xlsx-worker err]', d.toString().trim()))
+          child.stderr?.on('data', (d: Buffer) =>
+            console.error('[xlsx-worker err]', d.toString().trim())
+          )
 
           let settled = false
-          const done = (fn: () => void) => { if (!settled) { settled = true; fn() } }
+          const done = (fn: () => void) => {
+            if (!settled) {
+              settled = true
+              fn()
+            }
+          }
 
           const timeout = setTimeout(() => {
             child.kill()
@@ -815,14 +986,18 @@ export class OfficeExecutor implements IToolExecutor {
         const messageStr = parts.length > 0 ? parts.join('，') : '无数据改动'
 
         return {
-          content: JSON.stringify({
-            status: 'success',
-            message: `文件 "${safeName}" 已生成，${messageStr}`,
-            file_path: filePath,
-            file_name: safeName,
-            modified: modCount,
-            appended: appendCount
-          }, null, 2),
+          content: JSON.stringify(
+            {
+              status: 'success',
+              message: `文件 "${safeName}" 已生成，${messageStr}`,
+              file_path: filePath,
+              file_name: safeName,
+              modified: modCount,
+              appended: appendCount
+            },
+            null,
+            2
+          ),
           success: true
         }
       }

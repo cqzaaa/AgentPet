@@ -44,6 +44,24 @@ function modelFallbacks(provider: string, model?: string): string[] {
   return Array.from(new Set([model, ...(known[provider] || []), DEFAULT_MODELS[provider]].filter(Boolean) as string[]))
 }
 
+function messageTimestamp(message: any): number | undefined {
+  const numericId = Number(message?.id)
+  if (Number.isFinite(numericId)) return numericId
+  const embeddedTimestamp = String(message?.id || '').match(/(?:^|[-_])(\d{13})(?=$|[-_])/)
+  if (embeddedTimestamp) return Number(embeddedTimestamp[1])
+  return undefined
+}
+
+function compareMessagesChronologically(left: any, right: any): number {
+  const leftTimestamp = messageTimestamp(left)
+  const rightTimestamp = messageTimestamp(right)
+  if (leftTimestamp !== undefined && rightTimestamp !== undefined) return leftTimestamp - rightTimestamp
+  if (Number.isFinite(left?.msg_rowid) && Number.isFinite(right?.msg_rowid)) {
+    return left.msg_rowid - right.msg_rowid
+  }
+  return 0
+}
+
 // ── 类型定义 ─────────────────────────────────────────────────
 export interface CronLog {
   id: string
@@ -655,7 +673,7 @@ export function useAppStore() {
           return {
             ...s,
             messages: [...s.messages, {
-              id: `sys-${Date.now()}-${Math.random()}`,
+              id: Date.now() + Math.random(),
               sender: 'system',
               text: `⚙️ 已将大模型切换为：**${newModel}**`,
               time: timeStr
@@ -1134,7 +1152,7 @@ export function useAppStore() {
                 return lm
               })
               
-              const finalMessages = [...mergedMessages, ...memoryOnlyMessages].sort((a, b) => a.id - b.id)
+              const finalMessages = [...mergedMessages, ...memoryOnlyMessages].sort(compareMessagesChronologically)
               
               return {
                 ...ls,

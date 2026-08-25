@@ -27,7 +27,8 @@ const descriptor: OfficeSkillDescriptor = {
     '修改已有工作簿前先 inspect，沿用原工作表名称、隐藏行、公式模式、样式、命名区域和数据验证。',
     '对于下拉字段，只能使用工作簿数据验证允许的选项；不得用“是”代替 Y，或跨字段混用选项。',
     '修改默认另存为新文件，并在完成后 validate；validate 未通过时不得向用户宣称任务成功。',
-    '公式由兼容的电子表格应用打开时计算；本 Skill 检查公式结构、缓存错误值和下拉选项。'
+    '公式由兼容的电子表格应用打开时计算；本 Skill 检查公式结构、缓存错误值和下拉选项。',
+    '创建工作簿时，styles 首选范围数组，例如 [{range:"A1:C1",bold:true,fill:"4472C4",color:"FFFFFF",alignment:{horizontal:"center"}}]；也兼容 {"A1":{bold:true}} 旧格式。'
   ],
   operations: {
     create: {
@@ -38,7 +39,7 @@ const descriptor: OfficeSkillDescriptor = {
           output_name: { type: 'string' },
           content: {
             description:
-              'JSON 字符串或对象：{sheets:[{name,data,styles,formulas,merge,colWidths,dataValidations}]}'
+              'JSON 字符串或对象：{sheets:[{name,data,styles,formulas,merge,colWidths,dataValidations}]}。styles 推荐为 [{range:"A1:C1",bold:true,fill:"4472C4",color:"FFFFFF",alignment:{horizontal:"center",vertical:"top",wrapText:true}}]，range 支持单格或矩形范围；也兼容 {"A1":{bold:true,bgColor:"4472C4"}}。'
           }
         },
         required: ['output_name', 'content']
@@ -145,7 +146,9 @@ const descriptor: OfficeSkillDescriptor = {
 }
 
 function columnIndexFromAddress(address: unknown): number | null {
-  const match = String(address || '').trim().match(/^([A-Z]+)(?:\d+)?$/i)
+  const match = String(address || '')
+    .trim()
+    .match(/^([A-Z]+)(?:\d+)?$/i)
   if (!match) return null
   let index = 0
   for (const character of match[1].toUpperCase()) {
@@ -156,7 +159,7 @@ function columnIndexFromAddress(address: unknown): number | null {
 
 function normalizeAppendRows(value: unknown): any[] {
   if (!Array.isArray(value)) return []
-  return value.map(item => {
+  return value.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     if (Array.isArray((item as any).values)) return item
     const cells = Array.isArray((item as any).row)
@@ -227,7 +230,7 @@ function parseXlsxRange(XLSX: any, value: string): XlsxCellRange | null {
 
 function cellInRanges(row: number, column: number, ranges: XlsxCellRange[]): boolean {
   return ranges.some(
-    range =>
+    (range) =>
       row >= range.startRow &&
       row <= range.endRow &&
       column >= range.startColumn &&
@@ -243,7 +246,7 @@ function resolveValidationOptions(XLSX: any, workbook: any, formula: string): st
         trimmed
           .slice(1, -1)
           .split(',')
-          .map(value => value.trim())
+          .map((value) => value.trim())
           .filter(Boolean)
       )
     ] as string[]
@@ -307,7 +310,7 @@ async function readListValidations(
       if (xmlAttribute(match[1], 'type').toLowerCase() !== 'list') continue
       const ranges = xmlAttribute(match[1], 'sqref')
         .split(/\s+/)
-        .map(value => parseXlsxRange(XLSX, value))
+        .map((value) => parseXlsxRange(XLSX, value))
         .filter((range): range is XlsxCellRange => Boolean(range))
       const formulaMatch = match[2].match(
         /<(?:\w+:)?formula1\b[^>]*>([\s\S]*?)<\/(?:\w+:)?formula1>/i
@@ -415,10 +418,12 @@ export async function inspectXlsx(sourcePath: string): Promise<Record<string, an
     formula_errors: formulaErrors.slice(0, 100),
     formula_errors_truncated: formulaErrors.length > 100,
     list_validations: listValidations.length,
-    unresolved_list_validations: listValidations.filter(item => item.options.length === 0).map(item => ({
-      sheet: item.sheet,
-      formula: item.formula
-    })),
+    unresolved_list_validations: listValidations
+      .filter((item) => item.options.length === 0)
+      .map((item) => ({
+        sheet: item.sheet,
+        formula: item.formula
+      })),
     data_validation_errors: validationErrors.slice(0, 100),
     data_validation_errors_truncated: validationErrors.length > 100,
     sheets
@@ -534,9 +539,7 @@ export const xlsxSkill: OfficeSkill = {
             )
           }
         }
-        const modifications = Array.isArray(input.modifications)
-          ? input.modifications
-          : []
+        const modifications = Array.isArray(input.modifications) ? input.modifications : []
         const appendedRows = normalizedAppendRows
         const focusTexts = [
           ...modifications.flatMap((item: any) => [item?.value, item?.formula]),

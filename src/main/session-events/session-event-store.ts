@@ -94,17 +94,28 @@ export class SessionEventStore {
 
     // Streaming providers can yield a delta per token. Coalesce adjacent deltas
     // inside the same 40 ms write window to keep row and IPC volume bounded.
-    if (input.type === 'assistant/chunk' && typeof data.content === 'string') {
+    const streamField = input.type === 'assistant/chunk'
+      ? 'content'
+      : input.type === 'assistant/reasoning_chunk'
+        ? 'detail'
+        : null
+    if (streamField && typeof data[streamField] === 'string') {
       const previous = controller.pending[controller.pending.length - 1]
       if (
         previous?.record.type === input.type &&
         previous.record.turn === input.turn &&
         previous.record.step === input.step &&
-        typeof previous.record.data.content === 'string'
+        typeof previous.record.data[streamField] === 'string'
       ) {
         previous.record.data = {
           ...previous.record.data,
-          content: previous.record.data.content + data.content
+          [streamField]: previous.record.data[streamField] + data[streamField],
+          ...(Array.isArray(data.sourcePayloads) ? {
+            sourcePayloads: [
+              ...(Array.isArray(previous.record.data.sourcePayloads) ? previous.record.data.sourcePayloads : []),
+              ...data.sourcePayloads
+            ]
+          } : {})
         }
         previous.payloadJson = safeJson(previous.record.data)
         previous.record.payloadBytes = Buffer.byteLength(previous.payloadJson)

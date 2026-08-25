@@ -6,6 +6,7 @@ import { loadOfficeSkill } from './registry'
 import { attachVisiblePreviewValidation, jsonResult, readToolResultState, skillError } from './shared'
 import type { OfficeSkillAction } from './types'
 import { validateOfficeSkillInput } from './input-validation'
+import { parseOfficeSkillInput } from './parse-input'
 
 const validActions = new Set<OfficeSkillAction>([
   'create',
@@ -144,7 +145,7 @@ export class OfficeSkillExecutor implements IToolExecutor {
           throw new Error(`${skill.descriptor.name} Skill 不支持 ${action} 操作`)
         }
 
-        const input = args.input && typeof args.input === 'object' ? args.input : {}
+        const input = parseOfficeSkillInput(args.input)
         validateOfficeSkillInput(input, operation.inputSchema)
         if (action === 'semantic_edit') {
           if (skill.descriptor.name !== 'pdf') throw new Error('semantic_edit 当前仅支持 PDF')

@@ -1708,8 +1708,45 @@ body {
   padding: 8px 16px;
 }
 
-.content-body.tab-chat.trajectory-mode {
+.content-body.tab-chat.chat-view-host {
   padding: 0;
+}
+
+.chat-mode-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-mode-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-mode-panel > .chat-split-container {
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-mode-panel.conversation {
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+
+.chat-mode-panel.inactive {
+  z-index: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.chat-mode-panel.active {
+  z-index: 40;
+  visibility: visible;
 }
 
 .content-body.tab-skillhub {
@@ -7650,9 +7687,14 @@ body {
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  z-index: 100;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
+}
+
+.history-dropdown.history-dropdown-portal {
+  position: fixed;
+  z-index: 12000;
 }
 
 .dark .history-dropdown {
