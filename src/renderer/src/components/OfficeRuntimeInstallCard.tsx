@@ -4,6 +4,7 @@ import { CheckCircle2, Download, PackageOpen, XCircle } from 'lucide-react'
 
 interface OfficeRuntimeStep {
   requestId: number
+  runtimeKind?: 'python' | 'node'
   status?: 'waiting' | 'installing' | 'complete' | 'error'
   progress?: number
   detail?: string
@@ -21,38 +22,46 @@ export function OfficeRuntimeInstallCard({
   step: OfficeRuntimeStep
 }): React.JSX.Element | null {
   const [responded, setResponded] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
   const portalTarget = document.querySelector('.chat-control-card')
-  if (!portalTarget) return null
+  if (!portalTarget || dismissed) return null
 
   const status = String(step.status || 'waiting')
   const installing = status === 'installing'
   const complete = status === 'complete'
   const failed = status === 'error'
   const progress = Math.max(0, Math.min(100, Number(step.progress) || 0))
+  const isNode = step.runtimeKind === 'node' || /node/i.test(step.request.title)
+  const packageLabel = isNode ? 'Node 隔离运行时' : 'Python / Office 组件包'
 
   const respond = (approved: boolean): void => {
     if (responded) return
     setResponded(true)
-    window.api.respondOfficeRuntimeInstall(step.requestId, approved)
+    if (isNode) window.api.respondNodeRuntimeInstall(step.requestId, approved)
+    else window.api.respondOfficeRuntimeInstall(step.requestId, approved)
   }
 
   return createPortal(
-    <section className="clarification-popover" aria-label="Office components installation">
+    <section className="clarification-popover" aria-label={`${packageLabel} installation`}>
       <div className="clarification-popover__handle" />
       <header className="clarification-popover__header">
         <div>
           <div className="clarification-popover__eyebrow">
-            <PackageOpen size={14} /> Office 组件包
+            <PackageOpen size={14} /> {packageLabel}
           </div>
           <div style={{ marginTop: 6, fontSize: 15, fontWeight: 650 }}>
-            {complete ? 'Office 组件包安装完成' : failed ? 'Office 组件包安装失败' : step.request.title}
+            {complete ? `${packageLabel}安装完成` : failed ? `${packageLabel}安装失败` : step.request.title}
           </div>
         </div>
-        {!installing && !complete && !failed && (
-          <button type="button" className="clarification-popover__skip" onClick={() => respond(false)}>
-            取消转换
+        {complete || failed ? (
+          <button type="button" className="clarification-popover__skip" onClick={() => setDismissed(true)}>
+            关闭
           </button>
-        )}
+        ) : !installing ? (
+          <button type="button" className="clarification-popover__skip" onClick={() => respond(false)}>
+            取消安装
+          </button>
+        ) : null}
       </header>
 
       <div className="clarification-popover__questions">

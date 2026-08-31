@@ -12,6 +12,7 @@ import { appendMemorySummaryInternal } from '../../../api/memory'
 import { clarificationManager } from '../../interaction/clarification-manager'
 import { taskRunner } from '../../../task-runtime/task-runner'
 import type { TaskPlanInputStep } from '../../../task-runtime/types'
+import { buildUnknownTaskStepFeedback, listTaskStepReferences } from '../../../task-runtime/tool-feedback'
 import { skillRegistry } from '../../../skills/skill-registry'
 import { subagentRunner } from '../../../task-runtime/subagent-runner'
 import { SUBAGENT_ROLES, type DelegateTaskInput } from '../../../task-runtime/types'
@@ -59,8 +60,11 @@ export class SystemExecutor implements IToolExecutor {
             content: JSON.stringify({
               error: 'plan_already_exists',
               taskRunId: existing.run.id,
-              message: 'The plan structure is immutable. Use update_task_step with an existing step id.'
+              currentStepId: existing.steps.find(step => step.status === 'running')?.id,
+              validSteps: listTaskStepReferences(existing.steps),
+              message: 'The plan structure is immutable. Retry update_task_step with one exact id from validSteps.'
             }),
+            state: existing,
             success: false
           }
         }
@@ -88,7 +92,9 @@ export class SystemExecutor implements IToolExecutor {
             taskRunId: taskRun.id,
             status: blocked ? 'blocked' : completed === steps.length ? 'completed' : 'active',
             completed,
-            total: steps.length
+            total: steps.length,
+            currentStepId: steps.find(step => step.status === 'in_progress')?.id,
+            steps: steps.map(step => ({ id: step.id, title: step.title, status: step.status }))
           }),
           success: true
         }
@@ -104,6 +110,13 @@ export class SystemExecutor implements IToolExecutor {
         const ownedPlan = await taskRunner.getRun(taskRunId)
         if (!ownedPlan || ownedPlan.run.sessionId !== (context.sessionId || 'default')) {
           return { content: 'Task plan was not found in the current session.', success: false }
+        }
+        if (!ownedPlan.steps.some(step => step.id === stepId)) {
+          return {
+            content: JSON.stringify(buildUnknownTaskStepFeedback(stepId, ownedPlan.steps)),
+            state: ownedPlan,
+            success: false
+          }
         }
         const snapshot = await taskRunner.updateStep(taskRunId, stepId, status, {
           detail: typeof args.detail === 'string' ? args.detail.trim().slice(0, 500) || undefined : undefined,

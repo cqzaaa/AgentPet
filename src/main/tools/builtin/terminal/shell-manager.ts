@@ -99,7 +99,7 @@ export class ShellManager {
   }
 
   // 同步执行命令。shell 由调用方显式指定；本机未指定时固定使用 PowerShell，避免猜测命令语法。
-  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd: string; timeout?: number; signal?: AbortSignal; onOutput?: ShellOutputHandler }): Promise<ShellExecResult> {
+  public async exec(command: string, shell: ShellKind = 'powershell', options: { cwd: string; timeout?: number; signal?: AbortSignal; onOutput?: ShellOutputHandler; env?: NodeJS.ProcessEnv }): Promise<ShellExecResult> {
     const bashPath = this.getBashPath()
     const cmd = command.trim()
 
@@ -253,7 +253,7 @@ export class ShellManager {
   }
 
   // 启动异步 shell 会话
-  public startSession(command: string, shell: ShellKind = 'powershell', cwd: string, onOutput?: ShellOutputHandler): ShellSession {
+  public startSession(command: string, shell: ShellKind = 'powershell', cwd: string, onOutput?: ShellOutputHandler, env?: NodeJS.ProcessEnv): ShellSession {
     const shellId = `shell_${this.nextShellId++}`
     const bashPath = this.getBashPath()
 
@@ -265,6 +265,7 @@ export class ShellManager {
       }
       proc = spawn(bashExecutable, ['-lc', command], {
         cwd,
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else if (shell === 'powershell') {
@@ -273,6 +274,7 @@ export class ShellManager {
         : command
       proc = spawn(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
         cwd,
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else {
@@ -282,6 +284,7 @@ export class ShellManager {
       const finalCommand = process.platform === 'win32' ? `chcp 65001 >nul && ${command}` : command
       proc = spawn(process.platform === 'win32' ? 'cmd.exe' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', finalCommand] : ['-c', finalCommand], {
         cwd,
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     }

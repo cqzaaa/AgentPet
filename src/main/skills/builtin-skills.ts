@@ -136,7 +136,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     description: 'Run and monitor PowerShell, cmd, bash, SSH, and other terminal commands.',
     triggers: ['terminal', 'command', 'shell', 'powershell', 'cmd', 'bash', 'ssh', 'python', '命令', '终端', '脚本'],
     allowedTools: ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'],
-    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls.`
+    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Local node/npm/npx commands automatically use AgentPet's managed portable Node runtime, isolated npm prefix and cache; never inspect or install into the system-global Node environment. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls.`
   }),
   staticSkill({
     id: 'web-research',

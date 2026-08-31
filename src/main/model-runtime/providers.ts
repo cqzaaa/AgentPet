@@ -6,6 +6,40 @@ const TRANSIENT_HTTP_ATTEMPTS = 3
 const THINK_OPEN_TAGS = ['<think>', '<thinking>']
 const THINK_CLOSE_TAGS = ['</think>', '</thinking>']
 
+export class ModelStreamInterruptedError extends Error {
+  public readonly code: string
+  public readonly partialContent: string
+  public readonly partialReasoning: string
+  public readonly partialToolCalls: any[]
+
+  public constructor(params: {
+    message: string
+    code?: string
+    partialContent?: string
+    partialReasoning?: string
+    partialToolCalls?: any[]
+  }) {
+    super(params.message)
+    this.name = 'ModelStreamInterruptedError'
+    this.code = params.code || 'stream_error'
+    this.partialContent = params.partialContent || ''
+    this.partialReasoning = params.partialReasoning || ''
+    this.partialToolCalls = params.partialToolCalls || []
+  }
+}
+
+export function getSsePayloadError(data: any): { message: string; code: string } | null {
+  const error = data?.error
+  if (!error) return null
+  const message = typeof error === 'string'
+    ? error
+    : String(error.message || error.type || '模型流连接中断')
+  const code = typeof error === 'object' && error
+    ? String(error.code || error.type || 'stream_error')
+    : 'stream_error'
+  return { message, code }
+}
+
 function partialTagSuffixLength(value: string, tags: string[]): number {
   const lower = value.toLocaleLowerCase()
   const maximum = Math.min(value.length, Math.max(...tags.map(tag => tag.length)) - 1)
@@ -341,11 +375,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let usage: ChatMessage['usage']
     const toolCalls: any[] = []
     const rawEvents: unknown[] = []
+    let sawDone = false
+    let sawFinishReason = false
+    let streamFailure: { message: string; code: string } | null = null
 
     const taggedThinking = new TaggedThinkingStream()
     const consume = (payload: string): { content: string; reasoning: string; rawPayload: unknown } | null => {
       if (!payload) return null
-      if (payload === '[DONE]') return null
+      if (payload === '[DONE]') {
+        sawDone = true
+        return null
+      }
       let data: any
       try {
         data = JSON.parse(payload)
@@ -354,8 +394,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
         rawEvents.push(payload)
         return null
       }
+      const payloadError = getSsePayloadError(data)
+      if (payloadError) {
+        streamFailure = payloadError
+        return null
+      }
       if (data.usage) usage = { prompt_tokens: data.usage.prompt_tokens || 0, completion_tokens: data.usage.completion_tokens || 0 }
-      const delta = data.choices?.[0]?.delta
+      const choice = data.choices?.[0]
+      if (choice?.finish_reason) sawFinishReason = true
+      const delta = choice?.delta
       if (!delta) return null
       let contentDelta = ''
       let reasoningDelta = ''
@@ -376,22 +423,34 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return { content: contentDelta, reasoning: reasoningDelta, rawPayload: data }
     }
 
-    for await (const chunk of response.body as any) {
-      buffer += decoder.decode(chunk, { stream: true })
-      const events = buffer.split(/\r?\n\r?\n/)
-      buffer = events.pop() || ''
-      for (const event of events) {
-        const payload = event.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
-        const delta = consume(payload)
-        if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
-        if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
+    try {
+      streamBody: for await (const chunk of response.body as any) {
+        buffer += decoder.decode(chunk, { stream: true })
+        const events = buffer.split(/\r?\n\r?\n/)
+        buffer = events.pop() || ''
+        for (const event of events) {
+          const payload = event.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
+          const delta = consume(payload)
+          if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
+          if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
+          if (streamFailure) break streamBody
+        }
+      }
+    } catch (error) {
+      streamFailure = {
+        message: error instanceof Error ? error.message : String(error),
+        code: 'stream_transport_error'
       }
     }
-    buffer += decoder.decode()
-    const trailing = buffer.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
-    const delta = consume(trailing)
-    if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
-    if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
+    if (streamFailure) {
+      try { await response.body.cancel() } catch { /* The gateway may already have closed the stream. */ }
+    } else {
+      buffer += decoder.decode()
+      const trailing = buffer.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('')
+      const delta = consume(trailing)
+      if (delta?.reasoning) yield { type: 'reasoning_delta', content: delta.reasoning, rawPayload: delta.rawPayload }
+      if (delta?.content) yield { type: 'delta', content: delta.content, rawPayload: delta.rawPayload }
+    }
     const taggedTail = taggedThinking.finish()
     if (taggedTail.reasoning) {
       reasoning += taggedTail.reasoning
@@ -407,6 +466,24 @@ export class OpenAICompatibleProvider implements ModelProvider {
       contentType: response.headers.get('content-type') || undefined,
       events: rawEvents
     } }
+    if (streamFailure) {
+      throw new ModelStreamInterruptedError({
+        message: streamFailure.message,
+        code: streamFailure.code,
+        partialContent: content,
+        partialReasoning: reasoning,
+        partialToolCalls: toolCalls
+      })
+    }
+    if (!sawDone && !sawFinishReason) {
+      throw new ModelStreamInterruptedError({
+        message: '模型流在完成标记之前断开',
+        code: 'incomplete_stream',
+        partialContent: content,
+        partialReasoning: reasoning,
+        partialToolCalls: toolCalls
+      })
+    }
     yield { type: 'message', message: { role: 'assistant', content, reasoning_content: reasoning, tool_calls: toolCalls.length ? toolCalls : undefined, usage } }
   }
 }

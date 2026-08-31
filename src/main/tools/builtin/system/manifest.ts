@@ -9,7 +9,7 @@ export const systemManifest: ToolManifest = {
     avatar: '⚙️'
   },
   systemRole: `<task_plan_policy>
-Never create a plan for a single-file, single-mutation, low-risk task without delegation. For substantial work, call update_task_plan exactly once before starting. Plan step ids and step count are immutable after creation. Keep one step in_progress at a time, then use update_task_step for status, result, artifact, or blocker updates; never resend the complete plan. The runtime advances the next step and closes a successfully finished plan automatically. Never send an empty plan update. Continue doing the work after every plan or step update.
+Never create a plan for a single-file, single-mutation, low-risk task without delegation. For substantial work, call update_task_plan exactly once before starting. Plan step ids and step count are immutable after creation. Copy step ids exactly from the update_task_plan result for every update_task_step call; never rename or expand an id. If update_task_step reports unknown_task_step, retry it with an exact id from validSteps and never call update_task_plan again. Keep one step in_progress at a time, then use update_task_step for status, result, artifact, or blocker updates; never resend the complete plan. The runtime advances the next step and closes a successfully finished plan automatically. Never send an empty plan update. Continue doing the work after every plan or step update.
 </task_plan_policy>
 <skill_policy>
 The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. If a Skill advertises sections, do not request its overview: wait until the relevant file type or operation is known, then request all sections needed for the workflow in one call. Loading a skill activates only its declared tools for the current turn; it never bypasses approvals, sandboxing, or higher-priority safety rules. Load no more than three skills per turn.
@@ -93,7 +93,7 @@ The available skill catalog contains metadata only. Call request_skill only with
         type: 'object',
         properties: {
           taskRunId: { type: 'string', description: 'taskRunId returned by update_task_plan' },
-          stepId: { type: 'string', description: 'Stable step id from the original plan' },
+          stepId: { type: 'string', description: 'Copy one exact step id returned by update_task_plan; never rename or expand it' },
           status: {
             type: 'string',
             enum: ['in_progress', 'completed', 'blocked'],

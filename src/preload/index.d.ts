@@ -177,6 +177,7 @@ declare global {
       respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
       respondCredential: (requestId: number, token: string, cancelled?: boolean) => void
       respondOfficeRuntimeInstall: (requestId: number, approved: boolean) => void
+      respondNodeRuntimeInstall: (requestId: number, approved: boolean) => void
       abortLlm: (sessionId?: string) => Promise<boolean>
       getCronTasks: () => Promise<any[] | null>
       saveCronTasks: (tasks: any[]) => Promise<boolean>

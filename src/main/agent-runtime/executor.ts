@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions } from '../model-runtime'
+import { ModelStreamInterruptedError } from '../model-runtime/providers'
 import { AgentStepEvent } from './types'
 import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
 import { toolRegistry } from '../tools/core/tool-registry'
@@ -959,6 +960,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       memoryAlreadySaved: false
     }
     let imageCompatibilityFallbackUsed = false
+    let streamRecoveryUsed = false
+    let resumedTextPrefix = ''
     const successfulInputFingerprints = new Set<string>()
     let currentInputTarget = 'current-focus'
     const artifactCandidates = new Map<string, { name: string; path: string; size: number }>()
@@ -1135,10 +1138,41 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
           }
         }
 
+        // A successful response closes the retry budget for this request. A later
+        // model request may independently recover from one new stream interruption.
+        streamRecoveryUsed = false
+        if (resumedTextPrefix && effectiveTools.length === 0 && !responseMsg.tool_calls?.length) {
+          responseMsg.content = resumedTextPrefix + (typeof responseMsg.content === 'string' ? responseMsg.content : '')
+          resumedTextPrefix = ''
+        }
         const { raw_request: _rawRequest, raw_response: _rawResponse, ...normalizedMessage } = responseMsg
         responseMsg = normalizedMessage
         yield { type: 'assistant_message', step: loopCount, message: responseMsg }
       } catch (err: any) {
+        if (err instanceof ModelStreamInterruptedError && !streamRecoveryUsed && !abortSignal?.aborted) {
+          streamRecoveryUsed = true
+          const partialContent = String(err.partialContent || '')
+          if (effectiveTools.length === 0) resumedTextPrefix += partialContent
+          if (partialContent) {
+            chatHistory.push({ role: 'assistant', content: partialContent })
+          }
+          const discardedToolCallNote = err.partialToolCalls?.length
+            ? '中断时存在尚未完成的工具调用片段；请重新生成该未完成调用，不要复用残缺参数。'
+            : ''
+          chatHistory.push({
+            role: 'user',
+            content: [
+              '【系统恢复提示】上一轮模型输出流因连接故障中断。现在是唯一一次自动续接。',
+              '请从刚才未完成的位置继续当前任务；不要重复已经有 tool 结果的调用，也不要重新执行已经成功的文件或终端操作。',
+              discardedToolCallNote
+            ].filter(Boolean).join('\n')
+          })
+          yield {
+            type: 'think',
+            detail: `模型输出流中断（${err.code}），正在自动重连并从断点续接（1/1）。`
+          }
+          continue
+        }
         const errorText = err.message || String(err)
         const mayRejectImages =
           /HTTP\s*(400|415|422)\b/i.test(errorText) ||

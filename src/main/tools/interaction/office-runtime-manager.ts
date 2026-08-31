@@ -46,10 +46,29 @@ interface InstallEventContext {
 
 function runtimeRoot(): string {
   const runtimesDir = join(app.getPath('userData'), 'runtimes')
-  const sharedRoot = join(runtimesDir, 'python-runtime')
-  const legacyRoot = join(runtimesDir, 'office-components')
-  const legacyPython = join(legacyRoot, `python-${PYTHON_VERSION}`, 'python.exe')
-  return !fs.existsSync(sharedRoot) && fs.existsSync(legacyPython) ? legacyRoot : sharedRoot
+  return join(runtimesDir, 'python-runtime')
+}
+
+async function migrateLegacyRuntime(): Promise<void> {
+  const sharedRoot = runtimeRoot()
+  if (fs.existsSync(sharedRoot)) return
+  const runtimesDir = dirname(sharedRoot)
+  const legacyRoots = [
+    join(runtimesDir, 'office-components'),
+    join(runtimesDir, 'pdf-components')
+  ]
+  for (const legacyRoot of legacyRoots) {
+    const legacyPython = join(legacyRoot, `python-${PYTHON_VERSION}`, 'python.exe')
+    if (!fs.existsSync(legacyPython)) continue
+    try {
+      await fs.promises.mkdir(runtimesDir, { recursive: true })
+      await fs.promises.rename(legacyRoot, sharedRoot)
+      console.log(`[PythonRuntime] 已将旧运行时迁移到共享目录：${sharedRoot}`)
+      return
+    } catch (error) {
+      console.warn(`[PythonRuntime] 迁移旧运行时失败，将尝试其他候选：${legacyRoot}`, error)
+    }
+  }
 }
 
 function runtimeInfo(): OfficeRuntimeInfo {
@@ -552,6 +571,7 @@ class OfficeRuntimeManager {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
       throw new Error('当前 AgentPet Python 运行环境暂仅支持 Windows x64')
     }
+    await migrateLegacyRuntime()
     const info = runtimeInfo()
     if (fs.existsSync(info.pythonPath)) {
       await writeOfficeRuntimeScripts(info)

@@ -151,7 +151,7 @@ export const terminalManifest: ToolManifest = {
 - 验证数据库端口是否可用时优先使用 Test-NetConnection 或数据库自带的 readiness 工具；不要直接运行可能等待密码输入的交互式客户端
 - 仅在需要 POSIX 语法或 Unix 工具链时显式使用 shell=bash，例如 date +"%Y-%m-%d"、grep、sed、awk。
 - shell=cmd 仅用于 .bat 文件或明确的传统 CMD 命令。不要依赖命令文本自动猜测 shell。
-- git、node、npm、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。本机 Python 任务使用 run_python，不要假设系统已安装 python 命令。
+- git、node、npm、rg（ripgrep）是可执行程序；它们可在不同 shell 中运行，但变量、引号和管道语法必须符合所选 shell。本机 node/npm/npx 自动使用 AgentPet 管理的便携 Node、隔离包目录和缓存，禁止检查或安装到系统全局 Node。本机 Python 任务使用 run_python，不要假设系统已安装 python 命令。
 - SSH 远程会话默认 shell=bash；除非远程主机明确是 Windows，才指定 shell=powershell 或 shell=cmd。
 </rules>
 </tool_instructions>`

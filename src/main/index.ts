@@ -31,6 +31,7 @@ import { permissionManager } from './tools/security/permission-manager'
 import { clarificationManager } from './tools/interaction/clarification-manager'
 import { credentialManager } from './tools/interaction/credential-manager'
 import { officeRuntimeManager } from './tools/interaction/office-runtime-manager'
+import { nodeRuntimeManager } from './tools/interaction/node-runtime-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
 import { AgentExecutor } from './agent-runtime'
 import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
@@ -2617,6 +2618,7 @@ app.whenReady().then(() => {
     clarificationManager.cancelPending(sessionId)
     credentialManager.cancelPending(sessionId)
     officeRuntimeManager.cancelPending(sessionId)
+    nodeRuntimeManager.cancelPending(sessionId)
 
     return true
   })
@@ -5494,6 +5496,7 @@ app.whenReady().then(() => {
     clarificationManager.cancelPending()
     credentialManager.cancelPending()
     officeRuntimeManager.cancelPending()
+    nodeRuntimeManager.cancelPending()
 
 
     // 3. 断开所有 MCP 服务连接

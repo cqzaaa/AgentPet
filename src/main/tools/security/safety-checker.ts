@@ -198,6 +198,14 @@ export function invokesPythonExecutable(command: string): boolean {
   })
 }
 
+/** Detect commands that must use AgentPet's managed Node/npm runtime. */
+export function invokesNodeExecutable(command: string): boolean {
+  return getCommandSegments(command).some(segment => {
+    const executable = executableBasename(segment.command)
+    return /^(?:node|npm|npx|corepack)(?:\.cmd|\.exe)?$/.test(executable)
+  })
+}
+
 export function looksLikeReadOnlyInspection(command: string): boolean {
   const segments = getCommandSegments(command)
   return segments.some(segment => isReadOnlySegment(segment))

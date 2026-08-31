@@ -352,6 +352,9 @@ const api = {
   respondOfficeRuntimeInstall: (requestId: number, approved: boolean): void => {
     ipcRenderer.send('api:office-runtime-response', { requestId, approved })
   },
+  respondNodeRuntimeInstall: (requestId: number, approved: boolean): void => {
+    ipcRenderer.send('api:node-runtime-response', { requestId, approved })
+  },
   abortLlm: (sessionId?: string): Promise<boolean> =>
     ipcRenderer.invoke('api:abort-llm', sessionId),
   getCronTasks: (): Promise<any[] | null> =>

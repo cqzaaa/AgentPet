@@ -4,7 +4,8 @@ import { ShellKind, shellManager } from './shell-manager'
 import { sshManager } from './ssh-manager'
 import { getAllowedFileRoots, getDefaultWorkingDirectory, isPathWithinRoots, resolveSessionPath } from '../../utils/paths'
 import { pythonRuntimeManager } from '../../interaction/python-runtime-manager'
-import { invokesPythonExecutable } from '../../security/safety-checker'
+import { nodeRuntimeManager } from '../../interaction/node-runtime-manager'
+import { invokesNodeExecutable, invokesPythonExecutable } from '../../security/safety-checker'
 
 /** Render terminal-style output for the chat card: remove ANSI controls and let CR replace a line. */
 function renderTerminalOutput(previous: string, chunk: string): string {
@@ -106,13 +107,18 @@ export class TerminalExecutor implements IToolExecutor {
         }
 
         const execCwd = resolveExecutionCwd(args.cwd, context)
+        const nodeRuntime = invokesNodeExecutable(command)
+          ? await nodeRuntimeManager.ensure(context)
+          : null
+        const commandEnvironment = nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : undefined
         // run_terminal_command 同步执行，传入动态超时与中止信号
         const reportLiveOutput = this.createLiveOutputReporter(context, api)
         const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
           cwd: execCwd,
           timeout: cmdTimeout,
           signal: context.abortSignal,
-          onOutput: reportLiveOutput
+          onOutput: reportLiveOutput,
+          env: commandEnvironment
         } as any)
         const renderedStdout = renderTerminalOutput('', stdout)
         const renderedStderr = renderTerminalOutput('', stderr)
@@ -220,7 +226,17 @@ export class TerminalExecutor implements IToolExecutor {
         }
 
         const execCwd = resolveExecutionCwd(cwd, context)
-        const session = shellManager.startSession(command, shell, execCwd, this.createLiveOutputReporter(context, api))
+        const nodeRuntime = invokesNodeExecutable(command)
+          ? await nodeRuntimeManager.ensure(context)
+          : null
+        const commandEnvironment = nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : undefined
+        const session = shellManager.startSession(
+          command,
+          shell,
+          execCwd,
+          this.createLiveOutputReporter(context, api),
+          commandEnvironment
+        )
         return {
           content: `[命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
           state: { shell_id: session.id, command, shell },
