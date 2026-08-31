@@ -1,7 +1,9 @@
+import * as fs from 'fs'
 import { loadOfficeSkill } from '../tools/builtin/office/skills/registry'
 import type { OfficeSkillName } from '../tools/builtin/office/skills/types'
 import { DESKTOP_CONTROL_INSTRUCTIONS } from '../tools/builtin/computer/policy'
 import agentPetCodingSkill from '../tools/builtin/agentpet-coding/SKILL.md?raw'
+import { ensureManagedPptMaster, getManagedSkillRoot } from './managed-skill-runtime'
 
 export interface BuiltinSkillDefinition {
   id: string
@@ -10,6 +12,7 @@ export interface BuiltinSkillDefinition {
   triggers: string[]
   allowedTools: string[]
   sections?: string[]
+  artifactRoot?: string
   estimatedTokens: number
   loadInstructions: (sections?: string[]) => Promise<string>
 }
@@ -96,6 +99,40 @@ function officeSkill(): BuiltinSkillDefinition {
         ...examples,
         '',
         JSON.stringify({ formats: skills.map(({ name, skill }) => describeOfficeOperations(name, skill)) }, null, 2)
+      ].join('\n')
+    }
+  }
+}
+
+function pptMasterSkill(): BuiltinSkillDefinition {
+  const skillRoot = getManagedSkillRoot('ppt-master')
+  return {
+    id: 'ppt-master',
+    name: 'PPT Master',
+    description: 'Create, redesign, template, fill, or enhance native editable PowerPoint decks with high-end visual design, native transitions, object animations, charts, tables, notes, narration, and optional video export. Prefer this for substantial presentation authoring; use office/pptx for lightweight inspection, text replacement, conversion, and static validation.',
+    triggers: ['ppt master', 'ppt-master', 'animated ppt', 'presentation design', 'slide deck', 'powerpoint animation', '高级演示文稿', '动画ppt', 'PPT动画', '美化PPT', '演示设计'],
+    allowedTools: [
+      'read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content',
+      'write_file', 'edit_file', 'move_file',
+      'run_python', 'run_office_skill',
+      'web_search', 'web_fetch'
+    ],
+    artifactRoot: skillRoot,
+    estimatedTokens: 2200,
+    loadInstructions: async () => {
+      await ensureManagedPptMaster()
+      const skillPath = `${skillRoot}\\SKILL.md`
+      const instructions = await fs.promises.readFile(skillPath, 'utf8')
+      return [
+        '# AgentPet host adapter',
+        `SKILL_DIR is the absolute directory: ${skillRoot}`,
+        'This managed Skill directory is read-only application content. Create every project workspace and output under the current conversation workspace/session directory, never inside SKILL_DIR.',
+        'For every documented `python3 ${SKILL_DIR}/scripts/<name>.py ...` command, call run_python with script_path set to that absolute script, arguments as an array, cwd set to the project workspace, and a suitable timeout_seconds. Never invoke python or pip through run_terminal_command.',
+        'AgentPet lazily provisions PPT Master Python dependencies the first time a bundled PPT Master script is executed.',
+        'The loaded PPT Master workflow is an explicit exception to the ordinary rule that PPTX generation must only use run_office_skill. Use run_office_skill afterward when its render, inspect, validate, or PowerPoint-native PDF export operation is useful.',
+        'Use AgentPet web_search/web_fetch for factual research. If the workflow requests a host-native image generator but none is active, use licensed web imagery or proceed with native shapes instead of inventing an unavailable image tool.',
+        '',
+        instructions
       ].join('\n')
     }
   }
@@ -206,6 +243,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     allowedTools: ['trigger_memory_purify', 'append_memory_summary'],
     instructions: `# Memory management\nPersist information only when the user explicitly asks or when the configured workflow requires a durable summary. Keep summaries factual, scoped, and free of secrets that should not be stored.`
   }),
+  pptMasterSkill(),
   officeSkill()
 ]
 

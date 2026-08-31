@@ -136,15 +136,12 @@
 .inspector-head > div:nth-child(2) { min-width: 0; }
 .inspector-head span { color: var(--text-muted); font: 9px/1 "Cascadia Code", monospace; letter-spacing: .08em; }
 .inspector-head h2 { margin: 2px 0 0; overflow: hidden; color: var(--text-primary); font-size: 14px; line-height: 1.15; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-title-row { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.inspector-title-row h2 { flex: none; max-width: 44%; }
+.inspector-title-row code { min-width: 0; overflow: hidden; color: var(--trace-blue-soft); font: 9px/1.2 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-head button { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .inspector-head button:hover { color: var(--text-primary); background: var(--bg-menu-hover); }
 .inspector-symbol { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; color: var(--event-color); background: color-mix(in srgb, var(--event-color) 12%, transparent); }
-.inspector-facts { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--trace-grid); }
-.inspector-facts div { min-width: 0; padding: 11px 14px; border-right: 1px solid var(--trace-grid); border-bottom: 1px solid var(--trace-grid); }
-.inspector-facts div:nth-child(2n) { border-right: 0; }
-.inspector-facts div:nth-last-child(-n+2) { border-bottom: 0; }
-.inspector-facts span, .inspector-location span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 9.5px; }
-.inspector-facts strong { display: block; overflow: hidden; color: var(--text-secondary); font: 600 10.5px/1.3 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-section { padding: 14px 16px; border-bottom: 1px solid var(--trace-grid); }
 .inspector-section h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .inspector-section h3 em { margin-left: 6px; padding: 2px 4px; border-radius: 3px; color: var(--trace-blue-soft); background: color-mix(in srgb, var(--trace-blue) 10%, transparent); font: 650 8px/1 "Cascadia Code", monospace; font-style: normal; }
@@ -196,8 +193,6 @@
 .payload-tree-content.is-fullscreen .payload-tree-toolbar { min-height: 32px; margin-bottom: 10px; }
 .payload-tree-content.is-fullscreen .json-tree { max-height: none; min-height: 0; flex: 1; }
 .payload-loading { color: var(--text-muted); font-size: 11px; }
-.inspector-token-strip { flex: none; display: flex; align-items: center; gap: 7px; padding: 8px 16px; border-bottom: 1px solid var(--trace-grid); color: var(--text-muted); background: color-mix(in srgb, var(--bg-card) 86%, var(--bg-content)); font: 9.5px/1 "Cascadia Code", monospace; }
-
 @keyframes trace-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1120px) {

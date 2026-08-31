@@ -305,7 +305,7 @@ export class SkillRegistry {
             name: builtin.name,
             instructions,
             estimatedTokens: actualTokens,
-            artifactRoot: `builtin:${builtin.id}`,
+            artifactRoot: builtin.artifactRoot || `builtin:${builtin.id}`,
             allowedTools: [...builtin.allowedTools],
             sections: request.sections.length > 0 ? [...request.sections] : undefined
           })

@@ -789,6 +789,12 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       disableMemoryPersistence?: boolean
       sandboxMode?: boolean
       event?: Electron.IpcMainInvokeEvent
+      onTraceEvent?: (event: {
+        type: string
+        data: Record<string, unknown>
+        correlationId?: string
+        step?: number
+      }) => void | Promise<void>
     },
     messages: ChatMessage[],
     workspacePath?: string,
@@ -1446,7 +1452,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                     isFrontend,
                     sandboxMode: !!sandboxMode,
                     event,
-                    abortSignal
+                    abortSignal,
+                    traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
+                      config.onTraceEvent?.({ ...traceEvent, correlationId: toolCall.id, step: loopCount })
                   }
                   const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
                   toolResult = res.content
@@ -1465,7 +1473,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 isFrontend,
                 sandboxMode: !!sandboxMode,
                 event,
-                abortSignal
+                abortSignal,
+                traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
+                  config.onTraceEvent?.({ ...traceEvent, correlationId: toolCall.id, step: loopCount })
               }
               const res = await unifiedToolExecutor.execute(toolName, toolArgs, ctx)
               toolResult = res.content

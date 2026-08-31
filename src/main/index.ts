@@ -4805,7 +4805,20 @@ app.whenReady().then(() => {
         {
           ...config,
           sandboxMode: sandboxMode,
-          event
+          event,
+          onTraceEvent: async (traceEvent: {
+            type: string
+            data: Record<string, unknown>
+            correlationId?: string
+            step?: number
+          }) => {
+            await appendTrace(traceEvent.type, 'tool', {
+              ...sanitizeTraceValue(traceEvent.data) as Record<string, unknown>
+            }, {
+              step: traceEvent.step,
+              correlationId: traceEvent.correlationId
+            })
+          }
         },
         messages,
         workspacePath,

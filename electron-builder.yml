@@ -3,6 +3,7 @@ productName: agentpet
 directories:
   buildResources: build
 files:
+  - '!resources/skills/**'
   - '!**/*.map'
   - '!dist*/**'
   - '!**/.vscode/*'

@@ -6,6 +6,7 @@ import { getAllowedFileRoots, getDefaultWorkingDirectory, isPathWithinRoots, res
 import { pythonRuntimeManager } from '../../interaction/python-runtime-manager'
 import { nodeRuntimeManager } from '../../interaction/node-runtime-manager'
 import { invokesNodeExecutable, invokesPythonExecutable } from '../../security/safety-checker'
+import { getManagedSkillRoot } from '../../../skills/managed-skill-runtime'
 
 /** Render terminal-style output for the chat card: remove ANSI controls and let CR replace a line. */
 function renderTerminalOutput(previous: string, chunk: string): string {
@@ -167,7 +168,11 @@ export class TerminalExecutor implements IToolExecutor {
           }
         }
 
-        const runtime = await pythonRuntimeManager.ensure(context)
+        const pptMasterRoot = getManagedSkillRoot('ppt-master')
+        const usesPptMaster = Boolean(scriptPath) && isPathWithinRoots(scriptPath, [pptMasterRoot])
+        const runtime = usesPptMaster
+          ? await pythonRuntimeManager.ensurePptMaster(context, pptMasterRoot)
+          : await pythonRuntimeManager.ensure(context)
         const extraArgs = Array.isArray(args.arguments)
           ? args.arguments.slice(0, 100).map((value: unknown) => String(value))
           : []

@@ -50,6 +50,7 @@
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.2",
+    "isomorphic-git": "^1.41.9",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "node-edge-tts": "^1.2.10",

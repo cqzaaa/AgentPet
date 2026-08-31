@@ -44,6 +44,12 @@ export interface WebSource {
   sourceType: 'search' | 'fetch'
 }
 
+export interface ToolTraceEvent {
+  type: string
+  data: Record<string, unknown>
+  correlationId?: string
+}
+
 export interface ToolContext {
   workspacePath: string
   sessionId?: string
@@ -52,6 +58,8 @@ export interface ToolContext {
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean
   abortSignal?: AbortSignal
+  /** Emits durable protocol-level events for tools with an external transport. */
+  traceEvent?: (event: ToolTraceEvent) => void | Promise<void>
   /** Internal Office workflows use this while producing non-user-facing intermediates. */
   suppressOfficePreview?: boolean
 }

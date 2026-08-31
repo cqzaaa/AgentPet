@@ -29,7 +29,7 @@ export class UnifiedToolExecutor {
     if (!manifest || !executor) {
       if (mcpManager.hasTool(name)) {
         try {
-          const content = await mcpManager.executeTool(name, args, context.abortSignal)
+          const content = await mcpManager.executeTool(name, args, context.abortSignal, false, context.traceEvent)
           return { content, success: true }
         } catch (err: any) {
           if (err.message === 'UserAborted') {

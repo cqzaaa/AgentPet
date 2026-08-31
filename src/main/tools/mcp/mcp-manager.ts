@@ -11,6 +11,7 @@ import {
   saveSecureSystemMcpConfig
 } from '../../security/secure-mcp-config'
 import type { RuntimeMcpConfig } from '../../security/mcp-config-store'
+import type { ToolTraceEvent } from '../core/types'
 
 export interface McpServerConfig {
   id: string
@@ -29,12 +30,31 @@ type McpClientTransport =
   | SSEClientTransport
   | StreamableHTTPClientTransport
 
+interface McpTraceCapture {
+  attempt: number
+  report: (event: ToolTraceEvent) => Promise<void>
+  request?: any
+  response?: any
+  requestId?: string | number
+}
+
+interface McpConnection {
+  client: Client
+  transport: McpClientTransport
+  tools: any[]
+  config: McpServerConfig
+  pendingToolTraces: McpTraceCapture[]
+  toolTracesByRequestId: Map<string | number, McpTraceCapture>
+  connectionTrace?: {
+    report: (event: ToolTraceEvent) => Promise<void>
+    responseWrites: Promise<void>[]
+  }
+  connectionTracesByRequestId: Map<string | number, { method: string }>
+}
+
 export class McpManager {
   private static instance: McpManager
-  private connections: Map<
-    string,
-    { client: Client; transport: McpClientTransport; tools: any[]; config: McpServerConfig }
-  > = new Map()
+  private connections: Map<string, McpConnection> = new Map()
   private pendingConfigs: McpServerConfig[] = []
   public systemMcpConfig: { servers: McpServerConfig[] } = { servers: [] }
   private toolsCache: Record<string, any[]> = {}
@@ -66,6 +86,129 @@ export class McpManager {
     return new StreamableHTTPClientTransport(new URL(config.url), {
       requestInit: { headers }
     })
+  }
+
+  private transportName(transport: McpClientTransport): 'sse' | 'streamable-http' {
+    return transport instanceof SSEClientTransport ? 'sse' : 'streamable-http'
+  }
+
+  /**
+   * Installs a passive JSON-RPC tap after the SDK has connected. The tap keeps
+   * the SDK's original handlers intact while retaining the exact messages it
+   * generated and parsed, including JSON-RPC ids and error envelopes.
+   */
+  private createConnection(
+    client: Client,
+    transport: McpClientTransport,
+    tools: any[],
+    config: McpServerConfig,
+    connectionTrace?: (event: ToolTraceEvent) => Promise<void>
+  ): McpConnection {
+    const connection: McpConnection = {
+      client,
+      transport,
+      tools,
+      config,
+      pendingToolTraces: [],
+      toolTracesByRequestId: new Map(),
+      connectionTrace: connectionTrace ? { report: connectionTrace, responseWrites: [] } : undefined,
+      connectionTracesByRequestId: new Map()
+    }
+    const transportAny = transport as any
+    const originalSend = transportAny.send.bind(transport)
+    const originalOnMessage = transportAny.onmessage?.bind(transport)
+
+    transportAny.send = async (message: any, options?: any): Promise<void> => {
+      const messages = Array.isArray(message) ? message : [message]
+      const request = messages.find(item => item?.method === 'tools/call')
+      const capture = request ? connection.pendingToolTraces.shift() : undefined
+      if (capture) {
+        capture.request = request
+        if (typeof request.id === 'string' || typeof request.id === 'number') {
+          capture.requestId = request.id
+          connection.toolTracesByRequestId.set(request.id, capture)
+        }
+        await capture.report({
+          type: 'mcp/request',
+          data: {
+            server: {
+              id: config.id,
+              name: config.name,
+              endpoint: this.displayEndpoint(config),
+              transport: this.transportName(transport)
+            },
+            attempt: capture.attempt,
+            request
+          }
+        })
+      }
+      if (!capture && connection.connectionTrace) {
+        for (const connectionMessage of messages) {
+          if (!connectionMessage?.method) continue
+          if (typeof connectionMessage.id === 'string' || typeof connectionMessage.id === 'number') {
+            connection.connectionTracesByRequestId.set(connectionMessage.id, {
+              method: connectionMessage.method
+            })
+          }
+          await connection.connectionTrace.report({
+            type: 'mcp/request',
+            data: {
+              phase: 'connection',
+              server: {
+                id: config.id,
+                name: config.name,
+                endpoint: this.displayEndpoint(config),
+                transport: this.transportName(transport)
+              },
+              request: connectionMessage
+            }
+          })
+        }
+      }
+      await originalSend(message, options)
+    }
+
+    transportAny.onmessage = (message: any, extra?: any): void => {
+      if (typeof message?.id === 'string' || typeof message?.id === 'number') {
+        const capture = connection.toolTracesByRequestId.get(message.id)
+        if (capture) capture.response = message
+        const connectionRequest = connection.connectionTracesByRequestId.get(message.id)
+        if (connectionRequest && connection.connectionTrace) {
+          const write = connection.connectionTrace.report({
+            type: 'mcp/response',
+            data: {
+              phase: 'connection',
+              requestMethod: connectionRequest.method,
+              server: {
+                id: config.id,
+                name: config.name,
+                endpoint: this.displayEndpoint(config),
+                transport: this.transportName(transport)
+              },
+              response: message
+            }
+          })
+          connection.connectionTrace.responseWrites.push(write)
+          connection.connectionTracesByRequestId.delete(message.id)
+        }
+      }
+      originalOnMessage?.(message, extra)
+    }
+    return connection
+  }
+
+  private releaseTraceCapture(connection: McpConnection, capture: McpTraceCapture): void {
+    const pendingIndex = connection.pendingToolTraces.indexOf(capture)
+    if (pendingIndex >= 0) connection.pendingToolTraces.splice(pendingIndex, 1)
+    if (capture.requestId !== undefined) connection.toolTracesByRequestId.delete(capture.requestId)
+  }
+
+  private async finishConnectionTrace(connection: McpConnection): Promise<void> {
+    const trace = connection.connectionTrace
+    if (!trace) return
+    await Promise.all(trace.responseWrites)
+    connection.connectionTrace = undefined
+    connection.connectionTracesByRequestId.clear()
   }
 
   public static getInstance(): McpManager {
@@ -198,7 +341,7 @@ export class McpManager {
         const response = await client.listTools()
         const tools = response.tools || []
         
-        this.connections.set(config.id, { client, transport, tools, config })
+        this.connections.set(config.id, this.createConnection(client, transport, tools, config))
         this.updateServerToolsCache(config.id, tools)
         console.log(`[MCP] 服务 ${config.name} 连接成功！加载了 ${tools.length} 个外部工具`)
       } catch (err) {
@@ -208,10 +351,34 @@ export class McpManager {
   }
 
   // 针对单个服务进行单独连接（被呼叫时按需触发）
-  public async connectSingleServer(config: McpServerConfig): Promise<boolean> {
+  public async connectSingleServer(
+    config: McpServerConfig,
+    traceEvent?: (event: ToolTraceEvent) => void | Promise<void>
+  ): Promise<boolean> {
     console.log(
       `[MCP] 正在建立单体服务连接: ${config.name} -> ${this.displayEndpoint(config)}`
     )
+    const reportConnectionTrace = async (event: ToolTraceEvent): Promise<void> => {
+      if (!traceEvent) return
+      try {
+        await traceEvent(event)
+      } catch (error) {
+        console.warn('[MCP] 写入连接轨迹失败', error)
+      }
+    }
+    await reportConnectionTrace({
+      type: 'mcp/connection',
+      data: {
+        status: 'connecting',
+        server: {
+          id: config.id,
+          name: config.name,
+          endpoint: this.displayEndpoint(config),
+          configuredTransport: config.type || 'stream'
+        }
+      }
+    })
+    let connection: McpConnection | undefined
     try {
       let transport: McpClientTransport
       let client = new Client(
@@ -227,20 +394,39 @@ export class McpManager {
 
       if (mcpType === 'stream') {
         transport = this.createTransport(config)
+        connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
       } else if (mcpType === 'sse') {
         transport = this.createTransport(config)
+        connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
         await Promise.race([client.connect(transport), connectTimeout(5000)])
       } else {
         try {
           transport = this.createTransport({ ...config, type: 'stream' })
+          connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
-        } catch {
+        } catch (httpError) {
+          if (connection) await this.finishConnectionTrace(connection)
+          await reportConnectionTrace({
+            type: 'mcp/connection',
+            data: {
+              status: 'fallback',
+              server: {
+                id: config.id,
+                name: config.name,
+                endpoint: this.displayEndpoint(config)
+              },
+              from: 'streamable-http',
+              to: 'sse',
+              reason: httpError instanceof Error ? httpError.message : String(httpError)
+            }
+          })
           client = new Client(
             { name: 'AgentPet-Client', version: '1.0.0' },
             { capabilities: {} }
           )
           transport = this.createTransport({ ...config, type: 'sse' })
+          connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
           await Promise.race([client.connect(transport), connectTimeout(5000)])
         }
       }
@@ -248,12 +434,45 @@ export class McpManager {
       const response = await client.listTools()
       const tools = response.tools || []
 
-      this.connections.set(config.id, { client, transport, tools, config })
+      if (!connection) throw new Error('MCP 连接对象未初始化')
+      connection.tools = tools
+      await this.finishConnectionTrace(connection)
+      this.connections.set(config.id, connection)
+      await reportConnectionTrace({
+        type: 'mcp/connection',
+        data: {
+          status: 'ready',
+          server: {
+            id: config.id,
+            name: config.name,
+            endpoint: this.displayEndpoint(config),
+            transport: this.transportName(connection.transport)
+          },
+          toolsCount: tools.length
+        }
+      })
       this.updateServerToolsCache(config.id, tools)
       console.log(`[MCP] 服务 ${config.name} 按需握手成功！更新了 ${tools.length} 个工具`)
       return true
     } catch (err) {
       console.error(`[MCP] 握手单体服务 ${config.name} 失败:`, err)
+      if (connection) await this.finishConnectionTrace(connection)
+      await reportConnectionTrace({
+        type: 'mcp/error',
+        data: {
+          phase: 'connection',
+          server: {
+            id: config.id,
+            name: config.name,
+            endpoint: this.displayEndpoint(config),
+            ...(connection ? { transport: this.transportName(connection.transport) } : {})
+          },
+          error: {
+            name: err instanceof Error ? err.name : 'Error',
+            message: err instanceof Error ? err.message : String(err)
+          }
+        }
+      })
       return false
     }
   }
@@ -339,7 +558,7 @@ export class McpManager {
       const response = await client.listTools()
       const tools = response.tools || []
 
-      this.connections.set(config.id, { client, transport, tools, config })
+      this.connections.set(config.id, this.createConnection(client, transport, tools, config))
       this.updateServerToolsCache(config.id, tools)
       return true
     } catch (err) {
@@ -436,7 +655,21 @@ export class McpManager {
     return [...(this.connections.get(server.id)?.tools || [])]
   }
 
-  public async executeTool(name: string, args: any, abortSignal?: AbortSignal, isRetry = false): Promise<string> {
+  public async executeTool(
+    name: string,
+    args: any,
+    abortSignal?: AbortSignal,
+    isRetry = false,
+    traceEvent?: (event: ToolTraceEvent) => void | Promise<void>
+  ): Promise<string> {
+    const reportTrace = async (event: ToolTraceEvent): Promise<void> => {
+      if (!traceEvent) return
+      try {
+        await traceEvent(event)
+      } catch (error) {
+        console.warn('[MCP] 写入协议轨迹失败', error)
+      }
+    }
     const realName = McpNameMapper.toOriginalName(name)
     let targetServer: McpServerConfig | null = null
     for (const server of this.systemMcpConfig.servers) {
@@ -460,7 +693,7 @@ export class McpManager {
     let targetConn = this.connections.get(targetServer.id)
     if (!targetConn) {
       console.log(`[MCP] 工具 ${realName} 被调用，触发对服务 ${targetServer.name} 的按需握手连接...`)
-      const success = await this.connectSingleServer(targetServer)
+      const success = await this.connectSingleServer(targetServer, traceEvent)
       if (!success) {
         return `错误：工具 ${realName} 被调用，但建立服务连接 ${targetServer.name} 失败`
       }
@@ -482,6 +715,11 @@ export class McpManager {
 
     let timer: NodeJS.Timeout | null = null
     let onAbort: (() => void) | null = null
+    const capture: McpTraceCapture = {
+      attempt: isRetry ? 2 : 1,
+      report: reportTrace
+    }
+    targetConn.pendingToolTraces.push(capture)
 
     try {
       const promises: Promise<any>[] = []
@@ -511,6 +749,22 @@ export class McpManager {
       }
 
       const response = await Promise.race(promises)
+      await reportTrace({
+        type: 'mcp/response',
+        data: {
+          server: {
+            id: targetServer.id,
+            name: targetServer.name,
+            endpoint: this.displayEndpoint(targetServer),
+            transport: this.transportName(targetConn.transport)
+          },
+          attempt: capture.attempt,
+          response: capture.response ?? {
+            captureUnavailable: true,
+            sdkResult: response
+          }
+        }
+      })
 
       if (response && response.content) {
         return (response.content as any[])
@@ -521,6 +775,24 @@ export class McpManager {
       return 'MCP 工具执行完毕，但未返回可读文本。'
     } catch (err: any) {
       console.error(`[MCP] 调用外部工具 ${realName} 失败`, err)
+      await reportTrace({
+        type: 'mcp/error',
+        data: {
+          server: {
+            id: targetServer.id,
+            name: targetServer.name,
+            endpoint: this.displayEndpoint(targetServer),
+            transport: this.transportName(targetConn.transport)
+          },
+          attempt: capture.attempt,
+          ...(capture.request !== undefined ? { request: capture.request } : {}),
+          ...(capture.response !== undefined ? { response: capture.response } : {}),
+          error: {
+            name: err?.name || 'Error',
+            message: err?.message || String(err)
+          }
+        }
+      })
 
       if (err.message === 'UserAborted') {
         throw err
@@ -531,12 +803,13 @@ export class McpManager {
         const success = await this.reconnectServer(targetConnId)
         if (success) {
           console.log(`[MCP] 服务 ${targetConn.config.name} 重连成功，正在重新执行工具 ${name}...`)
-          return this.executeTool(name, args, abortSignal, true)
+          return this.executeTool(name, args, abortSignal, true, traceEvent)
         }
       }
 
       return `错误：调用外部 MCP 工具失败: ${err.message || err}`
     } finally {
+      this.releaseTraceCapture(targetConn, capture)
       if (timer) clearTimeout(timer)
       if (abortSignal && onAbort) {
         abortSignal.removeEventListener('abort', onAbort)

@@ -12,7 +12,6 @@ import {
   ChevronsDown,
   ChevronsUp,
   CircleAlert,
-  Clock3,
   Copy,
   GitBranch,
   Maximize2,
@@ -57,9 +56,9 @@ const FILTERS: Array<{ id: FilterId; label: string }> = [
 
 function typesForFilter(filter: FilterId): string[] | undefined {
   if (filter === 'model') return ['request/start', 'model/request', 'model/response', 'assistant/chunk', 'assistant/message', 'assistant/reasoning', 'assistant/reasoning_chunk', 'usage/tokens']
-  if (filter === 'tool') return ['tool/call', 'tool/result', 'artifact/generated']
+  if (filter === 'tool') return ['tool/call', 'tool/result', 'mcp/connection', 'mcp/request', 'mcp/response', 'mcp/error', 'artifact/generated']
   if (filter === 'context') return ['user/message', 'compaction/started', 'compaction/completed', 'compaction/failed']
-  if (filter === 'errors') return ['error']
+  if (filter === 'errors') return ['error', 'mcp/error']
   return undefined
 }
 
@@ -79,6 +78,38 @@ function textFromContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   return content.map(item => typeof item === 'string' ? item : item?.text || '').filter(Boolean).join('\n')
+}
+
+function mcpTransportLabel(value: unknown): string {
+  if (value === 'streamable-http' || value === 'stream') return 'Streamable HTTP'
+  if (value === 'sse') return 'SSE'
+  if (value === 'auto') return 'Auto'
+  return value ? String(value) : '协议待定'
+}
+
+function remoteHttpUrl(event: TraceEvent, events: TraceEvent[]): string {
+  const accept = (value: unknown): string => {
+    const url = typeof value === 'string' ? value.trim() : ''
+    return /^https?:\/\//i.test(url) ? url : ''
+  }
+  if (event.type === 'model/request') return accept(event.data?.request?.url)
+  if (event.type === 'model/response') {
+    const request = events.find(candidate =>
+      candidate.type === 'model/request' && candidate.correlationId === event.correlationId)
+    return accept(request?.data?.request?.url)
+  }
+  if (event.type.startsWith('mcp/')) return accept(event.data?.server?.endpoint)
+  if (event.type === 'tool/call' && (event.data?.name === 'browser_navigate' || event.data?.name === 'web_fetch')) {
+    return accept(event.data?.arguments?.url)
+  }
+  if (event.type === 'tool/result') {
+    const request = events.find(candidate =>
+      candidate.type === 'tool/call' &&
+      candidate.correlationId === event.correlationId &&
+      (candidate.data?.name === 'browser_navigate' || candidate.data?.name === 'web_fetch'))
+    return accept(request?.data?.arguments?.url)
+  }
+  return ''
 }
 
 function eventSummary(event: TraceEvent): string {
@@ -102,6 +133,22 @@ function eventSummary(event: TraceEvent): string {
   if (event.type === 'assistant/reasoning_chunk') return String(data.detail || '')
   if (event.type === 'tool/call') return `${data.name || '工具'}(${compactJson(data.arguments)})`
   if (event.type === 'tool/result') return String(data.displayResult || data.modelResult || '工具执行完成')
+  if (event.type === 'mcp/connection') {
+    if (data.status === 'ready') return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport)} · 连接就绪 · ${data.toolsCount || 0} 个工具`
+    if (data.status === 'fallback') return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.from)} 失败，回退 ${mcpTransportLabel(data.to)}`
+    return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.configuredTransport)} · 正在建立连接`
+  }
+  if (event.type === 'mcp/request') {
+    const method = data.request?.method || 'tools/call'
+    return data.phase === 'connection'
+      ? `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport)} · 初始化阶段 · ${method}`
+      : `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport)} · ${method} · 第 ${data.attempt || 1} 次`
+  }
+  if (event.type === 'mcp/response') {
+    if (data.phase === 'connection') return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport)} · ${data.requestMethod || '初始化'} 响应`
+    return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport)} · 返回 ${Array.isArray(data.response?.result?.content) ? data.response.result.content.length : 0} 段内容`
+  }
+  if (event.type === 'mcp/error') return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport || data.server?.configuredTransport)} · ${data.error?.message || '请求失败'}`
   if (event.type === 'usage/tokens') return `输入 ${data.promptTokens || 0} · 输出 ${data.completionTokens || 0} tokens`
   if (event.type.startsWith('subagent/')) return `${data.action || event.type.slice(9)} · ${data.run?.title || data.taskRunId || ''}`
   if (event.type.startsWith('compaction/')) return `${data.beforeTokens || 0} → ${data.afterTokens || '—'} tokens`
@@ -135,6 +182,10 @@ function eventLabel(type: string): string {
     'assistant/reasoning_chunk': '实时推理',
     'tool/call': '工具调用',
     'tool/result': '工具结果',
+    'mcp/connection': 'MCP 连接',
+    'mcp/request': 'MCP 请求报文',
+    'mcp/response': 'MCP 返回报文',
+    'mcp/error': 'MCP 请求异常',
     'usage/tokens': 'Token 用量',
     'artifact/generated': '生成产物',
     error: '执行异常'
@@ -147,12 +198,14 @@ function eventLabel(type: string): string {
 function eventBoundary(type: string): { kind: 'request' | 'response' | 'internal'; label: string } {
   if (type === 'model/request') return { kind: 'request', label: '网络请求' }
   if (type === 'model/response') return { kind: 'response', label: '网络响应' }
+  if (type === 'mcp/request') return { kind: 'request', label: 'MCP 请求' }
+  if (type === 'mcp/response') return { kind: 'response', label: 'MCP 响应' }
   return { kind: 'internal', label: '内部事件' }
 }
 
 function category(event: TraceEvent): string {
-  if (event.type === 'error') return 'error'
-  if (event.type.startsWith('tool/') || event.type === 'artifact/generated') return 'tool'
+  if (event.type === 'error' || event.type === 'mcp/error') return 'error'
+  if (event.type.startsWith('tool/') || event.type.startsWith('mcp/') || event.type === 'artifact/generated') return 'tool'
   if (event.type.startsWith('subagent/')) return 'subagent'
   if (event.type.startsWith('compaction/')) return 'context'
   if (event.type === 'user/message') return 'user'
@@ -173,6 +226,13 @@ function timelineDuration(events: TraceEvent[], index: number): number {
   if (event.type === 'tool/call') {
     const result = events.slice(index + 1).find(candidate =>
       candidate.type === 'tool/result' && candidate.correlationId === event.correlationId)
+    return result ? Math.max(0, result.time - event.time) : 0
+  }
+  if (event.type === 'mcp/request') {
+    const result = events.slice(index + 1).find(candidate =>
+      (candidate.type === 'mcp/response' || candidate.type === 'mcp/error') &&
+      candidate.correlationId === event.correlationId &&
+      candidate.data?.attempt === event.data?.attempt)
     return result ? Math.max(0, result.time - event.time) : 0
   }
   if (event.type === 'request/start') {
@@ -248,6 +308,8 @@ function isConsumedPayloadPath(type: string, path: string[]): boolean {
   if (type === 'user/message') return path[0] === 'message' && leaf === 'content'
   if (type === 'tool/call') return leaf === 'name' || leaf === 'arguments'
   if (type === 'tool/result') return leaf === 'displayResult' || leaf === 'modelResult'
+  if (type === 'mcp/request') return path[0] === 'request'
+  if (type === 'mcp/response') return path[0] === 'response'
   return false
 }
 
@@ -561,20 +623,14 @@ export function TrajectoryPage(): React.JSX.Element {
     let tools = 0
     let requests = 0
     let errors = 0
-    let promptTokens = 0
-    let completionTokens = 0
     for (const event of events) {
       if (event.type === 'tool/call') tools += 1
       if (event.type === 'request/start') requests += 1
-      if (event.type === 'error') errors += 1
-      if (event.type === 'usage/tokens') {
-        promptTokens += Number(event.data?.promptTokens || 0)
-        completionTokens += Number(event.data?.completionTokens || 0)
-      }
+      if (event.type === 'error' || event.type === 'mcp/error') errors += 1
     }
     const first = events[0]?.time
     const last = events[events.length - 1]?.time
-    return { tools, requests, errors, promptTokens, completionTokens, duration: first && last ? last - first : 0 }
+    return { tools, requests, errors, duration: first && last ? last - first : 0 }
   }, [events])
 
   const turnSummaries = useMemo(() => {
@@ -605,13 +661,18 @@ export function TrajectoryPage(): React.JSX.Element {
   const selectedDuration = selectedIndex >= 0 && selectedIndex < events.length - 1
     ? events[selectedIndex + 1].time - events[selectedIndex].time
     : 0
+  const selectedRemoteUrl = selected ? remoteHttpUrl(selected, events) : ''
   const inspectedEvent = selectedFull?.seq === selected?.seq ? selectedFull : selected
   const inspectedData = inspectedEvent?.data || {}
-  const inspectedRequest = selected?.type === 'model/request' ? inspectedData.request : undefined
-  const inspectedResponse = selected?.type === 'model/response' ? inspectedData.response : undefined
+  const inspectedRequest = selected?.type === 'model/request' || selected?.type === 'mcp/request' ? inspectedData.request : undefined
+  const inspectedResponse = selected?.type === 'model/response' || selected?.type === 'mcp/response' ? inspectedData.response : undefined
   const inspectedPayload: unknown = Array.isArray(inspectedData.sourcePayloads)
     ? inspectedData.sourcePayloads.length === 1 ? inspectedData.sourcePayloads[0] : inspectedData.sourcePayloads
-    : inspectedRequest?.body !== undefined
+    : selected?.type === 'mcp/request' && inspectedRequest !== undefined
+      ? inspectedRequest
+      : selected?.type === 'mcp/response' && inspectedResponse !== undefined
+        ? inspectedResponse
+        : inspectedRequest?.body !== undefined
       ? inspectedRequest.body
       : inspectedResponse?.transport === 'sse' && Array.isArray(inspectedResponse.events)
         ? inspectedResponse.events
@@ -785,23 +846,15 @@ export function TrajectoryPage(): React.JSX.Element {
           <aside className="trajectory-inspector" aria-label="事件详情">
             <div className="inspector-head">
               <div className={`inspector-symbol kind-${category(selected)}`}><EventIcon event={selected} /></div>
-              <div><span>EVENT {String(selected.seq).padStart(4, '0')}</span><h2>{eventLabel(selected.type)}</h2></div>
+              <div>
+                <span>EVENT {String(selected.seq).padStart(4, '0')} · 至下一事件 {selectedDuration ? formatDuration(selectedDuration) : '—'}</span>
+                <div className="inspector-title-row">
+                  <h2>{eventLabel(selected.type)}</h2>
+                  {selectedRemoteUrl && <code title={selectedRemoteUrl}>{selectedRemoteUrl}</code>}
+                </div>
+              </div>
               <button onClick={() => setSelected(null)} aria-label="关闭详情"><X size={16} /></button>
             </div>
-
-            <div className="inspector-facts">
-              <div><span>发生时间</span><strong>{formatClock(selected.time)}</strong></div>
-              <div><span>至下一事件</span><strong>{selectedDuration ? formatDuration(selectedDuration) : '—'}</strong></div>
-              <div><span>来源 / 层级</span><strong>{selected.source} · {eventBoundary(selected.type).label}</strong></div>
-              <div><span>负载</span><strong>{formatBytes(selected.payloadBytes)}</strong></div>
-            </div>
-
-            {(selected.type === 'usage/tokens' || metrics.promptTokens + metrics.completionTokens > 0) && (
-              <div className="inspector-token-strip">
-                <Clock3 size={14} />
-                Loaded window · {(metrics.promptTokens + metrics.completionTokens).toLocaleString()} tokens
-              </div>
-            )}
 
             <div className="inspector-section inspector-payload">
               <h3>原始事件负载 {selected.compressed && <em>GZIP</em>}</h3>

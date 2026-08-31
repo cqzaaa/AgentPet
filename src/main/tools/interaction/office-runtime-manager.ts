@@ -18,6 +18,7 @@ const OFFICE_PYTHON_PACKAGES = [
   'fire==0.7.1'
 ] as const
 const RUNTIME_SCHEMA_VERSION = 1
+const PPT_MASTER_RUNTIME_SCHEMA_VERSION = 1
 const PYTHON_EMBED_URL = `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`
 const GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000
@@ -553,6 +554,7 @@ class OfficeRuntimeManager {
   private pending = new Map<number, PendingRequest>()
   private nextRequestId = 1
   private installPromise: Promise<OfficeRuntimeInfo> | null = null
+  private pptMasterInstallPromise: Promise<OfficeRuntimeInfo> | null = null
 
   constructor() {
     ipcMain.on('api:office-runtime-response', (_event, data) => {
@@ -621,12 +623,108 @@ class OfficeRuntimeManager {
     return await this.installPromise
   }
 
+  public async ensurePptMaster(
+    context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal },
+    skillRoot: string
+  ): Promise<OfficeRuntimeInfo> {
+    const info = await this.ensure(context)
+    const requirementsPath = join(skillRoot, 'requirements.txt')
+    if (!fs.existsSync(requirementsPath)) {
+      throw new Error(`PPT Master 依赖清单不存在：${requirementsPath}`)
+    }
+    if (await this.validatePptMasterRuntime(info)) return info
+
+    if (!this.pptMasterInstallPromise) {
+      this.pptMasterInstallPromise = this.installPptMaster(
+        info,
+        requirementsPath,
+        context
+      ).finally(() => {
+        this.pptMasterInstallPromise = null
+      })
+    }
+    return await this.pptMasterInstallPromise
+  }
+
   public cancelPending(sessionId?: string): void {
     for (const [requestId, pending] of this.pending.entries()) {
       if (sessionId && pending.sessionId !== sessionId) continue
       clearTimeout(pending.timer)
       this.pending.delete(requestId)
       pending.resolve(false)
+    }
+  }
+
+  private sendPptMasterProgress(
+    context: { sessionId?: string; messageId?: number; event?: { sender: WebContents } },
+    detail: string,
+    progress: number
+  ): void {
+    if (!context.event || context.event.sender.isDestroyed()) return
+    context.event.sender.send('api:llm-tool-event', {
+      type: 'tool_progress',
+      name: 'PPT Master 运行环境',
+      detail,
+      progress: Math.max(0, Math.min(100, Math.round(progress))),
+      timestamp: Date.now(),
+      messageId: context.messageId,
+      sessionId: context.sessionId
+    })
+  }
+
+  private async validatePptMasterRuntime(info: OfficeRuntimeInfo): Promise<boolean> {
+    const markerPath = join(info.rootDir, 'ppt-master-manifest.json')
+    if (!fs.existsSync(markerPath)) return false
+    try {
+      const marker = JSON.parse(await fs.promises.readFile(markerPath, 'utf8'))
+      if (marker?.schemaVersion !== PPT_MASTER_RUNTIME_SCHEMA_VERSION) return false
+      await runProcess(
+        info.pythonPath,
+        [
+          '-c',
+          'import yaml, pptx, xlsxwriter, pathops, uharfbuzz, PIL, requests, bs4, flask, fitz, openpyxl'
+        ],
+        { cwd: info.rootDir, timeoutMs: 30_000 }
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async installPptMaster(
+    info: OfficeRuntimeInfo,
+    requirementsPath: string,
+    context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal }
+  ): Promise<OfficeRuntimeInfo> {
+    try {
+      this.sendPptMasterProgress(context, '首次使用，正在安装 PPT Master 专属组件', 5)
+      await runProcess(
+        info.pythonPath,
+        ['-m', 'pip', 'install', '--only-binary=:all:', '-r', requirementsPath],
+        { cwd: info.rootDir, signal: context.abortSignal, timeoutMs: INSTALL_TIMEOUT_MS }
+      )
+      this.sendPptMasterProgress(context, '正在验证 PPT Master 运行环境', 92)
+      await fs.promises.writeFile(
+        join(info.rootDir, 'ppt-master-manifest.json'),
+        JSON.stringify({
+          schemaVersion: PPT_MASTER_RUNTIME_SCHEMA_VERSION,
+          requirementsPath,
+          installedAt: new Date().toISOString()
+        }, null, 2),
+        'utf8'
+      )
+      if (!(await this.validatePptMasterRuntime(info))) {
+        throw new Error('PPT Master 组件安装后验证失败')
+      }
+      this.sendPptMasterProgress(context, 'PPT Master 运行环境准备完成', 100)
+      return info
+    } catch (error) {
+      await fs.promises.rm(join(info.rootDir, 'ppt-master-manifest.json'), { force: true })
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[PythonRuntime] PPT Master 运行环境安装失败：', message)
+      this.sendPptMasterProgress(context, `PPT Master 运行环境安装失败：${message}`, 100)
+      throw new Error(`PPT Master 运行环境安装失败：${message}`)
     }
   }
 
