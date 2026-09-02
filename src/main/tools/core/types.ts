@@ -54,6 +54,10 @@ export interface ToolContext {
   workspacePath: string
   sessionId?: string
   messageId?: number
+  /** Durable conversation turn that owns this tool invocation. */
+  turn?: number
+  /** Model tool-call id used to attach durable child workflows to their parent row. */
+  toolCallId?: string
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean

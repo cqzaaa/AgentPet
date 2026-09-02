@@ -14,6 +14,10 @@ import { taskRunner } from '../../../task-runtime/task-runner'
 import type { TaskPlanInputStep } from '../../../task-runtime/types'
 import { buildUnknownTaskStepFeedback, listTaskStepReferences } from '../../../task-runtime/tool-feedback'
 import { skillRegistry } from '../../../skills/skill-registry'
+import {
+  startManagedPptMasterPreparation,
+  waitForManagedPptMasterPreparation
+} from '../../../skills/managed-skill-runtime'
 import { subagentRunner } from '../../../task-runtime/subagent-runner'
 import { SUBAGENT_ROLES, type DelegateTaskInput } from '../../../task-runtime/types'
 
@@ -80,6 +84,9 @@ export class SystemExecutor implements IToolExecutor {
           title,
           explanation: typeof args.explanation === 'string' ? args.explanation.trim().slice(0, 500) : undefined,
           workspacePath: context.workspacePath || undefined,
+          parentTurn: context.turn,
+          parentMessageId: context.messageId === undefined ? undefined : String(context.messageId),
+          parentToolCallId: context.toolCallId,
           steps
         })
 
@@ -159,7 +166,7 @@ export class SystemExecutor implements IToolExecutor {
         }))
         const title = String(args.title || args.goal || 'Delegated task group').trim().slice(0, 120)
         const maxConcurrency = Math.max(1, Math.min(6, Number(args.maxConcurrency) || 3))
-        const result = await subagentRunner.delegate(context.sessionId || 'default', context.messageId, title, tasks, maxConcurrency, context.workspacePath, context.abortSignal)
+        const result = await subagentRunner.delegate(context.sessionId || 'default', context.messageId, context.turn, context.toolCallId, title, tasks, maxConcurrency, context.workspacePath, context.abortSignal)
         return { content: JSON.stringify(result), state: result, success: result.status === 'completed' }
       }
 
@@ -176,13 +183,68 @@ export class SystemExecutor implements IToolExecutor {
         if (skills.length === 0 || !reason) {
           return { content: 'request_skill requires one to three skills and a reason.', success: false }
         }
-        const result = await skillRegistry.requestSkills(skills, context.sessionId, context.messageId)
+        const readySkills: typeof skills = []
+        const preparing: Array<Record<string, unknown>> = []
+        for (const skill of skills) {
+          if (skill.id === 'ppt-master' && (!skill.sections || skill.sections.length === 0)) {
+            const preparation = startManagedPptMasterPreparation()
+            if (preparation.status === 'installed') {
+              readySkills.push(skill)
+            } else {
+              preparing.push({
+                id: skill.id,
+                status: preparation.status,
+                operationId: preparation.operationId,
+                startedAt: preparation.startedAt,
+                message: preparation.status === 'preparing'
+                  ? 'PPT Master 正在后台完成首次安装。请调用 wait_skill_ready 等待并激活该 Skill。'
+                  : preparation.error
+              })
+            }
+          } else {
+            readySkills.push(skill)
+          }
+        }
+        const result = readySkills.length > 0
+          ? await skillRegistry.requestSkills(readySkills, context.sessionId, context.messageId)
+          : { loaded: [], rejected: [], remainingSkillBudget: 16_000 }
         const allowedToolNames = [...new Set(result.loaded.flatMap(skill => skill.allowedTools))]
         return {
-          content: JSON.stringify({ reason, ...result }),
+          content: JSON.stringify({ reason, ...result, preparing }),
           state: {
             loadedSkillIds: result.loaded.map(skill => skill.id),
-            allowedToolNames
+            allowedToolNames,
+            pendingSkillIds: preparing.map(skill => String(skill.id))
+          },
+          success: result.loaded.length > 0 || preparing.length > 0
+        }
+      }
+
+      if (api === 'wait_skill_ready') {
+        const id = String(args.id || '').trim()
+        if (id !== 'ppt-master') {
+          return { content: 'wait_skill_ready only supports a pending ppt-master installation.', success: false }
+        }
+        const timeoutSeconds = Math.max(1, Math.min(600, Number(args.timeout_seconds) || 180))
+        const preparation = await waitForManagedPptMasterPreparation({
+          timeoutMs: timeoutSeconds * 1000,
+          abortSignal: context.abortSignal
+        })
+        if (preparation.status !== 'installed') {
+          return {
+            content: JSON.stringify({ id, ...preparation }),
+            state: { pendingSkillIds: preparation.status === 'preparing' ? [id] : [] },
+            success: preparation.status === 'preparing'
+          }
+        }
+        const result = await skillRegistry.requestSkills([{ id }], context.sessionId, context.messageId)
+        const allowedToolNames = [...new Set(result.loaded.flatMap(skill => skill.allowedTools))]
+        return {
+          content: JSON.stringify({ id, status: 'installed', ...result }),
+          state: {
+            loadedSkillIds: result.loaded.map(skill => skill.id),
+            allowedToolNames,
+            pendingSkillIds: []
           },
           success: result.loaded.length > 0
         }
@@ -469,7 +531,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

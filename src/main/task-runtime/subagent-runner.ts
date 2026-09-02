@@ -12,6 +12,8 @@ export class SubagentRunner {
   public async delegate(
     parentSessionId: string,
     parentMessageId: string | number | undefined,
+    parentTurn: number | undefined,
+    parentToolCallId: string | undefined,
     title: string,
     inputs: DelegateTaskInput[],
     maxConcurrency = 3,
@@ -24,6 +26,9 @@ export class SubagentRunner {
       title,
       explanation: `Delegated to ${normalized.length} sub-agent task${normalized.length === 1 ? '' : 's'}.`,
       workspacePath: workspacePath || undefined,
+      parentTurn,
+      parentMessageId: parentMessageId === undefined ? undefined : String(parentMessageId),
+      parentToolCallId,
       steps: normalized.map(input => ({
         id: input.id,
         title: input.title,

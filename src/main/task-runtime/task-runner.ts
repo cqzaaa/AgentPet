@@ -11,7 +11,14 @@ import { buildTaskStepPrompt } from './prompt-builder'
 import { getReadyPendingSteps, validateTaskDependencies } from './task-scheduler'
 
 export type TaskControlAction = 'pause' | 'resume' | 'cancel'
-export type TaskRunUpdate = { taskRunId: string; run: TaskRun; steps: TaskStep[]; action: string }
+export type TaskRunUpdate = {
+  taskRunId: string
+  run: TaskRun
+  steps: TaskStep[]
+  action: string
+  taskStepId?: string
+  payload?: Record<string, unknown>
+}
 
 type ActiveExecution = {
   controller: AbortController
@@ -62,7 +69,7 @@ export class TaskRunner {
   public async retryStep(taskRunId: string, taskStepId: string) {
     const result = await this.store.retryStep(taskRunId, taskStepId)
     if (result) {
-      await this.publish(taskRunId, 'retry_step')
+      await this.publish(taskRunId, 'retry_step', taskStepId)
       this.executeInBackground(taskRunId)
     }
     return result
@@ -131,7 +138,7 @@ export class TaskRunner {
           ? 'running'
           : 'pending'
     await this.store.setRunStatus(taskRunId, nextRunStatus, `step_${status}`)
-    await this.publish(taskRunId, `step_${status}`)
+    await this.publish(taskRunId, `step_${status}`, taskStepId)
     return this.store.getRun(taskRunId)
   }
 
@@ -151,8 +158,8 @@ export class TaskRunner {
     return this.store.getRun(snapshot.run.id)
   }
 
-  public notify(taskRunId: string, action: string): Promise<void> {
-    return this.publish(taskRunId, action)
+  public notify(taskRunId: string, action: string, taskStepId?: string, payload?: Record<string, unknown>): Promise<void> {
+    return this.publish(taskRunId, action, taskStepId, payload)
   }
 
   public executeRun(taskRunId: string, options: { maxConcurrency?: number } = {}): Promise<TaskRun | null> {
@@ -209,7 +216,7 @@ export class TaskRunner {
   private async executeStep(run: TaskRun, step: TaskStep, allSteps: TaskStep[], signal: AbortSignal): Promise<void> {
     if (!this.executor || signal.aborted) return
     await this.store.setStepStatus(run.id, step.id, 'running', { detail: 'Agent is working on this step.' })
-    await this.publish(run.id, 'step_running')
+    await this.publish(run.id, 'step_running', step.id)
     try {
       const completedSteps = allSteps.filter(candidate => candidate.status === 'completed')
       const result: TaskStepExecutionResult = await this.executor({
@@ -220,7 +227,7 @@ export class TaskRunner {
         signal,
         reportProgress: async (detail: string) => {
           await this.store.setStepStatus(run.id, step.id, 'running', { detail })
-          await this.publish(run.id, 'step_progress')
+          await this.publish(run.id, 'step_progress', step.id)
         }
       })
       if (signal.aborted) throw new Error('TaskExecutionAborted')
@@ -229,13 +236,13 @@ export class TaskRunner {
         resultSummary: result.resultSummary,
         artifactPaths: result.artifactPaths || []
       })
-      await this.publish(run.id, 'step_completed')
+      await this.publish(run.id, 'step_completed', step.id)
     } catch (error) {
       const latest = await this.store.getRun(run.id)
       if (signal.aborted || latest?.run.status === 'paused' || latest?.run.status === 'cancelled') {
         const nextStatus = latest?.run.status === 'cancelled' ? 'cancelled' : 'pending'
         await this.store.setStepStatus(run.id, step.id, nextStatus, { detail: nextStatus === 'pending' ? 'Paused at checkpoint; ready to resume.' : 'Cancelled.' })
-        await this.publish(run.id, nextStatus)
+        await this.publish(run.id, nextStatus, step.id)
         return
       }
       const message = error instanceof Error ? error.message : String(error)
@@ -245,18 +252,18 @@ export class TaskRunner {
           detail: `Attempt ${retryCount + 1} failed: ${message}. Retrying from checkpoint.`,
           incrementRetry: true
         })
-        await this.publish(run.id, 'step_retrying')
+        await this.publish(run.id, 'step_retrying', step.id)
       } else {
         await this.store.setStepStatus(run.id, step.id, 'failed', { detail: message, resultSummary: message })
-        await this.publish(run.id, 'step_failed')
+        await this.publish(run.id, 'step_failed', step.id)
       }
     }
   }
 
-  private async publish(taskRunId: string, action: string): Promise<void> {
+  private async publish(taskRunId: string, action: string, taskStepId?: string, payload?: Record<string, unknown>): Promise<void> {
     const snapshot = await this.store.getRun(taskRunId)
     if (!snapshot) return
-    const update = { taskRunId, run: snapshot.run, steps: snapshot.steps, action }
+    const update = { taskRunId, run: snapshot.run, steps: snapshot.steps, action, taskStepId, payload }
     for (const listener of this.listeners) {
       try { listener(update) } catch (error) { console.error('[TaskRunner] update listener failed', error) }
     }

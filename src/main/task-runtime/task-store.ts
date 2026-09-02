@@ -36,13 +36,13 @@ export class TaskStore {
     await this.withTransaction(database, async () => {
       if (existing) {
         await database.run(
-          'UPDATE task_runs SET title = ?, status = ?, explanation = ?, workspace_path = COALESCE(?, workspace_path), updated_at = ?, completed_at = ? WHERE id = ?',
-          plan.title, status, plan.explanation || null, plan.workspacePath || null, now, completedAt, id
+          'UPDATE task_runs SET title = ?, status = ?, explanation = ?, workspace_path = COALESCE(?, workspace_path), parent_turn = COALESCE(?, parent_turn), parent_message_id = COALESCE(?, parent_message_id), parent_tool_call_id = COALESCE(?, parent_tool_call_id), updated_at = ?, completed_at = ? WHERE id = ?',
+          plan.title, status, plan.explanation || null, plan.workspacePath || null, plan.parentTurn ?? null, plan.parentMessageId || null, plan.parentToolCallId || null, now, completedAt, id
         )
       } else {
         await database.run(
-          'INSERT INTO task_runs (id, session_id, message_id, title, status, explanation, workspace_path, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          id, sessionId, messageId || null, plan.title, status, plan.explanation || null, plan.workspacePath || null, now, now, completedAt
+          'INSERT INTO task_runs (id, session_id, message_id, parent_turn, parent_message_id, parent_tool_call_id, title, status, explanation, workspace_path, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          id, sessionId, messageId || null, plan.parentTurn ?? null, plan.parentMessageId || null, plan.parentToolCallId || null, plan.title, status, plan.explanation || null, plan.workspacePath || null, now, now, completedAt
         )
       }
 
@@ -74,7 +74,7 @@ export class TaskStore {
       await this.insertEvent(database, id, undefined, existing ? 'plan_updated' : 'plan_created', { status, stepCount: plan.steps.length }, now)
       await this.saveCheckpoint(database, id, { status, plan }, now)
     })
-    return { id, sessionId, messageId, title: plan.title, status, explanation: plan.explanation, workspacePath: plan.workspacePath || existing?.workspace_path || undefined, createdAt: existing?.created_at || now, updatedAt: now, completedAt: completedAt || undefined }
+    return { id, sessionId, messageId, parentTurn: plan.parentTurn ?? existing?.parent_turn ?? undefined, parentMessageId: plan.parentMessageId || existing?.parent_message_id || undefined, parentToolCallId: plan.parentToolCallId || existing?.parent_tool_call_id || undefined, title: plan.title, status, explanation: plan.explanation, workspacePath: plan.workspacePath || existing?.workspace_path || undefined, createdAt: existing?.created_at || now, updatedAt: now, completedAt: completedAt || undefined }
   }
 
   public async checkpointActiveRuns(): Promise<void> {
@@ -255,7 +255,8 @@ export class TaskStore {
     await this.database.exec(`
       CREATE TABLE IF NOT EXISTS task_runs (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL,
-        explanation TEXT, workspace_path TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+        explanation TEXT, workspace_path TEXT, parent_turn INTEGER, parent_message_id TEXT, parent_tool_call_id TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_session_message ON task_runs(session_id, message_id);
       CREATE INDEX IF NOT EXISTS idx_task_runs_status_updated ON task_runs(status, updated_at DESC);
@@ -292,6 +293,9 @@ export class TaskStore {
     await this.ensureColumn(this.database, 'task_steps', 'agent_role', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'prompt', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'workspace_path', 'TEXT')
+    await this.ensureColumn(this.database, 'task_runs', 'parent_turn', 'INTEGER')
+    await this.ensureColumn(this.database, 'task_runs', 'parent_message_id', 'TEXT')
+    await this.ensureColumn(this.database, 'task_runs', 'parent_tool_call_id', 'TEXT')
     return this.database
   }
 
@@ -319,7 +323,7 @@ export class TaskStore {
   }
 
   private mapRun(row: TaskRow): TaskRun {
-    return { id: row.id, sessionId: row.session_id, messageId: row.message_id || undefined, title: row.title, status: row.status, explanation: row.explanation || undefined, workspacePath: row.workspace_path || undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at || undefined }
+    return { id: row.id, sessionId: row.session_id, messageId: row.message_id || undefined, parentTurn: row.parent_turn === null || row.parent_turn === undefined ? undefined : Number(row.parent_turn), parentMessageId: row.parent_message_id || undefined, parentToolCallId: row.parent_tool_call_id || undefined, title: row.title, status: row.status, explanation: row.explanation || undefined, workspacePath: row.workspace_path || undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at || undefined }
   }
 
   private mapStep(row: TaskRow): TaskStep {

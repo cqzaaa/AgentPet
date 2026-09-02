@@ -251,9 +251,17 @@ function parseInlineMarkdown(text: string): string {
 }
 
 function normalizeLocalFileUrl(value: string): string {
-  if (value.startsWith('file:///')) return value.replace('file:///', 'local-file:///')
-  if (/^[A-Za-z]:[/\\]/.test(value)) return `local-file:///${value.replace(/\\/g, '/')}`
-  return value
+  const trimmed = value.trim()
+  const destination = trimmed.startsWith('<') && trimmed.endsWith('>')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed
+  if (destination.startsWith('file:///')) {
+    return destination.replace('file:///', 'local-file:///')
+  }
+  if (/^[A-Za-z]:[/\\]/.test(destination)) {
+    return `local-file:///${destination.replace(/\\/g, '/')}`
+  }
+  return destination
 }
 
 function localFileDisplayName(value: string): string {

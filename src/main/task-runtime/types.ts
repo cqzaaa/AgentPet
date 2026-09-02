@@ -26,6 +26,9 @@ export interface TaskPlanInput {
   title: string
   explanation?: string
   workspacePath?: string
+  parentTurn?: number
+  parentMessageId?: string
+  parentToolCallId?: string
   steps: TaskPlanInputStep[]
 }
 
@@ -33,6 +36,9 @@ export interface TaskRun {
   id: string
   sessionId: string
   messageId?: string
+  parentTurn?: number
+  parentMessageId?: string
+  parentToolCallId?: string
   title: string
   status: TaskRunStatus
   explanation?: string

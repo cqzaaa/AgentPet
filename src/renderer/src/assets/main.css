@@ -260,7 +260,7 @@ body {
   height: 100vh;
   display: flex;
   background: var(--bg-app);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
   color: var(--text-primary);
   overflow: hidden;
   box-sizing: border-box;
@@ -7903,6 +7903,41 @@ body {
 /* 4. ofv-viewport 是内容滚动区，覆盖蓝灰色背景 */
 .file-preview-viewer-container .ofv-viewport {
   background: var(--bg-card, #ffffff) !important;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* Preview scrollbars need a real pointer target. The global 5px scrollbar is
+   suitable for compact lists but is too narrow for long Office documents. */
+.file-preview-viewer-container::-webkit-scrollbar,
+.file-preview-viewer-container .ofv-viewport::-webkit-scrollbar,
+.file-preview-viewer-container .ofv-msdoc-document::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.file-preview-viewer-container::-webkit-scrollbar-track,
+.file-preview-viewer-container .ofv-viewport::-webkit-scrollbar-track,
+.file-preview-viewer-container .ofv-msdoc-document::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--bg-content, #f1f5f9) 72%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--border-color, #d1d5db) 65%, transparent);
+}
+
+.file-preview-viewer-container::-webkit-scrollbar-thumb,
+.file-preview-viewer-container .ofv-viewport::-webkit-scrollbar-thumb,
+.file-preview-viewer-container .ofv-msdoc-document::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 3px solid transparent;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 55%, var(--text-muted, #64748b));
+  background-clip: padding-box;
+}
+
+.file-preview-viewer-container::-webkit-scrollbar-thumb:hover,
+.file-preview-viewer-container .ofv-viewport::-webkit-scrollbar-thumb:hover,
+.file-preview-viewer-container .ofv-msdoc-document::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent-color, #4f8cff) 78%, var(--text-muted, #64748b));
+  background-clip: padding-box;
 }
 
 /* 5. Word/Office 文档容器（ofv-msdoc-document）—— 去掉蓝灰色衬底 */

@@ -130,6 +130,7 @@ function pptMasterSkill(): BuiltinSkillDefinition {
         'For every documented `python3 ${SKILL_DIR}/scripts/<name>.py ...` command, call run_python with script_path set to that absolute script, arguments as an array, cwd set to the project workspace, and a suitable timeout_seconds. Never invoke python or pip through run_terminal_command.',
         'AgentPet lazily provisions PPT Master Python dependencies the first time a bundled PPT Master script is executed.',
         'The loaded PPT Master workflow is an explicit exception to the ordinary rule that PPTX generation must only use run_office_skill. Use run_office_skill afterward when its render, inspect, validate, or PowerPoint-native PDF export operation is useful.',
+        'Hard routing rule: while this Skill is loaded, never call run_office_skill with action=create and skill=pptx. That lightweight creator produces a basic text deck and bypasses this Skill. Follow the routed workflow with read_file and run_python, then use Office only for post-generation inspection, rendering, validation, or conversion.',
         'Use AgentPet web_search/web_fetch for factual research. If the workflow requests a host-native image generator but none is active, use licensed web imagery or proceed with native shapes instead of inventing an unavailable image tool.',
         '',
         instructions

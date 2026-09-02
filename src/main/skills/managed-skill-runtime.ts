@@ -13,13 +13,23 @@ const PPT_MASTER_GITCODE_URL = 'https://gitcode.com/hugohe3/ppt-master.git'
 const PPT_MASTER_CODELOAD_URL = `https://codeload.github.com/hugohe3/ppt-master/zip/refs/tags/${PPT_MASTER_RELEASE_VERSION}`
 let pptMasterInstallPromise: Promise<string> | null = null
 
+export type ManagedPptMasterPreparation = {
+  operationId: 'ppt-master-install'
+  status: 'installed' | 'preparing' | 'failed'
+  root: string
+  startedAt?: string
+  error?: string
+}
+
+let pptMasterPreparation: ManagedPptMasterPreparation | null = null
+
 export function getManagedSkillRoot(name: string): string {
   const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '')
   const version = safeName === 'ppt-master' ? PPT_MASTER_CACHE_VERSION : 'current'
   return join(app.getPath('userData'), 'managed-skills', safeName, version)
 }
 
-async function isValidPptMasterInstall(root: string): Promise<boolean> {
+function isValidPptMasterInstall(root: string): boolean {
   const requiredFiles = [
     'SKILL.md',
     'requirements.txt',
@@ -153,12 +163,111 @@ async function installPptMaster(): Promise<string> {
 }
 
 export async function ensureManagedPptMaster(): Promise<string> {
+  const preparation = startManagedPptMasterPreparation()
+  if (preparation.status === 'installed') return preparation.root
+  const installPromise = pptMasterInstallPromise
+  if (!installPromise) {
+    throw new Error(preparation.error || 'PPT Master installation did not start')
+  }
+  return await installPromise
+}
+
+export function getManagedPptMasterPreparation(): ManagedPptMasterPreparation {
   const root = getManagedSkillRoot('ppt-master')
-  if (await isValidPptMasterInstall(root)) return root
+  if (isValidPptMasterInstall(root)) {
+    pptMasterPreparation = {
+      operationId: 'ppt-master-install',
+      status: 'installed',
+      root
+    }
+  }
+  return pptMasterPreparation || {
+    operationId: 'ppt-master-install',
+    status: 'failed',
+    root,
+    error: 'PPT Master has not been prepared'
+  }
+}
+
+export function startManagedPptMasterPreparation(): ManagedPptMasterPreparation {
+  const root = getManagedSkillRoot('ppt-master')
+  if (isValidPptMasterInstall(root)) {
+    pptMasterPreparation = {
+      operationId: 'ppt-master-install',
+      status: 'installed',
+      root
+    }
+    return pptMasterPreparation
+  }
+
   if (!pptMasterInstallPromise) {
-    pptMasterInstallPromise = installPptMaster().finally(() => {
-      pptMasterInstallPromise = null
+    const startedAt = new Date().toISOString()
+    pptMasterPreparation = {
+      operationId: 'ppt-master-install',
+      status: 'preparing',
+      root,
+      startedAt
+    }
+    const installPromise = installPptMaster()
+    pptMasterInstallPromise = installPromise
+    void installPromise.then(installedRoot => {
+      pptMasterPreparation = {
+        operationId: 'ppt-master-install',
+        status: 'installed',
+        root: installedRoot,
+        startedAt
+      }
+    }, error => {
+      pptMasterPreparation = {
+        operationId: 'ppt-master-install',
+        status: 'failed',
+        root,
+        startedAt,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }).finally(() => {
+      if (pptMasterInstallPromise === installPromise) pptMasterInstallPromise = null
     })
   }
-  return await pptMasterInstallPromise
+  return getManagedPptMasterPreparation()
+}
+
+export async function waitForManagedPptMasterPreparation(options: {
+  timeoutMs: number
+  abortSignal?: AbortSignal
+}): Promise<ManagedPptMasterPreparation> {
+  const preparation = startManagedPptMasterPreparation()
+  if (preparation.status === 'installed') return preparation
+
+  const installPromise = pptMasterInstallPromise
+  if (!installPromise) return getManagedPptMasterPreparation()
+
+  let timer: NodeJS.Timeout | undefined
+  let abortHandler: (() => void) | undefined
+  const waiters: Promise<unknown>[] = [installPromise]
+  if (options.timeoutMs > 0) {
+    waiters.push(new Promise(resolve => {
+      timer = setTimeout(resolve, options.timeoutMs)
+    }))
+  }
+  if (options.abortSignal) {
+    waiters.push(new Promise((_, reject) => {
+      abortHandler = () => reject(new Error('UserAborted'))
+      options.abortSignal!.addEventListener('abort', abortHandler!, { once: true })
+      if (options.abortSignal!.aborted) abortHandler()
+    }))
+  }
+
+  try {
+    await Promise.race(waiters)
+  } catch (error) {
+    if (error instanceof Error && error.message === 'UserAborted') throw error
+    return getManagedPptMasterPreparation()
+  } finally {
+    if (timer) clearTimeout(timer)
+    if (abortHandler && options.abortSignal) {
+      options.abortSignal.removeEventListener('abort', abortHandler)
+    }
+  }
+  return getManagedPptMasterPreparation()
 }

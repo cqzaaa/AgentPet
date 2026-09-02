@@ -11,6 +11,7 @@ import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/mem
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
 import { skillRegistry } from '../skills/skill-registry'
+import { startManagedPptMasterPreparation } from '../skills/managed-skill-runtime'
 import { isSimpleSingleFileMutationRequest } from './tool-routing'
 import { taskRunner } from '../task-runtime/task-runner'
 import {
@@ -18,7 +19,9 @@ import {
   activateAllowedTools,
   createInitialActiveToolNames,
   filterToolDefinitions,
-  inferPreloadedSkillIds
+  inferPreloadedSkillIds,
+  isPptMasterRequest,
+  shouldBlockBasicOfficePptxCreate
 } from './skill-tool-routing'
 
 type WebMemorySource = {
@@ -781,6 +784,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       contextWindow?: number
       sessionId?: string
       messageId?: number
+      traceTurn?: number
       isBackground?: boolean
       disableTools?: boolean
       allowedToolNames?: string[]
@@ -1029,13 +1033,27 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     const activeToolNames = createInitialActiveToolNames({
       availableToolNames: availableToolNameSet
     })
+    const activeSkillIds = new Set<string>()
     const localToolNames = new Set(Object.keys(toolRegistry.getAllToolsInfo()))
     for (const name of availableToolNameSet) {
       // This migration classifies every local built-in. External MCP tools keep
       // their existing exposure until MCP servers gain first-class Skill metadata.
       if (!localToolNames.has(name)) activeToolNames.add(name)
     }
-    const preloadedSkillIds = inferPreloadedSkillIds(latestUserText)
+    const recentConversationText = chatHistory
+      .filter(message => message.role === 'user' || message.role === 'assistant')
+      .slice(-6)
+      .map(message => messageText(message))
+      .join('\n')
+    const requiresPptMaster = isPptMasterRequest(recentConversationText)
+    const inferredPreloadedSkillIds = inferPreloadedSkillIds(recentConversationText)
+    let pptMasterPreparing = false
+    const preloadedSkillIds = inferredPreloadedSkillIds.filter(id => {
+      if (id !== 'ppt-master') return true
+      const preparation = startManagedPptMasterPreparation()
+      pptMasterPreparing = preparation.status !== 'installed'
+      return preparation.status === 'installed'
+    })
     const preloadedSkillInstructions: string[] = []
     const preloadedSkills = preloadedSkillIds.length > 0
       ? await skillRegistry.requestSkills(
@@ -1045,6 +1063,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         )
       : { loaded: [] }
     for (const skill of preloadedSkills.loaded) {
+      activeSkillIds.add(skill.id)
       const activated = activateAllowedTools(
         activeToolNames,
         skill.allowedTools,
@@ -1058,6 +1077,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
     if (preloadedSkillInstructions.length > 0 && typeof chatHistory[0]?.content === 'string') {
       chatHistory[0].content += `\n\n${preloadedSkillInstructions.join('\n\n')}\nThese Skills are already loaded for this turn. Do not call request_skill for them.`
+    }
+    if (pptMasterPreparing && typeof chatHistory[0]?.content === 'string') {
+      chatHistory[0].content += '\n\n<required_managed_skill id="ppt-master" status="preparing">This presentation-design request requires PPT Master. Call request_skill for ppt-master, then call wait_skill_ready exactly once if it is still preparing. Do not use run_office_skill create as a fallback.</required_managed_skill>'
     }
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
     if (simpleSingleFileMutation && typeof chatHistory[0]?.content === 'string') {
@@ -1408,6 +1430,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
               const required = Array.isArray(parameterSchema?.required) ? parameterSchema.required.join(', ') : ''
               toolResult = `[工具参数校验失败] ${toolName} 的参数不完整或类型错误${required ? `；必填字段：${required}` : ''}。请根据工具 Schema 重新生成完整参数后重试，不要重复发送空对象。`
               toolSuccess = false
+            } else if (shouldBlockBasicOfficePptxCreate(activeSkillIds, toolName, toolArgs, requiresPptMaster)) {
+              toolResult = '[PPT Master 路由保护] 当前任务要求 PPT 美化/专业设计，不能用 run_office_skill(create, pptx) 生成基础文本型演示文稿。若 ppt-master 尚未加载，请先调用 request_skill；随后严格执行其工作流，使用 read_file 读取路由文件并用 run_python 调用 Skill 脚本完成设计、SVG 构建和 PPTX 导出。run_office_skill 仅用于生成后的 inspect、render、validate 或 convert。'
+              toolSuccess = false
             } else if (config.dedupeMutatingToolCalls && inputFingerprint && successfulInputFingerprints.has(inputFingerprint)) {
               toolResult = '[操作去重] 已阻止对同一焦点重复输入相同文本。上一次输入工具已成功返回；只有在截图明确证明失败后，才应重新定位目标并重试。'
               toolSuccess = false
@@ -1449,6 +1474,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                     workspacePath: workspacePath || '',
                     sessionId,
                     messageId: config.messageId,
+                    turn: config.traceTurn,
+                    toolCallId: toolCall.id,
                     isFrontend,
                     sandboxMode: !!sandboxMode,
                     event,
@@ -1470,6 +1497,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 workspacePath: workspacePath || '',
                 sessionId,
                 messageId: config.messageId,
+                turn: config.traceTurn,
+                toolCallId: toolCall.id,
                 isFrontend,
                 sandboxMode: !!sandboxMode,
                 event,
@@ -1565,7 +1594,10 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
             )
             if (destination) artifactCandidates.set(artifactKey(destination.path), destination)
           }
-          if (res.toolSuccess && res.toolName === 'request_skill') {
+          if (res.toolSuccess && (res.toolName === 'request_skill' || res.toolName === 'wait_skill_ready')) {
+            for (const skillId of Array.isArray(res.toolState?.loadedSkillIds) ? res.toolState.loadedSkillIds : []) {
+              if (typeof skillId === 'string' && skillId) activeSkillIds.add(skillId)
+            }
             const activated = activateAllowedTools(
               activeToolNames,
               Array.isArray(res.toolState?.allowedToolNames) ? res.toolState.allowedToolNames : [],

@@ -776,13 +776,21 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   agentWindow.webContents.on('did-attach-webview', (_event, guest) => {
     guest.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://')) void shell.openExternal(url)
+      if (url.startsWith('https://')) {
+        void shell.openExternal(url).catch(error => {
+          console.error('[SkillHub] 打开外部链接失败:', error)
+        })
+      }
       return { action: 'deny' }
     })
     const guardSkillHubNavigation = (event: Electron.Event, url: string): void => {
       if (!isAllowedSkillHubUrl(url)) {
         event.preventDefault()
-        if (url.startsWith('https://')) void shell.openExternal(url)
+        if (url.startsWith('https://')) {
+          void shell.openExternal(url).catch(error => {
+            console.error('[SkillHub] 打开外部链接失败:', error)
+          })
+        }
       }
     }
     guest.on('will-navigate', guardSkillHubNavigation)
@@ -818,7 +826,13 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
 
   // 让链接在系统浏览器中打开，而不是弹出新窗口
   agentWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (/^https?:\/\//i.test(details.url)) {
+      void shell.openExternal(details.url).catch(error => {
+        console.error('[AgentWindow] 打开外部链接失败:', error)
+      })
+    } else {
+      console.warn('[AgentWindow] 已拦截非网页新窗口地址:', details.url)
+    }
     return { action: 'deny' }
   })
 
@@ -1093,7 +1107,13 @@ function createWindow(): void {
   })
 
   win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (/^https?:\/\//i.test(details.url)) {
+      void shell.openExternal(details.url).catch(error => {
+        console.error('[MainWindow] 打开外部链接失败:', error)
+      })
+    } else {
+      console.warn('[MainWindow] 已拦截非网页新窗口地址:', details.url)
+    }
     return { action: 'deny' }
   })
 
@@ -1343,10 +1363,14 @@ app.whenReady().then(() => {
     void sessionEventStore.append(update.run.sessionId, {
       type: `subagent/${update.action}`,
       source: 'subagent',
+      turn: update.run.parentTurn,
+      messageId: update.run.parentMessageId || update.run.messageId,
       correlationId: update.taskRunId,
       data: sanitizeTraceValue({
         taskRunId: update.taskRunId,
+        taskStepId: update.taskStepId,
         action: update.action,
+        activity: update.payload,
         run: update.run,
         steps: update.steps
       }) as Record<string, unknown>
@@ -4686,6 +4710,27 @@ app.whenReady().then(() => {
       let finalResponse = ''
       const generatedPaths: string[] = []
       const executionController = new AbortController()
+      let modelRequestCount = 0
+      const pendingModelRequests = new Map<number, {
+        metadata: Record<string, unknown>
+        fallbackRequest: Record<string, unknown>
+      }>()
+      const modelRequestMetadata = new Map<number, Record<string, unknown>>()
+      const emittedModelRequests = new Set<number>()
+      const parseStructuredTraceValue = (value: unknown): unknown => {
+        if (typeof value !== 'string') return value
+        try { return JSON.parse(value) } catch { return value }
+      }
+      const emitModelRequest = async (stepNumber: number, requestPayload: unknown): Promise<void> => {
+        if (emittedModelRequests.has(stepNumber)) return
+        emittedModelRequests.add(stepNumber)
+        const pending = pendingModelRequests.get(stepNumber)
+        pendingModelRequests.delete(stepNumber)
+        await taskRunner.notify(request.run.id, 'model_call', request.step.id, {
+          ...(pending?.metadata || {}),
+          request: sanitizeTraceValue(requestPayload)
+        })
+      }
       const cancelExecution = (): void => executionController.abort()
       request.signal.addEventListener('abort', cancelExecution, { once: true })
       await request.reportProgress('等待子 Agent 模型响应')
@@ -4705,16 +4750,76 @@ app.whenReady().then(() => {
           const next = await nextWithIdleTimeout(iterator, SUBAGENT_IDLE_TIMEOUT_MS, cancelExecution)
           if (next.done) break
           const step = next.value
+          if (step.type === 'request_start') {
+            modelRequestCount += 1
+            const metadata = {
+                index: modelRequestCount,
+                provider: systemLlmConfig.provider,
+                model: systemLlmConfig.model,
+                messageCount: Array.isArray(step.messages) ? step.messages.length : 0,
+                toolCount: Array.isArray(step.options?.tools) ? step.options.tools.length : 0,
+                startedAt: Date.now()
+            }
+            modelRequestMetadata.set(step.step, metadata)
+            pendingModelRequests.set(step.step, {
+              metadata,
+              fallbackRequest: {
+                model: step.options?.model || systemLlmConfig.model,
+                messages: sanitizeTraceValue(step.messages),
+                temperature: step.options?.temperature,
+                stream: true,
+                stream_options: { include_usage: true },
+                ...(step.options?.maxTokens !== undefined ? { max_tokens: step.options.maxTokens } : {}),
+                ...(Array.isArray(step.options?.tools) ? { tools: sanitizeTraceValue(step.options.tools) } : {}),
+                ...(step.options?.tool_choice !== undefined ? { tool_choice: step.options.tool_choice } : {})
+              }
+            })
+          }
+          if (step.type === 'model_request') {
+            await emitModelRequest(step.step, step.request)
+          }
+          if (step.type === 'model_response') {
+            await taskRunner.notify(request.run.id, 'model_response', request.step.id, {
+              ...(modelRequestMetadata.get(step.step) || {}),
+              response: sanitizeTraceValue(step.response),
+              completedAt: Date.now()
+            })
+          }
           if (step.type === 'text') finalResponse = step.content
           if (step.type === 'generated_files') generatedPaths.push(...step.files.map(file => file.path))
           if (step.type === 'think') await request.reportProgress('子 Agent 正在推理')
-          if (step.type === 'tool_call') await request.reportProgress(`正在调用工具：${step.name}`)
-          if (step.type === 'tool_result') await request.reportProgress(`${step.name} 已完成，等待模型继续`)
+          if (step.type === 'tool_call') {
+            const kind = toolRegistry.getManifest(step.name) ? 'tool' : 'mcp'
+            await taskRunner.notify(request.run.id, 'tool_call', request.step.id, {
+              callId: step.id,
+              name: step.name,
+              kind,
+              arguments: sanitizeTraceValue(step.args)
+            })
+            await request.reportProgress(`正在调用工具：${step.name}`)
+          }
+          if (step.type === 'tool_result') {
+            const kind = toolRegistry.getManifest(step.name) ? 'tool' : 'mcp'
+            const modelResult = step.modelResult ?? step.result
+            await taskRunner.notify(request.run.id, 'tool_result', request.step.id, {
+              callId: step.callId,
+              name: step.name,
+              kind,
+              result: sanitizeTraceValue(parseStructuredTraceValue(modelResult)),
+              ...(step.modelResult !== undefined && step.modelResult !== step.result
+                ? { displayResult: sanitizeTraceValue(parseStructuredTraceValue(step.result)) }
+                : {})
+            })
+            await request.reportProgress(`${step.name} 已完成，等待模型继续`)
+          }
           if (step.type === 'text_delta' && !writingReported) {
             writingReported = true
             await request.reportProgress('子 Agent 正在生成结果')
           }
           if (step.type === 'error') throw new Error(step.message)
+        }
+        for (const [stepNumber, pending] of pendingModelRequests) {
+          await emitModelRequest(stepNumber, pending.fallbackRequest)
         }
       } finally {
         request.signal.removeEventListener('abort', cancelExecution)
@@ -4804,6 +4909,7 @@ app.whenReady().then(() => {
       const stepStream = executor.run(
         {
           ...config,
+          traceTurn,
           sandboxMode: sandboxMode,
           event,
           onTraceEvent: async (traceEvent: {

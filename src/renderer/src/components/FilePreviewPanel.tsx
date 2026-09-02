@@ -1032,7 +1032,7 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
                   {previewLoading && (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', zIndex: 10, color: 'var(--text-muted)', fontSize: '12px' }}>加载中...</div>
                   )}
-                  <div ref={handleViewerNode} className="file-preview-viewer-container" style={{ position: 'absolute', inset: 0, overflow: 'auto' }} />
+                  <div ref={handleViewerNode} className="file-preview-viewer-container" style={{ position: 'absolute', inset: 0, overflow: 'auto', scrollbarGutter: 'stable' }} />
                 </div>
               </div>
             </>

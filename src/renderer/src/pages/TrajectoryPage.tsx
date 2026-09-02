@@ -1,6 +1,6 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Virtuoso } from 'react-virtuoso'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import {
   Activity,
   Bot,
@@ -62,14 +62,16 @@ function typesForFilter(filter: FilterId): string[] | undefined {
   return undefined
 }
 
-function sourcesForFilter(filter: FilterId): TraceSource[] | undefined {
-  return filter === 'subagent' ? ['subagent'] : undefined
+function sourcesForFilter(_filter: FilterId): TraceSource[] | undefined {
+  // The sub-agent view also needs the parent delegate_tasks tool call so the
+  // complete durable event group can render as one expandable workflow.
+  return undefined
 }
 
 function matchesFilter(event: TraceEvent, filter: FilterId): boolean {
   if (event.type === 'request/header') return false
   if (filter === 'all') return true
-  if (filter === 'subagent') return event.type.startsWith('subagent/')
+  if (filter === 'subagent') return event.type.startsWith('subagent/') || isDelegateCall(event)
   const types = typesForFilter(filter)
   return Boolean(types?.includes(event.type))
 }
@@ -150,7 +152,14 @@ function eventSummary(event: TraceEvent): string {
   }
   if (event.type === 'mcp/error') return `${data.server?.name || 'MCP'} · ${mcpTransportLabel(data.server?.transport || data.server?.configuredTransport)} · ${data.error?.message || '请求失败'}`
   if (event.type === 'usage/tokens') return `输入 ${data.promptTokens || 0} · 输出 ${data.completionTokens || 0} tokens`
-  if (event.type.startsWith('subagent/')) return `${data.action || event.type.slice(9)} · ${data.run?.title || data.taskRunId || ''}`
+  if (event.type.startsWith('subagent/')) {
+    const step = Array.isArray(data.steps)
+      ? data.steps.find((candidate: unknown) =>
+          Boolean(candidate && typeof candidate === 'object' && (candidate as { id?: unknown }).id === data.taskStepId))
+      : undefined
+    const scope = step?.title || data.run?.title || data.taskRunId || ''
+    return `${data.action || event.type.slice(9)} · ${scope}`
+  }
   if (event.type.startsWith('compaction/')) return `${data.beforeTokens || 0} → ${data.afterTokens || '—'} tokens`
   if (event.type === 'turn/start') return `${data.provider || ''} ${data.model || ''}`.trim() || '开始执行'
   if (event.type === 'turn/end') return `结束原因：${data.reason || 'completed'}`
@@ -223,6 +232,13 @@ function timelineLane(event: TraceEvent): 0 | 1 | 2 {
 
 function timelineDuration(events: TraceEvent[], index: number): number {
   const event = events[index]
+  if (event.type === 'subagent/step_running' && event.data?.taskStepId) {
+    const result = events.slice(index + 1).find(candidate =>
+      candidate.correlationId === event.correlationId &&
+      candidate.data?.taskStepId === event.data.taskStepId &&
+      ['subagent/step_completed', 'subagent/step_failed', 'subagent/step_retrying', 'subagent/cancelled'].includes(candidate.type))
+    return result ? Math.max(0, result.time - event.time) : 0
+  }
   if (event.type === 'tool/call') {
     const result = events.slice(index + 1).find(candidate =>
       candidate.type === 'tool/result' && candidate.correlationId === event.correlationId)
@@ -244,6 +260,564 @@ function timelineDuration(events: TraceEvent[], index: number): number {
     return Math.max(0, (events[index + 1]?.time || event.time) - event.time)
   }
   return 0
+}
+
+function isDelegateCall(event: TraceEvent): boolean {
+  return event.type === 'tool/call' && event.data?.name === 'delegate_tasks'
+}
+
+function parseTaskRunId(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const taskRunId = (value as Record<string, unknown>).taskRunId
+    if (typeof taskRunId === 'string') return taskRunId
+  }
+  if (typeof value !== 'string') return ''
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object') return ''
+    const taskRunId = (parsed as Record<string, unknown>).taskRunId
+    return typeof taskRunId === 'string' ? taskRunId : ''
+  } catch {
+    return ''
+  }
+}
+
+type WorkflowTaskData = {
+  id?: unknown
+  title?: unknown
+  role?: unknown
+  type?: unknown
+  agentRole?: unknown
+  dependencies?: unknown
+  status?: unknown
+  detail?: unknown
+  startedAt?: unknown
+  completedAt?: unknown
+  prompt?: unknown
+  goal?: unknown
+  acceptanceCriteria?: unknown
+  resultSummary?: unknown
+  artifactPaths?: unknown
+}
+
+function workflowTaskList(value: unknown): WorkflowTaskData[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is WorkflowTaskData => Boolean(item && typeof item === 'object'))
+    : []
+}
+
+function delegateEvents(call: TraceEvent, events: TraceEvent[]): TraceEvent[] {
+  const explicit = events.filter(event =>
+    event.type.startsWith('subagent/') && event.data?.run?.parentToolCallId === call.correlationId)
+  if (explicit.length > 0) return explicit
+
+  const result = events.find(event => event.type === 'tool/result' && event.correlationId === call.correlationId)
+  const taskRunId = parseTaskRunId(result?.data?.displayResult) || parseTaskRunId(result?.data?.modelResult)
+  if (taskRunId) return events.filter(event => event.type.startsWith('subagent/') && event.correlationId === taskRunId)
+
+  // Compatibility for traces written before parentToolCallId was persisted.
+  const title = String(call.data?.arguments?.title || call.data?.arguments?.goal || '')
+  return events.filter(event =>
+    event.type.startsWith('subagent/') &&
+    event.turn === call.turn &&
+    event.time >= call.time &&
+    (!title || event.data?.run?.title === title))
+}
+
+function workflowStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: '等待', running: '运行中', paused: '已暂停', completed: '完成',
+    failed: '失败', blocked: '阻塞', cancelled: '取消'
+  }
+  return labels[status] || status || '等待'
+}
+
+function workflowRoleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    general: '通用执行', researcher: '研究分析', coder: '代码实现', reviewer: '审核验证'
+  }
+  return labels[role] || role || '通用执行'
+}
+
+function subagentTraceLabel(type: string): string {
+  const labels: Record<string, string> = {
+    'subagent/step_running': '开始执行',
+    'subagent/model_call': '模型网络请求',
+    'subagent/model_response': '模型返回报文',
+    'subagent/tool_call': '工具调用',
+    'subagent/tool_result': '工具返回结果',
+    'subagent/step_retrying': '准备重试',
+    'subagent/step_completed': '执行完成',
+    'subagent/step_failed': '执行失败',
+    'subagent/blocked': '任务阻塞',
+    'subagent/cancelled': '任务取消'
+  }
+  return labels[type] || '状态更新'
+}
+
+function DelegateWorkflow({
+  call,
+  events,
+  expanded,
+  selected,
+  onToggle,
+  onFocus
+}: {
+  call: TraceEvent
+  events: TraceEvent[]
+  expanded: boolean
+  selected: boolean
+  onToggle: () => void
+  onFocus: () => void
+}): React.JSX.Element | null {
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [selectedTraceSeq, setSelectedTraceSeq] = useState<number | null>(null)
+  const [parameterTaskId, setParameterTaskId] = useState<string | null>(null)
+  const [detailAnchor, setDetailAnchor] = useState<{
+    x: number
+    y: number
+    horizontal: 'left' | 'right'
+    vertical: 'up' | 'down'
+  } | null>(null)
+  const [callPayloadAnchor, setCallPayloadAnchor] = useState<{
+    x: number
+    y: number
+    horizontal: 'left' | 'right'
+    vertical: 'up' | 'down'
+  } | null>(null)
+  const [callPayloadPosition, setCallPayloadPosition] = useState<{ left: number; top: number } | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+  const workflowRef = useRef<HTMLElement>(null)
+  const callPayloadRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!fullscreen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setFullscreen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [fullscreen])
+  useEffect(() => {
+    if (!selectedTaskId && !parameterTaskId && !callPayloadAnchor) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setSelectedTaskId(null)
+        setParameterTaskId(null)
+        setCallPayloadAnchor(null)
+      }
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [callPayloadAnchor, parameterTaskId, selectedTaskId])
+  useLayoutEffect(() => {
+    if (!callPayloadAnchor || !callPayloadRef.current) return
+    const placeWithinViewport = (): void => {
+      const rect = callPayloadRef.current!.getBoundingClientRect()
+      const gap = 12
+      const preferredLeft = callPayloadAnchor.horizontal === 'left'
+        ? callPayloadAnchor.x - rect.width - gap
+        : callPayloadAnchor.x + gap
+      const preferredTop = callPayloadAnchor.vertical === 'up'
+        ? callPayloadAnchor.y - rect.height - gap
+        : callPayloadAnchor.y + gap
+      setCallPayloadPosition({
+        left: Math.max(gap, Math.min(window.innerWidth - rect.width - gap, preferredLeft)),
+        top: Math.max(gap, Math.min(window.innerHeight - rect.height - gap, preferredTop))
+      })
+    }
+    placeWithinViewport()
+    window.addEventListener('resize', placeWithinViewport)
+    return () => window.removeEventListener('resize', placeWithinViewport)
+  }, [callPayloadAnchor])
+  const toggleTaskDetail = (taskId: string): void => {
+    onFocus()
+    if (selectedTaskId === taskId) {
+      setSelectedTaskId(null)
+      setSelectedTraceSeq(null)
+      return
+    }
+    setCallPayloadAnchor(null)
+    setParameterTaskId(null)
+    setSelectedTraceSeq(null)
+    setSelectedTaskId(taskId)
+  }
+  const openTaskParameters = (taskId: string, event: React.MouseEvent<HTMLButtonElement>): void => {
+    onFocus()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const pointerX = event.clientX || rect.left + rect.width / 2
+    const pointerY = event.clientY || rect.top + rect.height / 2
+    const x = Math.max(12, Math.min(window.innerWidth - 12, pointerX))
+    const y = Math.max(12, Math.min(window.innerHeight - 12, pointerY))
+    setSelectedTaskId(null)
+    setCallPayloadAnchor(null)
+    setDetailAnchor({
+      x,
+      y,
+      horizontal: x > window.innerWidth / 2 ? 'left' : 'right',
+      vertical: y > window.innerHeight / 2 ? 'up' : 'down'
+    })
+    setParameterTaskId(taskId)
+  }
+  const openCallPayload = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    onFocus()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const pointerX = event.clientX || rect.left + rect.width / 2
+    const pointerY = event.clientY || rect.top + rect.height / 2
+    const x = Math.max(12, Math.min(window.innerWidth - 12, pointerX))
+    const y = Math.max(12, Math.min(window.innerHeight - 12, pointerY))
+    setSelectedTaskId(null)
+    setCallPayloadPosition(null)
+    setCallPayloadAnchor({
+      x,
+      y,
+      horizontal: x > window.innerWidth / 2 ? 'left' : 'right',
+      vertical: y > window.innerHeight / 2 ? 'up' : 'down'
+    })
+  }
+  const related = delegateEvents(call, events)
+  const args = call.data?.arguments || {}
+  const rawTasks = workflowTaskList(Array.isArray(args.tasks) ? args.tasks : args.subtasks)
+  const latestWithSteps = [...related].reverse().find(event => Array.isArray(event.data?.steps))
+  const persistedSteps = workflowTaskList(latestWithSteps?.data?.steps)
+  const persistedById = new Map(persistedSteps.map(step => [String(step.id), step]))
+  const sourceTasks = rawTasks.length > 0 ? rawTasks : persistedSteps
+  if (sourceTasks.length === 0) return null
+
+  const tasks = sourceTasks.map((task, index) => {
+    const id = String(task.id || `agent-${index + 1}`)
+    const persisted = persistedById.get(id) || task
+    const taskEvents = related.filter(event => event.data?.taskStepId === id)
+    const runningEvent = taskEvents.find(event => event.type === 'subagent/step_running')
+    const terminalEvent = [...taskEvents].reverse().find(event =>
+      ['subagent/step_completed', 'subagent/step_failed', 'subagent/cancelled', 'subagent/blocked'].includes(event.type))
+    const dependencies = Array.isArray(task.dependencies)
+      ? task.dependencies
+      : Array.isArray(persisted.dependencies) ? persisted.dependencies : []
+    return {
+      payload: task,
+      id,
+      title: String(task.title || persisted.title || id),
+      role: String(task.role || task.type || persisted.agentRole || 'general'),
+      dependencies: dependencies.map(String),
+      status: String(persisted.status || (runningEvent ? 'running' : 'pending')),
+      detail: String(persisted.detail || ''),
+      prompt: String(task.prompt || task.goal || persisted.prompt || persisted.goal || ''),
+      acceptanceCriteria: String(task.acceptanceCriteria || persisted.acceptanceCriteria || ''),
+      resultSummary: String(persisted.resultSummary || ''),
+      artifactPaths: Array.isArray(persisted.artifactPaths) ? persisted.artifactPaths.map(String) : [],
+      startedAt: Number(persisted.startedAt || runningEvent?.time || 0),
+      completedAt: Number(persisted.completedAt || terminalEvent?.time || 0),
+      events: taskEvents
+    }
+  })
+
+  const stages = new Map<string, number>()
+  const taskById = new Map(tasks.map(task => [task.id, task]))
+  const stageFor = (id: string, visiting = new Set<string>()): number => {
+    if (stages.has(id)) return stages.get(id)!
+    if (visiting.has(id)) return 1
+    const task = taskById.get(id)
+    if (!task || task.dependencies.length === 0) { stages.set(id, 1); return 1 }
+    const nextVisiting = new Set(visiting).add(id)
+    const stage = 1 + Math.max(0, ...task.dependencies.map(dependency => stageFor(dependency, nextVisiting)))
+    stages.set(id, stage)
+    return stage
+  }
+  tasks.forEach(task => stageFor(task.id))
+
+  const latestRun = [...related].reverse().find(event => event.data?.run)?.data?.run
+  const groupStart = Math.min(call.time, ...tasks.map(task => task.startedAt).filter(Boolean))
+  const groupEnd = Math.max(
+    groupStart + 1,
+    Number(latestRun?.completedAt || 0),
+    ...tasks.map(task => task.completedAt || task.startedAt).filter(Boolean),
+    ...related.map(event => event.time)
+  )
+  const span = Math.max(1, groupEnd - groupStart)
+  const intervals = tasks.filter(task => task.startedAt).map(task => ({
+    start: task.startedAt,
+    end: task.completedAt || groupEnd
+  }))
+  const points = intervals.flatMap(interval => [{ time: interval.start, delta: 1 }, { time: interval.end, delta: -1 }])
+    .sort((a, b) => a.time - b.time || a.delta - b.delta)
+  let active = 0
+  let peak = 0
+  points.forEach(point => { active += point.delta; peak = Math.max(peak, active) })
+  const maxConcurrency = Math.max(1, Math.min(6, Number(args.maxConcurrency) || 3))
+  const stageCount = Math.max(...tasks.map(task => stages.get(task.id) || 1))
+  const stageGroups = Array.from({ length: stageCount }, (_, index) => ({
+    stage: index + 1,
+    tasks: tasks.filter(task => (stages.get(task.id) || 1) === index + 1)
+  }))
+  const completed = tasks.filter(task => task.status === 'completed').length
+  const groupStatus = String(latestRun?.status || (completed === tasks.length ? 'completed' : related.length ? 'running' : 'pending'))
+  const selectedTask = tasks.find(task => task.id === selectedTaskId)
+  const parameterTask = tasks.find(task => task.id === parameterTaskId)
+  const selectedTaskTrace = selectedTask?.events.filter(event => [
+    'subagent/step_running',
+    'subagent/model_call',
+    'subagent/model_response',
+    'subagent/tool_call',
+    'subagent/tool_result',
+    'subagent/step_retrying',
+    'subagent/step_completed',
+    'subagent/step_failed',
+    'subagent/blocked',
+    'subagent/cancelled'
+  ].includes(event.type)) || []
+  const selectedTraceEvent = selectedTaskTrace.find(event => event.seq === selectedTraceSeq)
+  const selectedTraceActivity = selectedTraceEvent?.data?.activity
+  const selectedTracePayload: unknown = selectedTraceEvent
+    ? (selectedTraceActivity?.request
+        ?? selectedTraceActivity?.response
+        ?? selectedTraceActivity?.arguments
+        ?? selectedTraceActivity?.result
+        ?? selectedTraceActivity) || {
+        action: selectedTraceEvent.data?.action,
+        taskStepId: selectedTraceEvent.data?.taskStepId,
+        status: selectedTraceEvent.data?.run?.status,
+        time: selectedTraceEvent.time
+      }
+    : null
+
+  const workflowContent = (
+    <section ref={workflowRef} className={`delegate-workflow status-${groupStatus} ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${fullscreen ? 'is-app-fullscreen' : ''}`} aria-label={`子任务工作流：${String(args.title || latestRun?.title || '')}`}>
+      <div className="delegate-workflow-head">
+        <button className="delegate-workflow-toggle" onClick={() => { onFocus(); onToggle() }} aria-expanded={expanded}>
+          <span className="workflow-head-icon"><GitBranch size={14} /></span>
+          <span className="workflow-head-copy">
+            <strong>{String(args.title || latestRun?.title || '子任务工作流')}</strong>
+            <small>委派任务 {String(call.seq).padStart(4, '0')} · {tasks.length} 个子任务 · {stageCount} 个依赖阶段</small>
+          </span>
+          <span className={`workflow-parallel-badge ${peak > 1 ? 'is-parallel' : ''}`}>
+            {peak > 1 ? `实际并行峰值 ${peak}` : related.length ? '当前串行执行' : `最多并行 ${maxConcurrency}`}
+          </span>
+          <span className={`workflow-group-status status-${groupStatus}`}>{workflowStatusLabel(groupStatus)} {completed}/{tasks.length}</span>
+          <ChevronRight className="workflow-expand-icon" size={15} />
+        </button>
+        <button className="workflow-inspect-button" onClick={openCallPayload}>调用参数</button>
+        <button
+          className="workflow-fullscreen-button"
+          onClick={() => {
+            onFocus()
+            if (!expanded) onToggle()
+            setFullscreen(current => !current)
+          }}
+          aria-label={fullscreen ? '退出全屏' : '全屏查看流程图'}
+          title={fullscreen ? '退出全屏' : '全屏查看'}
+        >
+          {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      </div>
+      {expanded && (
+        <div className="delegate-workflow-body">
+          <div className="workflow-flow" aria-label="子任务依赖流程图">
+            <span className="workflow-terminal start">开始</span>
+            {stageGroups.map(group => (
+              <React.Fragment key={group.stage}>
+                <span className="workflow-flow-arrow" aria-hidden="true"><i /><ChevronRight size={13} /></span>
+                <section className="workflow-flow-stage" aria-label={`阶段 ${group.stage}`}>
+                  <header>阶段 {group.stage} · {group.tasks.length > 1 ? `${group.tasks.length} 项并行` : '串行节点'}</header>
+                  {group.tasks.map(task => (
+                    <button
+                      key={task.id}
+                      className={`workflow-flow-node status-${task.status} ${parameterTaskId === task.id ? 'selected' : ''}`}
+                      onClick={event => openTaskParameters(task.id, event)}
+                      aria-expanded={parameterTaskId === task.id}
+                    >
+                      <span><i />{task.title}</span>
+                      <small>{workflowRoleLabel(task.role)}{task.dependencies.length ? ` · 依赖 ${task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}` : ''}</small>
+                    </button>
+                  ))}
+                </section>
+              </React.Fragment>
+            ))}
+            <span className="workflow-flow-arrow" aria-hidden="true"><i /><ChevronRight size={13} /></span>
+            <span className={`workflow-terminal end status-${groupStatus}`}>{workflowStatusLabel(groupStatus)}</span>
+          </div>
+          <div className="workflow-runtime-title"><span>实际运行时间</span><i />时间条重叠表示真实并行</div>
+          <div className="workflow-axis" aria-hidden="true">
+            <span>任务 / 依赖</span>
+            <div><i>开始</i><b /><i>{formatDuration(span)}</i></div>
+          </div>
+          <div className="workflow-lanes">
+            {tasks.map(task => {
+              const stage = stages.get(task.id) || 1
+              const left = task.startedAt ? ((task.startedAt - groupStart) / span) * 100 : 0
+              const width = task.startedAt ? ((task.completedAt || groupEnd) - task.startedAt) / span * 100 : 0
+              return (
+                <React.Fragment key={task.id}>
+                  <button
+                    className={`workflow-lane status-${task.status} ${selectedTaskId === task.id ? 'selected' : ''}`}
+                    onClick={() => toggleTaskDetail(task.id)}
+                    aria-expanded={selectedTaskId === task.id}
+                  >
+                  <div className="workflow-task-copy">
+                    <span className="workflow-stage">阶段 {stage}</span>
+                    <span className="workflow-task-title" title={task.title}>{task.title}</span>
+                    <span className="workflow-role">{workflowRoleLabel(task.role)}</span>
+                    {task.dependencies.length > 0 && <small title={`等待：${task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}`}>等待 {task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}</small>}
+                  </div>
+                  <div className="workflow-time-track" title={task.detail || task.title}>
+                    <i className="workflow-grid-line one-third" />
+                    <i className="workflow-grid-line two-thirds" />
+                    {task.startedAt ? (
+                      <span className="workflow-time-bar" style={{ left: `${left}%`, width: `${Math.max(.8, width)}%` }}>
+                        <b>{workflowStatusLabel(task.status)}</b>
+                      </span>
+                    ) : (
+                      <span className="workflow-waiting-mark"><b>{workflowStatusLabel(task.status)}</b></span>
+                    )}
+                  </div>
+                  <span className="workflow-lane-meta">
+                    <time>{task.startedAt ? formatDuration((task.completedAt || groupEnd) - task.startedAt) : '—'}</time>
+                    <ChevronRight size={12} />
+                  </span>
+                  </button>
+                  {selectedTaskId === task.id && selectedTask && (
+                    <section className="workflow-lane-detail" aria-label={`${selectedTask.title} 调用详情`}>
+                      <header>
+                        <span><small>子任务 · {selectedTask.id}</small><strong>{selectedTask.title}</strong></span>
+                        <button onClick={() => { setSelectedTaskId(null); setSelectedTraceSeq(null) }} aria-label="收起子任务详情"><X size={13} /></button>
+                      </header>
+                      <div className={`workflow-task-trace-layout ${selectedTraceEvent ? 'with-payload' : ''}`}>
+                        <ol className="workflow-task-call-trace">
+                          {selectedTaskTrace.length > 0 ? selectedTaskTrace.map(taskEvent => {
+                            const activity = taskEvent.data?.activity
+                            const isModelRequest = taskEvent.type === 'subagent/model_call'
+                            const isModelResponse = taskEvent.type === 'subagent/model_response'
+                            const isToolCall = taskEvent.type === 'subagent/tool_call'
+                            const isToolResult = taskEvent.type === 'subagent/tool_result'
+                            const isModel = isModelRequest || isModelResponse
+                            const isTool = isToolCall || isToolResult
+                            const isMcp = isTool && activity?.kind === 'mcp'
+                            const title = isModel
+                              ? `${subagentTraceLabel(taskEvent.type)} ${Number(activity?.index) || ''}`.trim()
+                              : isTool
+                                ? `${String(activity?.name || '工具')}${isToolResult ? ' · 返回结果' : ''}`
+                                : subagentTraceLabel(taskEvent.type)
+                            const detail = isModel
+                              ? [activity?.provider, activity?.model, activity?.messageCount ? `${activity.messageCount} 条消息` : ''].filter(Boolean).join(' · ')
+                              : isTool
+                                ? `${isMcp ? 'MCP 工具' : '本地工具'}${isToolResult ? '返回报文' : '调用参数'}`
+                                : workflowStatusLabel(String(taskEvent.data?.run?.status || 'running'))
+                            return (
+                              <li key={taskEvent.seq} className={`${isModelRequest ? 'model' : isModelResponse ? 'model-response' : isMcp ? 'mcp' : isToolResult ? 'tool-result' : isTool ? 'tool' : 'status'} ${selectedTraceSeq === taskEvent.seq ? 'selected' : ''}`}>
+                                <button onClick={() => setSelectedTraceSeq(current => current === taskEvent.seq ? null : taskEvent.seq)} aria-expanded={selectedTraceSeq === taskEvent.seq}>
+                                  <span className="workflow-call-trace-icon">{isModel ? <Bot size={12} /> : isTool ? <TerminalSquare size={12} /> : <GitBranch size={12} />}</span>
+                                  <span><strong>{title}</strong><small>{detail || '执行状态更新'}</small></span>
+                                  <time>{formatClock(taskEvent.time)}</time>
+                                  <ChevronRight size={12} />
+                                </button>
+                              </li>
+                            )
+                          }) : (
+                            <li className="empty"><span><strong>暂无详细调用记录</strong><small>历史任务未采集模型与工具调用摘要</small></span></li>
+                          )}
+                        </ol>
+                        {selectedTraceEvent && (
+                          <aside className="workflow-trace-payload" aria-label={`${subagentTraceLabel(selectedTraceEvent.type)} JSON 负载`}>
+                            <header><strong>JSON 负载</strong><button onClick={() => setSelectedTraceSeq(null)} aria-label="关闭 JSON 负载"><X size={12} /></button></header>
+                            <StructuredPayload
+                              key={selectedTraceEvent.seq}
+                              value={selectedTracePayload}
+                              eventType={selectedTraceEvent.type}
+                              initialDepth={2}
+                              hint="JSON 负载"
+                              showConsumedLegend={false}
+                              alwaysShowHorizontalAxis
+                              fullscreenTitle="调用事件负载"
+                            />
+                          </aside>
+                        )}
+                      </div>
+                    </section>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </div>
+          <div className="workflow-foot">
+            <span><i className="legend parallel" />时间条重叠 = 并行</span>
+            <span><i className="legend dependency" />“等待”关系 = 串行依赖</span>
+            <code>并发上限 {maxConcurrency}</code>
+          </div>
+        </div>
+      )}
+      {parameterTask && createPortal(
+        <div className="workflow-task-detail-backdrop" role="presentation" onMouseDown={() => setParameterTaskId(null)}>
+          <section
+            className={`workflow-task-detail anchor-${detailAnchor?.horizontal || 'right'}-${detailAnchor?.vertical || 'down'}`}
+            style={{
+              '--workflow-detail-x': `${detailAnchor?.x ?? window.innerWidth / 2}px`,
+              '--workflow-detail-y': `${detailAnchor?.y ?? window.innerHeight / 2}px`
+            } as React.CSSProperties}
+            role="dialog"
+            aria-label={`${parameterTask.title} 任务参数`}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <small>子任务 · {parameterTask.id}</small>
+                <strong>{parameterTask.title}</strong>
+              </div>
+              <button onClick={() => setParameterTaskId(null)} aria-label="关闭任务参数"><X size={13} /></button>
+            </header>
+            <StructuredPayload
+              key={parameterTask.id}
+              value={parameterTask.payload}
+              eventType="subagent/task_detail"
+              initialDepth={0}
+              hint="JSON 负载"
+              showConsumedLegend={false}
+              alwaysShowHorizontalAxis
+              fullscreenTitle="任务参数"
+            />
+          </section>
+        </div>,
+        document.querySelector<HTMLElement>('.agent-window-container') || document.body
+      )}
+      {callPayloadAnchor && createPortal(
+        <div className="workflow-task-detail-backdrop" role="presentation" onMouseDown={() => setCallPayloadAnchor(null)}>
+          <section
+            ref={callPayloadRef}
+            className={`workflow-task-detail workflow-call-payload anchor-${callPayloadAnchor.horizontal}-${callPayloadAnchor.vertical}`}
+            style={{
+              '--workflow-detail-x': `${callPayloadPosition?.left ?? callPayloadAnchor.x}px`,
+              '--workflow-detail-y': `${callPayloadPosition?.top ?? callPayloadAnchor.y}px`,
+              visibility: callPayloadPosition ? 'visible' : 'hidden'
+            } as React.CSSProperties}
+            role="dialog"
+            aria-label="delegate_tasks 调用参数"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <small>工具调用 · delegate_tasks</small>
+                <strong>调用参数</strong>
+              </div>
+              <button onClick={() => setCallPayloadAnchor(null)} aria-label="关闭调用参数"><X size={13} /></button>
+            </header>
+            <StructuredPayload
+              value={call.data?.arguments ?? {}}
+              eventType="tool/call"
+              initialDepth={20}
+              hint="JSON 负载"
+              showConsumedLegend={false}
+              alwaysShowHorizontalAxis
+              fullscreenTitle="调用参数"
+            />
+          </section>
+        </div>,
+        document.querySelector<HTMLElement>('.agent-window-container') || document.body
+      )}
+    </section>
+  )
+  if (!fullscreen) return workflowContent
+  return createPortal(
+    <div className="workflow-fullscreen-backdrop">{workflowContent}</div>,
+    document.querySelector<HTMLElement>('.agent-window-container') || document.body
+  )
 }
 
 function EventIcon({ event }: { event: TraceEvent }): React.JSX.Element {
@@ -286,10 +860,10 @@ function collectContainerPaths(value: unknown, path = '$', paths = new Set<strin
   return paths
 }
 
-function initiallyExpandedPaths(value: unknown, path = '$', depth = 0, paths = new Set<string>()): Set<string> {
+function initiallyExpandedPaths(value: unknown, path = '$', depth = 0, maxDepth = 2, paths = new Set<string>()): Set<string> {
   if (!isContainer(value)) return paths
-  if (depth <= 2) paths.add(path)
-  Object.entries(value).forEach(([key, child]) => initiallyExpandedPaths(child, `${path}.${key}`, depth + 1, paths))
+  if (depth <= maxDepth) paths.add(path)
+  Object.entries(value).forEach(([key, child]) => initiallyExpandedPaths(child, `${path}.${key}`, depth + 1, maxDepth, paths))
   return paths
 }
 
@@ -352,7 +926,9 @@ function JsonTreeNode({
   path,
   eventType,
   expanded,
-  onToggle
+  onToggle,
+  copiedPath,
+  onOpenContextMenu
 }: {
   value: unknown
   label?: string
@@ -360,13 +936,34 @@ function JsonTreeNode({
   eventType: string
   expanded: Set<string>
   onToggle: (path: string) => void
+  copiedPath: string | null
+  onOpenContextMenu: (position: { x: number; y: number }, path: string, label: string, value: unknown) => void
 }): React.JSX.Element {
   const pathKey = path.length ? `$.${path.join('.')}` : '$'
   const consumed = isConsumedPayloadPath(eventType, path)
   if (!isContainer(value)) {
     return (
       <div className={`json-tree-leaf ${consumed ? 'frontend-consumed' : ''}`} role="treeitem">
-        {label !== undefined && <span className="json-key">{label}:</span>}
+        {label !== undefined && (
+          <span
+            className={`json-key json-key-context ${copiedPath === pathKey ? 'copied' : ''}`}
+            title="右键查看操作"
+            tabIndex={0}
+            aria-haspopup="menu"
+            onContextMenu={event => {
+              event.preventDefault()
+              onOpenContextMenu({ x: event.clientX, y: event.clientY }, pathKey, label, value)
+            }}
+            onKeyDown={event => {
+              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+              event.preventDefault()
+              const rect = event.currentTarget.getBoundingClientRect()
+              onOpenContextMenu({ x: rect.left, y: rect.bottom + 4 }, pathKey, label, value)
+            }}
+          >
+            {copiedPath === pathKey ? '已复制' : `${label}:`}
+          </span>
+        )}
         <JsonPrimitive value={value} />
       </div>
     )
@@ -378,13 +975,34 @@ function JsonTreeNode({
   const closing = Array.isArray(value) ? ']' : '}'
   return (
     <div className={`json-tree-branch ${consumed ? 'frontend-consumed' : ''}`} role="treeitem">
-      <button className="json-tree-toggle" onClick={() => onToggle(pathKey)} aria-expanded={open}>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {label !== undefined && <span className="json-key">{label}:</span>}
+      <div className="json-tree-toggle">
+        <button className="json-tree-expand" onClick={() => onToggle(pathKey)} aria-expanded={open} aria-label={open ? '折叠字段' : '展开字段'}>
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {label !== undefined && (
+          <span
+            className={`json-key json-key-context ${copiedPath === pathKey ? 'copied' : ''}`}
+            title="右键查看操作"
+            tabIndex={0}
+            aria-haspopup="menu"
+            onContextMenu={event => {
+              event.preventDefault()
+              onOpenContextMenu({ x: event.clientX, y: event.clientY }, pathKey, label, value)
+            }}
+            onKeyDown={event => {
+              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+              event.preventDefault()
+              const rect = event.currentTarget.getBoundingClientRect()
+              onOpenContextMenu({ x: rect.left, y: rect.bottom + 4 }, pathKey, label, value)
+            }}
+          >
+            {copiedPath === pathKey ? '已复制' : `${label}:`}
+          </span>
+        )}
         <span className="json-bracket">{opening}</span>
         {!open && <span className="json-folded">{entries.length} 项</span>}
         {!open && <span className="json-bracket">{closing}</span>}
-      </button>
+      </div>
       {open && (
         <div className="json-tree-children" role="group">
           {entries.map(([key, child]) => (
@@ -396,6 +1014,8 @@ function JsonTreeNode({
               eventType={eventType}
               expanded={expanded}
               onToggle={onToggle}
+              copiedPath={copiedPath}
+              onOpenContextMenu={onOpenContextMenu}
             />
           ))}
           <div className="json-tree-close">{closing}</div>
@@ -405,19 +1025,88 @@ function JsonTreeNode({
   )
 }
 
-function StructuredPayload({ value, eventType }: { value: unknown; eventType: string }): React.JSX.Element {
-  const [expanded, setExpanded] = useState<Set<string>>(() => initiallyExpandedPaths(value))
+function StructuredPayload({
+  value,
+  eventType,
+  initialDepth = 2,
+  hint = '红色为发送给前端渲染层的内容',
+  showConsumedLegend = true,
+  alwaysShowHorizontalAxis = false,
+  fullscreenTitle = '原始事件负载'
+}: {
+  value: unknown
+  eventType: string
+  initialDepth?: number
+  hint?: string
+  showConsumedLegend?: boolean
+  alwaysShowHorizontalAxis?: boolean
+  fullscreenTitle?: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState<Set<string>>(() => initiallyExpandedPaths(value, '$', 0, initialDepth))
   const [copied, setCopied] = useState(false)
+  const [copiedPath, setCopiedPath] = useState<string | null>(null)
+  const [keyContextMenu, setKeyContextMenu] = useState<{
+    x: number
+    y: number
+    path: string
+    label: string
+    value: unknown
+  } | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const treeRef = useRef<HTMLDivElement>(null)
-  const horizontalAxisRef = useRef<HTMLDivElement>(null)
-  const [horizontalMetrics, setHorizontalMetrics] = useState({ content: 0, viewport: 0 })
+  const copyFeedbackTimerRef = useRef<number | null>(null)
+  const [horizontalMetrics, setHorizontalMetrics] = useState({ content: 0, viewport: 0, offset: 0 })
   const toggle = (path: string): void => setExpanded(current => {
     const next = new Set(current)
     if (next.has(path)) next.delete(path)
     else next.add(path)
     return next
   })
+  const copyEntry = (path: string, label: string, entryValue: unknown): void => {
+    const serializedValue = JSON.stringify(entryValue, null, 2) ?? String(entryValue ?? '')
+    void copyTextToClipboard(`${JSON.stringify(label)}: ${serializedValue}`).then(() => {
+      setCopiedPath(path)
+      if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
+      copyFeedbackTimerRef.current = window.setTimeout(() => {
+        setCopiedPath(null)
+        copyFeedbackTimerRef.current = null
+      }, 1200)
+    }).catch(console.error)
+  }
+  const openKeyContextMenu = (
+    position: { x: number; y: number },
+    path: string,
+    label: string,
+    entryValue: unknown
+  ): void => {
+    setKeyContextMenu({
+      x: Math.max(8, Math.min(position.x, window.innerWidth - 150)),
+      y: Math.max(8, Math.min(position.y, window.innerHeight - 48)),
+      path,
+      label,
+      value: entryValue
+    })
+  }
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
+  }, [])
+  useEffect(() => {
+    if (!keyContextMenu) return
+    const close = (): void => setKeyContextMenu(null)
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close()
+    }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('blur', close)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [keyContextMenu])
   useEffect(() => {
     if (!fullscreen) return
     const closeOnEscape = (event: KeyboardEvent): void => {
@@ -431,8 +1120,7 @@ function StructuredPayload({ value, eventType }: { value: unknown; eventType: st
     const tree = treeRef.current
     if (!tree) return
     const update = (): void => {
-      setHorizontalMetrics({ content: tree.scrollWidth, viewport: tree.clientWidth })
-      if (horizontalAxisRef.current) horizontalAxisRef.current.scrollLeft = tree.scrollLeft
+      setHorizontalMetrics({ content: tree.scrollWidth, viewport: tree.clientWidth, offset: tree.scrollLeft })
     }
     const frame = window.requestAnimationFrame(update)
     const observer = new ResizeObserver(update)
@@ -442,11 +1130,16 @@ function StructuredPayload({ value, eventType }: { value: unknown; eventType: st
       observer.disconnect()
     }
   }, [expanded, fullscreen, value])
+  const horizontalMaximum = Math.max(0, horizontalMetrics.content - horizontalMetrics.viewport)
 
   const content = (
-    <div className={`payload-tree-content ${fullscreen ? 'is-fullscreen' : ''}`}>
+    <div className={`payload-tree-content ${fullscreen ? 'is-fullscreen' : ''} ${alwaysShowHorizontalAxis ? 'has-horizontal-axis' : ''}`}>
       <div className="payload-tree-toolbar">
-        <span>{fullscreen && <strong>原始事件负载</strong>}<i />红色为发送给前端渲染层的内容</span>
+        <span>
+          {fullscreen && <strong>{fullscreenTitle}</strong>}
+          {showConsumedLegend && <i />}
+          {(!fullscreen || hint !== fullscreenTitle) && hint}
+        </span>
         <div>
           <button
             className={copied ? 'copied' : ''}
@@ -476,16 +1169,21 @@ function StructuredPayload({ value, eventType }: { value: unknown; eventType: st
           </button>
         </div>
       </div>
-      {horizontalMetrics.content > horizontalMetrics.viewport + 1 && (
-        <div
-          ref={horizontalAxisRef}
-          className="payload-horizontal-axis"
-          aria-label="原始事件负载横向滚动"
-          onScroll={event => {
-            if (treeRef.current) treeRef.current.scrollLeft = event.currentTarget.scrollLeft
-          }}
-        >
-          <div style={{ width: horizontalMetrics.content }} />
+      {(alwaysShowHorizontalAxis || horizontalMetrics.content > horizontalMetrics.viewport + 1) && (
+        <div className="payload-horizontal-axis">
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, horizontalMaximum)}
+            value={Math.min(horizontalMetrics.offset, Math.max(1, horizontalMaximum))}
+            disabled={horizontalMaximum === 0}
+            aria-label="JSON 负载横向滚动"
+            onChange={event => {
+              const offset = Number(event.currentTarget.value)
+              if (treeRef.current) treeRef.current.scrollLeft = offset
+              setHorizontalMetrics(current => ({ ...current, offset }))
+            }}
+          />
         </div>
       )}
       <div
@@ -493,17 +1191,47 @@ function StructuredPayload({ value, eventType }: { value: unknown; eventType: st
         className="json-tree"
         role="tree"
         onScroll={event => {
-          if (horizontalAxisRef.current) horizontalAxisRef.current.scrollLeft = event.currentTarget.scrollLeft
+          const offset = event.currentTarget.scrollLeft
+          setHorizontalMetrics(current => current.offset === offset ? current : { ...current, offset })
         }}
       >
-        <JsonTreeNode value={value} path={[]} eventType={eventType} expanded={expanded} onToggle={toggle} />
+        <JsonTreeNode
+          value={value}
+          path={[]}
+          eventType={eventType}
+          expanded={expanded}
+          onToggle={toggle}
+          copiedPath={copiedPath}
+          onOpenContextMenu={openKeyContextMenu}
+        />
       </div>
+      {keyContextMenu && createPortal(
+        <div
+          className="json-key-context-menu"
+          role="menu"
+          style={{ left: keyContextMenu.x, top: keyContextMenu.y }}
+          onPointerDown={event => event.stopPropagation()}
+        >
+          <button
+            role="menuitem"
+            autoFocus
+            onClick={() => {
+              copyEntry(keyContextMenu.path, keyContextMenu.label, keyContextMenu.value)
+              setKeyContextMenu(null)
+            }}
+          >
+            <Copy size={12} />
+            复制键值对
+          </button>
+        </div>,
+        document.querySelector<HTMLElement>('.agent-window-container') || document.body
+      )}
     </div>
   )
   if (!fullscreen) return content
   return createPortal(
     <div className="payload-fullscreen-backdrop" role="presentation" onMouseDown={() => setFullscreen(false)}>
-      <section className="payload-fullscreen-dialog" role="dialog" aria-modal="true" aria-label="原始事件负载全屏查看" onMouseDown={event => event.stopPropagation()}>
+      <section className="payload-fullscreen-dialog" role="dialog" aria-modal="true" aria-label={`${fullscreenTitle}全屏查看`} onMouseDown={event => event.stopPropagation()}>
         {content}
       </section>
     </div>,
@@ -526,6 +1254,10 @@ export function TrajectoryPage(): React.JSX.Element {
   const [selectedFull, setSelectedFull] = useState<TraceEvent | null>(null)
   const [followTail, setFollowTail] = useState(true)
   const [collapsedTurns, setCollapsedTurns] = useState<Set<number>>(() => new Set())
+  const [expandedDelegates, setExpandedDelegates] = useState<Set<number>>(() => new Set())
+  const [highlightedSeq, setHighlightedSeq] = useState<number | null>(null)
+  const [pendingScrollSeq, setPendingScrollSeq] = useState<number | null>(null)
+  const ledgerRef = useRef<VirtuosoHandle>(null)
   const latestTurnRef = useRef<number | undefined>(undefined)
 
   const activeSession = sessions.find(session => session.id === activeSessionId)
@@ -619,23 +1351,37 @@ export function TrajectoryPage(): React.JSX.Element {
     }
   }, [activeSessionId, deferredQuery, events, filter, hasMore, loadingOlder])
 
+  const workflowInternalSeqs = useMemo(() => {
+    const hidden = new Set<number>()
+    for (const call of events.filter(isDelegateCall)) {
+      delegateEvents(call, events).forEach(event => hidden.add(event.seq))
+      const result = events.find(event => event.type === 'tool/result' && event.correlationId === call.correlationId)
+      if (result) hidden.add(result.seq)
+    }
+    return hidden
+  }, [events])
+  const mainTimelineEvents = useMemo(
+    () => events.filter(event => !workflowInternalSeqs.has(event.seq)),
+    [events, workflowInternalSeqs]
+  )
+
   const metrics = useMemo(() => {
     let tools = 0
     let requests = 0
     let errors = 0
-    for (const event of events) {
+    for (const event of mainTimelineEvents) {
       if (event.type === 'tool/call') tools += 1
       if (event.type === 'request/start') requests += 1
       if (event.type === 'error' || event.type === 'mcp/error') errors += 1
     }
-    const first = events[0]?.time
-    const last = events[events.length - 1]?.time
+    const first = mainTimelineEvents[0]?.time
+    const last = mainTimelineEvents[mainTimelineEvents.length - 1]?.time
     return { tools, requests, errors, duration: first && last ? last - first : 0 }
-  }, [events])
+  }, [mainTimelineEvents])
 
   const turnSummaries = useMemo(() => {
     const summaries = new Map<number, { count: number; start: number; end: number }>()
-    for (const event of events) {
+    for (const event of mainTimelineEvents) {
       if (event.turn === undefined) continue
       const current = summaries.get(event.turn)
       if (current) {
@@ -646,17 +1392,54 @@ export function TrajectoryPage(): React.JSX.Element {
       }
     }
     return summaries
-  }, [events])
+  }, [mainTimelineEvents])
   const turns = turnSummaries.size
+  const firstEventSeqByTurn = useMemo(() => {
+    const first = new Map<number, number>()
+    for (const event of mainTimelineEvents) {
+      if (event.turn !== undefined && !first.has(event.turn)) first.set(event.turn, event.seq)
+    }
+    return first
+  }, [mainTimelineEvents])
   const visibleEvents = useMemo(() => {
     const seenTurns = new Set<number>()
-    return events.filter(event => {
+    return mainTimelineEvents.filter(event => {
       if (event.turn === undefined) return true
       const firstInTurn = !seenTurns.has(event.turn)
       seenTurns.add(event.turn)
       return firstInTurn || !collapsedTurns.has(event.turn)
     })
-  }, [collapsedTurns, events])
+  }, [collapsedTurns, mainTimelineEvents])
+  const focusTimelineEvent = useCallback((event: TraceEvent): void => {
+    setFollowTail(false)
+    setSelected(isDelegateCall(event) ? null : event)
+    setHighlightedSeq(event.seq)
+    setPendingScrollSeq(event.seq)
+    if (event.turn !== undefined) {
+      setCollapsedTurns(current => {
+        if (!current.has(event.turn!)) return current
+        const next = new Set(current)
+        next.delete(event.turn!)
+        return next
+      })
+    }
+  }, [])
+  useEffect(() => {
+    if (pendingScrollSeq === null) return
+    const index = visibleEvents.findIndex(event => event.seq === pendingScrollSeq)
+    if (index < 0) return
+    let measureFrame = 0
+    const layoutFrame = window.requestAnimationFrame(() => {
+      measureFrame = window.requestAnimationFrame(() => {
+        ledgerRef.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' })
+        setPendingScrollSeq(null)
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(layoutFrame)
+      if (measureFrame) window.cancelAnimationFrame(measureFrame)
+    }
+  }, [pendingScrollSeq, visibleEvents])
   const selectedIndex = selected ? events.findIndex(event => event.seq === selected.seq) : -1
   const selectedDuration = selectedIndex >= 0 && selectedIndex < events.length - 1
     ? events[selectedIndex + 1].time - events[selectedIndex].time
@@ -706,37 +1489,38 @@ export function TrajectoryPage(): React.JSX.Element {
           <div
             className="timeline-track"
             onClick={(pointer) => {
-              if (events.length === 0) return
+              if (mainTimelineEvents.length === 0) return
               const rect = pointer.currentTarget.getBoundingClientRect()
               const fraction = Math.min(1, Math.max(0, (pointer.clientX - rect.left) / Math.max(1, rect.width)))
-              const start = events[0].time
-              const end = events[events.length - 1].time
+              const start = mainTimelineEvents[0].time
+              const end = mainTimelineEvents[mainTimelineEvents.length - 1].time
               const targetTime = start + fraction * Math.max(1, end - start)
-              const nearest = events.reduce((best, candidate) =>
+              const nearest = mainTimelineEvents.reduce((best, candidate) =>
                 Math.abs(candidate.time - targetTime) < Math.abs(best.time - targetTime) ? candidate : best)
-              setSelected(nearest)
+              focusTimelineEvent(nearest)
             }}
-            title={events.length > 0 ? `${formatClock(events[0].time)} → ${formatClock(events[events.length - 1].time)}` : '暂无时间数据'}
+            title={mainTimelineEvents.length > 0 ? `${formatClock(mainTimelineEvents[0].time)} → ${formatClock(mainTimelineEvents[mainTimelineEvents.length - 1].time)}` : '暂无时间数据'}
           >
-            {events.map((event, index) => {
-              if (index > 0 && events[index - 1].turn === event.turn) return null
-              const start = events[0]?.time || 0
-              const span = Math.max(1, (events[events.length - 1]?.time || 0) - start)
+            {mainTimelineEvents.map((event) => {
+              if (event.turn === undefined || firstEventSeqByTurn.get(event.turn) !== event.seq) return null
+              const start = mainTimelineEvents[0]?.time || 0
+              const span = Math.max(1, (mainTimelineEvents[mainTimelineEvents.length - 1]?.time || 0) - start)
               return <i key={`turn-${event.seq}`} className="timeline-turn-boundary" style={{ left: `${((event.time - start) / span) * 100}%` }} />
             })}
-            {events.map((event, index) => {
-              const start = events[0]?.time || 0
-              const span = Math.max(1, (events[events.length - 1]?.time || 0) - start)
-              const duration = timelineDuration(events, index)
+            {mainTimelineEvents.map((event) => {
+              const start = mainTimelineEvents[0]?.time || 0
+              const span = Math.max(1, (mainTimelineEvents[mainTimelineEvents.length - 1]?.time || 0) - start)
+              const rawIndex = events.findIndex(candidate => candidate.seq === event.seq)
+              const duration = rawIndex >= 0 ? timelineDuration(events, rawIndex) : 0
               const left = ((event.time - start) / span) * 100
               const width = (duration / span) * 100
               return (
                 <button
                   key={event.seq}
-                  className={`timeline-span lane-${timelineLane(event)} kind-${category(event)} ${duration === 0 ? 'point' : ''} ${selected?.seq === event.seq ? 'selected' : ''}`}
+                  className={`timeline-span lane-${timelineLane(event)} kind-${category(event)} ${duration === 0 ? 'point' : ''} ${selected?.seq === event.seq || highlightedSeq === event.seq ? 'selected' : ''}`}
                   style={{ left: `${left}%`, width: `${width}%` }}
                   title={`${eventLabel(event.type)}\n${formatClock(event.time)}${duration ? ` · ${formatDuration(duration)}` : ''}`}
-                  onClick={(pointer) => { pointer.stopPropagation(); setSelected(event) }}
+                  onClick={(pointer) => { pointer.stopPropagation(); focusTimelineEvent(event) }}
                 />
               )
             })}
@@ -757,7 +1541,7 @@ export function TrajectoryPage(): React.JSX.Element {
         </label>
       </div>
 
-      <main className={`trajectory-workspace ${selected ? 'with-inspector' : ''}`}>
+      <main className={`trajectory-workspace ${selected && !isDelegateCall(selected) ? 'with-inspector' : ''}`}>
         <section className="trajectory-ledger" aria-label="事件账本">
           {loading ? (
             <div className="trajectory-loading"><span />正在读取事件流…</div>
@@ -769,6 +1553,7 @@ export function TrajectoryPage(): React.JSX.Element {
             </div>
           ) : (
             <Virtuoso
+              ref={ledgerRef}
               className="trajectory-virtuoso"
               data={visibleEvents}
               computeItemKey={(_index, event) => event.seq}
@@ -783,7 +1568,8 @@ export function TrajectoryPage(): React.JSX.Element {
               }}
               itemContent={(index, event) => {
                 const previous = index > 0 ? visibleEvents[index - 1] : undefined
-                const turnChanged = previous?.turn !== event.turn && event.turn !== undefined
+                const delegateCall = isDelegateCall(event)
+                const turnChanged = event.turn !== undefined && firstEventSeqByTurn.get(event.turn) === event.seq
                 const stepChanged = previous?.step !== event.step && event.step !== undefined
                 const turnCollapsed = event.turn !== undefined && collapsedTurns.has(event.turn)
                 const turnSummary = event.turn === undefined ? undefined : turnSummaries.get(event.turn)
@@ -812,27 +1598,43 @@ export function TrajectoryPage(): React.JSX.Element {
                     {!turnCollapsed && (
                       <>
                         {stepChanged && <div className="trace-step-marker">STEP {event.step}</div>}
-                        <button
-                          className={`trace-row kind-${category(event)} ${selected?.seq === event.seq ? 'selected' : ''}`}
-                          onClick={() => setSelected(event)}
-                        >
-                          <span className="trace-rail"><i /><b /></span>
-                          <span className="trace-seq">{String(event.seq).padStart(4, '0')}</span>
-                          <span className="trace-icon"><EventIcon event={event} /></span>
-                          <span className="trace-main">
-                            <span className="trace-row-title">
-                              <strong>{eventLabel(event.type)}</strong>
-                              <span className={`trace-boundary boundary-${eventBoundary(event.type).kind}`}>{eventBoundary(event.type).label}</span>
-                              <code>{event.type}</code>
+                        {delegateCall ? (
+                          <DelegateWorkflow
+                            call={event}
+                            events={events}
+                            expanded={expandedDelegates.has(event.seq)}
+                            selected={selected?.seq === event.seq || highlightedSeq === event.seq}
+                            onFocus={() => { setHighlightedSeq(event.seq); setSelected(null) }}
+                            onToggle={() => setExpandedDelegates(current => {
+                              const next = new Set(current)
+                              if (next.has(event.seq)) next.delete(event.seq)
+                              else next.add(event.seq)
+                              return next
+                            })}
+                          />
+                        ) : (
+                          <button
+                            className={`trace-row kind-${category(event)} ${selected?.seq === event.seq ? 'selected' : ''}`}
+                            onClick={() => setSelected(event)}
+                          >
+                            <span className="trace-rail"><i /><b /></span>
+                            <span className="trace-seq">{String(event.seq).padStart(4, '0')}</span>
+                            <span className="trace-icon"><EventIcon event={event} /></span>
+                            <span className="trace-main">
+                              <span className="trace-row-title">
+                                <strong>{eventLabel(event.type)}</strong>
+                                <span className={`trace-boundary boundary-${eventBoundary(event.type).kind}`}>{eventBoundary(event.type).label}</span>
+                                <code>{event.type}</code>
+                              </span>
+                              <span className="trace-summary">{eventSummary(event)}</span>
                             </span>
-                            <span className="trace-summary">{eventSummary(event)}</span>
-                          </span>
-                          <span className="trace-meta">
-                            <time>{formatClock(event.time)}</time>
-                            {event.payloadBytes > 0 && <small>{formatBytes(event.payloadBytes)}</small>}
-                          </span>
-                          <ChevronRight className="trace-chevron" size={15} />
-                        </button>
+                            <span className="trace-meta">
+                              <time>{formatClock(event.time)}</time>
+                              {event.payloadBytes > 0 && <small>{formatBytes(event.payloadBytes)}</small>}
+                            </span>
+                            <ChevronRight className="trace-chevron" size={15} />
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -842,7 +1644,7 @@ export function TrajectoryPage(): React.JSX.Element {
           )}
         </section>
 
-        {selected && (
+        {selected && !isDelegateCall(selected) && (
           <aside className="trajectory-inspector" aria-label="事件详情">
             <div className="inspector-head">
               <div className={`inspector-symbol kind-${category(selected)}`}><EventIcon event={selected} /></div>
