@@ -786,6 +786,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       messageId?: number
       traceTurn?: number
       isBackground?: boolean
+      interactionOrigin?: 'chat' | 'orchestration'
+      taskRunId?: string
+      taskStepId?: string
       disableTools?: boolean
       allowedToolNames?: string[]
       blockedToolNames?: string[]
@@ -1476,6 +1479,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                     messageId: config.messageId,
                     turn: config.traceTurn,
                     toolCallId: toolCall.id,
+                    interactionOrigin: config.interactionOrigin,
+                    taskRunId: config.taskRunId,
+                    taskStepId: config.taskStepId,
                     isFrontend,
                     sandboxMode: !!sandboxMode,
                     event,
@@ -1499,6 +1505,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 messageId: config.messageId,
                 turn: config.traceTurn,
                 toolCallId: toolCall.id,
+                interactionOrigin: config.interactionOrigin,
+                taskRunId: config.taskRunId,
+                taskStepId: config.taskStepId,
                 isFrontend,
                 sandboxMode: !!sandboxMode,
                 event,

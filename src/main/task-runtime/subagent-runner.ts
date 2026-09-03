@@ -18,7 +18,8 @@ export class SubagentRunner {
     inputs: DelegateTaskInput[],
     maxConcurrency = 3,
     workspacePath?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onStarted?: (taskRunId: string) => void
   ): Promise<{ taskRunId: string; status: string; tasks: SubagentTask[] }> {
     const normalized = this.normalizeInputs(inputs)
     this.validateDependencies(normalized)
@@ -36,6 +37,8 @@ export class SubagentRunner {
         goal: input.prompt,
         prompt: input.prompt,
         agentRole: input.role,
+        agentId: input.agentId,
+        model: input.model,
         dependencies: input.dependencies,
         acceptanceCriteria: input.acceptanceCriteria
       }))
@@ -47,6 +50,8 @@ export class SubagentRunner {
       taskStepId: input.id,
       parentSessionId,
       role: input.role || 'general',
+      agentId: input.agentId,
+      model: input.model,
       title: input.title,
       prompt: input.prompt,
       status: 'pending',
@@ -56,6 +61,8 @@ export class SubagentRunner {
       updatedAt: now
     }))
     await this.store.upsertSubagentTasks(records)
+    onStarted?.(taskRun.id)
+    if (onStarted) await new Promise<void>(resolve => setTimeout(resolve, 0))
     const cancel = (): void => { void this.runner.control(taskRun.id, 'cancel') }
     signal?.addEventListener('abort', cancel, { once: true })
     const run = await this.runner.executeRun(taskRun.id, { maxConcurrency }).finally(() => {
@@ -92,6 +99,8 @@ export class SubagentRunner {
         title: String(input.title || '').trim().slice(0, 180),
         prompt: String(input.prompt || '').trim().slice(0, 8000),
         role: (allowedRoles.has(String(input.role)) ? input.role : 'general') as SubagentRole,
+        agentId: String(input.agentId || 'agentpet').trim().slice(0, 100) || 'agentpet',
+        model: String(input.model || '').trim().slice(0, 200) || undefined,
         dependencies: Array.isArray(input.dependencies) ? [...new Set(input.dependencies.map(String))].filter(Boolean) : [],
         acceptanceCriteria: String(input.acceptanceCriteria || '').trim().slice(0, 1000) || undefined
       }

@@ -50,7 +50,7 @@ declare global {
       getActiveSkillsPrompt: (enabledSkillNames: string[]) => Promise<string>
       getToolsDefinition: () => Promise<any[]>
       callLLM: (config: any, messages: any[], workspacePath?: string) => Promise<string>
-      getSessionEvents: (sessionId: string, options?: { beforeSeq?: number; limit?: number; types?: string[]; sources?: string[]; search?: string }) => Promise<any>
+      getSessionEvents: (sessionId: string, options?: { beforeSeq?: number; limit?: number; types?: string[]; sources?: string[]; correlationIds?: string[]; search?: string }) => Promise<any>
       getSessionEvent: (sessionId: string, seq: number) => Promise<any | null>
       onSessionEventsAppended: (callback: (events: any[]) => void) => () => void
       selectFile: () => Promise<{ name: string; path: string; content: string } | null>
@@ -127,11 +127,20 @@ declare global {
       onAutomationProgress: (callback: (data: any) => void) => () => void
       onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
+      listAgents: () => Promise<any[]>
+      probeAgent: (agentId: string, cwd?: string) => Promise<any>
+      listAgentModels: (agentId: string, cwd?: string, configuredModel?: string) => Promise<any[]>
+      upsertAgent: (input: any) => Promise<any>
+      deleteAgent: (agentId: string) => Promise<boolean>
+      runAgentPrompt: (request: { agentId: string; prompt: string; cwd: string; model?: string }) => Promise<any>
+      startAgentCollaboration: (input: any) => Promise<any>
+      onAgentEvent: (callback: (data: any) => void) => () => void
       getTaskRun: (taskRunId: string) => Promise<any | null>
       listTaskRuns: (sessionId?: string) => Promise<any[]>
       listSubagentTasks: (taskRunId: string) => Promise<any[]>
       controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel') => Promise<any | null>
       retryTaskStep: (taskRunId: string, taskStepId: string) => Promise<any | null>
+      retryFailedTaskSteps: (taskRunId: string) => Promise<any | null>
       onTaskRunUpdated: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
       getStoragePath: () => Promise<string>
@@ -207,6 +216,8 @@ declare global {
       getPathForFile: (file: File) => string
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void
+      showFileContextMenu: (filePath: string) => void
+      showItemInFolder: (filePath: string) => Promise<boolean>
       showPetContextMenu: () => void
       sendPetReplyToInput: (responseText: string) => void
       onPetReplyResponse: (callback: (responseText: string) => void) => () => void

@@ -172,7 +172,7 @@ export class SessionEventStore {
 
   public async readPage(
     sessionId: string,
-    options: { beforeSeq?: number; limit?: number; types?: string[]; sources?: string[]; search?: string } = {}
+    options: { beforeSeq?: number; limit?: number; types?: string[]; sources?: string[]; correlationIds?: string[]; search?: string } = {}
   ): Promise<SessionEventPage> {
     await this.flush(sessionId)
     const database = await this.getDatabase()
@@ -190,6 +190,13 @@ export class SessionEventStore {
     if (Array.isArray(options.sources) && options.sources.length > 0) {
       clauses.push(`source IN (${options.sources.map(() => '?').join(', ')})`)
       params.push(...options.sources)
+    }
+    if (Array.isArray(options.correlationIds) && options.correlationIds.length > 0) {
+      const correlationIds = options.correlationIds.map(String).filter(Boolean).slice(0, 50)
+      if (correlationIds.length > 0) {
+        clauses.push(`correlation_id IN (${correlationIds.map(() => '?').join(', ')})`)
+        params.push(...correlationIds)
+      }
     }
     if (options.search?.trim()) {
       clauses.push('search_text LIKE ?')

@@ -7,6 +7,7 @@ import { ChatControllerProvider } from '../hooks/useChatController'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import {
   CheckCircle2,
+  Bot,
   ChevronDown,
   ChevronRight,
   CircleX,
@@ -37,6 +38,7 @@ import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
 import { normalizeSearchCitations } from '../utils/helpers'
+import { AgentSettingsPanel } from './AgentSettingsPanel'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -55,13 +57,14 @@ function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
 }
 
-type FunctionPageId = 'control' | 'agent' | 'skillhub' | 'knowledge' | 'rpa' | 'logs' | 'settings'
+type FunctionPageId = 'control' | 'agents' | 'agent' | 'skillhub' | 'knowledge' | 'rpa' | 'logs' | 'settings'
 
 type WorkspaceTab =
   | { key: string; kind: 'session'; sessionId: string }
   | { key: string; kind: 'page'; pageId: FunctionPageId; detailId?: string }
 
 const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
+  agents: 'Agents',
   skillhub: '技能市场',
   control: '订阅频道',
   agent: '代理',
@@ -519,6 +522,7 @@ export function AgentWindow(): React.JSX.Element {
         </div>
       ); break
       case 'control': page = <ControlPage store={store} />; break
+      case 'agents': page = <AgentSettingsPanel showToast={store.showToast} />; break
       case 'agent': page = <AgentPage store={store} />; break
       case 'skillhub': page = <SkillHubPage />; break
       case 'knowledge': page = <KnowledgeBasePage />; break
@@ -607,6 +611,10 @@ export function AgentWindow(): React.JSX.Element {
           </div>
           {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
+              <div className={`menu-item ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')} title="Agents">
+                <div className="menu-item-left"><Bot size={18} strokeWidth={2} aria-hidden="true" /><span>Agents</span></div>
+                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              </div>
               <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="订阅频道">
                 <div className="menu-item-left"><OverviewIcon /><span>订阅频道</span></div>
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />

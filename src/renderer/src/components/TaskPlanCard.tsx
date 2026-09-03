@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Circle, FileText, ListChecks, LoaderCircle, LocateFixed, Network, Pause, Play, RotateCcw, Square, X } from 'lucide-react'
 import './TaskPlanCard.css'
+import { AgentBrandIcon } from './AgentBrandIcon'
 
 export type TaskStepStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
 
@@ -16,6 +17,7 @@ export interface TaskPlanStep {
   artifactPaths?: string[]
   retryCount?: number
   agentRole?: 'general' | 'researcher' | 'coder' | 'reviewer'
+  agentId?: string
 }
 
 export interface TaskPlan {
@@ -50,7 +52,8 @@ function normalizeTaskPlan(value: any): TaskPlan | null {
     retryCount: Math.max(0, Number(step?.retryCount) || 0),
     agentRole: ['general', 'researcher', 'coder', 'reviewer'].includes(String(step?.agentRole || step?.role))
       ? step.agentRole || step.role
-      : undefined
+      : undefined,
+    agentId: String(step?.agentId || 'agentpet')
   })).filter((step: TaskPlanStep) => step.title)
   if (!title || steps.length < 1) return null
   return {
@@ -186,11 +189,11 @@ function layoutDag(steps: TaskPlanStep[]): { nodes: DagNode[]; width: number; he
     const level = levelOf(step.id)
     groups.set(level, [...(groups.get(level) || []), step])
   }
-  const nodeWidth = 184
-  const nodeHeight = 78
-  const columnGap = 54
-  const rowGap = 18
-  const padding = 20
+  const nodeWidth = 135
+  const nodeHeight = 54
+  const columnGap = 36
+  const rowGap = 12
+  const padding = 14
   const columnCount = Math.max(0, ...groups.keys()) + 1
   const maxRows = Math.max(1, ...Array.from(groups.values(), group => group.length))
   const height = padding * 2 + maxRows * nodeHeight + (maxRows - 1) * rowGap
@@ -208,20 +211,32 @@ function layoutDag(steps: TaskPlanStep[]): { nodes: DagNode[]; width: number; he
   return { nodes, width: padding * 2 + columnCount * nodeWidth + (columnCount - 1) * columnGap, height }
 }
 
-function TaskDagGraph({ plan }: { plan: TaskPlan }): React.JSX.Element {
+export function TaskDagGraph({
+  plan,
+  onStepClick,
+  selectedStepId,
+  showHeader = false
+}: {
+  plan: TaskPlan
+  onStepClick?: (step: TaskPlanStep) => void
+  selectedStepId?: string
+  showHeader?: boolean
+}): React.JSX.Element {
   const layout = useMemo(() => layoutDag(plan.steps), [plan.steps])
   const nodesById = useMemo(() => new Map(layout.nodes.map(node => [node.step.id, node])), [layout.nodes])
   const running = plan.steps.filter(step => step.status === 'in_progress').length
   const completed = plan.steps.filter(step => step.status === 'completed').length
   return (
-    <section className="task-dag" aria-label={`Agent execution graph: ${plan.title}`}>
-      <header className="task-dag-header">
-        <span><Network size={14} aria-hidden="true" /><strong>Agent DAG</strong></span>
-        <small>{running > 0 ? `${running} running` : `${completed}/${plan.steps.length} complete`}</small>
-      </header>
+    <section className={`task-dag ${!showHeader ? 'is-bare' : ''}`} aria-label={`Agent execution graph: ${plan.title}`}>
+      {showHeader && (
+        <header className="task-dag-header">
+          <span><Network size={14} aria-hidden="true" /><strong>Agent DAG</strong></span>
+          <small>{running > 0 ? `${running} running` : `${completed}/${plan.steps.length} complete`}</small>
+        </header>
+      )}
       <div className="task-dag-viewport">
         <div className="task-dag-canvas" style={{ width: layout.width, height: layout.height }}>
-          <svg viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
+          <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <marker id="task-dag-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
                 <path d="M0,0 L7,3.5 L0,7 Z" />
@@ -241,13 +256,22 @@ function TaskDagGraph({ plan }: { plan: TaskPlan }): React.JSX.Element {
           {layout.nodes.map(node => (
             <article
               key={node.step.id}
-              className={`task-dag-node is-${node.step.status}`}
+              className={`task-dag-node is-${node.step.status} ${selectedStepId === node.step.id ? 'is-selected' : ''} ${onStepClick ? 'is-clickable' : ''}`}
               style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
               title={node.step.status === 'in_progress' ? node.step.detail || node.step.title : node.step.title}
+              role={onStepClick ? 'button' : undefined}
+              tabIndex={onStepClick ? 0 : undefined}
+              onClick={() => onStepClick?.(node.step)}
+              onKeyDown={event => {
+                if (!onStepClick || !['Enter', ' '].includes(event.key)) return
+                event.preventDefault()
+                onStepClick(node.step)
+              }}
             >
               <span className="task-dag-node-top">
                 <span className="task-dag-node-marker"><StepMarker status={node.step.status} /></span>
-                <small>{node.step.agentRole || 'general'}</small>
+                <AgentBrandIcon agentId={node.step.agentId || 'agentpet'} className="task-dag-agent-icon" />
+                <small>{node.step.agentId || node.step.agentRole || 'agentpet'}</small>
                 {(node.step.retryCount || 0) > 0 && <em>retry {node.step.retryCount}</em>}
               </span>
               <strong>{node.step.title}</strong>
@@ -364,7 +388,7 @@ export const TaskPlanPanel = React.memo(function TaskPlanPanel({ plan, messageId
   const completed = steps.filter(step => step.status === 'completed').length
   const blocked = steps.some(step => step.status === 'blocked')
   const allCompleted = completed === steps.length
-  const showDag = steps.some(step => step.agentRole || (step.dependencies?.length || 0) > 0)
+  const showDag = steps.some(step => step.agentId !== 'agentpet' || step.agentRole || (step.dependencies?.length || 0) > 0)
   const artifacts = useMemo(() => {
     const seen = new Set<string>()
     const result: Array<{ path: string; stepTitle: string }> = []
@@ -451,9 +475,10 @@ export const TaskPlanPanel = React.memo(function TaskPlanPanel({ plan, messageId
               <span className="task-plan-panel-index"><StepMarker status={step.status} /></span>
               <span className="task-plan-panel-step-copy">
                 <span><b>{index + 1}. {step.title}</b><small>{STATUS_LABEL[step.status]}</small></span>
-                {(step.agentRole || (step.dependencies?.length || 0) > 0 || (step.retryCount || 0) > 0) && (
+                {(step.agentId || step.agentRole || (step.dependencies?.length || 0) > 0 || (step.retryCount || 0) > 0) && (
                   <span className="task-plan-step-meta">
-                    {step.agentRole && <small>{step.agentRole}</small>}
+                    {step.agentId && <small>{step.agentId}</small>}
+                    {!step.agentId && step.agentRole && <small>{step.agentRole}</small>}
                     {(step.dependencies?.length || 0) > 0 && <small>depends on {step.dependencies!.join(', ')}</small>}
                     {(step.retryCount || 0) > 0 && <small>retry {step.retryCount}</small>}
                   </span>

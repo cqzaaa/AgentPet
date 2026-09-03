@@ -923,6 +923,13 @@
   background: color-mix(in srgb, var(--bg-card, #fff) 97%, #7067d9 3%);
 }
 
+.task-dag.is-bare {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
 .task-dag-header {
   display: flex;
   align-items: center;
@@ -937,9 +944,9 @@
 .task-dag-header strong { color: var(--color-text-primary, #2c2f35); font-size: 12px; letter-spacing: .02em; }
 .task-dag-header small { font: 600 10px/1.2 Consolas, Monaco, monospace; color: #7067d9; }
 
-.task-dag-viewport { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
-.task-dag-canvas { position: relative; min-width: 100%; }
-.task-dag-canvas > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.task-dag-viewport { display: flex; align-items: center; justify-content: center; min-width: 100%; box-sizing: border-box; overflow: auto; scrollbar-width: thin; }
+.task-dag-canvas { position: relative; flex: none; margin: auto; }
+.task-dag-canvas > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .task-dag-canvas > svg path { fill: none; stroke: color-mix(in srgb, #7b8190 48%, transparent); stroke-width: 1.5; }
 .task-dag-canvas > svg marker path { fill: #8c91a0; stroke: none; }
 .task-dag-canvas > svg path.is-in_progress { stroke: #7067d9; stroke-dasharray: 5 4; animation: task-dag-flow .8s linear infinite; }
@@ -950,33 +957,37 @@
   position: absolute;
   box-sizing: border-box;
   display: grid;
-  grid-template-rows: 19px 1fr 14px;
-  gap: 2px;
-  padding: 9px 10px 8px;
+  grid-template-rows: 15px 1fr 12px;
+  gap: 1px;
+  padding: 5px 7px 4px;
   overflow: hidden;
   border: 1px solid var(--border-card, #dfe3ea);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--color-text-primary, #2c2f35);
   background: var(--bg-card, #fff);
-  box-shadow: 0 5px 14px rgba(42, 47, 66, .07);
+  box-shadow: 0 3px 10px rgba(42, 47, 66, .06);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
-.task-dag-node:hover { z-index: 2; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(42, 47, 66, .12); }
-.task-dag-node.is-in_progress { border-color: color-mix(in srgb, #7067d9 62%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, #7067d9 10%, transparent), 0 7px 18px rgba(69, 61, 151, .12); }
+.task-dag-node:hover { z-index: 2; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(42, 47, 66, .1); }
+.task-dag-node.is-clickable { cursor: pointer; }
+.task-dag-node.is-clickable:focus-visible { outline: 3px solid color-mix(in srgb, #5b73dc 34%, transparent); outline-offset: 2px; }
+.task-dag-node.is-selected { z-index: 3; border-color: #5b73dc; box-shadow: 0 0 0 3px color-mix(in srgb, #5b73dc 14%, transparent), 0 7px 18px rgba(50, 61, 112, .14); }
+.task-dag-node.is-in_progress { border-color: color-mix(in srgb, #7067d9 62%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, #7067d9 10%, transparent), 0 5px 14px rgba(69, 61, 151, .1); }
 .task-dag-node.is-completed { border-color: color-mix(in srgb, #2aa178 42%, transparent); }
 .task-dag-node.is-blocked { border-color: color-mix(in srgb, #d97732 58%, transparent); }
 
-.task-dag-node-top { display: flex; align-items: center; min-width: 0; gap: 6px; color: var(--color-text-muted, #858a94); }
-.task-dag-node-top small { overflow: hidden; font: 600 9px/1.2 Consolas, Monaco, monospace; letter-spacing: .04em; text-transform: uppercase; text-overflow: ellipsis; }
-.task-dag-node-top em { margin-left: auto; color: #d97732; font: 600 9px/1 Consolas, Monaco, monospace; }
-.task-dag-node-marker { display: grid; place-items: center; width: 17px; height: 17px; flex: none; border-radius: 6px; color: #8c91a0; background: color-mix(in srgb, currentColor 9%, transparent); }
+.task-dag-node-top { display: flex; align-items: center; min-width: 0; gap: 4px; color: var(--color-text-muted, #858a94); }
+.task-dag-agent-icon { width: 13px; height: 13px; flex: none; object-fit: contain; }
+.task-dag-node-top small { overflow: hidden; font: 600 8.5px/1.2 Consolas, Monaco, monospace; letter-spacing: .03em; text-transform: uppercase; text-overflow: ellipsis; }
+.task-dag-node-top em { margin-left: auto; color: #d97732; font: 600 8.5px/1 Consolas, Monaco, monospace; }
+.task-dag-node-marker { display: grid; place-items: center; width: 14px; height: 14px; flex: none; border-radius: 4px; color: #8c91a0; background: color-mix(in srgb, currentColor 9%, transparent); }
 .task-dag-node.is-in_progress .task-dag-node-marker { color: #7067d9; }
 .task-dag-node.is-in_progress .task-dag-node-marker svg { animation: task-plan-spin 1.1s linear infinite; }
 .task-dag-node.is-completed .task-dag-node-marker { color: #2aa178; }
 .task-dag-node.is-blocked .task-dag-node-marker { color: #d97732; }
-.task-dag-node > strong { align-self: center; overflow: hidden; font-size: 11.5px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-.task-dag-node-state { overflow: hidden; color: var(--color-text-muted, #858a94); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.task-dag-node > strong { align-self: center; overflow: hidden; font-size: 10.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.task-dag-node-state { overflow: hidden; color: var(--color-text-muted, #858a94); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
 
 @keyframes task-dag-flow { to { stroke-dashoffset: -9; } }
 

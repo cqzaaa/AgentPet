@@ -58,6 +58,10 @@ export interface ToolContext {
   turn?: number
   /** Model tool-call id used to attach durable child workflows to their parent row. */
   toolCallId?: string
+  /** UI surface that owns interactive prompts raised by this invocation. */
+  interactionOrigin?: 'chat' | 'orchestration'
+  taskRunId?: string
+  taskStepId?: string
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean

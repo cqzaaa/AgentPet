@@ -25,6 +25,19 @@ type ActiveExecution = {
   promise: Promise<TaskRun | null>
 }
 
+const TRANSIENT_EXTERNAL_AGENT_ERROR = /\bEOF\b|TLS handshake timeout|stream (?:was )?interrupted|loadCodeAssist|failed to get profile picture|ECONNRESET|ETIMEDOUT|socket hang up/i
+
+async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) return
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, delayMs)
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
+}
+
 /** Owns durable state, dependency scheduling, cancellation and resumable step execution. */
 export class TaskRunner {
   private executor?: TaskStepExecutor
@@ -70,6 +83,17 @@ export class TaskRunner {
     const result = await this.store.retryStep(taskRunId, taskStepId)
     if (result) {
       await this.publish(taskRunId, 'retry_step', taskStepId)
+      this.executeInBackground(taskRunId)
+    }
+    return result
+  }
+
+  public async retryFailedSteps(taskRunId: string) {
+    const result = await this.store.retryFailedSteps(taskRunId)
+    if (result && result.steps.some(step => step.status === 'pending')) {
+      await this.publish(taskRunId, 'retry_failed_steps', undefined, {
+        retriedStepIds: result.steps.filter(step => step.status === 'pending').map(step => step.id)
+      })
       this.executeInBackground(taskRunId)
     }
     return result
@@ -206,7 +230,19 @@ export class TaskRunner {
         return run
       }
 
-      const batch = ready.slice(0, maxConcurrency)
+      const batch: TaskStep[] = []
+      let antigravitySelected = false
+      for (const step of ready) {
+        if (batch.length >= maxConcurrency) break
+        // Multiple simultaneous agy cold starts frequently fail during Google's
+        // eligibility/profile requests. Serialize Antigravity while still allowing
+        // other agents to use the remaining global concurrency slots.
+        if (step.agentId === 'antigravity') {
+          if (antigravitySelected) continue
+          antigravitySelected = true
+        }
+        batch.push(step)
+      }
       await Promise.all(batch.map(step => this.executeStep(snapshot.run, step, snapshot.steps, signal)))
     }
 
@@ -247,12 +283,16 @@ export class TaskRunner {
       }
       const message = error instanceof Error ? error.message : String(error)
       const retryCount = step.retryCount || 0
-      if (retryCount < 2) {
+      const transientExternalFailure = TRANSIENT_EXTERNAL_AGENT_ERROR.test(message)
+      const maxRetries = transientExternalFailure ? 4 : 2
+      if (retryCount < maxRetries) {
+        const retryDelayMs = transientExternalFailure ? Math.min(15_000, 2_000 * (2 ** retryCount)) : 0
         await this.store.setStepStatus(run.id, step.id, 'pending', {
-          detail: `Attempt ${retryCount + 1} failed: ${message}. Retrying from checkpoint.`,
+          detail: `Attempt ${retryCount + 1} failed: ${message}. Retrying from checkpoint${retryDelayMs ? ` in ${Math.round(retryDelayMs / 1000)}s` : ''}.`,
           incrementRetry: true
         })
         await this.publish(run.id, 'step_retrying', step.id)
+        await waitForRetry(retryDelayMs, signal)
       } else {
         await this.store.setStepStatus(run.id, step.id, 'failed', { detail: message, resultSummary: message })
         await this.publish(run.id, 'step_failed', step.id)

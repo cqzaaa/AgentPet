@@ -52,17 +52,17 @@ export class TaskStore {
         const startedAt = stepStatus === 'running' ? previous?.started_at || now : previous?.started_at || null
         const stepCompletedAt = ['completed', 'failed', 'blocked', 'cancelled'].includes(stepStatus) ? previous?.completed_at || now : null
         await database.run(
-          `INSERT INTO task_steps (id, task_run_id, sequence, title, goal, dependencies_json, acceptance_criteria, status, detail, result_summary, artifact_paths_json, retry_count, agent_role, prompt, started_at, completed_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO task_steps (id, task_run_id, sequence, title, goal, dependencies_json, acceptance_criteria, status, detail, result_summary, artifact_paths_json, retry_count, agent_role, agent_id, model, prompt, started_at, completed_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(task_run_id, id) DO UPDATE SET
              sequence = excluded.sequence, title = excluded.title, goal = excluded.goal, dependencies_json = excluded.dependencies_json,
              acceptance_criteria = excluded.acceptance_criteria, status = excluded.status, detail = excluded.detail,
              result_summary = excluded.result_summary, artifact_paths_json = excluded.artifact_paths_json,
-             retry_count = excluded.retry_count, agent_role = excluded.agent_role, prompt = excluded.prompt,
+             retry_count = excluded.retry_count, agent_role = excluded.agent_role, agent_id = excluded.agent_id, model = excluded.model, prompt = excluded.prompt,
              started_at = excluded.started_at, completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
           item.id, id, index + 1, item.title, item.goal || null, toJson(item.dependencies || []), item.acceptanceCriteria || null,
           stepStatus, item.detail || null, item.resultSummary || item.detail || null, toJson(item.artifactPaths || []), item.retryCount || previous?.retry_count || 0,
-          item.agentRole || null, item.prompt || null, startedAt, stepCompletedAt, now
+          item.agentRole || null, item.agentId || 'agentpet', item.model || null, item.prompt || null, startedAt, stepCompletedAt, now
         )
         for (const artifactPath of item.artifactPaths || []) {
           await database.run(
@@ -198,11 +198,11 @@ export class TaskStore {
     await this.withTransaction(database, async () => {
       for (const task of tasks) {
         await database.run(
-          `INSERT INTO subagent_tasks (id, task_run_id, task_step_id, parent_session_id, role, title, prompt, status, dependencies_json, result_summary, artifact_paths_json, created_at, updated_at, completed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO subagent_tasks (id, task_run_id, task_step_id, parent_session_id, role, agent_id, model, title, prompt, status, dependencies_json, result_summary, artifact_paths_json, created_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET status = excluded.status, result_summary = excluded.result_summary,
            artifact_paths_json = excluded.artifact_paths_json, updated_at = excluded.updated_at, completed_at = excluded.completed_at`,
-          task.id, task.taskRunId, task.taskStepId, task.parentSessionId, task.role, task.title, task.prompt, task.status,
+          task.id, task.taskRunId, task.taskStepId, task.parentSessionId, task.role, task.agentId || 'agentpet', task.model || null, task.title, task.prompt, task.status,
           toJson(task.dependencies), task.resultSummary || null, toJson(task.artifactPaths), task.createdAt, task.updatedAt, task.completedAt || null
         )
       }
@@ -214,7 +214,7 @@ export class TaskStore {
     const rows = await database.all<TaskRow[]>('SELECT * FROM subagent_tasks WHERE task_run_id = ? ORDER BY created_at, id', taskRunId)
     return rows.map(row => ({
       id: row.id, taskRunId: row.task_run_id, taskStepId: row.task_step_id, parentSessionId: row.parent_session_id,
-      role: row.role, title: row.title, prompt: row.prompt, status: row.status,
+      role: row.role, agentId: row.agent_id || 'agentpet', model: row.model || undefined, title: row.title, prompt: row.prompt, status: row.status,
       dependencies: parseJson(row.dependencies_json, []), resultSummary: row.result_summary || undefined,
       artifactPaths: parseJson(row.artifact_paths_json, []), createdAt: row.created_at, updatedAt: row.updated_at,
       completedAt: row.completed_at || undefined
@@ -229,13 +229,22 @@ export class TaskStore {
     const now = Date.now()
     await this.withTransaction(database, async () => {
       await database.run('UPDATE task_steps SET status = ?, retry_count = retry_count + 1, completed_at = NULL, updated_at = ? WHERE task_run_id = ? AND id = ?', 'pending', now, taskRunId, taskStepId)
-      const blockedSteps = await database.all<TaskRow[]>('SELECT id, dependencies_json FROM task_steps WHERE task_run_id = ? AND status = ?', taskRunId, 'blocked')
-      for (const blockedStep of blockedSteps) {
-        if (parseJson<string[]>(blockedStep.dependencies_json, []).includes(taskStepId)) {
+      const blockedSteps = await database.all<TaskRow[]>('SELECT id, dependencies_json, detail FROM task_steps WHERE task_run_id = ? AND status = ?', taskRunId, 'blocked')
+      const restoredDependencyIds = new Set([taskStepId])
+      let restoredInPass = true
+      while (restoredInPass) {
+        restoredInPass = false
+        for (const blockedStep of blockedSteps) {
+          if (restoredDependencyIds.has(blockedStep.id)) continue
+          const wasDependencyBlocked = !blockedStep.detail || blockedStep.detail === 'Dependencies cannot be satisfied.' || blockedStep.detail === 'Dependency retry requested; waiting to run.'
+          const dependsOnRestoredStep = parseJson<string[]>(blockedStep.dependencies_json, []).some(dependency => restoredDependencyIds.has(dependency))
+          if (!wasDependencyBlocked || !dependsOnRestoredStep) continue
           await database.run(
             'UPDATE task_steps SET status = ?, detail = ?, completed_at = NULL, updated_at = ? WHERE task_run_id = ? AND id = ?',
             'pending', 'Dependency retry requested; waiting to run.', now, taskRunId, blockedStep.id
           )
+          restoredDependencyIds.add(blockedStep.id)
+          restoredInPass = true
         }
       }
       await database.run('UPDATE task_runs SET status = ?, updated_at = ?, completed_at = NULL WHERE id = ?', 'pending', now, taskRunId)
@@ -243,6 +252,49 @@ export class TaskStore {
       await this.saveCheckpoint(database, taskRunId, { status: 'pending', retryStepId: taskStepId }, now)
     })
     return { run: { ...this.mapRun(run), status: 'pending', updatedAt: now, completedAt: undefined }, step: { ...this.mapStep(step), status: 'pending', retryCount: Number(step.retry_count || 0) + 1, completedAt: undefined } }
+  }
+
+  public async retryFailedSteps(taskRunId: string): Promise<{ run: TaskRun; steps: TaskStep[] } | null> {
+    const database = await this.getDatabase()
+    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ?', taskRunId)
+    const rows = await database.all<TaskRow[]>('SELECT * FROM task_steps WHERE task_run_id = ? ORDER BY sequence', taskRunId)
+    if (!run || rows.length === 0) return null
+    const failedIds = new Set(rows.filter(row => row.status === 'failed').map(row => String(row.id)))
+    if (failedIds.size === 0) return { run: this.mapRun(run), steps: rows.map(row => this.mapStep(row)) }
+    const now = Date.now()
+    const restoredIds = new Set(failedIds)
+
+    await this.withTransaction(database, async () => {
+      for (const failedId of failedIds) {
+        await database.run(
+          'UPDATE task_steps SET status = ?, detail = ?, retry_count = retry_count + 1, completed_at = NULL, updated_at = ? WHERE task_run_id = ? AND id = ?',
+          'pending', 'Run retry requested; waiting to run.', now, taskRunId, failedId
+        )
+      }
+
+      let restoredInPass = true
+      while (restoredInPass) {
+        restoredInPass = false
+        for (const row of rows) {
+          if (row.status !== 'blocked' || restoredIds.has(String(row.id))) continue
+          const wasDependencyBlocked = !row.detail || row.detail === 'Dependencies cannot be satisfied.' || row.detail === 'Dependency retry requested; waiting to run.'
+          const dependsOnRestoredStep = parseJson<string[]>(row.dependencies_json, []).some(dependency => restoredIds.has(dependency))
+          if (!wasDependencyBlocked || !dependsOnRestoredStep) continue
+          await database.run(
+            'UPDATE task_steps SET status = ?, detail = ?, completed_at = NULL, updated_at = ? WHERE task_run_id = ? AND id = ?',
+            'pending', 'Dependency retry requested; waiting to run.', now, taskRunId, row.id
+          )
+          restoredIds.add(String(row.id))
+          restoredInPass = true
+        }
+      }
+
+      await database.run('UPDATE task_runs SET status = ?, updated_at = ?, completed_at = NULL WHERE id = ?', 'pending', now, taskRunId)
+      await this.insertEvent(database, taskRunId, undefined, 'run_retry_requested', { failedStepIds: [...failedIds], restoredStepIds: [...restoredIds] }, now)
+      await this.saveCheckpoint(database, taskRunId, { status: 'pending', retryFailedStepIds: [...failedIds] }, now)
+    })
+
+    return this.getRun(taskRunId)
   }
 
   private async getDatabase(): Promise<Database> {
@@ -264,7 +316,7 @@ export class TaskStore {
         id TEXT NOT NULL, task_run_id TEXT NOT NULL, sequence INTEGER NOT NULL, title TEXT NOT NULL, goal TEXT,
         dependencies_json TEXT DEFAULT '[]', acceptance_criteria TEXT, status TEXT NOT NULL, detail TEXT,
         result_summary TEXT, artifact_paths_json TEXT DEFAULT '[]', retry_count INTEGER NOT NULL DEFAULT 0,
-        agent_role TEXT, prompt TEXT, started_at INTEGER, completed_at INTEGER, updated_at INTEGER NOT NULL,
+        agent_role TEXT, agent_id TEXT DEFAULT 'agentpet', model TEXT, prompt TEXT, started_at INTEGER, completed_at INTEGER, updated_at INTEGER NOT NULL,
         PRIMARY KEY (task_run_id, id), FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE
       );
       CREATE TABLE IF NOT EXISTS task_events (
@@ -283,7 +335,7 @@ export class TaskStore {
       CREATE INDEX IF NOT EXISTS idx_task_checkpoints_run_created ON task_checkpoints(task_run_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS subagent_tasks (
         id TEXT PRIMARY KEY, task_run_id TEXT NOT NULL, task_step_id TEXT NOT NULL, parent_session_id TEXT NOT NULL,
-        role TEXT NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL,
+        role TEXT NOT NULL, agent_id TEXT DEFAULT 'agentpet', model TEXT, title TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL,
         dependencies_json TEXT DEFAULT '[]', result_summary TEXT, artifact_paths_json TEXT DEFAULT '[]',
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER,
         FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE
@@ -291,7 +343,11 @@ export class TaskStore {
       CREATE INDEX IF NOT EXISTS idx_subagent_tasks_run ON subagent_tasks(task_run_id, created_at);
     `)
     await this.ensureColumn(this.database, 'task_steps', 'agent_role', 'TEXT')
+    await this.ensureColumn(this.database, 'task_steps', 'agent_id', "TEXT DEFAULT 'agentpet'")
     await this.ensureColumn(this.database, 'task_steps', 'prompt', 'TEXT')
+    await this.ensureColumn(this.database, 'task_steps', 'model', 'TEXT')
+    await this.ensureColumn(this.database, 'subagent_tasks', 'agent_id', "TEXT DEFAULT 'agentpet'")
+    await this.ensureColumn(this.database, 'subagent_tasks', 'model', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'workspace_path', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'parent_turn', 'INTEGER')
     await this.ensureColumn(this.database, 'task_runs', 'parent_message_id', 'TEXT')
@@ -327,6 +383,6 @@ export class TaskStore {
   }
 
   private mapStep(row: TaskRow): TaskStep {
-    return { id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
+    return { id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, agentId: row.agent_id || 'agentpet', model: row.model || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
   }
 }

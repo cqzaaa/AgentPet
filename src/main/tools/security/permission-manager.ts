@@ -43,8 +43,14 @@ export class PermissionManager {
     sender?: WebContents
     forcePrompt?: boolean
     allowTurnScope?: boolean
+    interactionOrigin?: 'chat' | 'orchestration'
+    taskRunId?: string
+    taskStepId?: string
   }): Promise<boolean> {
-    if (!params.forcePrompt && this.isTurnApprovalGranted(params.sessionId)) {
+    const approvalScopeId = params.interactionOrigin === 'orchestration' && params.taskRunId
+      ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
+      : params.sessionId
+    if (!params.forcePrompt && this.isTurnApprovalGranted(approvalScopeId)) {
       return true
     }
 
@@ -62,10 +68,10 @@ export class PermissionManager {
         if (
           response.approved &&
           response.scope === 'turn' &&
-          params.sessionId &&
+          approvalScopeId &&
           params.allowTurnScope !== false
         ) {
-          this.grantTurnApproval(params.sessionId)
+          this.grantTurnApproval(approvalScopeId)
         }
         resolve(response.approved)
       })
@@ -76,11 +82,14 @@ export class PermissionManager {
         execCwd: params.execCwd,
         sessionId: params.sessionId,
         warning: params.warning,
-        allowTurnScope: params.allowTurnScope !== false
+        allowTurnScope: params.allowTurnScope !== false,
+        interactionOrigin: params.interactionOrigin || 'chat',
+        taskRunId: params.taskRunId,
+        taskStepId: params.taskStepId
       })
 
       if (!activeWin.isFocused() || activeWin.isMinimized() || !activeWin.isVisible()) {
-        this.showPermissionNotification(reqId, activeWin)
+        this.showPermissionNotification(reqId, activeWin, params.interactionOrigin)
       }
 
       setTimeout(() => {
@@ -118,11 +127,13 @@ export class PermissionManager {
     this.turnApprovals.clear()
   }
 
-  private showPermissionNotification(requestId: number, win: BrowserWindow): void {
+  private showPermissionNotification(requestId: number, win: BrowserWindow, interactionOrigin?: 'chat' | 'orchestration'): void {
     if (!Notification.isSupported()) return
     const notification = new Notification({
-      title: 'AgentPet 需要审批',
-      body: '有一项操作正在等待你的确认，点击返回应用查看详情。'
+      title: interactionOrigin === 'orchestration' ? '多 Agent 编排需要审批' : 'AgentPet 需要审批',
+      body: interactionOrigin === 'orchestration'
+        ? '协作节点正在等待确认，点击返回编排运行台查看详情。'
+        : '有一项操作正在等待你的确认，点击返回应用查看详情。'
     })
     this.pendingNotifications.set(requestId, notification)
     notification.on('click', () => {

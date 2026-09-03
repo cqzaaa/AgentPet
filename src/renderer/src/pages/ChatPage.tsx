@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, react-hooks/set-state-in-effect */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { getInternalClipboard, setInternalClipboard } from '../hooks/useAppStore'
+import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem } from '../components/ChatMessageItem'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
+import { CollaborationComposer } from '../components/CollaborationComposer'
+import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
 import {
@@ -23,6 +25,7 @@ import {
   Link,
   Mic,
   Monitor,
+  Network,
   Palette,
   Plug,
   Plus,
@@ -98,12 +101,88 @@ function ChatPageImpl(): React.JSX.Element {
     setShowFilePanel,
     currentContextTokens
   } = useChatController()
+  const activeWorkspacePath = useAppStoreRaw((state: any) =>
+    state.sessions?.find((session: any) => session.id === state.activeSessionId)?.workspacePath || ''
+  )
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
+  const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
+  const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
+  const [collaborationRuns, setCollaborationRuns] = useState<CollaborationSnapshot[]>([])
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+
+  const handleCollaborationStarted = useCallback((collaborationTitle: string): void => {
+    const normalized = collaborationTitle.replace(/\s+/g, ' ').trim() || '多 Agent 协作'
+    const sessionName = normalized.length > 15 ? `${normalized.slice(0, 15)}...` : normalized
+    let renamed = false
+    useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session => {
+      if (session.id !== activeSessionId) return session
+      const currentName = String(session.name || '')
+      const isDefaultName = currentName === '(未命名)' || currentName === '新会话' || currentName.startsWith('agent:main:dashboard:')
+      if (!isDefaultName) return session
+      renamed = true
+      return { ...session, name: sessionName }
+    }))
+    if (!renamed) return
+    void window.api.updateSession(activeSessionId, { name: sessionName }).then(updated => {
+      if (!updated) showToast('协作已启动，但会话名称保存失败', 'error')
+    }).catch(error => {
+      console.error('保存协作会话名称失败:', error)
+      showToast('协作已启动，但会话名称保存失败', 'error')
+    })
+  }, [activeSessionId, showToast])
+
+  const handleCollaborationWorkspaceSelected = useCallback(async (workspacePath: string): Promise<void> => {
+    const normalizedPath = workspacePath.trim()
+    if (!normalizedPath) throw new Error('请选择有效的工作文件夹')
+    useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session =>
+      session.id === activeSessionId ? { ...session, workspacePath: normalizedPath } : session
+    ))
+    try {
+      const updated = await window.api.updateSession(activeSessionId, { workspacePath: normalizedPath })
+      if (!updated) throw new Error('工作文件夹保存失败')
+    } catch (error) {
+      useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session =>
+        session.id === activeSessionId ? { ...session, workspacePath: activeWorkspacePath || undefined } : session
+      ))
+      throw error
+    }
+  }, [activeSessionId, activeWorkspacePath])
+
+  useEffect(() => {
+    let active = true
+    setCollaborationRuns([])
+    if (!activeSessionId) return () => { active = false }
+    const isCanvasRun = (run: any): boolean => String(run?.parentToolCallId || '').startsWith('orchestration-')
+    void window.api.listTaskRuns(activeSessionId).then((items: any[]) => {
+      if (!active) return
+      const snapshots = (Array.isArray(items) ? items : []).filter(item => isCanvasRun(item?.run))
+      setCollaborationRuns(snapshots)
+      const earliestRun = [...snapshots].sort((left, right) => Number(left?.run?.createdAt || 0) - Number(right?.run?.createdAt || 0))[0]?.run
+      if (earliestRun?.title) handleCollaborationStarted(String(earliestRun.title))
+    }).catch(() => undefined)
+    const unsubscribe = window.api.onTaskRunUpdated((update: any) => {
+      if (!active || update?.run?.sessionId !== activeSessionId || !isCanvasRun(update.run)) return
+      setCollaborationRuns(current => {
+        const snapshot = { run: update.run, steps: Array.isArray(update.steps) ? update.steps : [] }
+        const index = current.findIndex(item => item.run.id === update.run.id)
+        if (index < 0) return [...current, snapshot]
+        const next = [...current]
+        next[index] = snapshot
+        return next
+      })
+    })
+    return () => { active = false; unsubscribe() }
+  }, [activeSessionId, handleCollaborationStarted])
+
+  useEffect(() => {
+    if (activePermissionRequest?.interactionOrigin !== 'orchestration') return
+    setOpenedCollaborationRunId(String(activePermissionRequest.taskRunId || ''))
+    setShowCollaborationComposer(true)
+  }, [activePermissionRequest])
 
   // 技能与 MCP Popover 状态与 Refs
   const [showSkillsPopover, setShowSkillsPopover] = useState(false)
@@ -863,16 +942,25 @@ function ChatPageImpl(): React.JSX.Element {
 
   // Keep the virtual list data stable while only a message's streaming text is
   // changing. Virtuoso now tracks lightweight IDs instead of full messages.
-  const messageIdsRef = useRef<Array<string | number>>([])
+  const messageIdsRef = useRef<string[]>([])
   const messageIds = useMemo(() => {
-    const next = activeSessMessages.map((message: any) => message.id as string | number)
+    const next = [
+      ...activeSessMessages.map((message: any, index: number) => ({
+        key: `message:${String(message.id)}`,
+        createdAt: Number(message.id) || index
+      })),
+      ...collaborationRuns.map((snapshot, index) => ({
+        key: `collaboration:${String(snapshot.run.id)}`,
+        createdAt: Number(snapshot.run.createdAt) || activeSessMessages.length + index
+      }))
+    ].sort((left, right) => left.createdAt - right.createdAt).map(item => item.key)
     const previous = messageIdsRef.current
     if (previous.length === next.length && previous.every((id, index) => id === next[index])) {
       return previous
     }
     messageIdsRef.current = next
     return next
-  }, [activeSessMessages])
+  }, [activeSessMessages, collaborationRuns])
 
   // Build message and request relationships once per message update. This
   // replaces the previous slice(0, index).findLast(...) work performed by
@@ -889,21 +977,30 @@ function ChatPageImpl(): React.JSX.Element {
     return { messageById: byId, requestMessageById: requestById }
   }, [activeSessMessages])
 
-  const itemContent = useCallback((_index: number, messageId: string | number) => {
-    const message = messageById.get(messageId)
+  const collaborationById = useMemo(() => new Map(
+    collaborationRuns.map(snapshot => [String(snapshot.run.id), snapshot])
+  ), [collaborationRuns])
+
+  const itemContent = useCallback((_index: number, timelineId: string) => {
+    if (timelineId.startsWith('collaboration:')) {
+      const snapshot = collaborationById.get(timelineId.slice('collaboration:'.length))
+      return snapshot ? <CollaborationRunCard snapshot={snapshot} onPreviewFile={handlePreviewFile} onOpenDetails={(taskRunId) => { setOpenedCollaborationRunId(taskRunId); setShowCollaborationComposer(true) }} /> : null
+    }
+    const rawId = timelineId.slice('message:'.length)
+    const message = messageById.get(rawId) || messageById.get(Number(rawId))
     if (!message) return null
     return (
       <ChatMessageItem
         msg={message}
         currentAvatarName={currentAvatarName}
-        requestMessage={requestMessageById.get(messageId)}
+        requestMessage={requestMessageById.get(message.id)}
         highlightedMessageId={highlightedMessageId}
         onPreviewFile={handlePreviewFile}
       />
     )
-  }, [messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile])
+  }, [collaborationById, messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile])
 
-  const computeMessageKey = useCallback((_index: number, messageId: string | number) => messageId, [])
+  const computeMessageKey = useCallback((_index: number, timelineId: string) => timelineId, [])
 
   const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
   const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
@@ -955,7 +1052,7 @@ function ChatPageImpl(): React.JSX.Element {
                 <div className="skeleton-bubble medium"></div>
               </div>
             </div>
-          ) : activeSessMessages.length === 0 ? (
+          ) : messageIds.length === 0 ? (
             <div className="chat-empty-state">
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
@@ -1180,7 +1277,7 @@ function ChatPageImpl(): React.JSX.Element {
         {/* 现代卡片式输入控制面板 */}
         <div className="chat-control-card">
           {/* 人机协作安全核对面板：锚定在输入框上方 */}
-          {activePermissionRequest && (
+          {activePermissionRequest && activePermissionRequest.interactionOrigin !== 'orchestration' && (
             <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
               <div className="approval-card-head">
                 <div className="approval-card-title">
@@ -1559,6 +1656,15 @@ function ChatPageImpl(): React.JSX.Element {
 
             {/* 右侧：文件上传与发送按钮 */}
             <div className="toolbar-group-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
+                type="button"
+                onClick={() => { setOpenedCollaborationRunId(''); setShowCollaborationComposer(true) }}
+                title="新建多 Agent 协作任务"
+                aria-label="新建多 Agent 协作任务"
+              >
+                <Network size={17} strokeWidth={2} aria-hidden="true" />
+              </button>
               {/* SVG 额度环 */}
               <div
                 style={{
@@ -1739,6 +1845,22 @@ function ChatPageImpl(): React.JSX.Element {
           llmConfig={llmConfig}
           onClose={() => setShowMeetingRecorder(false)}
           onToast={showToast}
+        />
+      )}
+
+      {showCollaborationComposer && (
+        <CollaborationComposer
+          sessionId={activeSessionId}
+          workspacePath={activeWorkspacePath || undefined}
+          llmConfig={llmConfig}
+          initialGoal={inputValue}
+          initialRunId={openedCollaborationRunId || undefined}
+          permissionRequest={activePermissionRequest?.interactionOrigin === 'orchestration' && (!openedCollaborationRunId || activePermissionRequest.taskRunId === openedCollaborationRunId) ? activePermissionRequest : undefined}
+          onRespondPermission={handleRespondPermission}
+          onWorkspaceSelected={handleCollaborationWorkspaceSelected}
+          onStarted={handleCollaborationStarted}
+          onClose={() => { setShowCollaborationComposer(false); setOpenedCollaborationRunId('') }}
+          showToast={showToast}
         />
       )}
 

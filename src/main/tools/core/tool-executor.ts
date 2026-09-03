@@ -73,7 +73,10 @@ export class UnifiedToolExecutor {
           : getDefaultWorkingDirectory(context),
         sessionId: context.sessionId,
         warning: auditResult.warning,
-        sender: context.event?.sender
+        sender: context.event?.sender,
+        interactionOrigin: context.interactionOrigin,
+        taskRunId: context.taskRunId,
+        taskStepId: context.taskStepId
       })
 
       if (!approved) {

@@ -20,6 +20,7 @@ import {
 } from '../../../skills/managed-skill-runtime'
 import { subagentRunner } from '../../../task-runtime/subagent-runner'
 import { SUBAGENT_ROLES, type DelegateTaskInput } from '../../../task-runtime/types'
+import { externalAgentManager } from '../../../external-agents'
 
 const execAsync = promisify(exec)
 
@@ -50,7 +51,9 @@ export class SystemExecutor implements IToolExecutor {
               acceptanceCriteria: String(step?.acceptanceCriteria || '').trim().slice(0, 1000) || undefined,
               resultSummary: String(step?.resultSummary || '').trim().slice(0, 2000) || undefined,
               artifactPaths: Array.isArray(step?.artifactPaths) ? step.artifactPaths.map(String).filter(Boolean).slice(0, 30) : [],
-              retryCount: Math.max(0, Math.min(20, Number(step?.retryCount) || 0))
+              retryCount: Math.max(0, Math.min(20, Number(step?.retryCount) || 0)),
+              agentId: String(step?.agentId || 'agentpet').trim(),
+              model: String(step?.model || '').trim() || undefined
             }
           })
           .filter((step: any) => step.title)
@@ -146,6 +149,20 @@ export class SystemExecutor implements IToolExecutor {
         }
       }
 
+      if (api === 'list_agents') {
+        const agents = await externalAgentManager.list()
+        const result = agents.map(agent => ({
+          id: agent.id,
+          name: agent.name,
+          protocol: agent.protocol,
+          source: agent.source,
+          status: agent.probe?.status || 'unchecked',
+          installed: agent.probe?.installed ?? null,
+          description: agent.description
+        }))
+        return { content: JSON.stringify(result), state: result, success: true }
+      }
+
       if (api === 'delegate_tasks') {
         let rawTasks: any[] = Array.isArray(args.tasks) ? args.tasks : []
         if (rawTasks.length === 0 && Array.isArray(args.subtasks)) rawTasks = args.subtasks
@@ -161,6 +178,8 @@ export class SystemExecutor implements IToolExecutor {
           title: String(task?.title || task?.description || `Sub-agent ${index + 1}`).trim(),
           prompt: String(task?.prompt || task?.description || '').trim(),
           role: allowedRoles.has(String(task?.role || task?.type)) ? (task.role || task.type) : 'general',
+          agentId: String(task?.agentId || 'agentpet').trim(),
+          model: String(task?.model || '').trim() || undefined,
           dependencies: Array.isArray(task?.dependencies) ? task.dependencies.map(String).filter(Boolean) : [],
           acceptanceCriteria: String(task?.acceptanceCriteria || '').trim() || undefined
         }))

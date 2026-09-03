@@ -23,6 +23,7 @@ import {
   X
 } from 'lucide-react'
 import { useAppStoreRaw } from '../hooks/useAppStore'
+import { AgentBrandIcon } from '../components/AgentBrandIcon'
 import './TrajectoryPage.css'
 
 type TraceSource = 'user' | 'assistant' | 'model' | 'tool' | 'system' | 'context' | 'subagent'
@@ -288,6 +289,8 @@ type WorkflowTaskData = {
   role?: unknown
   type?: unknown
   agentRole?: unknown
+  agentId?: unknown
+  model?: unknown
   dependencies?: unknown
   status?: unknown
   detail?: unknown
@@ -324,6 +327,51 @@ function delegateEvents(call: TraceEvent, events: TraceEvent[]): TraceEvent[] {
     (!title || event.data?.run?.title === title))
 }
 
+function mergeTraceEvents(...groups: TraceEvent[][]): TraceEvent[] {
+  const bySeq = new Map<number, TraceEvent>()
+  groups.flat().forEach(event => bySeq.set(event.seq, event))
+  return [...bySeq.values()].sort((left, right) => left.seq - right.seq)
+}
+
+async function readCorrelationHistory(sessionId: string, correlationIds: string[]): Promise<TraceEvent[]> {
+  const ids = [...new Set(correlationIds.map(String).filter(Boolean))]
+  if (ids.length === 0) return []
+  const collected: TraceEvent[] = []
+  let beforeSeq: number | undefined
+  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+    const page = await window.api.getSessionEvents(sessionId, {
+      beforeSeq,
+      limit: 500,
+      correlationIds: ids
+    })
+    const pageEvents = Array.isArray(page?.events) ? page.events as TraceEvent[] : []
+    collected.unshift(...pageEvents)
+    if (!page?.hasMore || pageEvents.length === 0) break
+    const nextBeforeSeq = Number(page?.nextBeforeSeq ?? pageEvents[0]?.seq)
+    if (!Number.isSafeInteger(nextBeforeSeq) || nextBeforeSeq === beforeSeq) break
+    beforeSeq = nextBeforeSeq
+  }
+  return mergeTraceEvents(collected)
+}
+
+async function hydrateWorkflowHistory(sessionId: string, seed: TraceEvent[]): Promise<TraceEvent[]> {
+  const runIds = seed.flatMap(event => {
+    if (event.type.startsWith('subagent/') && event.correlationId) return [event.correlationId]
+    if (event.type === 'tool/result') {
+      const taskRunId = parseTaskRunId(event.data?.displayResult) || parseTaskRunId(event.data?.modelResult)
+      return taskRunId ? [taskRunId] : []
+    }
+    return []
+  })
+  if (runIds.length === 0) return seed
+  const runHistory = await readCorrelationHistory(sessionId, runIds)
+  const parentCallIds = runHistory
+    .map(event => String(event.data?.run?.parentToolCallId || ''))
+    .filter(Boolean)
+  const parentHistory = await readCorrelationHistory(sessionId, parentCallIds)
+  return mergeTraceEvents(seed, runHistory, parentHistory)
+}
+
 function workflowStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending: '等待', running: '运行中', paused: '已暂停', completed: '完成',
@@ -339,20 +387,55 @@ function workflowRoleLabel(role: string): string {
   return labels[role] || role || '通用执行'
 }
 
+function workflowAgentLabel(agentId: string): string {
+  const labels: Record<string, string> = {
+    agentpet: 'AgentPet', 'claude-code': 'Claude Code', codex: 'Codex', 'gemini-cli': 'Gemini CLI', antigravity: 'Antigravity CLI'
+  }
+  return labels[agentId] || agentId
+}
+
+function agentTransportLabel(protocol: unknown, agentId?: string): string {
+  const labels: Record<string, string> = {
+    'acp-v1': 'ACP v1 SDK',
+    'claude-stream-json': 'Claude stream-json CLI',
+    'codex-app-server': 'Codex App Server',
+    'antigravity-json': 'Antigravity JSON CLI'
+  }
+  return labels[String(protocol || '')] || workflowAgentLabel(agentId || '') || '外部 Agent'
+}
+
 function subagentTraceLabel(type: string): string {
   const labels: Record<string, string> = {
     'subagent/step_running': '开始执行',
     'subagent/model_call': '模型网络请求',
     'subagent/model_response': '模型返回报文',
+    'subagent/agent_request': 'Agent 请求报文',
+    'subagent/agent_response': 'Agent 返回报文',
+    'subagent/agent_error': 'Agent 请求异常',
+    'subagent/acp_wire_request': 'ACP SDK 请求报文',
+    'subagent/acp_wire_response': 'ACP SDK 返回报文',
+    'subagent/acp_wire_notification': 'ACP SDK 通知报文',
+    'subagent/agent_wire_request': '外部 Agent 传输请求',
+    'subagent/agent_wire_response': '外部 Agent 传输返回',
+    'subagent/agent_wire_notification': '外部 Agent 传输事件',
+    'subagent/acp_request': '旧版外部 Agent 请求',
+    'subagent/acp_response': '旧版外部 Agent 返回',
+    'subagent/acp_error': '旧版外部 Agent 异常',
     'subagent/tool_call': '工具调用',
     'subagent/tool_result': '工具返回结果',
     'subagent/step_retrying': '准备重试',
+    'subagent/retry_step': '手动重试',
+    'subagent/retry_failed_steps': '手动重试失败节点',
     'subagent/step_completed': '执行完成',
     'subagent/step_failed': '执行失败',
     'subagent/blocked': '任务阻塞',
     'subagent/cancelled': '任务取消'
   }
   return labels[type] || '状态更新'
+}
+
+function isLegacyAgentResult(event: TraceEvent): boolean {
+  return event.type === 'subagent/agent_event' && event.data?.activity?.update?.event === 'result'
 }
 
 function DelegateWorkflow({
@@ -372,6 +455,7 @@ function DelegateWorkflow({
 }): React.JSX.Element | null {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTraceSeq, setSelectedTraceSeq] = useState<number | null>(null)
+  const [selectedTraceFull, setSelectedTraceFull] = useState<TraceEvent | null>(null)
   const [parameterTaskId, setParameterTaskId] = useState<string | null>(null)
   const [detailAnchor, setDetailAnchor] = useState<{
     x: number
@@ -486,7 +570,9 @@ function DelegateWorkflow({
   const tasks = sourceTasks.map((task, index) => {
     const id = String(task.id || `agent-${index + 1}`)
     const persisted = persistedById.get(id) || task
-    const taskEvents = related.filter(event => event.data?.taskStepId === id)
+    const taskEvents = related.filter(event =>
+      event.data?.taskStepId === id ||
+      (event.type === 'subagent/retry_failed_steps' && Array.isArray(event.data?.activity?.retriedStepIds) && event.data.activity.retriedStepIds.includes(id)))
     const runningEvent = taskEvents.find(event => event.type === 'subagent/step_running')
     const terminalEvent = [...taskEvents].reverse().find(event =>
       ['subagent/step_completed', 'subagent/step_failed', 'subagent/cancelled', 'subagent/blocked'].includes(event.type))
@@ -498,6 +584,8 @@ function DelegateWorkflow({
       id,
       title: String(task.title || persisted.title || id),
       role: String(task.role || task.type || persisted.agentRole || 'general'),
+      agentId: String(task.agentId || persisted.agentId || 'agentpet'),
+      model: String(task.model || persisted.model || ''),
       dependencies: dependencies.map(String),
       status: String(persisted.status || (runningEvent ? 'running' : 'pending')),
       detail: String(persisted.detail || ''),
@@ -551,32 +639,85 @@ function DelegateWorkflow({
   }))
   const completed = tasks.filter(task => task.status === 'completed').length
   const groupStatus = String(latestRun?.status || (completed === tasks.length ? 'completed' : related.length ? 'running' : 'pending'))
+  const orchestrationCanvas = args.origin === 'orchestration-canvas'
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
   const parameterTask = tasks.find(task => task.id === parameterTaskId)
+  const structuredAgentTraceTypes = [
+    'subagent/agent_request', 'subagent/agent_response', 'subagent/agent_error',
+    'subagent/acp_wire_request', 'subagent/acp_wire_response', 'subagent/acp_wire_notification',
+    'subagent/agent_wire_request', 'subagent/agent_wire_response', 'subagent/agent_wire_notification',
+    'subagent/acp_request', 'subagent/acp_response', 'subagent/acp_error'
+  ]
+  const hasStructuredAgentTrace = selectedTask?.events.some(event => structuredAgentTraceTypes.includes(event.type)) || false
   const selectedTaskTrace = selectedTask?.events.filter(event => [
     'subagent/step_running',
     'subagent/model_call',
     'subagent/model_response',
+    'subagent/agent_request',
+    'subagent/agent_response',
+    'subagent/agent_error',
+    'subagent/acp_wire_request',
+    'subagent/acp_wire_response',
+    'subagent/acp_wire_notification',
+    'subagent/agent_wire_request',
+    'subagent/agent_wire_response',
+    'subagent/agent_wire_notification',
+    'subagent/acp_request',
+    'subagent/acp_response',
+    'subagent/acp_error',
     'subagent/tool_call',
     'subagent/tool_result',
     'subagent/step_retrying',
+    'subagent/retry_step',
+    'subagent/retry_failed_steps',
     'subagent/step_completed',
     'subagent/step_failed',
     'subagent/blocked',
     'subagent/cancelled'
-  ].includes(event.type)) || []
+  ].includes(event.type) || (!hasStructuredAgentTrace && isLegacyAgentResult(event))) || []
   const selectedTraceEvent = selectedTaskTrace.find(event => event.seq === selectedTraceSeq)
-  const selectedTraceActivity = selectedTraceEvent?.data?.activity
-  const selectedTracePayload: unknown = selectedTraceEvent
-    ? (selectedTraceActivity?.request
+  useEffect(() => {
+    setSelectedTraceFull(null)
+    if (!selectedTraceEvent?.data?.truncated) return
+    let cancelled = false
+    void window.api.getSessionEvent(selectedTraceEvent.sessionId, selectedTraceEvent.seq).then(event => {
+      if (!cancelled && event) setSelectedTraceFull(event as TraceEvent)
+    })
+    return () => { cancelled = true }
+  }, [selectedTraceEvent?.sessionId, selectedTraceEvent?.seq, selectedTraceEvent?.data?.truncated])
+  const effectiveTraceEvent = selectedTraceFull?.seq === selectedTraceEvent?.seq ? selectedTraceFull : selectedTraceEvent
+  const selectedTraceActivity = effectiveTraceEvent?.data?.activity
+  const selectedTraceStep = effectiveTraceEvent && Array.isArray(effectiveTraceEvent.data?.steps)
+    ? effectiveTraceEvent.data.steps.find((step: { id?: unknown }) => step?.id === selectedTask?.id)
+    : undefined
+  const selectedTraceIsLegacyRequest = Boolean(
+    selectedTraceEvent?.type === 'subagent/step_running' &&
+    selectedTask?.agentId !== 'agentpet' &&
+    !hasStructuredAgentTrace
+  )
+  const selectedTracePayload: unknown = effectiveTraceEvent
+    ? (selectedTraceIsLegacyRequest
+        ? {
+            method: 'session/prompt',
+            agentId: selectedTask?.agentId,
+            model: selectedTask?.model || 'default',
+            cwd: args.workspacePath,
+            prompt: selectedTask?.prompt,
+            attempt: Number(selectedTraceStep?.retryCount || 0) + 1,
+            compatibility: '根据历史任务快照还原；旧版本未单独保存真实传输报文'
+          }
+        : selectedTraceActivity?.payload
+        ?? selectedTraceActivity?.request
         ?? selectedTraceActivity?.response
+        ?? selectedTraceActivity?.error
+        ?? selectedTraceActivity?.update?.result
         ?? selectedTraceActivity?.arguments
         ?? selectedTraceActivity?.result
         ?? selectedTraceActivity) || {
-        action: selectedTraceEvent.data?.action,
-        taskStepId: selectedTraceEvent.data?.taskStepId,
-        status: selectedTraceEvent.data?.run?.status,
-        time: selectedTraceEvent.time
+        action: effectiveTraceEvent.data?.action,
+        taskStepId: effectiveTraceEvent.data?.taskStepId,
+        status: effectiveTraceEvent.data?.run?.status,
+        time: effectiveTraceEvent.time
       }
     : null
 
@@ -587,7 +728,7 @@ function DelegateWorkflow({
           <span className="workflow-head-icon"><GitBranch size={14} /></span>
           <span className="workflow-head-copy">
             <strong>{String(args.title || latestRun?.title || '子任务工作流')}</strong>
-            <small>委派任务 {String(call.seq).padStart(4, '0')} · {tasks.length} 个子任务 · {stageCount} 个依赖阶段</small>
+            <small>{orchestrationCanvas ? '多 Agent 编排' : '委派任务'} {String(call.seq).padStart(4, '0')} · {tasks.length} 个子任务 · {stageCount} 个依赖阶段</small>
           </span>
           <span className={`workflow-parallel-badge ${peak > 1 ? 'is-parallel' : ''}`}>
             {peak > 1 ? `实际并行峰值 ${peak}` : related.length ? '当前串行执行' : `最多并行 ${maxConcurrency}`}
@@ -625,8 +766,8 @@ function DelegateWorkflow({
                       onClick={event => openTaskParameters(task.id, event)}
                       aria-expanded={parameterTaskId === task.id}
                     >
-                      <span><i />{task.title}</span>
-                      <small>{workflowRoleLabel(task.role)}{task.dependencies.length ? ` · 依赖 ${task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}` : ''}</small>
+                      <span><b className="workflow-agent-icon"><AgentBrandIcon agentId={task.agentId} /></b><i />{task.title}</span>
+                      <small>{workflowAgentLabel(task.agentId)}{task.model ? ` · ${task.model}` : ` · ${workflowRoleLabel(task.role)}`}{task.dependencies.length ? ` · 依赖 ${task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}` : ''}</small>
                     </button>
                   ))}
                 </section>
@@ -655,7 +796,7 @@ function DelegateWorkflow({
                   <div className="workflow-task-copy">
                     <span className="workflow-stage">阶段 {stage}</span>
                     <span className="workflow-task-title" title={task.title}>{task.title}</span>
-                    <span className="workflow-role">{workflowRoleLabel(task.role)}</span>
+                    <span className="workflow-role">{workflowAgentLabel(task.agentId)}</span>
                     {task.dependencies.length > 0 && <small title={`等待：${task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}`}>等待 {task.dependencies.map(id => taskById.get(id)?.title || id).join('、')}</small>}
                   </div>
                   <div className="workflow-time-track" title={task.detail || task.title}>
@@ -686,25 +827,59 @@ function DelegateWorkflow({
                             const activity = taskEvent.data?.activity
                             const isModelRequest = taskEvent.type === 'subagent/model_call'
                             const isModelResponse = taskEvent.type === 'subagent/model_response'
+                            const legacyAgentRequest = !hasStructuredAgentTrace && taskEvent.type === 'subagent/step_running' && selectedTask.agentId !== 'agentpet'
+                            const legacyAgentResponse = !hasStructuredAgentTrace && isLegacyAgentResult(taskEvent)
+                            const legacyResultStatus = String(activity?.update?.result?.status || '')
+                            const isWireRequest = taskEvent.type === 'subagent/acp_wire_request'
+                            const isWireResponse = taskEvent.type === 'subagent/acp_wire_response'
+                            const isWireNotification = taskEvent.type === 'subagent/acp_wire_notification'
+                            const isAgentWireRequest = taskEvent.type === 'subagent/agent_wire_request'
+                            const isAgentWireResponse = taskEvent.type === 'subagent/agent_wire_response'
+                            const isAgentWireNotification = taskEvent.type === 'subagent/agent_wire_notification'
+                            const isAgentRequest = taskEvent.type === 'subagent/agent_request' || taskEvent.type === 'subagent/acp_request' || legacyAgentRequest
+                            const isAgentResponse = taskEvent.type === 'subagent/agent_response' || taskEvent.type === 'subagent/acp_response' || (legacyAgentResponse && legacyResultStatus === 'SUCCESS')
+                            const isAgentError = taskEvent.type === 'subagent/agent_error' || taskEvent.type === 'subagent/acp_error' || (legacyAgentResponse && legacyResultStatus !== 'SUCCESS')
                             const isToolCall = taskEvent.type === 'subagent/tool_call'
                             const isToolResult = taskEvent.type === 'subagent/tool_result'
                             const isModel = isModelRequest || isModelResponse
+                            const isAcpWire = isWireRequest || isWireResponse || isWireNotification
+                            const isExternalWire = isAgentWireRequest || isAgentWireResponse || isAgentWireNotification
+                            const isAgentProtocol = isAcpWire || isExternalWire || isAgentRequest || isAgentResponse || isAgentError
                             const isTool = isToolCall || isToolResult
                             const isMcp = isTool && activity?.kind === 'mcp'
-                            const title = isModel
+                            const eventStep = Array.isArray(taskEvent.data?.steps)
+                              ? taskEvent.data.steps.find((step: { id?: unknown }) => step?.id === selectedTask.id)
+                              : undefined
+                            const retryCount = Number(eventStep?.retryCount || 0)
+                            const transport = agentTransportLabel(activity?.protocol, String(activity?.agentId || selectedTask.agentId))
+                            const title = isAcpWire
+                              ? isWireRequest ? 'ACP SDK 请求报文' : isWireResponse ? 'ACP SDK 返回报文' : 'ACP SDK 通知报文'
+                              : isExternalWire
+                                ? isAgentWireRequest ? `${transport} 请求报文` : isAgentWireResponse ? `${transport} 返回报文` : `${transport} 传输事件`
+                              : isAgentProtocol
+                                ? legacyAgentRequest
+                                  ? `${transport} 请求（历史快照还原）`
+                                  : isAgentError ? `${transport} 请求异常` : isAgentResponse ? `${transport} 返回报文` : `${transport} 请求报文`
+                              : taskEvent.type === 'subagent/step_retrying' && retryCount > 0
+                                ? `准备第 ${retryCount} 次重试`
+                                : taskEvent.type === 'subagent/step_running' && retryCount > 0
+                                  ? `开始执行 · 重试 ${retryCount}`
+                                  : isModel
                               ? `${subagentTraceLabel(taskEvent.type)} ${Number(activity?.index) || ''}`.trim()
                               : isTool
                                 ? `${String(activity?.name || '工具')}${isToolResult ? ' · 返回结果' : ''}`
                                 : subagentTraceLabel(taskEvent.type)
-                            const detail = isModel
+                            const detail = isAgentProtocol
+                              ? [workflowAgentLabel(String(activity?.agentId || selectedTask.agentId)), isAcpWire || isExternalWire ? activity?.direction : transport, activity?.method, activity?.id !== undefined ? `id ${activity.id}` : '', activity?.model, activity?.attempt ? `第 ${activity.attempt} 次` : ''].filter(Boolean).join(' · ')
+                              : isModel
                               ? [activity?.provider, activity?.model, activity?.messageCount ? `${activity.messageCount} 条消息` : ''].filter(Boolean).join(' · ')
                               : isTool
                                 ? `${isMcp ? 'MCP 工具' : '本地工具'}${isToolResult ? '返回报文' : '调用参数'}`
-                                : workflowStatusLabel(String(taskEvent.data?.run?.status || 'running'))
+                                : String(eventStep?.detail || workflowStatusLabel(String(taskEvent.data?.run?.status || 'running')))
                             return (
-                              <li key={taskEvent.seq} className={`${isModelRequest ? 'model' : isModelResponse ? 'model-response' : isMcp ? 'mcp' : isToolResult ? 'tool-result' : isTool ? 'tool' : 'status'} ${selectedTraceSeq === taskEvent.seq ? 'selected' : ''}`}>
+                              <li key={taskEvent.seq} className={`${isWireRequest || isAgentWireRequest || isAgentRequest ? 'model' : isWireResponse || isAgentWireResponse || isAgentResponse ? 'model-response' : isWireNotification || isAgentWireNotification ? 'mcp' : isAgentError ? 'status' : isModelRequest ? 'model' : isModelResponse ? 'model-response' : isMcp ? 'mcp' : isToolResult ? 'tool-result' : isTool ? 'tool' : 'status'} ${selectedTraceSeq === taskEvent.seq ? 'selected' : ''}`}>
                                 <button onClick={() => setSelectedTraceSeq(current => current === taskEvent.seq ? null : taskEvent.seq)} aria-expanded={selectedTraceSeq === taskEvent.seq}>
-                                  <span className="workflow-call-trace-icon">{isModel ? <Bot size={12} /> : isTool ? <TerminalSquare size={12} /> : <GitBranch size={12} />}</span>
+                                  <span className="workflow-call-trace-icon">{isModel || isAgentProtocol ? <Bot size={12} /> : isTool ? <TerminalSquare size={12} /> : <GitBranch size={12} />}</span>
                                   <span><strong>{title}</strong><small>{detail || '执行状态更新'}</small></span>
                                   <time>{formatClock(taskEvent.time)}</time>
                                   <ChevronRight size={12} />
@@ -793,7 +968,7 @@ function DelegateWorkflow({
           >
             <header>
               <div>
-                <small>工具调用 · delegate_tasks</small>
+                <small>{orchestrationCanvas ? '多 Agent 编排' : '工具调用 · delegate_tasks'}</small>
                 <strong>调用参数</strong>
               </div>
               <button onClick={() => setCallPayloadAnchor(null)} aria-label="关闭调用参数"><X size={13} /></button>
@@ -1272,7 +1447,10 @@ export function TrajectoryPage(): React.JSX.Element {
         sources: sourcesForFilter(filter),
         search: deferredQuery || undefined
       })
-      const nextEvents: TraceEvent[] = (page?.events || []).filter((event: TraceEvent) => matchesFilter(event, filter))
+      let nextEvents: TraceEvent[] = (page?.events || []).filter((event: TraceEvent) => matchesFilter(event, filter))
+      if (!deferredQuery && (filter === 'all' || filter === 'subagent')) {
+        nextEvents = (await hydrateWorkflowHistory(activeSessionId, nextEvents)).filter(event => matchesFilter(event, filter))
+      }
       const loadedTurns = [...new Set(nextEvents.flatMap((event: TraceEvent) =>
         event.turn === undefined ? [] : [event.turn]))]
       const latestTurn = loadedTurns[loadedTurns.length - 1]
@@ -1280,7 +1458,8 @@ export function TrajectoryPage(): React.JSX.Element {
       setCollapsedTurns(new Set(loadedTurns.filter(turn => turn !== latestTurn)))
       setEvents(nextEvents)
       setTotal(Number(page?.total || 0))
-      setHasMore(Boolean(page?.hasMore))
+      const reachedSessionStart = Number.isSafeInteger(page?.firstSeq) && nextEvents.some(event => event.seq === page.firstSeq)
+      setHasMore(Boolean(page?.hasMore) && !reachedSessionStart)
       setSelected(current => current && nextEvents.some((event: TraceEvent) => event.seq === current.seq) ? current : null)
     } finally {
       setLoading(false)
@@ -1341,11 +1520,15 @@ export function TrajectoryPage(): React.JSX.Element {
         sources: sourcesForFilter(filter),
         search: deferredQuery || undefined
       })
-      const older = (page?.events || []).filter((event: TraceEvent) => matchesFilter(event, filter))
-      if (older.length > 0) {
-        setEvents(current => [...older, ...current])
+      let older = (page?.events || []).filter((event: TraceEvent) => matchesFilter(event, filter))
+      if (!deferredQuery && (filter === 'all' || filter === 'subagent')) {
+        older = (await hydrateWorkflowHistory(activeSessionId, older)).filter(event => matchesFilter(event, filter))
       }
-      setHasMore(Boolean(page?.hasMore))
+      if (older.length > 0) {
+        setEvents(current => mergeTraceEvents(older, current))
+      }
+      const reachedSessionStart = Number.isSafeInteger(page?.firstSeq) && older.some(event => event.seq === page.firstSeq)
+      setHasMore(Boolean(page?.hasMore) && !reachedSessionStart)
     } finally {
       setLoadingOlder(false)
     }

@@ -166,6 +166,7 @@
 .workflow-flow-node:focus-visible { outline: 2px solid color-mix(in srgb, var(--node-color) 55%, transparent); outline-offset: 1px; }
 .workflow-flow-node > span { display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--text-primary); font-size: 9.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-flow-node > span i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--node-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 12%, transparent); }
+.workflow-agent-icon { width: 13px; height: 13px; flex: none; display: inline-grid; place-items: center; }
 .workflow-flow-node small { overflow: hidden; padding-left: 13px; color: var(--text-muted); font: 8px/1.2 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-runtime-title { display: flex; align-items: center; gap: 7px; padding: 2px 5px 0; color: var(--text-muted); font-size: 8px; }
 .workflow-runtime-title span { color: var(--text-secondary); font: 700 8px/1 "Cascadia Code", Consolas, monospace; letter-spacing: .05em; }

@@ -16,6 +16,7 @@ import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
 import * as Papa from 'papaparse'
 import ExcelJS from 'exceljs'
+import { randomUUID } from 'crypto'
 
 const ATTACHMENT_TEXT_PREVIEW_LIMIT = 30000
 
@@ -37,6 +38,7 @@ import { AgentExecutor } from './agent-runtime'
 import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { ModelRuntimeFactory } from './model-runtime'
 import { taskRunner } from './task-runtime/task-runner'
+import { subagentRunner } from './task-runtime/subagent-runner'
 import { extractExecutionResult } from './task-runtime/prompt-builder'
 import { getSubagentToolNames, nextWithIdleTimeout, SUBAGENT_IDLE_TIMEOUT_MS } from './task-runtime/subagent-execution'
 import { handleSkillHubDownload } from './skills/skillhub-download-installer'
@@ -44,6 +46,7 @@ import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
 import { SessionEventStore } from './session-events/session-event-store'
 import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
+import { externalAgentManager } from './external-agents'
 import globalAssistantPageContextSkill from './tools/builtin/global-assistant-page-context/SKILL.md?raw'
 
 
@@ -1339,6 +1342,82 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  ipcMain.handle('api:list-agents', () => externalAgentManager.list())
+  ipcMain.handle('api:probe-agent', (_event, agentId: string, cwd?: string) =>
+    externalAgentManager.probe(agentId, cwd)
+  )
+  ipcMain.handle('api:list-agent-models', (_event, agentId: string, cwd?: string, configuredModel?: string) =>
+    externalAgentManager.listModels(agentId, cwd, configuredModel)
+  )
+  ipcMain.handle('api:upsert-agent', (_event, input) => externalAgentManager.upsert(input))
+  ipcMain.handle('api:delete-agent', (_event, agentId: string) => externalAgentManager.delete(agentId))
+  ipcMain.handle('api:run-agent-prompt', (event, request) =>
+    externalAgentManager.runPrompt(request, update => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('api:agent-event', { agentId: request.agentId, update })
+      }
+    })
+  )
+  ipcMain.handle('api:start-agent-collaboration', async (_event, input) => {
+    const tasks = Array.isArray(input?.tasks) ? input.tasks : []
+    const sessionId = String(input?.sessionId || 'default')
+    const title = String(input?.title || '多 Agent 协作').trim().slice(0, 120)
+    const maxConcurrency = Math.max(1, Math.min(6, Number(input?.maxConcurrency) || 3))
+    const workspacePath = String(input?.workspacePath || '').trim()
+    if (!workspacePath) throw new Error('开始协作前，请先为当前会话绑定工作文件夹')
+    let workspaceStat: fs.Stats
+    try {
+      workspaceStat = await fs.promises.stat(workspacePath)
+    } catch {
+      throw new Error('当前会话绑定的工作文件夹不存在，请重新选择')
+    }
+    if (!workspaceStat.isDirectory()) throw new Error('当前会话绑定的工作路径不是文件夹，请重新选择')
+    const callId = `orchestration-${randomUUID()}`
+    await sessionEventStore.append(sessionId, {
+      type: 'tool/call',
+      source: 'tool',
+      correlationId: callId,
+      data: sanitizeTraceValue({
+        name: 'delegate_tasks',
+        arguments: { title, tasks, maxConcurrency, workspacePath, origin: 'orchestration-canvas' }
+      }) as Record<string, unknown>
+    })
+    return new Promise<{ taskRunId: string; status: string }>((resolveStart, rejectStart) => {
+      let started = false
+      void subagentRunner.delegate(
+        sessionId,
+        `collaboration-${Date.now()}`,
+        undefined,
+        callId,
+        title,
+        tasks,
+        maxConcurrency,
+        workspacePath,
+        undefined,
+        taskRunId => {
+          started = true
+          resolveStart({ taskRunId, status: 'running' })
+        }
+      ).then(async result => {
+        await sessionEventStore.append(sessionId, {
+          type: 'tool/result',
+          source: 'tool',
+          correlationId: callId,
+          data: { name: 'delegate_tasks', success: result.status === 'completed', displayResult: JSON.stringify(result), modelResult: JSON.stringify(result) }
+        })
+      }).catch(async error => {
+        const message = error instanceof Error ? error.message : String(error)
+        await sessionEventStore.append(sessionId, {
+          type: 'tool/result',
+          source: 'tool',
+          correlationId: callId,
+          data: { name: 'delegate_tasks', success: false, displayResult: message, modelResult: message }
+        })
+        if (!started) rejectStart(error)
+      })
+    })
+  })
+
   taskRunner.recoverInterruptedRuns().catch((error) => {
     console.error('[TaskRunner] Failed to restore interrupted task state', error)
   })
@@ -1412,6 +1491,10 @@ app.whenReady().then(() => {
     if (!taskRunId || !taskStepId || typeof taskRunId !== 'string' || typeof taskStepId !== 'string') return null
     const result = await taskRunner.retryStep(taskRunId, taskStepId)
     return result
+  })
+  ipcMain.handle('api:retry-failed-task-steps', async (_event, taskRunId: string) => {
+    if (!taskRunId || typeof taskRunId !== 'string') return null
+    return taskRunner.retryFailedSteps(taskRunId)
   })
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   registerBuiltinTools()
@@ -4706,6 +4789,104 @@ app.whenReady().then(() => {
 
   function configureTaskExecutor(): void {
     taskRunner.setExecutor(async (request) => {
+      const selectedAgentId = request.step.agentId || 'agentpet'
+      if (selectedAgentId !== 'agentpet') {
+        await request.reportProgress(`正在由 ${selectedAgentId} 执行`)
+        const cwd = request.run.workspacePath || getActiveStorageDir()
+        const agent = await externalAgentManager.describe(selectedAgentId)
+        const attempt = (request.step.retryCount || 0) + 1
+        await taskRunner.notify(request.run.id, 'agent_request', request.step.id, {
+          agentId: selectedAgentId,
+          agentName: agent.name,
+          protocol: agent.protocol,
+          model: request.step.model || 'default',
+          attempt,
+          request: sanitizeTraceValue({
+            operation: 'runPrompt',
+            agentId: selectedAgentId,
+            model: request.step.model || 'default',
+            cwd,
+            prompt: request.prompt
+          })
+        })
+        let protocolTraceQueue = Promise.resolve()
+        try {
+          const result = await externalAgentManager.runPrompt({
+            agentId: selectedAgentId,
+            prompt: request.prompt,
+            cwd,
+            model: request.step.model
+          }, update => {
+            void taskRunner.notify(request.run.id, 'agent_event', request.step.id, {
+              agentId: selectedAgentId,
+              protocol: agent.protocol,
+              attempt,
+              update: sanitizeTraceValue(update)
+            })
+          }, protocolEvent => {
+            const wirePrefix = protocolEvent.protocol === 'acp-v1' ? 'acp_wire' : 'agent_wire'
+            protocolTraceQueue = protocolTraceQueue.then(() => taskRunner.notify(
+              request.run.id,
+              protocolEvent.messageType === 'request'
+                ? `${wirePrefix}_request`
+                : protocolEvent.messageType === 'response'
+                  ? `${wirePrefix}_response`
+                  : `${wirePrefix}_notification`,
+              request.step.id,
+              {
+                agentId: selectedAgentId,
+                agentName: agent.name,
+                protocol: protocolEvent.protocol,
+                attempt,
+                direction: protocolEvent.direction,
+                messageType: protocolEvent.messageType,
+                method: protocolEvent.method,
+                id: protocolEvent.id,
+                byteLength: protocolEvent.byteLength,
+                payload: sanitizeTraceValue(protocolEvent.payload)
+              }
+            ))
+          })
+          await protocolTraceQueue
+          await taskRunner.notify(request.run.id, 'agent_response', request.step.id, {
+            agentId: selectedAgentId,
+            agentName: agent.name,
+            protocol: agent.protocol,
+            model: request.step.model || 'default',
+            attempt,
+            response: sanitizeTraceValue({
+              sessionId: result.sessionId,
+              stopReason: result.stopReason,
+              content: result.text,
+              artifactPaths: result.artifactPaths || []
+            })
+          })
+          await taskRunner.notify(request.run.id, 'agent_completed', request.step.id, {
+            agentId: selectedAgentId,
+            sessionId: result.sessionId,
+            stopReason: result.stopReason
+          })
+          const parsedResult = extractExecutionResult(result.text || '')
+          return {
+            resultSummary: parsedResult.resultSummary || `${selectedAgentId} 已完成任务（${result.stopReason}）`,
+            artifactPaths: [...new Set([...(result.artifactPaths || []), ...parsedResult.artifactPaths])]
+          }
+        } catch (error) {
+          await protocolTraceQueue
+          await taskRunner.notify(request.run.id, 'agent_error', request.step.id, {
+            agentId: selectedAgentId,
+            agentName: agent.name,
+            protocol: agent.protocol,
+            model: request.step.model || 'default',
+            attempt,
+            error: sanitizeTraceValue({
+              name: error instanceof Error ? error.name : 'Error',
+              message: error instanceof Error ? error.message : String(error)
+            })
+          })
+          throw error
+        }
+      }
       const backgroundExecutor = new AgentExecutor()
       let finalResponse = ''
       const generatedPaths: string[] = []
@@ -4736,9 +4917,13 @@ app.whenReady().then(() => {
       await request.reportProgress('等待子 Agent 模型响应')
       const stream = backgroundExecutor.run({
         ...systemLlmConfig,
+        model: request.step.model || systemLlmConfig.model,
         apiKey: systemLlmConfig.apiKey,
         sessionId: request.run.sessionId,
         isBackground: true,
+        interactionOrigin: String(request.run.parentToolCallId || '').startsWith('orchestration-') ? 'orchestration' : 'chat',
+        taskRunId: request.run.id,
+        taskStepId: request.step.id,
         disableMemoryPersistence: true,
         blockedToolNames: ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_user_clarification'],
         allowedToolNames: getSubagentToolNames(request.step.agentRole)

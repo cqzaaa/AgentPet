@@ -49,7 +49,9 @@ The available skill catalog contains metadata only. Call request_skill only with
                 acceptanceCriteria: { type: 'string', description: 'How completion will be verified' },
                 resultSummary: { type: 'string', description: 'Concise result when the step is complete' },
                 artifactPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths produced by the step' },
-                retryCount: { type: 'number', description: 'Number of attempts already made' }
+                retryCount: { type: 'number', description: 'Number of attempts already made' },
+                agentId: { type: 'string', description: 'Agent id; defaults to agentpet' },
+                model: { type: 'string', description: 'Optional model id exposed by the selected Agent CLI' }
               },
               required: ['id', 'title', 'status']
             }
@@ -57,6 +59,11 @@ The available skill catalog contains metadata only. Call request_skill only with
         },
         required: ['title', 'steps']
       }
+    },
+    {
+      name: 'list_agents',
+      description: 'List AgentPet and locally configured Agents with installation status. Use before selecting a non-default Agent.',
+      parameters: { type: 'object', properties: {} }
     },
     {
       name: 'delegate_tasks',
@@ -76,6 +83,11 @@ The available skill catalog contains metadata only. Call request_skill only with
                 title: { type: 'string' },
                 prompt: { type: 'string', description: 'Self-contained assignment and scope' },
                 role: { type: 'string', enum: ['general', 'researcher', 'coder', 'reviewer'] },
+                agentId: {
+                  type: 'string',
+                  description: 'Execution Agent id: agentpet (default), claude-code, codex, antigravity, or a custom ACP Agent id'
+                },
+                model: { type: 'string', description: 'Optional model id exposed by the selected Agent CLI' },
                 dependencies: { type: 'array', items: { type: 'string' } },
                 acceptanceCriteria: { type: 'string' }
               },

@@ -157,8 +157,8 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     name: 'Agent workflow',
     description: 'Plan substantial work and delegate independent or dependency-linked subtasks.',
     triggers: ['plan', 'delegate', 'subagent', 'task plan', '规划', '计划', '委派', '子任务', '并行'],
-    allowedTools: ['update_task_plan', 'update_task_step', 'delegate_tasks'],
-    instructions: `# Agent workflow\nNever plan a single-file, single-mutation, low-risk task. For substantial work, call update_task_plan once, keep its structure immutable, and use update_task_step for all later progress. Complete or block the current step before another begins; the runtime starts the next ready step and closes successful work automatically. Use delegate_tasks only for concrete independent or dependency-linked subtasks.`
+    allowedTools: ['list_agents', 'update_task_plan', 'update_task_step', 'delegate_tasks'],
+    instructions: `# Agent workflow\nNever plan a single-file, single-mutation, low-risk task. For substantial work, call update_task_plan once, keep its structure immutable, and use update_task_step for all later progress. Complete or block the current step before another begins; the runtime starts the next ready step and closes successful work automatically. Call list_agents before selecting a non-default execution Agent, then pass its id as agentId. Use delegate_tasks only for concrete independent or dependency-linked subtasks.`
   }),
   staticSkill({
     id: 'files',

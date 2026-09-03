@@ -19,6 +19,8 @@ export interface TaskPlanInputStep {
   artifactPaths?: string[]
   retryCount?: number
   agentRole?: SubagentRole
+  agentId?: string
+  model?: string
   prompt?: string
 }
 
@@ -87,6 +89,8 @@ export interface SubagentTask {
   taskStepId: string
   parentSessionId: string
   role: SubagentRole
+  agentId?: string
+  model?: string
   title: string
   prompt: string
   status: TaskStepStatus
@@ -103,6 +107,8 @@ export interface DelegateTaskInput {
   title: string
   prompt: string
   role?: SubagentRole
+  agentId?: string
+  model?: string
   dependencies?: string[]
   acceptanceCriteria?: string
 }

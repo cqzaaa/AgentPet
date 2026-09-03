@@ -237,6 +237,22 @@ const api = {
       ipcRenderer.removeListener('api:llm-token-usage', subscription)
     }
   },
+  listAgents: (): Promise<any[]> => ipcRenderer.invoke('api:list-agents'),
+  probeAgent: (agentId: string, cwd?: string): Promise<any> =>
+    ipcRenderer.invoke('api:probe-agent', agentId, cwd),
+  listAgentModels: (agentId: string, cwd?: string, configuredModel?: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:list-agent-models', agentId, cwd, configuredModel),
+  upsertAgent: (input: any): Promise<any> => ipcRenderer.invoke('api:upsert-agent', input),
+  deleteAgent: (agentId: string): Promise<boolean> => ipcRenderer.invoke('api:delete-agent', agentId),
+  runAgentPrompt: (request: { agentId: string; prompt: string; cwd: string; model?: string }): Promise<any> =>
+    ipcRenderer.invoke('api:run-agent-prompt', request),
+  startAgentCollaboration: (input: any): Promise<any> =>
+    ipcRenderer.invoke('api:start-agent-collaboration', input),
+  onAgentEvent: (callback: (data: any) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, data: any): void => callback(data)
+    ipcRenderer.on('api:agent-event', subscription)
+    return () => ipcRenderer.removeListener('api:agent-event', subscription)
+  },
   getTaskRun: (taskRunId: string): Promise<any | null> => ipcRenderer.invoke('api:get-task-run', taskRunId),
   listTaskRuns: (sessionId?: string): Promise<any[]> => ipcRenderer.invoke('api:list-task-runs', sessionId),
   listSubagentTasks: (taskRunId: string): Promise<any[]> => ipcRenderer.invoke('api:list-subagent-tasks', taskRunId),
@@ -244,6 +260,8 @@ const api = {
     ipcRenderer.invoke('api:control-task-run', taskRunId, action),
   retryTaskStep: (taskRunId: string, taskStepId: string): Promise<any | null> =>
     ipcRenderer.invoke('api:retry-task-step', taskRunId, taskStepId),
+  retryFailedTaskSteps: (taskRunId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:retry-failed-task-steps', taskRunId),
   onTaskRunUpdated: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('api:task-run-updated', subscription)
