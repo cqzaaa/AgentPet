@@ -996,3 +996,11 @@
   .task-dag-node.is-in_progress .task-dag-node-marker svg { animation: none; }
   .task-dag-node { transition: none; }
 }
+
+.task-dag-react-flow { display: flex; flex-direction: column; }
+.task-dag-flow-viewport { height: 280px; min-height: 280px; width: 100%; position: relative; flex: 1; }
+/* Give React Flow a definite containing height even when the flex viewport grows from min-height. */
+.task-dag-flow-surface { position: absolute; inset: 0; }
+.task-dag-flow-viewport:focus-visible { outline: 2px solid var(--collab-blue, #3157d5); outline-offset: -2px; }
+.collab-readonly-graph > .task-dag-react-flow { height: 100%; }
+.task-dag-react-flow .react-flow__node:focus-visible { outline: 2px solid var(--collab-blue, #3157d5); outline-offset: 3px; border-radius: 8px; }

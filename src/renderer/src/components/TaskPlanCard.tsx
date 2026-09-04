@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Circle, FileText, ListChecks, LoaderCircle, LocateFixed, Network, Pause, Play, RotateCcw, Square, X } from 'lucide-react'
+import { ReactFlow, Background, Controls, Handle, Position, MarkerType, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import './TaskPlanCard.css'
 import { AgentBrandIcon } from './AgentBrandIcon'
 
@@ -211,79 +213,97 @@ function layoutDag(steps: TaskPlanStep[]): { nodes: DagNode[]; width: number; he
   return { nodes, width: padding * 2 + columnCount * nodeWidth + (columnCount - 1) * columnGap, height }
 }
 
-export function TaskDagGraph({
-  plan,
-  onStepClick,
-  selectedStepId,
-  showHeader = false
-}: {
+type ReadonlyTaskNode = Node<{ step: TaskPlanStep; highlighted: boolean }, 'readonlyTask'>
+
+function ReadonlyTaskNodeView({ data }: NodeProps<ReadonlyTaskNode>): React.JSX.Element {
+  const { step, highlighted } = data
+  return <article className={`task-dag-node is-${step.status} ${highlighted ? 'is-selected' : ''}`} style={{ position: 'relative', width: 135, height: 54 }} title={step.detail || step.title}>
+    <Handle type="target" position={Position.Left} isConnectable={false} style={{ visibility: 'hidden' }} />
+    <span className="task-dag-node-top">
+      <span className="task-dag-node-marker"><StepMarker status={step.status} /></span>
+      <AgentBrandIcon agentId={step.agentId || 'agentpet'} className="task-dag-agent-icon" />
+      <small>{step.agentId || step.agentRole || 'agentpet'}</small>
+      {(step.retryCount || 0) > 0 && <em>retry {step.retryCount}</em>}
+    </span>
+    <strong>{step.title}</strong>
+    <span className="task-dag-node-state" title={step.detail}>{step.status === 'in_progress' && step.detail ? step.detail : STATUS_LABEL[step.status]}</span>
+    <Handle type="source" position={Position.Right} isConnectable={false} style={{ visibility: 'hidden' }} />
+  </article>
+}
+
+const readonlyNodeTypes = { readonlyTask: ReadonlyTaskNodeView }
+
+export function TaskDagGraph({ plan, onStepClick, selectedStepId, showHeader = false }: {
   plan: TaskPlan
   onStepClick?: (step: TaskPlanStep) => void
   selectedStepId?: string
   showHeader?: boolean
 }): React.JSX.Element {
+  const flowRef = React.useRef<ReactFlowInstance<ReadonlyTaskNode> | null>(null)
+  const hasSelection = Boolean(selectedStepId)
+  useEffect(() => {
+    // The details panel changes the available width after selecting a node.
+    let nextFrame = 0
+    const frame = requestAnimationFrame(() => {
+      nextFrame = requestAnimationFrame(() => {
+        void flowRef.current?.fitView({ padding: 0.25, maxZoom: 1.5 })
+      })
+    })
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(nextFrame) }
+  }, [hasSelection])
   const layout = useMemo(() => layoutDag(plan.steps), [plan.steps])
-  const nodesById = useMemo(() => new Map(layout.nodes.map(node => [node.step.id, node])), [layout.nodes])
+  const nodes = useMemo<ReadonlyTaskNode[]>(() => layout.nodes.map(node => ({
+    id: node.step.id, type: 'readonlyTask', position: { x: node.x, y: node.y },
+    data: { step: node.step, highlighted: selectedStepId === node.step.id },
+    ariaLabel: `${node.step.title}，${STATUS_LABEL[node.step.status]}`
+  })), [layout, selectedStepId])
+  const edges = useMemo(() => {
+    const ids = new Set(plan.steps.map(step => step.id))
+    return plan.steps.flatMap(step => (step.dependencies || []).filter(id => ids.has(id)).map(id => ({
+      id: JSON.stringify([id, step.id]), source: id, target: step.id,
+      animated: step.status === 'in_progress',
+      style: { stroke: step.status === 'completed' ? '#2aa178' : step.status === 'blocked' ? '#d97732' : '#8c91a0' },
+      markerEnd: { type: MarkerType.ArrowClosed }
+    })))
+  }, [plan.steps])
   const running = plan.steps.filter(step => step.status === 'in_progress').length
   const completed = plan.steps.filter(step => step.status === 'completed').length
-  return (
-    <section className={`task-dag ${!showHeader ? 'is-bare' : ''}`} aria-label={`Agent execution graph: ${plan.title}`}>
-      {showHeader && (
-        <header className="task-dag-header">
-          <span><Network size={14} aria-hidden="true" /><strong>Agent DAG</strong></span>
-          <small>{running > 0 ? `${running} running` : `${completed}/${plan.steps.length} complete`}</small>
-        </header>
-      )}
-      <div className="task-dag-viewport">
-        <div className="task-dag-canvas" style={{ width: layout.width, height: layout.height }}>
-          <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <marker id="task-dag-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-                <path d="M0,0 L7,3.5 L0,7 Z" />
-              </marker>
-            </defs>
-            {layout.nodes.flatMap(target => (target.step.dependencies || []).map(dependencyId => {
-              const source = nodesById.get(dependencyId)
-              if (!source) return null
-              const x1 = source.x + source.width
-              const y1 = source.y + source.height / 2
-              const x2 = target.x
-              const y2 = target.y + target.height / 2
-              const bend = Math.max(24, (x2 - x1) / 2)
-              return <path key={`${dependencyId}-${target.step.id}`} className={`is-${target.step.status}`} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} markerEnd="url(#task-dag-arrow)" />
-            }))}
-          </svg>
-          {layout.nodes.map(node => (
-            <article
-              key={node.step.id}
-              className={`task-dag-node is-${node.step.status} ${selectedStepId === node.step.id ? 'is-selected' : ''} ${onStepClick ? 'is-clickable' : ''}`}
-              style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
-              title={node.step.status === 'in_progress' ? node.step.detail || node.step.title : node.step.title}
-              role={onStepClick ? 'button' : undefined}
-              tabIndex={onStepClick ? 0 : undefined}
-              onClick={() => onStepClick?.(node.step)}
-              onKeyDown={event => {
-                if (!onStepClick || !['Enter', ' '].includes(event.key)) return
-                event.preventDefault()
-                onStepClick(node.step)
-              }}
-            >
-              <span className="task-dag-node-top">
-                <span className="task-dag-node-marker"><StepMarker status={node.step.status} /></span>
-                <AgentBrandIcon agentId={node.step.agentId || 'agentpet'} className="task-dag-agent-icon" />
-                <small>{node.step.agentId || node.step.agentRole || 'agentpet'}</small>
-                {(node.step.retryCount || 0) > 0 && <em>retry {node.step.retryCount}</em>}
-              </span>
-              <strong>{node.step.title}</strong>
-              <span className="task-dag-node-state" title={node.step.detail}>
-                {node.step.status === 'in_progress' && node.step.detail ? node.step.detail : STATUS_LABEL[node.step.status]}
-              </span>
-            </article>
-          ))}
-        </div>
+  return <section className={`task-dag task-dag-react-flow ${!showHeader ? 'is-bare' : ''}`} aria-label={`只读流程图：${plan.title}`}>
+    {showHeader && <header className="task-dag-header">
+      <span><Network size={14} aria-hidden="true" /><strong>Agent DAG</strong></span>
+      <small>{running > 0 ? `${running} running` : `${completed}/${plan.steps.length} complete`}</small>
+    </header>}
+    <div className="task-dag-flow-viewport" tabIndex={0}
+      aria-label="流程图画布，滚轮缩放，拖动空白处移动；Ctrl 或 Command 加减键缩放，0 适应画布"
+      onPointerDown={event => { if (!(event.target as HTMLElement).closest('button, .react-flow__node')) event.currentTarget.focus({ preventScroll: true }) }}
+      onKeyDownCapture={event => {
+        if (!event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && ['Enter', ' '].includes(event.key) && onStepClick) {
+          const id = (event.target as HTMLElement).closest('.react-flow__node')?.getAttribute('data-id')
+          const step = plan.steps.find(item => item.id === id)
+          if (step) { event.preventDefault(); event.stopPropagation(); onStepClick(step); return }
+        }
+        if (event.nativeEvent.isComposing || event.altKey || !(event.ctrlKey || event.metaKey)) return
+        if (!['+', '=', '-', '0'].includes(event.key) || !flowRef.current) return
+        event.preventDefault()
+        event.stopPropagation()
+        if (event.key === '0') void flowRef.current.fitView({ padding: 0.25, maxZoom: 1.5 })
+        else if (event.key === '-') void flowRef.current.zoomOut()
+        else void flowRef.current.zoomIn()
+      }}>
+      <div className="task-dag-flow-surface">
+        <ReactFlow<ReadonlyTaskNode> nodes={nodes} edges={edges} nodeTypes={readonlyNodeTypes}
+          onInit={instance => { flowRef.current = instance }}
+          onNodeClick={(_, node) => onStepClick?.(node.data.step)}
+          nodesDraggable={false} nodesConnectable={false} edgesReconnectable={false}
+          elementsSelectable={false} nodesFocusable={!!onStepClick} edgesFocusable={false}
+          deleteKeyCode={null} selectionKeyCode={null} panOnDrag zoomOnScroll zoomOnPinch
+          fitView fitViewOptions={{ padding: 0.25, maxZoom: 1.5 }} minZoom={0.25} maxZoom={3}>
+          <Background gap={24} size={1} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
       </div>
-    </section>
-  )
+    </div>
+  </section>
 }
 
 export const TaskPlanCard = React.memo(function TaskPlanCard({ toolSteps, messageId }: { toolSteps: any[]; messageId?: string | number }) {

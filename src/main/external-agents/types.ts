@@ -83,4 +83,11 @@ export interface ExternalAgentRunResult {
   text: string
   stopReason: string
   artifactPaths?: string[]
+  performance?: {
+    elapsedMs: number
+    initializeMs: number
+    sessionMs: number
+    firstTextMs?: number
+    updateCount: number
+  }
 }

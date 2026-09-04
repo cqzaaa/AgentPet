@@ -157,16 +157,20 @@ function ChatPageImpl(): React.JSX.Element {
     setCollaborationRuns([])
     if (!activeSessionId) return () => { active = false }
     const isCanvasRun = (run: any): boolean => String(run?.parentToolCallId || '').startsWith('orchestration-')
+    const deletedRunIds = new Set<string>()
     void window.api.listTaskRuns(activeSessionId).then((items: any[]) => {
       if (!active) return
-      const snapshots = (Array.isArray(items) ? items : []).filter(item => isCanvasRun(item?.run))
+      const snapshots = (Array.isArray(items) ? items : []).filter(item => isCanvasRun(item?.run) && !deletedRunIds.has(item.run.id))
       setCollaborationRuns(snapshots)
       const earliestRun = [...snapshots].sort((left, right) => Number(left?.run?.createdAt || 0) - Number(right?.run?.createdAt || 0))[0]?.run
       if (earliestRun?.title) handleCollaborationStarted(String(earliestRun.title))
     }).catch(() => undefined)
     const unsubscribe = window.api.onTaskRunUpdated((update: any) => {
       if (!active || update?.run?.sessionId !== activeSessionId || !isCanvasRun(update.run)) return
+      if (update.action === 'deleted') deletedRunIds.add(update.run.id)
+      else if (deletedRunIds.has(update.run.id)) return
       setCollaborationRuns(current => {
+        if (update.action === 'deleted') return current.filter(item => item.run.id !== update.run.id)
         const snapshot = { run: update.run, steps: Array.isArray(update.steps) ? update.steps : [] }
         const index = current.findIndex(item => item.run.id === update.run.id)
         if (index < 0) return [...current, snapshot]

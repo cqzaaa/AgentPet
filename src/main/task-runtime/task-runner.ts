@@ -42,6 +42,7 @@ async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void>
 export class TaskRunner {
   private executor?: TaskStepExecutor
   private readonly active = new Map<string, ActiveExecution>()
+  private readonly controls = new Map<string, Promise<unknown>>()
   private readonly listeners = new Set<(update: TaskRunUpdate) => void>()
 
   public constructor(private readonly store = new TaskStore()) {}
@@ -70,13 +71,49 @@ export class TaskRunner {
     return this.store.recoverInterruptedRuns()
   }
 
-  public async control(taskRunId: string, action: TaskControlAction): Promise<TaskRun | null> {
-    if (action === 'pause' || action === 'cancel') this.active.get(taskRunId)?.controller.abort()
+  private serializeControl<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const pending = (this.controls.get(id) || Promise.resolve()).catch(() => {}).then(operation)
+    this.controls.set(id, pending)
+    void pending.finally(() => { if (this.controls.get(id) === pending) this.controls.delete(id) }).catch(() => {})
+    return pending
+  }
+
+  public control(taskRunId: string, action: TaskControlAction): Promise<TaskRun | null> {
+    return this.serializeControl(taskRunId, () => this.applyControl(taskRunId, action))
+  }
+
+  private async applyControl(taskRunId: string, action: TaskControlAction): Promise<TaskRun | null> {
+    const snapshot = await this.store.getRun(taskRunId)
+    if (!snapshot) return null
+    if (action === 'resume' && !['paused', 'pending'].includes(snapshot.run.status)) {
+      throw new Error('只有暂停或等待中的编排可以继续')
+    }
+    const active = this.active.get(taskRunId)
     const status: Record<TaskControlAction, TaskRunStatus> = { pause: 'paused', resume: 'pending', cancel: 'cancelled' }
-    const run = await this.store.setRunStatus(taskRunId, status[action], `user_${action}`)
+    let run = await this.store.setRunStatus(taskRunId, status[action], `user_${action}`)
+    if (action === 'pause' || action === 'cancel') {
+      active?.controller.abort()
+      await active?.promise.catch(() => {})
+      if (active) run = await this.store.setRunStatus(taskRunId, status[action], `user_${action}`)
+    }
     if (run) await this.publish(taskRunId, action)
     if (action === 'resume' && run) this.executeInBackground(taskRunId)
     return run
+  }
+
+  public deleteRun(taskRunId: string): Promise<boolean> {
+    return this.serializeControl(taskRunId, async () => {
+      const snapshot = await this.store.getRun(taskRunId)
+      if (!snapshot) return false
+      if (this.active.has(taskRunId) || ['pending', 'running', 'paused'].includes(snapshot.run.status)) {
+        await this.applyControl(taskRunId, 'cancel')
+      }
+      const deleted = await this.store.deleteRun(taskRunId)
+      if (deleted) for (const listener of this.listeners) {
+        try { listener({ taskRunId, ...snapshot, action: 'deleted' }) } catch (error) { console.error('[TaskRunner] update listener failed', error) }
+      }
+      return deleted
+    })
   }
 
   public async retryStep(taskRunId: string, taskStepId: string) {
@@ -186,6 +223,19 @@ export class TaskRunner {
     return this.publish(taskRunId, action, taskStepId, payload)
   }
 
+  /** Read one task snapshot per batch while preserving each original event. */
+  public async notifyBatch(taskRunId: string, events: Array<Pick<TaskRunUpdate, 'action' | 'taskStepId' | 'payload'>>): Promise<void> {
+    if (!events.length) return
+    const snapshot = await this.store.getRun(taskRunId)
+    if (!snapshot) return
+    for (const event of events) {
+      const update = { taskRunId, run: snapshot.run, steps: snapshot.steps, ...event }
+      for (const listener of this.listeners) {
+        try { listener(update) } catch (error) { console.error('[TaskRunner] update listener failed', error) }
+      }
+    }
+  }
+
   public executeRun(taskRunId: string, options: { maxConcurrency?: number } = {}): Promise<TaskRun | null> {
     const current = this.active.get(taskRunId)
     if (current) return current.promise
@@ -201,6 +251,7 @@ export class TaskRunner {
   }
 
   private async executeLoop(taskRunId: string, signal: AbortSignal, maxConcurrency: number): Promise<TaskRun | null> {
+    if (signal.aborted || !(await this.store.getRun(taskRunId))) return null
     await this.store.setRunStatus(taskRunId, 'running', 'execution_started')
     await this.publish(taskRunId, 'execution_started')
 
@@ -262,6 +313,7 @@ export class TaskRunner {
         prompt: buildTaskStepPrompt(run, step, completedSteps),
         signal,
         reportProgress: async (detail: string) => {
+          if (signal.aborted) return
           await this.store.setStepStatus(run.id, step.id, 'running', { detail })
           await this.publish(run.id, 'step_progress', step.id)
         }

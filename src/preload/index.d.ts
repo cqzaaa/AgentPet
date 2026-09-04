@@ -129,6 +129,8 @@ declare global {
       onTokenUsage: (callback: (data: any) => void) => () => void
       listAgents: () => Promise<any[]>
       probeAgent: (agentId: string, cwd?: string) => Promise<any>
+      getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => Promise<{ status: string; models: any[]; error?: string }>
+      loginAgent: (agentId: string) => Promise<void>
       listAgentModels: (agentId: string, cwd?: string, configuredModel?: string) => Promise<any[]>
       upsertAgent: (input: any) => Promise<any>
       deleteAgent: (agentId: string) => Promise<boolean>
@@ -137,6 +139,7 @@ declare global {
       onAgentEvent: (callback: (data: any) => void) => () => void
       getTaskRun: (taskRunId: string) => Promise<any | null>
       listTaskRuns: (sessionId?: string) => Promise<any[]>
+      deleteTaskRun: (taskRunId: string) => Promise<boolean>
       listSubagentTasks: (taskRunId: string) => Promise<any[]>
       controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel') => Promise<any | null>
       retryTaskStep: (taskRunId: string, taskStepId: string) => Promise<any | null>

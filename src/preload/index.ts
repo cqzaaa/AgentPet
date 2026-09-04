@@ -240,6 +240,8 @@ const api = {
   listAgents: (): Promise<any[]> => ipcRenderer.invoke('api:list-agents'),
   probeAgent: (agentId: string, cwd?: string): Promise<any> =>
     ipcRenderer.invoke('api:probe-agent', agentId, cwd),
+  getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => ipcRenderer.invoke('api:agent-model-status', agentId, cwd, model),
+  loginAgent: (agentId: string): Promise<void> => ipcRenderer.invoke('api:login-agent', agentId),
   listAgentModels: (agentId: string, cwd?: string, configuredModel?: string): Promise<any[]> =>
     ipcRenderer.invoke('api:list-agent-models', agentId, cwd, configuredModel),
   upsertAgent: (input: any): Promise<any> => ipcRenderer.invoke('api:upsert-agent', input),
@@ -255,6 +257,7 @@ const api = {
   },
   getTaskRun: (taskRunId: string): Promise<any | null> => ipcRenderer.invoke('api:get-task-run', taskRunId),
   listTaskRuns: (sessionId?: string): Promise<any[]> => ipcRenderer.invoke('api:list-task-runs', sessionId),
+  deleteTaskRun: (taskRunId: string): Promise<boolean> => ipcRenderer.invoke('api:delete-task-run', taskRunId),
   listSubagentTasks: (taskRunId: string): Promise<any[]> => ipcRenderer.invoke('api:list-subagent-tasks', taskRunId),
   controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel'): Promise<any | null> =>
     ipcRenderer.invoke('api:control-task-run', taskRunId, action),

@@ -14,7 +14,7 @@ export const BUILTIN_EXTERNAL_AGENTS: ExternalAgentDefinition[] = [
   {
     id: 'claude-code',
     name: 'Claude Code',
-    description: '使用用户本机 Claude Code CLI（stream-json）',
+    description: '使用用户本机 Claude Code CLI（通过内置 ACP Bridge 接入）',
     source: 'builtin',
     protocol: 'claude-stream-json',
     executable: 'claude',
@@ -25,7 +25,7 @@ export const BUILTIN_EXTERNAL_AGENTS: ExternalAgentDefinition[] = [
   {
     id: 'codex',
     name: 'Codex',
-    description: '使用用户本机 Codex CLI 原生 App Server',
+    description: '使用用户本机 Codex CLI（通过内置 ACP Bridge 接入）',
     source: 'builtin',
     protocol: 'codex-app-server',
     executable: 'codex',
@@ -36,7 +36,7 @@ export const BUILTIN_EXTERNAL_AGENTS: ExternalAgentDefinition[] = [
   {
     id: 'antigravity',
     name: 'Antigravity CLI',
-    description: '使用用户本机 agy CLI（JSON 非交互模式）',
+    description: '使用用户本机 agy CLI（通过内置 ACP Bridge 接入）',
     source: 'builtin',
     protocol: 'antigravity-json',
     executable: 'agy',

@@ -47,6 +47,7 @@ import { localMeetingRuntime } from './local-meeting-runtime'
 import { SessionEventStore } from './session-events/session-event-store'
 import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
 import { externalAgentManager } from './external-agents'
+import { EventBatcher } from './external-agents/event-batcher'
 import globalAssistantPageContextSkill from './tools/builtin/global-assistant-page-context/SKILL.md?raw'
 
 
@@ -1343,6 +1344,8 @@ function createWindow(): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   ipcMain.handle('api:list-agents', () => externalAgentManager.list())
+  ipcMain.handle('api:agent-model-status', (_event, agentId: string, cwd?: string, model?: string) => externalAgentManager.getModelStatus(agentId, cwd, model))
+  ipcMain.handle('api:login-agent', (_event, agentId: string) => externalAgentManager.login(agentId))
   ipcMain.handle('api:probe-agent', (_event, agentId: string, cwd?: string) =>
     externalAgentManager.probe(agentId, cwd)
   )
@@ -1418,16 +1421,18 @@ app.whenReady().then(() => {
     })
   })
 
-  taskRunner.recoverInterruptedRuns().catch((error) => {
+  const taskRecovery = taskRunner.recoverInterruptedRuns().catch((error) => {
     console.error('[TaskRunner] Failed to restore interrupted task state', error)
   })
 
   ipcMain.handle('api:get-task-run', async (_event, taskRunId: string) => {
+    await taskRecovery
     if (!taskRunId || typeof taskRunId !== 'string') return null
     return taskRunner.getRun(taskRunId)
   })
 
   ipcMain.handle('api:list-task-runs', async (_event, sessionId?: string) => {
+    await taskRecovery
     return taskRunner.listRuns(typeof sessionId === 'string' && sessionId ? sessionId : undefined)
   })
 
@@ -1495,6 +1500,11 @@ app.whenReady().then(() => {
   ipcMain.handle('api:retry-failed-task-steps', async (_event, taskRunId: string) => {
     if (!taskRunId || typeof taskRunId !== 'string') return null
     return taskRunner.retryFailedSteps(taskRunId)
+  })
+  ipcMain.handle('api:delete-task-run', async (_event, taskRunId: string) => {
+    if (!taskRunId || typeof taskRunId !== 'string') return false
+    await taskRecovery
+    return taskRunner.deleteRun(taskRunId)
   })
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   registerBuiltinTools()
@@ -4809,7 +4819,9 @@ app.whenReady().then(() => {
             prompt: request.prompt
           })
         })
-        let protocolTraceQueue = Promise.resolve()
+        const eventBatcher = new EventBatcher<{ action: string; taskStepId?: string; payload?: Record<string, unknown> }>(
+          events => taskRunner.notifyBatch(request.run.id, events)
+        )
         try {
           const result = await externalAgentManager.runPrompt({
             agentId: selectedAgentId,
@@ -4817,23 +4829,22 @@ app.whenReady().then(() => {
             cwd,
             model: request.step.model
           }, update => {
-            void taskRunner.notify(request.run.id, 'agent_event', request.step.id, {
+            return eventBatcher.push({ action: 'agent_event', taskStepId: request.step.id, payload: {
               agentId: selectedAgentId,
               protocol: agent.protocol,
               attempt,
               update: sanitizeTraceValue(update)
-            })
+            } })
           }, protocolEvent => {
             const wirePrefix = protocolEvent.protocol === 'acp-v1' ? 'acp_wire' : 'agent_wire'
-            protocolTraceQueue = protocolTraceQueue.then(() => taskRunner.notify(
-              request.run.id,
-              protocolEvent.messageType === 'request'
+            return eventBatcher.push({
+              action: protocolEvent.messageType === 'request'
                 ? `${wirePrefix}_request`
                 : protocolEvent.messageType === 'response'
                   ? `${wirePrefix}_response`
                   : `${wirePrefix}_notification`,
-              request.step.id,
-              {
+              taskStepId: request.step.id,
+              payload: {
                 agentId: selectedAgentId,
                 agentName: agent.name,
                 protocol: protocolEvent.protocol,
@@ -4845,9 +4856,9 @@ app.whenReady().then(() => {
                 byteLength: protocolEvent.byteLength,
                 payload: sanitizeTraceValue(protocolEvent.payload)
               }
-            ))
-          })
-          await protocolTraceQueue
+            })
+          }, { signal: request.signal })
+          await eventBatcher.flush()
           await taskRunner.notify(request.run.id, 'agent_response', request.step.id, {
             agentId: selectedAgentId,
             agentName: agent.name,
@@ -4858,6 +4869,7 @@ app.whenReady().then(() => {
               sessionId: result.sessionId,
               stopReason: result.stopReason,
               content: result.text,
+              performance: result.performance,
               artifactPaths: result.artifactPaths || []
             })
           })
@@ -4872,7 +4884,7 @@ app.whenReady().then(() => {
             artifactPaths: [...new Set([...(result.artifactPaths || []), ...parsedResult.artifactPaths])]
           }
         } catch (error) {
-          await protocolTraceQueue
+          await eventBatcher.flush()
           await taskRunner.notify(request.run.id, 'agent_error', request.step.id, {
             agentId: selectedAgentId,
             agentName: agent.name,
@@ -5778,6 +5790,7 @@ app.whenReady().then(() => {
   // 应用退出前清理所有进行中的请求和连接，防止重启后假死
   app.on('before-quit', () => {
     console.log('[App] 正在清理进行中的请求和连接...')
+    void externalAgentManager.dispose().catch(error => console.error('[ExternalAgents] cleanup failed', error))
 
     // 1. 中止所有正在进行的 LLM 请求
     for (const controller of activeLlmAbortControllers.values()) {

@@ -93,7 +93,7 @@ export class TaskStore {
   public async recoverInterruptedRuns(): Promise<number> {
     const database = await this.getDatabase()
     const now = Date.now()
-    const runs = await database.all<TaskRow[]>('SELECT id FROM task_runs WHERE status = ?', 'running')
+    const runs = await database.all<TaskRow[]>("SELECT id FROM task_runs WHERE deleted_at IS NULL AND (status IN ('running', 'pending') OR (status = 'paused' AND EXISTS (SELECT 1 FROM task_steps WHERE task_run_id = task_runs.id AND status = 'running')))")
     if (runs.length === 0) return 0
     await this.withTransaction(database, async () => {
       for (const run of runs) {
@@ -111,7 +111,7 @@ export class TaskStore {
 
   public async getRun(id: string): Promise<{ run: TaskRun; steps: TaskStep[]; events: TaskEvent[] } | null> {
     const database = await this.getDatabase()
-    const row = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ?', id)
+    const row = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ? AND deleted_at IS NULL', id)
     if (!row) return null
     const steps = await database.all<TaskRow[]>('SELECT * FROM task_steps WHERE task_run_id = ? ORDER BY sequence', id)
     const events = await database.all<TaskRow[]>('SELECT * FROM task_events WHERE task_run_id = ? ORDER BY created_at DESC LIMIT 100', id)
@@ -144,11 +144,27 @@ export class TaskStore {
     return { ...this.mapRun(existing), status, updatedAt: now, completedAt: completedAt || undefined }
   }
 
+  /** Remove from the workspace while retaining its saved snapshot and audit history. */
+  public async deleteRun(id: string): Promise<boolean> {
+    const database = await this.getDatabase()
+    const now = Date.now()
+    let deleted = false
+    await this.withTransaction(database, async () => {
+      const result = await database.run('UPDATE task_runs SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL', now, now, id)
+      deleted = Boolean(result.changes)
+      if (deleted) {
+        await this.insertEvent(database, id, undefined, 'task_deleted', {}, now)
+        await this.saveCheckpoint(database, id, { reason: 'user_delete' }, now)
+      }
+    })
+    return deleted
+  }
+
   public async listRuns(sessionId?: string): Promise<Array<{ run: TaskRun; steps: TaskStep[] }>> {
     const database = await this.getDatabase()
     const rows = sessionId
-      ? await database.all<TaskRow[]>('SELECT * FROM task_runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT 50', sessionId)
-      : await database.all<TaskRow[]>('SELECT * FROM task_runs ORDER BY updated_at DESC LIMIT 50')
+      ? await database.all<TaskRow[]>('SELECT * FROM task_runs WHERE deleted_at IS NULL AND session_id = ? ORDER BY updated_at DESC LIMIT 50', sessionId)
+      : await database.all<TaskRow[]>('SELECT * FROM task_runs WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50')
     return Promise.all(rows.map(async row => ({
       run: this.mapRun(row),
       steps: (await database.all<TaskRow[]>('SELECT * FROM task_steps WHERE task_run_id = ? ORDER BY sequence', row.id)).map(step => this.mapStep(step))
@@ -223,7 +239,7 @@ export class TaskStore {
 
   public async retryStep(taskRunId: string, taskStepId: string): Promise<{ run: TaskRun; step: TaskStep } | null> {
     const database = await this.getDatabase()
-    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ?', taskRunId)
+    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ? AND deleted_at IS NULL', taskRunId)
     const step = await database.get<TaskRow>('SELECT * FROM task_steps WHERE task_run_id = ? AND id = ?', taskRunId, taskStepId)
     if (!run || !step) return null
     const now = Date.now()
@@ -256,7 +272,7 @@ export class TaskStore {
 
   public async retryFailedSteps(taskRunId: string): Promise<{ run: TaskRun; steps: TaskStep[] } | null> {
     const database = await this.getDatabase()
-    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ?', taskRunId)
+    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ? AND deleted_at IS NULL', taskRunId)
     const rows = await database.all<TaskRow[]>('SELECT * FROM task_steps WHERE task_run_id = ? ORDER BY sequence', taskRunId)
     if (!run || rows.length === 0) return null
     const failedIds = new Set(rows.filter(row => row.status === 'failed').map(row => String(row.id)))
@@ -342,6 +358,7 @@ export class TaskStore {
       );
       CREATE INDEX IF NOT EXISTS idx_subagent_tasks_run ON subagent_tasks(task_run_id, created_at);
     `)
+    await this.ensureColumn(this.database, 'task_runs', 'deleted_at', 'INTEGER')
     await this.ensureColumn(this.database, 'task_steps', 'agent_role', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'agent_id', "TEXT DEFAULT 'agentpet'")
     await this.ensureColumn(this.database, 'task_steps', 'prompt', 'TEXT')
@@ -371,7 +388,10 @@ export class TaskStore {
   }
 
   private async saveCheckpoint(database: Database, taskRunId: string, state: Record<string, unknown>, createdAt: number): Promise<void> {
-    await database.run('INSERT INTO task_checkpoints (id, task_run_id, state_json, created_at) VALUES (?, ?, ?, ?)', randomUUID(), taskRunId, JSON.stringify(state), createdAt)
+    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ?', taskRunId)
+    const steps = await database.all<TaskRow[]>('SELECT * FROM task_steps WHERE task_run_id = ? ORDER BY sequence', taskRunId)
+    const snapshot = { ...state, run: run ? this.mapRun(run) : null, steps: steps.map(step => this.mapStep(step)) }
+    await database.run('INSERT INTO task_checkpoints (id, task_run_id, state_json, created_at) VALUES (?, ?, ?, ?)', randomUUID(), taskRunId, JSON.stringify(snapshot), createdAt)
   }
 
   private toStepStatus(status: TaskPlanInput['steps'][number]['status']): TaskStepStatus {

@@ -5,7 +5,7 @@ import {
   type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, Bot, CheckCircle2, FolderOpen, GitBranch, Loader2, Network, Play, Plus, RotateCcw, ShieldAlert, Sparkles, TerminalSquare, Trash2, Zap } from 'lucide-react'
+import { ArrowLeft, Bot, CheckCircle2, FolderOpen, GitBranch, Loader2, Network, Pause, Play, Plus, RotateCcw, ShieldAlert, Sparkles, TerminalSquare, Trash2, Zap } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { cleanResultSummary, CollaborationArtifactCards } from './CollaborationRunCard'
@@ -214,6 +214,38 @@ function runtimeMessage(update: any, step?: RuntimeStep): Omit<RuntimeLine, 'id'
       }
       return { kind: state === 'ERROR' ? 'error' : 'status', text: `${stepType || '步骤'} · ${state || '更新'}` }
     }
+    if (agentEvent?.sessionUpdate) {
+      const su = agentEvent.sessionUpdate
+      if (su === 'agent_message_chunk' && agentEvent.content?.text) {
+        return { kind: 'stream', text: String(agentEvent.content.text) }
+      }
+      if (su === 'agent_thought_chunk' && agentEvent.content?.text) {
+        return { kind: 'model', text: String(agentEvent.content.text) }
+      }
+      if (su === 'tool_call') {
+        const name = String(agentEvent.name || agentEvent.title || '工具')
+        const raw = agentEvent.rawInput && typeof agentEvent.rawInput === 'object'
+          ? JSON.stringify(agentEvent.rawInput).slice(0, 260)
+          : ''
+        return { kind: 'tool', text: `正在调用 ${name}${raw ? `\n${raw}` : ''}` }
+      }
+      if (su === 'tool_call_update') {
+        const title = String(agentEvent.title || '工具')
+        if (agentEvent.status === 'completed') {
+          const out = typeof agentEvent.rawOutput === 'string' ? agentEvent.rawOutput.trim() : ''
+          return { kind: 'tool', text: `${title} 已完成${out ? `\n${out.slice(0, 500)}${out.length > 500 ? '…' : ''}` : ''}` }
+        }
+        if (agentEvent.status === 'failed') {
+          return { kind: 'error', text: `${title} 失败：${String(agentEvent.rawOutput || '执行失败')}` }
+        }
+        return { kind: 'tool', text: `${title} 状态更新：${agentEvent.status}` }
+      }
+      const usage = su === 'session_info_update' ? agentEvent._meta?.['agentpet/usage'] : agentEvent.usage
+      if ((su === 'usage_update' || su === 'session_info_update') && usage) {
+        const out = Number(usage.outputTokens || 0)
+        return { kind: 'model', text: out > 0 ? `Agent 已输出 ${out.toLocaleString()} tokens` : 'Agent 正在生成' }
+      }
+    }
     const contentBlocks = Array.isArray(agentEvent?.message?.content) ? agentEvent.message.content : []
     const latestBlock = contentBlocks[contentBlocks.length - 1]
     if (latestBlock?.type === 'tool_use') return { kind: 'tool', text: `调用工具 ${latestBlock.name || ''}`.trim() }
@@ -309,20 +341,26 @@ export function CollaborationComposer({
   const [models, setModels] = React.useState<Record<string, AgentModel[]>>({})
   const [allowedAgentIds, setAllowedAgentIds] = React.useState<string[]>([])
   const [loadingModels, setLoadingModels] = React.useState(false)
+  const [modelFailure, setModelFailure] = React.useState<{ status: string; error?: string } | null>(null)
+  const [modelRetry, setModelRetry] = React.useState(0)
+  const [openingLogin, setOpeningLogin] = React.useState(false)
   const [planning, setPlanning] = React.useState(false)
   const [maxConcurrency, setMaxConcurrency] = React.useState(3)
-  const [executionPhase, setExecutionPhase] = React.useState<'editing' | 'starting' | 'running' | 'finished'>(initialRunId ? 'starting' : 'editing')
+  const [executionPhase, setExecutionPhase] = React.useState<'editing' | 'starting' | 'running' | 'paused' | 'finished'>(initialRunId ? 'starting' : 'editing')
   const [executionRunId, setExecutionRunId] = React.useState('')
   const [runtimeSnapshot, setRuntimeSnapshot] = React.useState<{ run?: any; steps: RuntimeStep[] }>({ steps: [] })
   const [runtimeLogs, setRuntimeLogs] = React.useState<Record<string, RuntimeLine[]>>({})
   const [pinnedRuntimeTaskId, setPinnedRuntimeTaskId] = React.useState<string | null>(null)
   const [showRuntimeGraph, setShowRuntimeGraph] = React.useState(false)
   const [selectedReadonlyStepId, setSelectedReadonlyStepId] = React.useState<string | null>(null)
+  const [controllingRun, setControllingRun] = React.useState(false)
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [retryingFailed, setRetryingFailed] = React.useState(false)
   const workspaceOverriddenRef = React.useRef(false)
   const agentSelectionTouchedRef = React.useRef(false)
   const flowInstanceRef = React.useRef<ReactFlowInstance<Node<TaskNodeData>, Edge> | null>(null)
   const selectedNode = nodes.find(node => node.id === selectedNodeId)
+  const selectedAgentId = selectedNode?.data.agentId
 
   const fitGeneratedGraph = (): void => {
     window.requestAnimationFrame(() => {
@@ -345,9 +383,11 @@ export function CollaborationComposer({
     if (!executionRunId) return
     return window.api.onTaskRunUpdated((update: any) => {
       if (update?.taskRunId !== executionRunId) return
+      if (update.action === 'deleted') { onClose(); return }
       const steps = Array.isArray(update.steps) ? update.steps as RuntimeStep[] : []
       setRuntimeSnapshot({ run: update.run, steps })
       if (['completed', 'failed', 'blocked', 'cancelled'].includes(String(update.run?.status))) setExecutionPhase('finished')
+      else if (update.run?.status === 'paused') { setExecutionPhase('paused'); setShowRuntimeGraph(true) }
       else setExecutionPhase('running')
       const stepId = String(update.taskStepId || '')
       if (!stepId) return
@@ -376,12 +416,13 @@ export function CollaborationComposer({
       }))
       const graph = graphFromPlan({ title: snapshot.run.title, tasks: steps }, restoredAgents, snapshot.run.title || '')
       setExecutionRunId(initialRunId)
+      if (snapshot.run.status === 'paused') setShowRuntimeGraph(true)
       setRuntimeSnapshot({ run: snapshot.run, steps })
       setTitle(snapshot.run.title || '多 Agent 协作')
       setWorkspacePath(snapshot.run.workspacePath || sessionWorkspacePath || '')
       setNodes(graph.nodes)
       setEdges(graph.edges)
-      setExecutionPhase(['completed', 'failed', 'blocked', 'cancelled'].includes(String(snapshot.run.status)) ? 'finished' : 'running')
+      setExecutionPhase(['completed', 'failed', 'blocked', 'cancelled'].includes(String(snapshot.run.status)) ? 'finished' : snapshot.run?.status === 'paused' ? 'paused' : 'running')
     }).catch((error: any) => showToast(error?.message || '读取协作详情失败', 'error'))
     return () => { active = false }
   }, [initialRunId, sessionWorkspacePath, setEdges, setNodes, showToast])
@@ -418,14 +459,31 @@ export function CollaborationComposer({
   }, [sessionWorkspacePath, showToast])
 
   React.useEffect(() => {
-    if (!selectedNode || models[selectedNode.data.agentId]) return
-    const agentId = selectedNode.data.agentId
+    if (!selectedAgentId) { setLoadingModels(false); setModelFailure(null); return }
+    let active = true
+    const agentId = selectedAgentId
     setLoadingModels(true)
-    void window.api.listAgentModels(agentId, workspacePath || sessionWorkspacePath, llmConfig?.model)
-      .then((items: AgentModel[]) => setModels(current => ({ ...current, [agentId]: items })))
-      .catch((error: any) => showToast(error?.message || '读取模型失败', 'error'))
-      .finally(() => setLoadingModels(false))
-  }, [llmConfig?.model, models, selectedNode, sessionWorkspacePath, showToast, workspacePath])
+    setModelFailure(null)
+    void window.api.getAgentModelStatus(agentId, workspacePath || sessionWorkspacePath, llmConfig?.model)
+      .then(result => {
+        if (!active) return
+        if (result.status === 'ready') setModels(current => ({ ...current, [agentId]: result.models }))
+        else setModelFailure(result)
+      })
+      .catch((error: any) => { if (active) setModelFailure({ status: 'error', error: error?.message || '读取模型失败' }) })
+      .finally(() => { if (active) setLoadingModels(false) })
+    return () => { active = false }
+  }, [llmConfig?.model, selectedAgentId, sessionWorkspacePath, workspacePath, modelRetry])
+
+  const openAgentLogin = async (): Promise<void> => {
+    if (!selectedAgentId || openingLogin) return
+    setOpeningLogin(true)
+    try {
+      await window.api.loginAgent(selectedAgentId)
+      showToast('已打开登录终端，完成登录后请点击「重新检测」', 'info')
+    } catch (error: any) { showToast(error?.message || '打开登录终端失败', 'error') }
+    finally { setOpeningLogin(false) }
+  }
 
   const updateSelected = (patch: Partial<TaskNodeData>): void => {
     if (!selectedNodeId) return
@@ -534,7 +592,7 @@ export function CollaborationComposer({
       const snapshot = await window.api.getTaskRun(taskRunId)
       if (snapshot) {
         setRuntimeSnapshot({ run: snapshot.run, steps: snapshot.steps || [] })
-        setExecutionPhase(['completed', 'failed', 'blocked', 'cancelled'].includes(String(snapshot.run?.status)) ? 'finished' : 'running')
+        setExecutionPhase(['completed', 'failed', 'blocked', 'cancelled'].includes(String(snapshot.run?.status)) ? 'finished' : snapshot.run?.status === 'paused' ? 'paused' : 'running')
       } else {
         setExecutionPhase('running')
       }
@@ -581,6 +639,32 @@ export function CollaborationComposer({
   const isCompletedDetails = Boolean(isReadonlyDetails && runStatus === 'completed')
   const selectedReadonlyStep = runtimeSteps.find(step => step.id === selectedReadonlyStepId)
 
+  const controlRun = async (action: 'pause' | 'resume' | 'delete'): Promise<void> => {
+    if (!executionRunId || controllingRun) return
+    setControllingRun(true)
+    try {
+      if (action === 'delete') {
+        const deleted = await window.api.deleteTaskRun(executionRunId)
+        if (!deleted) throw new Error('编排不存在或已删除')
+        showToast('编排已删除，工作区文件保留', 'success')
+        onClose()
+        return
+      }
+      const run = await window.api.controlTaskRun(executionRunId, action)
+      if (!run) throw new Error('未找到该编排')
+      const snapshot = await window.api.getTaskRun(executionRunId)
+      if (snapshot) setRuntimeSnapshot({ run: snapshot.run, steps: snapshot.steps || [] })
+      setExecutionPhase(action === 'pause' ? 'paused' : 'running')
+      setShowRuntimeGraph(true)
+      showToast(action === 'pause' ? '已暂停并保存快照' : '已从快照继续，已完成节点不会重复执行', 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '操作失败，请重试', 'error')
+    } finally {
+      setControllingRun(false)
+      setConfirmDelete(false)
+    }
+  }
+
   const retryFailedSteps = async (taskStepId?: string): Promise<void> => {
     if (!executionRunId || retryingFailed) return
     setRetryingFailed(true)
@@ -600,6 +684,34 @@ export function CollaborationComposer({
     }
   }
 
+  const executionGraph = (
+    <div className={`collab-readonly-stage ${selectedReadonlyStep ? 'has-detail' : ''}`}>
+      <div className="collab-readonly-graph">
+        <TaskDagGraph plan={runtimeFlowPlan} selectedStepId={selectedReadonlyStepId || undefined} onStepClick={step => setSelectedReadonlyStepId(step.id)} />
+        {!selectedReadonlyStep && <p>点击任一节点查看执行详情</p>}
+      </div>
+      {selectedReadonlyStep && <aside className="collab-readonly-node-detail" aria-label="节点执行详情">
+        <header><span className="agent-brand-icon"><AgentBrandIcon agentId={selectedReadonlyStep.agentId || 'agentpet'} /></span><span><small>节点详情 · {selectedReadonlyStep.status === 'failed' ? '可重试' : '只读'}</small><strong>{selectedReadonlyStep.title}</strong></span><div className="collab-readonly-node-actions">{selectedReadonlyStep.status === 'failed' && <button className="retry" type="button" disabled={retryingFailed} aria-busy={retryingFailed} onClick={() => { void retryFailedSteps(selectedReadonlyStep.id) }}>{retryingFailed ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}重试</button>}<button type="button" onClick={() => setSelectedReadonlyStepId(null)}>关闭</button></div></header>
+        <dl>
+          <div><dt>Agent</dt><dd>{agents.find(agent => agent.id === selectedReadonlyStep.agentId)?.name || selectedReadonlyStep.agentId || 'AgentPet'}</dd></div>
+          <div><dt>模型</dt><dd>{selectedReadonlyStep.model || '默认模型'}</dd></div>
+          <div><dt>状态</dt><dd>{runtimeStatusLabel(selectedReadonlyStep.status)}</dd></div>
+          <div><dt>依赖</dt><dd>{selectedReadonlyStep.dependencies?.length ? selectedReadonlyStep.dependencies.join('、') : '无'}</dd></div>
+        </dl>
+        {selectedReadonlyStep.prompt && <section><h3>Prompt</h3><pre>{selectedReadonlyStep.prompt}</pre></section>}
+        {selectedReadonlyStep.resultSummary && (
+          <section className="collab-node-result-section">
+            <h3>节点结果</h3>
+            <div className="collab-node-result-content">
+              {renderAdvancedMessage(cleanResultSummary(selectedReadonlyStep.resultSummary))}
+            </div>
+          </section>
+        )}
+        <CollaborationArtifactCards paths={selectedReadonlyStep.artifactPaths || []} workspacePath={runtimeSnapshot.run?.workspacePath || workspacePath} />
+      </aside>}
+    </div>
+  )
+
   return (
     <div className="collab-overlay">
       <section className="collab-drawer collab-workbench" role="dialog" aria-modal="true" aria-labelledby="collab-title">
@@ -618,38 +730,14 @@ export function CollaborationComposer({
               <em>{runtimeSteps.filter(step => step.status === 'completed').length}/{runtimeSteps.length} 节点完成</em>
               {failedRuntimeSteps.length > 0 && <button className="collab-retry-failed" type="button" disabled={retryingFailed} aria-busy={retryingFailed} onClick={() => { void retryFailedSteps() }}>{retryingFailed ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}<span>重试失败节点 ({failedRuntimeSteps.length})</span></button>}
             </header>
-            <div className={`collab-readonly-stage ${selectedReadonlyStep ? 'has-detail' : ''}`}>
-              <div className="collab-readonly-graph">
-                <TaskDagGraph plan={runtimeFlowPlan} selectedStepId={selectedReadonlyStepId || undefined} onStepClick={step => setSelectedReadonlyStepId(step.id)} />
-                {!selectedReadonlyStep && <p>点击任一节点查看执行详情</p>}
-              </div>
-              {selectedReadonlyStep && <aside className="collab-readonly-node-detail">
-                <header><span className="agent-brand-icon"><AgentBrandIcon agentId={selectedReadonlyStep.agentId || 'agentpet'} /></span><span><small>节点详情 · {selectedReadonlyStep.status === 'failed' ? '可重试' : '只读'}</small><strong>{selectedReadonlyStep.title}</strong></span><div className="collab-readonly-node-actions">{selectedReadonlyStep.status === 'failed' && <button className="retry" type="button" disabled={retryingFailed} aria-busy={retryingFailed} onClick={() => { void retryFailedSteps(selectedReadonlyStep.id) }}>{retryingFailed ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}重试</button>}<button type="button" onClick={() => setSelectedReadonlyStepId(null)}>关闭</button></div></header>
-                <dl>
-                  <div><dt>Agent</dt><dd>{agents.find(agent => agent.id === selectedReadonlyStep.agentId)?.name || selectedReadonlyStep.agentId || 'AgentPet'}</dd></div>
-                  <div><dt>模型</dt><dd>{selectedReadonlyStep.model || '默认模型'}</dd></div>
-                  <div><dt>状态</dt><dd>{runtimeStatusLabel(selectedReadonlyStep.status)}</dd></div>
-                  <div><dt>依赖</dt><dd>{selectedReadonlyStep.dependencies?.length ? selectedReadonlyStep.dependencies.join('、') : '无'}</dd></div>
-                </dl>
-                {selectedReadonlyStep.prompt && <section><h3>Prompt</h3><pre>{selectedReadonlyStep.prompt}</pre></section>}
-                {selectedReadonlyStep.resultSummary && (
-                  <section className="collab-node-result-section">
-                    <h3>节点结果</h3>
-                    <div className="collab-node-result-content">
-                      {renderAdvancedMessage(cleanResultSummary(selectedReadonlyStep.resultSummary))}
-                    </div>
-                  </section>
-                )}
-                <CollaborationArtifactCards paths={selectedReadonlyStep.artifactPaths || []} workspacePath={runtimeSnapshot.run?.workspacePath || workspacePath} />
-              </aside>}
-            </div>
+            {executionGraph}
           </main> : <>
           <aside className="collab-inspector">
             <div className="collab-mode-switch">
               <button className={mode === 'auto' ? 'active' : ''} type="button" onClick={() => { setMode('auto'); setSelectedNodeId(undefined) }}><Sparkles size={15} />自动</button>
               <button className={mode === 'manual' ? 'active' : ''} type="button" onClick={() => setMode('manual')}><Network size={15} />手动</button>
             </div>
-            {mode === 'auto' && <div className="collab-auto-builder">
+            {mode === 'auto' && !selectedNode && <div className="collab-auto-builder">
               <label className="collab-field"><span>协作目标</span><textarea autoFocus rows={6} value={goal} onChange={event => setGoal(event.target.value)} placeholder="描述最终目标、技术约束和验收标准…" /></label>
               <fieldset className="collab-agent-limiter">
                 <legend>参与 Agent <small>仅用于自动编排</small></legend>
@@ -675,11 +763,13 @@ export function CollaborationComposer({
               </fieldset>
               <button className="collab-generate" type="button" onClick={() => { void generatePlan() }} disabled={planning || !allowedAgentIds.some(id => agents.some(agent => agent.id === id && canAutomate(agent)))}><Sparkles size={15} />{planning ? '正在规划…' : '生成协作流程'}</button>
             </div>}
-            {mode === 'manual' && <><div className="collab-inspector-divider"><span>{selectedNode ? '节点配置' : '流程设置'}</span></div>
+            {(mode === 'manual' || selectedNode) && <><div className="collab-inspector-divider"><span>{selectedNode ? '节点配置' : '流程设置'}</span></div>
             {selectedNode ? <div className="collab-node-form">
+              {mode === 'auto' && <button type="button" className="collab-model-action" onClick={() => setSelectedNodeId(undefined)}>返回自动编排</button>}
               <label className="collab-field compact"><span>任务名称</span><input value={selectedNode.data.title} onChange={event => updateSelected({ title: event.target.value })} /></label>
-              <label className="collab-field compact"><span>执行 Agent</span><div className="collab-select-with-icon"><AgentBrandIcon agentId={selectedNode.data.agentId} /><select value={selectedNode.data.agentId} onChange={event => changeAgent(event.target.value)}>{automationAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name} · {STATUS_LABEL[agent.id === 'agentpet' ? 'ready' : agent.probe?.status || 'unchecked']}</option>)}</select></div></label>
-              <label className="collab-field compact"><span>模型 <small>{loadingModels ? '检测中…' : '来自本地 CLI'}</small></span><select value={selectedNode.data.model || 'default'} onChange={event => updateSelected({ model: event.target.value })}>{(models[selectedNode.data.agentId] || [{ id: 'default', name: '默认模型', source: 'configured' }]).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
+              <label className="collab-field compact"><span>执行 Agent</span><div className="collab-select-with-icon"><AgentBrandIcon agentId={selectedNode.data.agentId} /><select disabled={loadingModels || openingLogin} aria-busy={loadingModels} value={selectedNode.data.agentId} onChange={event => changeAgent(event.target.value)}>{automationAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name} · {STATUS_LABEL[agent.id === 'agentpet' ? 'ready' : agent.probe?.status || 'unchecked']}</option>)}</select></div></label>
+              <label className="collab-field compact"><span>模型 <small>{loadingModels ? '检测中…' : '来自本地 CLI'}</small></span><select disabled={loadingModels || !!modelFailure} aria-busy={loadingModels} value={selectedNode.data.model || 'default'} onChange={event => updateSelected({ model: event.target.value })}>{(models[selectedNode.data.agentId] || [{ id: 'default', name: '默认模型', source: 'configured' }]).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
+              {modelFailure && <div className="collab-model-feedback" role="status"><span>{modelFailure.status === 'auth_required' ? '此 CLI 尚未登录或登录已失效，请登录后重新检测模型。' : '模型检测失败，请重试。'}</span><details><summary>查看原因</summary><p>{modelFailure.error}</p></details><div>{modelFailure.status === 'auth_required' && <button type="button" className="collab-model-action" disabled={openingLogin} onClick={() => { void openAgentLogin() }}>{openingLogin ? '正在打开…' : '打开登录终端'}</button>}<button type="button" className="collab-model-action" disabled={openingLogin || loadingModels} onClick={() => setModelRetry(value => value + 1)}>重新检测</button></div></div>}
               <label className="collab-field"><span>Prompt</span><textarea rows={8} value={selectedNode.data.prompt} onChange={event => updateSelected({ prompt: event.target.value })} placeholder="写清任务边界、输入、交付物和验收标准…" /></label>
               <button className="collab-delete-node" type="button" onClick={deleteSelected}><Trash2 size={14} />删除节点</button>
             </div> : <p className="collab-empty-tip">选择画布节点后配置 Agent、模型和 Prompt。拖动节点两侧端点即可建立依赖。</p>}</>}
@@ -696,8 +786,8 @@ export function CollaborationComposer({
                 <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
                   onConnect={(connection: Connection) => setEdges(current => addEdge({ ...connection, animated: true }, current))}
                   onInit={instance => { flowInstanceRef.current = instance }}
-                  onNodeClick={(_, node) => { if (mode === 'manual') setSelectedNodeId(node.id) }} onPaneClick={() => setSelectedNodeId(undefined)}
-                  nodesDraggable={mode === 'manual'} nodesConnectable={mode === 'manual'} elementsSelectable={mode === 'manual'}
+                  onNodeClick={(_, node) => setSelectedNodeId(node.id)} onPaneClick={() => setSelectedNodeId(undefined)}
+                  nodesDraggable={mode === 'manual'} nodesConnectable={mode === 'manual'} elementsSelectable
                   fitView fitViewOptions={{ padding: 0.25, maxZoom: 0.8 }} minZoom={0.35} maxZoom={1.6} deleteKeyCode={mode === 'manual' ? 'Delete' : null}>
                   <Background gap={24} size={1.5} color="var(--border-color, #e2e8f0)" />
                   <Controls className="collab-controls" />
@@ -707,7 +797,7 @@ export function CollaborationComposer({
               <div className="collab-runtime-toolbar">
                 <div>
                   <TerminalSquare size={17} />
-                  <span><strong>{title}</strong><small>{executionPhase === 'starting' ? '正在建立 CLI 会话…' : executionPhase === 'finished' ? `执行${runtimeStatusLabel(String(runtimeSnapshot.run?.status || 'completed'))}` : `${runningSteps.length} 个节点正在执行`}</small></span>
+                  <span><strong>{title}</strong><small>{executionPhase === 'paused' ? '已暂停 · 快照已保存' : executionPhase === 'starting' ? '正在建立 CLI 会话…' : executionPhase === 'finished' ? `执行${runtimeStatusLabel(String(runtimeSnapshot.run?.status || 'completed'))}` : `${runningSteps.length} 个节点正在执行`}</small></span>
                 </div>
                 <button className={`collab-runtime-graph-toggle ${showRuntimeGraph ? 'active' : ''}`} type="button" onClick={() => { setShowRuntimeGraph(current => !current); setPinnedRuntimeTaskId(null) }}>
                   {showRuntimeGraph ? <TerminalSquare size={13} /> : <Network size={13} />}
@@ -715,7 +805,7 @@ export function CollaborationComposer({
                 </button>
               </div>
               {permissionRequest && onRespondPermission && <OrchestrationApprovalCard request={permissionRequest} onRespond={onRespondPermission} />}
-              {showRuntimeGraph ? <div className="collab-runtime-graph"><TaskDagGraph plan={runtimeFlowPlan} /></div> : <div className={`collab-runtime-grid ${displayedRuntimeSteps.length > 1 ? 'parallel' : 'single'}`}>
+              {showRuntimeGraph ? executionGraph : <div className={`collab-runtime-grid ${displayedRuntimeSteps.length > 1 ? 'parallel' : 'single'}`}>
                 {displayedRuntimeSteps.map(step => {
                   const agent = agents.find(item => item.id === step.agentId)
                   const lines = runtimeLogs[step.id] || []
@@ -727,19 +817,32 @@ export function CollaborationComposer({
           </>}
         </div>
 
-        {!isCompletedDetails && <footer className="collab-footer collab-workbench-footer">
+        <footer className="collab-footer collab-workbench-footer">
           {executionPhase === 'editing' ? <>
-            <button className="collab-workspace-button" type="button" onClick={selectWorkspace} title={workspacePath || '当前会话未绑定工作文件夹'}><FolderOpen size={15} /><span>{workspacePath ? `当前会话：${workspacePath}` : '当前会话未绑定文件夹 · 点击选择'}</span></button>
-            <div className="collab-concurrency"><label>并发上限<select value={maxConcurrency} onChange={event => setMaxConcurrency(Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map(value => <option key={value}>{value}</option>)}</select></label></div>
-            <span className="collab-runtime-note"><Bot size={14} />依赖调度由 AgentPet 执行</span>
-            <button className="collab-start" type="button" onClick={() => { void start() }}><Play size={15} fill="currentColor" />开始协作</button>
+            <div className="collab-footer-left">
+              <button className="collab-workspace-button" type="button" onClick={selectWorkspace} title={workspacePath || '当前会话未绑定工作文件夹'}><FolderOpen size={15} /><span>{workspacePath ? `当前会话：${workspacePath}` : '当前会话未绑定文件夹 · 点击选择'}</span></button>
+              <div className="collab-concurrency"><label>并发上限<select value={maxConcurrency} onChange={event => setMaxConcurrency(Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map(value => <option key={value}>{value}</option>)}</select></label></div>
+            </div>
+            <div className="collab-footer-actions">
+              <span className="collab-runtime-note"><Bot size={14} />依赖调度由 AgentPet 执行</span>
+              <button className="collab-start" type="button" onClick={() => { void start() }}><Play size={15} fill="currentColor" />开始协作</button>
+            </div>
           </> : <>
-            <span className="collab-runtime-note"><TerminalSquare size={14} />运行记录同时写入执行轨迹</span>
-            {executionPhase === 'finished' && failedRuntimeSteps.length > 0 && <button className="collab-retry-failed" type="button" disabled={retryingFailed} aria-busy={retryingFailed} onClick={() => { void retryFailedSteps() }}>{retryingFailed ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}重新执行失败节点</button>}
-            {executionPhase === 'finished' && <button className="collab-return-flow" type="button" onClick={() => setExecutionPhase('editing')}><GitBranch size={14} />返回流程图</button>}
-            <button className="collab-start" type="button" onClick={onClose}>{executionPhase === 'finished' ? '完成' : '在后台运行'}</button>
+            <div className="collab-footer-left">
+              <span className="collab-runtime-note"><TerminalSquare size={14} />{executionPhase === 'paused' ? '继续时保留已完成节点，重新执行中断节点' : '运行记录同时写入执行轨迹'}</span>
+            </div>
+            <div className="collab-footer-actions">
+              {executionRunId && <>
+                {confirmDelete ? <div className="collab-delete-confirm" role="group" aria-label="确认删除编排"><span>删除编排并停止执行？工作区文件会保留。</span><button type="button" disabled={controllingRun} onClick={() => setConfirmDelete(false)}>保留</button><button type="button" disabled={controllingRun} onClick={() => { void controlRun('delete') }}>确认删除</button></div> : <button className="collab-return-flow collab-btn-danger" type="button" disabled={controllingRun || retryingFailed} onClick={() => setConfirmDelete(true)}><Trash2 size={14} />删除编排</button>}
+                {['running', 'starting'].includes(executionPhase) && <button className="collab-return-flow" type="button" disabled={controllingRun || retryingFailed} onClick={() => { void controlRun('pause') }}>{controllingRun ? <Loader2 size={14} className="spin" /> : <Pause size={14} />}暂停</button>}
+                {executionPhase === 'paused' && <button className="collab-start" type="button" disabled={controllingRun} onClick={() => { void controlRun('resume') }}>{controllingRun ? <Loader2 size={14} className="spin" /> : <Play size={14} />}从快照继续</button>}
+              </>}
+              {executionPhase === 'finished' && failedRuntimeSteps.length > 0 && <button className="collab-retry-failed" type="button" disabled={retryingFailed} aria-busy={retryingFailed} onClick={() => { void retryFailedSteps() }}>{retryingFailed ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}重新执行失败节点</button>}
+              {executionPhase === 'finished' && <button className="collab-return-flow" type="button" onClick={() => setExecutionPhase('editing')}><GitBranch size={14} />返回流程图</button>}
+              <button className="collab-start" type="button" onClick={onClose}>{executionPhase === 'paused' ? '关闭' : executionPhase === 'finished' ? '完成' : '在后台运行'}</button>
+            </div>
           </>}
-        </footer>}
+        </footer>
       </section>
     </div>
   )

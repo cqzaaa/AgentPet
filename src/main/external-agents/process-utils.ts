@@ -3,6 +3,12 @@ import { access, readdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+const executableCache = new Map<string, { expires: number; value: Promise<string | null> }>()
+
+export function clearExecutableCache(): void {
+  executableCache.clear()
+}
+
 async function exists(candidate: string): Promise<boolean> {
   try {
     await access(candidate)
@@ -35,7 +41,7 @@ export function spawnAgentProcess(
   options: { cwd: string; env?: Record<string, string>; detached?: boolean }
 ): ChildProcessWithoutNullStreams {
   const isCommandShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable)
-  return spawn(isCommandShim ? `"${executable}"` : executable, args, {
+  const child = spawn(isCommandShim ? `"${executable}"` : executable, args, {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
     detached: options.detached,
@@ -43,6 +49,8 @@ export function spawnAgentProcess(
     shell: isCommandShim,
     stdio: ['pipe', 'pipe', 'pipe']
   })
+  child.once('error', () => clearExecutableCache())
+  return child
 }
 
 async function newestMatch(parent: string, childName: string): Promise<string | null> {
@@ -88,6 +96,23 @@ async function windowsFallbacks(command: string): Promise<string[]> {
 }
 
 export async function resolveExecutable(command: string, aliases: string[] = []): Promise<string | null> {
+  const key = JSON.stringify([command, aliases, process.env.PATH, process.env.PATHEXT, process.cwd()])
+  const cached = executableCache.get(key)
+  if (cached && cached.expires > Date.now()) return cached.value
+  if (executableCache.size >= 128) executableCache.delete(executableCache.keys().next().value!)
+  const entry = { expires: Date.now() + 60_000, value: resolveExecutableUncached(command, aliases) }
+  executableCache.set(key, entry)
+  try {
+    const resolved = await entry.value
+    if (!resolved && executableCache.get(key) === entry) executableCache.delete(key)
+    return resolved
+  } catch (error) {
+    if (executableCache.get(key) === entry) executableCache.delete(key)
+    throw error
+  }
+}
+
+async function resolveExecutableUncached(command: string, aliases: string[]): Promise<string | null> {
   for (const value of [command, ...aliases].map(item => item.trim()).filter(Boolean)) {
     if (path.isAbsolute(value) || value.includes('/') || value.includes('\\')) {
       if (await exists(value)) return value
@@ -139,5 +164,5 @@ export async function killProcessTree(child: ChildProcessWithoutNullStreams): Pr
 
 export function classifyAgentError(error: unknown): 'auth_required' | 'error' {
   const text = error instanceof Error ? error.message : String(error)
-  return /auth|login|unauthori[sz]ed|credential|not logged/i.test(text) ? 'auth_required' : 'error'
+  return /auth|login|sign[ -]?in|unauthori[sz]ed|credential|not logged|未登录/i.test(text) ? 'auth_required' : 'error'
 }

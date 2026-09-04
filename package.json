@@ -6,6 +6,8 @@
   "author": "cheer.com",
   "homepage": "http://cheer472.cloud:3031/",
   "scripts": {
+    "test:acp-object-stream": "tsc src/main/external-agents/acp-object-stream.ts --outDir node_modules/.cache/agentpet-external-agent-tests --module commonjs --moduleResolution node --target ES2022 --types node --esModuleInterop --skipLibCheck && node --test scripts/acp-object-stream.test.cjs",
+    "test:external-agent-performance": "tsc src/main/external-agents/acp-client.ts src/main/external-agents/bridges/codex-bridge.ts src/main/external-agents/bridges/claude-bridge.ts src/main/external-agents/bridges/antigravity-bridge.ts src/main/external-agents/event-batcher.ts --outDir node_modules/.cache/agentpet-external-agent-tests --module commonjs --moduleResolution node --target ES2022 --types node --esModuleInterop --skipLibCheck && node --test scripts/external-agent-performance.test.cjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -38,7 +40,8 @@
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "test:task-recovery": "tsc src/main/task-runtime/task-runner.ts --outDir node_modules/.cache/task-recovery-tests --module commonjs --moduleResolution node --target ES2022 --types node,electron --esModuleInterop --skipLibCheck && node --test scripts/task-recovery.test.cjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

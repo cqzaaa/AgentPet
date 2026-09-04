@@ -8968,6 +8968,39 @@ html.collab-takeover-active .window-titlebar .titlebar-controls {
   background: color-mix(in srgb, var(--card-bg, #ffffff) 90%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.collab-workbench-footer .collab-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-color, #334155);
+}
+
+.collab-workbench-footer .collab-footer-left .collab-runtime-note {
+  margin-left: 0;
+}
+
+.collab-workbench-footer .collab-footer-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-width: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+.collab-workbench-footer .collab-footer-actions span {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
 }
 
 .collab-workspace-button {
@@ -9044,11 +9077,14 @@ html.collab-takeover-active .window-titlebar .titlebar-controls {
   align-items: center;
   gap: 8px;
   padding: 9px 22px !important;
+  border: 0 !important;
   border-radius: 10px !important;
   background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%) !important;
   color: #ffffff !important;
-  font-size: 13.5px !important;
+  font-size: 13px !important;
   font-weight: 700 !important;
+  cursor: pointer;
+  white-space: nowrap;
   box-shadow: 0 4px 16px rgba(37, 99, 235, 0.38) !important;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
@@ -9056,6 +9092,12 @@ html.collab-takeover-active .window-titlebar .titlebar-controls {
 .collab-start:hover {
   transform: translateY(-1px) scale(1.02) !important;
   box-shadow: 0 6px 22px rgba(37, 99, 235, 0.48) !important;
+}
+
+.collab-start:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
 }
 
 @media (max-width: 820px) {
@@ -9427,17 +9469,39 @@ html.collab-takeover-active .window-titlebar .titlebar-controls {
 }
 
 .collab-return-flow {
-  margin-left: auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 36px;
-  padding: 0 13px;
+  padding: 0 14px;
   border: 1px solid var(--border-color, #d7dfeb);
   border-radius: 8px;
   background: var(--card-bg, #fff);
   color: var(--text-color, #1e293b);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.collab-return-flow:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: var(--bg-card-sub, #f8fafc);
+  transform: translateY(-1px);
+}
+
+.collab-return-flow:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.collab-return-flow.collab-btn-danger:hover:not(:disabled) {
+  border-color: #fca5a5;
+  color: #dc2626;
+  background: #fef2f2;
 }
 
 .collab-workbench:has(.collab-runtime) .collab-inspector {
@@ -9622,3 +9686,14 @@ html.collab-takeover-active .window-titlebar .titlebar-controls {
   .collab-runtime-grid.parallel { grid-template-columns: minmax(0, 1fr); }
   .collab-readonly-stage.has-detail { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
 }
+
+.collab-field select:disabled { opacity: .5; cursor: not-allowed; background-color: var(--bg-secondary, #eef1f5); }
+.collab-model-feedback { display: grid; gap: 10px; font-size: 12px; color: var(--collab-muted); overflow-wrap: anywhere; }
+.collab-model-feedback > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.collab-model-action { padding: 8px 12px; border: 1px solid var(--border-color, #dce3ed); border-radius: 8px; background: var(--bg-secondary, #f5f7fb); color: var(--collab-blue); cursor: pointer; }
+.collab-model-action:disabled { opacity: .5; cursor: not-allowed; }
+.collab-delete-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-color, #202938); }
+.collab-delete-confirm button { padding: 7px 13px; border: 1px solid var(--border-color, #d6deea); border-radius: 7px; background: var(--card-bg, #fff); color: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.18s ease; }
+.collab-delete-confirm button:hover:not(:disabled) { border-color: #94a3b8; background: var(--bg-card-sub, #f8fafc); transform: translateY(-1px); }
+.collab-delete-confirm button:last-child { color: #b42318; border-color: #e9a49c; background: #fef3f2; }
+.collab-delete-confirm button:last-child:hover:not(:disabled) { border-color: #f87171; background: #fee2e2; }

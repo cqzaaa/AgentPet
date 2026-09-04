@@ -1,9 +1,14 @@
 import os from 'node:os'
+import { openLoginTerminal } from './login-terminal'
 import path from 'node:path'
 import { BUILTIN_EXTERNAL_AGENTS } from './catalog'
 import { AcpExternalAgentClient } from './acp-client'
 import { CodexAppServerClient } from './codex-app-server-client'
 import { LocalCliAgentClient } from './local-cli-client'
+import { AntigravityAcpBridge, createAntigravityAcpConnection } from './bridges/antigravity-bridge'
+import { ClaudeAcpBridge, createClaudeAcpConnection } from './bridges/claude-bridge'
+import { CodexAcpBridge, createCodexAcpConnection, disposeCodexProcessPool } from './bridges/codex-bridge'
+import { clearExecutableCache, classifyAgentError, resolveExecutable } from './process-utils'
 import { ExternalAgentStore } from './store'
 import type {
   ExternalAgentDefinition,
@@ -22,6 +27,37 @@ export class ExternalAgentManager {
   private readonly codexClient = new CodexAppServerClient()
   private readonly localCliClient = new LocalCliAgentClient()
   private readonly probes = new Map<string, ExternalAgentProbeResult>()
+  private readonly loginWindows = new Set<string>()
+
+  public async getModelStatus(agentId: string, cwd?: string, configuredModel?: string) {
+    try {
+      return { status: 'ready', models: await this.listModels(agentId, cwd, configuredModel) }
+    } catch (error) {
+      return { status: classifyAgentError(error), models: [], error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  public async login(agentId: string): Promise<void> {
+    const definition = BUILTIN_EXTERNAL_AGENTS.find(agent => agent.id === agentId)
+    const loginArgs: Record<string, string[]> = { antigravity: [], 'claude-code': ['auth', 'login'], codex: ['login'] }
+    if (!definition || !Object.hasOwn(loginArgs, agentId)) throw new Error('请在该 Agent 的终端中手动登录')
+    if (process.platform !== 'win32') throw new Error('请在系统终端中运行对应 CLI 登录')
+    if (this.loginWindows.has(agentId)) throw new Error('正在打开登录终端，请稍候')
+    this.loginWindows.add(agentId)
+    try {
+      const executable = await resolveExecutable(definition.executable, definition.executableAliases)
+      if (!executable) throw new Error(`未找到 ${definition.executable}`)
+      await openLoginTerminal(executable, loginArgs[agentId], definition.env)
+      this.probes.delete(agentId)
+    } finally {
+      this.loginWindows.delete(agentId)
+    }
+  }
+
+  public async dispose(): Promise<void> {
+    this.client.dispose()
+    await disposeCodexProcessPool()
+  }
 
   public async list(): Promise<ExternalAgentListItem[]> {
     const definitions = [...BUILTIN_EXTERNAL_AGENTS, ...await this.store.list()]
@@ -72,6 +108,7 @@ export class ExternalAgentManager {
   }
 
   public async upsert(input: ExternalAgentUpsertInput): Promise<ExternalAgentDefinition> {
+    clearExecutableCache()
     if (input.id && BUILTIN_EXTERNAL_AGENTS.some(agent => agent.id === input.id)) {
       throw new Error('内置 Agent 不能通过自定义接口覆盖')
     }
@@ -90,8 +127,9 @@ export class ExternalAgentManager {
 
   public async runPrompt(
     request: ExternalAgentRunRequest,
-    onUpdate?: (update: unknown) => void,
-    onProtocolEvent?: (event: ExternalAgentProtocolEvent) => void
+    onUpdate?: (update: unknown) => void | Promise<void>,
+    onProtocolEvent?: (event: ExternalAgentProtocolEvent) => void | Promise<void>,
+    options?: { signal?: AbortSignal }
   ): Promise<ExternalAgentRunResult> {
     if (!request.prompt?.trim()) throw new Error('prompt 不能为空')
     const definition = await this.find(request.agentId)
@@ -101,15 +139,54 @@ export class ExternalAgentManager {
     }
     const cwd = this.normalizeCwd(request.cwd)
     if (definition.protocol === 'claude-stream-json') {
-      return this.localCliClient.runClaude(definition, cwd, request.prompt.trim(), onUpdate, request.model)
+      const connection = createClaudeAcpConnection(definition, cwd, request.model, onProtocolEvent)
+      return this.client.runPrompt(
+        definition,
+        cwd,
+        request.prompt.trim(),
+        onUpdate as any,
+        onProtocolEvent,
+        {
+          customStream: connection.clientStream,
+          onDispose: connection.dispose,
+          signal: options?.signal,
+          model: request.model
+        }
+      )
     }
     if (definition.protocol === 'codex-app-server') {
-      return this.codexClient.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, request.model)
+      const connection = createCodexAcpConnection(definition, cwd, request.model, onProtocolEvent)
+      return this.client.runPrompt(
+        definition,
+        cwd,
+        request.prompt.trim(),
+        onUpdate as any,
+        onProtocolEvent,
+        {
+          customStream: connection.clientStream,
+          onDispose: connection.dispose,
+          signal: options?.signal,
+          model: request.model
+        }
+      )
     }
     if (definition.protocol === 'antigravity-json') {
-      return this.localCliClient.runAntigravity(definition, cwd, request.prompt.trim(), onUpdate, request.model, onProtocolEvent)
+      const connection = createAntigravityAcpConnection(definition, cwd, request.model, onProtocolEvent)
+      return this.client.runPrompt(
+        definition,
+        cwd,
+        request.prompt.trim(),
+        onUpdate as any,
+        onProtocolEvent,
+        {
+          customStream: connection.clientStream,
+          onDispose: connection.dispose,
+          signal: options?.signal,
+          model: request.model
+        }
+      )
     }
-    return this.client.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, onProtocolEvent)
+    return this.client.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, onProtocolEvent, options)
   }
 
   public async describe(agentId: string): Promise<Pick<ExternalAgentDefinition, 'id' | 'name' | 'protocol'>> {
@@ -123,16 +200,17 @@ export class ExternalAgentManager {
     if (definition.protocol === 'internal') {
       return [{ id: configuredModel || 'default', name: configuredModel || '当前对话模型', source: 'configured' }]
     }
-    if (definition.protocol === 'codex-app-server') return this.codexClient.listModels(definition, normalizedCwd)
+    if (definition.protocol === 'codex-app-server') {
+      const bridge = new CodexAcpBridge(definition, normalizedCwd, configuredModel)
+      return bridge.listModels()
+    }
     if (definition.protocol === 'claude-stream-json') {
-      return [
-        { id: 'default', name: '默认（CLI 当前配置）', source: 'cli-alias' },
-        { id: 'sonnet', name: 'Sonnet', source: 'cli-alias' },
-        { id: 'opus', name: 'Opus', source: 'cli-alias' }
-      ]
+      const bridge = new ClaudeAcpBridge(definition, normalizedCwd, configuredModel)
+      return bridge.listModels()
     }
     if (definition.protocol === 'antigravity-json') {
-      return this.localCliClient.listAntigravityModels(definition, normalizedCwd)
+      const bridge = new AntigravityAcpBridge(definition, normalizedCwd, configuredModel)
+      return bridge.listModels()
     }
     const probe = await this.probe(agentId, normalizedCwd)
     const options = Array.isArray(probe.configOptions) ? probe.configOptions : []
@@ -163,8 +241,42 @@ export class ExternalAgentManager {
     isInstalled: (value: ExternalAgentDefinition) => Promise<boolean>
     probe: (value: ExternalAgentDefinition, cwd: string) => Promise<ExternalAgentProbeResult>
   } {
-    if (definition.protocol === 'codex-app-server') return this.codexClient
-    if (definition.protocol === 'claude-stream-json' || definition.protocol === 'antigravity-json') return this.localCliClient
+    if (definition.protocol === 'claude-stream-json') {
+      return {
+        isInstalled: def => this.localCliClient.isInstalled(def),
+        probe: async (def, cwd) => {
+          const connection = createClaudeAcpConnection(def, cwd)
+          return this.client.probe(def, cwd, {
+            customStream: connection.clientStream,
+            onDispose: connection.dispose
+          })
+        }
+      }
+    }
+    if (definition.protocol === 'codex-app-server') {
+      return {
+        isInstalled: def => this.codexClient.isInstalled(def),
+        probe: async (def, cwd) => {
+          const connection = createCodexAcpConnection(def, cwd)
+          return this.client.probe(def, cwd, {
+            customStream: connection.clientStream,
+            onDispose: connection.dispose
+          })
+        }
+      }
+    }
+    if (definition.protocol === 'antigravity-json') {
+      return {
+        isInstalled: def => this.localCliClient.isInstalled(def),
+        probe: async (def, cwd) => {
+          const connection = createAntigravityAcpConnection(def, cwd)
+          return this.client.probe(def, cwd, {
+            customStream: connection.clientStream,
+            onDispose: connection.dispose
+          })
+        }
+      }
+    }
     return this.client
   }
 }
