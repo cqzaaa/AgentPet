@@ -4,6 +4,8 @@
 
 # AgentPet 2.0
 
+[简体中文](README.md) | [English](README_EN.md)
+
 **住在桌面上的 AI 助手，也是你的多 Agent 工作台。**
 
 把对话、任务编排、代码协作、知识检索和办公自动化，放进同一个桌面应用。
