@@ -478,7 +478,6 @@ public static class RpaWindowBounds {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   private delegate bool EnumWindowsProc(IntPtr handle, IntPtr data);
   [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
-  [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr handle);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
@@ -490,17 +489,15 @@ public static class RpaWindowBounds {
     IntPtr titleMatch = IntPtr.Zero;
     IntPtr processFallback = IntPtr.Zero;
     EnumWindows(delegate(IntPtr handle, IntPtr data) {
-      if (!IsWindowVisible(handle)) return true;
       int length = GetWindowTextLength(handle);
-      if (length <= 0) return true;
-      var builder = new StringBuilder(length + 1);
-      GetWindowText(handle, builder, builder.Capacity);
+      var builder = new StringBuilder(Math.Max(1, length + 1));
+      if (length > 0) GetWindowText(handle, builder, builder.Capacity);
       string windowTitle = builder.ToString();
       uint processId;
       GetWindowThreadProcessId(handle, out processId);
       string processName = "";
       try { processName = Process.GetProcessById((int)processId).ProcessName; } catch {}
-      if (!string.IsNullOrEmpty(targetTitle) && windowTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0) {
+      if (!string.IsNullOrEmpty(targetTitle) && length > 0 && windowTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0) {
         titleMatch = handle;
         return false;
       }

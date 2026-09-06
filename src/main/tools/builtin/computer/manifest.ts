@@ -50,6 +50,11 @@ export const computerManifest: ToolManifest = {
             type: 'number',
             description:
               '截图前等待毫秒数（最大 5000）。刚启动了新应用、打开了新页面，或需要等待加载动画时传入此参数（如 1500）。如果已调用过 focus_window，它内置了等待，无需再传此参数。'
+          },
+          state_id: {
+            type: 'string',
+            description:
+              '返回的 Computer State ID；执行后续坐标操作时可传入，用于确认操作基于最新截图。'
           }
         },
         required: []
@@ -70,7 +75,8 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'mouse_click',
-      description: '在已确认的全局屏幕坐标执行鼠标点击。mouse_click 会自行移动鼠标，不要先调用 mouse_move；同一视觉状态下重复点击会被保护机制拦截。',
+      description:
+        '在已确认的全局屏幕坐标执行鼠标点击。mouse_click 会自行移动鼠标，不要先调用 mouse_move；同一视觉状态下重复点击会被保护机制拦截。',
       parameters: {
         type: 'object',
         properties: {
@@ -88,6 +94,11 @@ export const computerManifest: ToolManifest = {
           allow_repeat: {
             type: 'boolean',
             description: '明确允许在同一视觉状态下重复点击；仅用于确实需要双次独立点击的场景'
+          },
+          state_id: {
+            type: 'string',
+            description:
+              '最近一次 screenshot 返回的 Computer State ID。传入后会拒绝使用过期截图操作。'
           }
         },
         required: ['x', 'y']
@@ -95,7 +106,8 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'mouse_click_relative',
-      description: '按窗口或显示器相对坐标点击，执行器会根据实时窗口边界、DPI 和多显示器布局转换为物理屏幕坐标。优先于绝对坐标。',
+      description:
+        '按窗口或显示器相对坐标点击，执行器会根据实时窗口边界、DPI 和多显示器布局转换为物理屏幕坐标。优先于绝对坐标。',
       parameters: {
         type: 'object',
         properties: {
@@ -112,7 +124,8 @@ export const computerManifest: ToolManifest = {
           display_id: { type: 'number', description: 'display scope 的显示器 id 或序号' },
           button: { type: 'string', enum: ['left', 'right'], description: '鼠标按键，默认 left' },
           double: { type: 'boolean', description: '是否双击，默认 false' },
-          allow_repeat: { type: 'boolean', description: '明确允许重复点击，默认 false' }
+          allow_repeat: { type: 'boolean', description: '明确允许重复点击，默认 false' },
+          state_id: { type: 'string', description: '最近一次 screenshot 返回的 Computer State ID' }
         },
         required: ['scope', 'relative_x', 'relative_y']
       }
@@ -133,14 +146,16 @@ export const computerManifest: ToolManifest = {
           amount: {
             type: 'number',
             description: '滚动格数，默认 3'
-          }
+          },
+          state_id: { type: 'string', description: '最近一次 screenshot 返回的 Computer State ID' }
         },
         required: ['x', 'y', 'direction']
       }
     },
     {
       name: 'type_text',
-      description: '向当前焦点元素输入一段文字。默认使用剪贴板粘贴，适合中文、emoji 和复杂标点；仅在确需逐键模拟时使用 method="keyboard"。',
+      description:
+        '向当前焦点元素输入一段文字。默认使用剪贴板粘贴，适合中文、emoji 和复杂标点；仅在确需逐键模拟时使用 method="keyboard"。',
       parameters: {
         type: 'object',
         properties: {
@@ -176,14 +191,18 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'find_ui_elements',
-      description: '在指定 Windows 窗口内查找可访问性元素，返回 name、automationId、controlType、边界和可复用定位字段。需要优先提供 PID。',
+      description:
+        '在指定 Windows 窗口内查找可访问性元素，返回 name、automationId、controlType、边界和可复用定位字段。需要优先提供 PID。',
       parameters: {
         type: 'object',
         properties: {
           pid: { type: 'number', description: '目标窗口进程 PID，优先提供' },
           process_name: { type: 'string', description: '目标进程名' },
           name_contains: { type: 'string', description: '元素名称包含的文字' },
-          control_type: { type: 'string', description: 'UI Automation control type，例如 ControlType.Button' },
+          control_type: {
+            type: 'string',
+            description: 'UI Automation control type，例如 ControlType.Button'
+          },
           limit: { type: 'number', description: '最多返回元素数量，默认 30，最大 80' }
         },
         required: []
@@ -191,7 +210,8 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'click_ui_element',
-      description: '通过 Windows UI Automation 的 automationId/name/processId/controlType 点击元素，优先于猜测屏幕坐标。',
+      description:
+        '通过 Windows UI Automation 的 automationId/name/processId/controlType 点击元素，优先于猜测屏幕坐标。',
       parameters: {
         type: 'object',
         properties: {
@@ -199,17 +219,22 @@ export const computerManifest: ToolManifest = {
           process_name: { type: 'string', description: '目标进程名' },
           name: { type: 'string', description: '元素可访问名称' },
           automation_id: { type: 'string', description: '元素 AutomationId' },
-          control_type: { type: 'string', description: '元素 ControlType，例如 ControlType.Button' },
+          control_type: {
+            type: 'string',
+            description: '元素 ControlType，例如 ControlType.Button'
+          },
           button: { type: 'string', enum: ['left', 'right'], description: '鼠标按键，默认 left' },
           double: { type: 'boolean', description: '是否双击，默认 false' },
-          allow_repeat: { type: 'boolean', description: '明确允许重复点击，默认 false' }
+          allow_repeat: { type: 'boolean', description: '明确允许重复点击，默认 false' },
+          state_id: { type: 'string', description: '最近一次 screenshot 返回的 Computer State ID' }
         },
         required: []
       }
     },
     {
       name: 'focus_ui_element',
-      description: '通过 Windows UI Automation 将指定元素设为焦点，适合输入框；之后可直接调用 type_text。',
+      description:
+        '通过 Windows UI Automation 将指定元素设为焦点，适合输入框；之后可直接调用 type_text。',
       parameters: {
         type: 'object',
         properties: {
@@ -223,7 +248,8 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'perform_computer_actions',
-      description: '顺序执行一组确定性的电脑动作，适合 click/type/Enter 等连续步骤；动作之间不产生模型往返。可选 verify_after=true 在结尾截取一次验证截图。',
+      description:
+        '顺序执行一组确定性的电脑动作，适合 click/type/Enter 等连续步骤；动作之间不产生模型往返。可选 verify_after=true 在结尾截取一次验证截图。',
       parameters: {
         type: 'object',
         properties: {
@@ -237,15 +263,34 @@ export const computerManifest: ToolManifest = {
             items: {
               type: 'object',
               properties: {
-                type: { type: 'string', enum: ['focus_window', 'click', 'click_relative', 'click_ui', 'focus_ui', 'type', 'key', 'wait'] },
-                x: { type: 'number' }, y: { type: 'number' },
-                relative_x: { type: 'number' }, relative_y: { type: 'number' },
+                type: {
+                  type: 'string',
+                  enum: [
+                    'focus_window',
+                    'click',
+                    'click_relative',
+                    'scroll',
+                    'click_ui',
+                    'focus_ui',
+                    'type',
+                    'key',
+                    'wait'
+                  ]
+                },
+                x: { type: 'number' },
+                y: { type: 'number' },
+                relative_x: { type: 'number' },
+                relative_y: { type: 'number' },
                 scope: { type: 'string', enum: ['window', 'display'] },
-                name: { type: 'string' }, automation_id: { type: 'string' }, control_type: { type: 'string' },
-                text: { type: 'string' }, method: { type: 'string', enum: ['clipboard_paste', 'keyboard'] },
+                name: { type: 'string' },
+                automation_id: { type: 'string' },
+                control_type: { type: 'string' },
+                text: { type: 'string' },
+                method: { type: 'string', enum: ['clipboard_paste', 'keyboard'] },
                 keys: { type: 'array', items: { type: 'string' } },
                 milliseconds: { type: 'number' },
-                button: { type: 'string', enum: ['left', 'right', 'middle'] }, double: { type: 'boolean' },
+                button: { type: 'string', enum: ['left', 'right', 'middle'] },
+                double: { type: 'boolean' },
                 allow_repeat: { type: 'boolean' }
               },
               required: ['type']
@@ -258,17 +303,27 @@ export const computerManifest: ToolManifest = {
     },
     {
       name: 'get_windows',
-      description: '获取当前所有可见窗口的列表（标题、进程名、PID），用于确定要操作的目标窗口。',
+      description:
+        '获取当前可见窗口列表（标题、进程名、PID）。需要查找可能在后台或系统托盘运行的应用时，传 process_name（如 QQ），工具会额外返回没有标题栏的后台进程；发现已有进程后优先 focus_window，禁止重新启动。',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          process_name: {
+            type: 'string',
+            description: '可选的进程名，例如 QQ 或 QQ.exe；同时查找无标题的后台进程'
+          },
+          include_background: {
+            type: 'boolean',
+            description: '是否包含没有标题栏的后台进程；指定 process_name 时自动启用'
+          }
+        },
         required: []
       }
     },
     {
       name: 'focus_window',
       description:
-        '将指定窗口切换到前台并获得焦点。支持三种方式：(1) 窗口标题模糊匹配，(2) PID 精确匹配，(3) show_desktop=true 显示桌面。内置 800ms 等待，调用后可直接截图。',
+        '将指定窗口切换到前台并获得焦点。支持窗口标题、PID 或进程名匹配；即使窗口标题为空也会按进程名查找。show_desktop=true 可显示桌面。内置等待，调用后可直接截图。',
       parameters: {
         type: 'object',
         properties: {
@@ -279,6 +334,10 @@ export const computerManifest: ToolManifest = {
           pid: {
             type: 'number',
             description: '进程 PID（精确匹配，优先于 title）'
+          },
+          process_name: {
+            type: 'string',
+            description: '进程名，例如 QQ 或 QQ.exe；适合恢复后台或系统托盘应用'
           },
           show_desktop: {
             type: 'boolean',

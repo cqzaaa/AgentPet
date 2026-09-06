@@ -17,6 +17,7 @@ import {
   scrollDesktopPointNative
 } from '../../../rpa/rpaDesktopPicker'
 import { DesktopActionGuard, desktopClickFingerprint } from './action-guard'
+import { ComputerState, createComputerStateId, stateMismatchMessage } from './computer-state'
 
 const execFileAsync = promisify(execFile)
 
@@ -57,15 +58,27 @@ const KEY_MAP: Record<string, string> = {
   end: 'End',
   pageup: 'PageUp',
   pagedown: 'PageDown',
-  f1: 'F1', f2: 'F2', f3: 'F3', f4: 'F4',
-  f5: 'F5', f6: 'F6', f7: 'F7', f8: 'F8',
-  f9: 'F9', f10: 'F10', f11: 'F11', f12: 'F12'
+  f1: 'F1',
+  f2: 'F2',
+  f3: 'F3',
+  f4: 'F4',
+  f5: 'F5',
+  f6: 'F6',
+  f7: 'F7',
+  f8: 'F8',
+  f9: 'F9',
+  f10: 'F10',
+  f11: 'F11',
+  f12: 'F12'
 }
 
 export class ComputerExecutor implements IToolExecutor {
   private readonly actionGuard = new DesktopActionGuard()
   private readonly windowDiagnosticCache = new Map<string, { diagnostic: any; expiresAt: number }>()
-  private focusedWindow: { processId?: number; processName?: string; title?: string; expiresAt: number } | undefined
+  private focusedWindow:
+    | { processId?: number; processName?: string; title?: string; expiresAt: number }
+    | undefined
+  private readonly latestComputerStates = new Map<string, ComputerState>()
 
   public async execute(
     api: string,
@@ -97,7 +110,7 @@ export class ComputerExecutor implements IToolExecutor {
         case 'perform_computer_actions':
           return await this.performComputerActions(args, context)
         case 'get_windows':
-          return await this.getWindows()
+          return await this.getWindows(args)
         case 'focus_window':
           return await this.focusWindow(args)
         default:
@@ -132,10 +145,7 @@ export class ComputerExecutor implements IToolExecutor {
 
   // ─── 截图 ────────────────────────────────────────────────────────────────────
 
-  private async screenshot(
-    args: Record<string, any>,
-    context: ToolContext
-  ): Promise<ToolResult> {
+  private async screenshot(args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
     // 截图前等待（用于 focus_window 后给窗口动画留时间）
     const delayMs = typeof args.delay_ms === 'number' ? Math.min(args.delay_ms, 5000) : 0
     if (delayMs > 0) {
@@ -143,18 +153,32 @@ export class ComputerExecutor implements IToolExecutor {
     }
 
     const { desktopCapturer, screen } = await import('electron')
-    const rememberedWindow = !args.mode && !args.pid && !args.title && !args.process_name && this.focusedWindow && this.focusedWindow.expiresAt > Date.now()
-      ? this.focusedWindow
-      : undefined
-    const mode = args.mode === 'window' || args.pid || args.title || args.process_name || rememberedWindow ? 'window' : 'screen'
+    const rememberedWindow =
+      !args.mode &&
+      !args.pid &&
+      !args.title &&
+      !args.process_name &&
+      this.focusedWindow &&
+      this.focusedWindow.expiresAt > Date.now()
+        ? this.focusedWindow
+        : undefined
+    const mode =
+      args.mode === 'window' || args.pid || args.title || args.process_name || rememberedWindow
+        ? 'window'
+        : 'screen'
     const maxWidth = Math.min(3840, Math.max(640, Math.round(Number(args.max_width) || 1920)))
     const maxHeight = Math.min(2160, Math.max(360, Math.round(Number(args.max_height) || 1080)))
     const displays = screen.getAllDisplays()
     const primaryDisplay = screen.getPrimaryDisplay()
-    const requestedDisplayId = Number.isFinite(args.display_id) ? Number(args.display_id) : undefined
-    const display = requestedDisplayId === undefined
-      ? primaryDisplay
-      : displays.find(item => Number(item.id) === requestedDisplayId) || displays[Math.max(0, Math.min(displays.length - 1, Math.trunc(requestedDisplayId)))] || primaryDisplay
+    const requestedDisplayId = Number.isFinite(args.display_id)
+      ? Number(args.display_id)
+      : undefined
+    const display =
+      requestedDisplayId === undefined
+        ? primaryDisplay
+        : displays.find((item) => Number(item.id) === requestedDisplayId) ||
+          displays[Math.max(0, Math.min(displays.length - 1, Math.trunc(requestedDisplayId)))] ||
+          primaryDisplay
 
     let targetWindow: { processId?: number; processName?: string; title?: string } = {
       processId: Number.isFinite(args.pid) ? Math.trunc(Number(args.pid)) : undefined,
@@ -162,24 +186,53 @@ export class ComputerExecutor implements IToolExecutor {
       title: args.title ? String(args.title) : undefined
     }
     if (rememberedWindow) targetWindow = { ...rememberedWindow }
-    if (mode === 'window' && !targetWindow.title && (targetWindow.processId || targetWindow.processName)) {
+    if (
+      mode === 'window' &&
+      !targetWindow.title &&
+      (targetWindow.processId || targetWindow.processName)
+    ) {
       const windows = await listDesktopWindows()
-      const matched = windows.find(item =>
-        (targetWindow.processId && item.processId === targetWindow.processId) ||
-        (!targetWindow.processId && targetWindow.title && item.windowTitle.toLowerCase().includes(targetWindow.title.toLowerCase())) ||
-        (!targetWindow.processId && !targetWindow.title && targetWindow.processName && item.processName.toLowerCase() === targetWindow.processName.toLowerCase())
+      const matched = windows.find(
+        (item) =>
+          (targetWindow.processId && item.processId === targetWindow.processId) ||
+          (!targetWindow.processId &&
+            targetWindow.title &&
+            item.windowTitle.toLowerCase().includes(targetWindow.title.toLowerCase())) ||
+          (!targetWindow.processId &&
+            !targetWindow.title &&
+            targetWindow.processName &&
+            item.processName.toLowerCase() === targetWindow.processName.toLowerCase())
       )
       if (matched) {
-        targetWindow = { processId: matched.processId, processName: matched.processName, title: matched.windowTitle }
+        targetWindow = {
+          processId: matched.processId,
+          processName: matched.processName,
+          title: matched.windowTitle
+        }
       }
     }
 
-    const thumbnailSize = mode === 'window'
-      ? { width: maxWidth, height: maxHeight }
-      : {
-          width: Math.min(maxWidth, Math.max(640, Math.round(display.size.width * display.scaleFactor))),
-          height: Math.min(maxHeight, Math.max(360, Math.round(display.size.height * display.scaleFactor)))
-        }
+    if (mode === 'window' && !targetWindow.title) {
+      return {
+        content:
+          '[截图失败] 已找到进程，但无法解析它的可见窗口标题。请改用 mode="screen" 验证前台状态；不能把任意窗口源当作目标窗口。',
+        success: false
+      }
+    }
+
+    const thumbnailSize =
+      mode === 'window'
+        ? { width: maxWidth, height: maxHeight }
+        : {
+            width: Math.min(
+              maxWidth,
+              Math.max(640, Math.round(display.size.width * display.scaleFactor))
+            ),
+            height: Math.min(
+              maxHeight,
+              Math.max(360, Math.round(display.size.height * display.scaleFactor))
+            )
+          }
     const sources = await desktopCapturer.getSources({
       types: [mode === 'window' ? 'window' : 'screen'],
       thumbnailSize,
@@ -190,12 +243,22 @@ export class ComputerExecutor implements IToolExecutor {
       return { content: '截图失败：未找到可用的屏幕源', success: false }
     }
 
-    const source = mode === 'window'
-      ? sources.find(item => targetWindow.title && item.name === targetWindow.title) ||
-        sources.find(item => targetWindow.title && item.name.toLowerCase().includes(targetWindow.title.toLowerCase())) ||
-        sources[0]
-      : sources.find(item => String(item.display_id) === String(display.id)) || sources[0]
-    if (mode === 'window' && targetWindow.title && source.name.toLowerCase() !== targetWindow.title.toLowerCase() && !source.name.toLowerCase().includes(targetWindow.title.toLowerCase())) {
+    const source =
+      mode === 'window'
+        ? sources.find((item) => targetWindow.title && item.name === targetWindow.title) ||
+          sources.find(
+            (item) =>
+              targetWindow.title &&
+              item.name.toLowerCase().includes(targetWindow.title.toLowerCase())
+          ) ||
+          sources[0]
+        : sources.find((item) => String(item.display_id) === String(display.id)) || sources[0]
+    if (
+      mode === 'window' &&
+      targetWindow.title &&
+      source.name.toLowerCase() !== targetWindow.title.toLowerCase() &&
+      !source.name.toLowerCase().includes(targetWindow.title.toLowerCase())
+    ) {
       return {
         content: `[截图失败] 未找到目标窗口：${targetWindow.title}`,
         success: false
@@ -216,10 +279,10 @@ export class ComputerExecutor implements IToolExecutor {
 
     const { width, height } = thumbnail.getSize()
     const stateHash = this.visualStateHash(thumbnail)
-    const changedSincePrevious = this.actionGuard.updateVisualState(this.guardKey(context), stateHash)
-    const windowBounds = mode === 'window'
-      ? await this.resolveWindowBounds(targetWindow)
-      : undefined
+    const guardKey = this.guardKey(context)
+    const changedSincePrevious = this.actionGuard.updateVisualState(guardKey, stateHash)
+    const windowBounds =
+      mode === 'window' ? await this.resolveWindowBounds(targetWindow) : undefined
     let pointDiagnostic: any
     if (mode === 'window' && windowBounds) {
       const diagnosticKey = `${targetWindow.processId || 0}:${targetWindow.title || targetWindow.processName || ''}`
@@ -227,19 +290,56 @@ export class ComputerExecutor implements IToolExecutor {
       if (cachedDiagnostic && cachedDiagnostic.expiresAt > Date.now()) {
         pointDiagnostic = cachedDiagnostic.diagnostic
       } else {
-        pointDiagnostic = await inspectDesktopPoint({ x: windowBounds.x + Math.round(windowBounds.width / 2), y: windowBounds.y + Math.round(windowBounds.height / 2) })
-        if (pointDiagnostic) this.windowDiagnosticCache.set(diagnosticKey, { diagnostic: pointDiagnostic, expiresAt: Date.now() + 30_000 })
+        pointDiagnostic = await inspectDesktopPoint({
+          x: windowBounds.x + Math.round(windowBounds.width / 2),
+          y: windowBounds.y + Math.round(windowBounds.height / 2)
+        })
+        if (pointDiagnostic)
+          this.windowDiagnosticCache.set(diagnosticKey, {
+            diagnostic: pointDiagnostic,
+            expiresAt: Date.now() + 30_000
+          })
       }
     }
-    const displayBounds = mode === 'screen'
-      ? {
-          left: display.bounds.x,
-          top: display.bounds.y,
-          width: display.bounds.width,
-          height: display.bounds.height,
-          primary: display.id === primaryDisplay.id
-        }
-      : pointDiagnostic?.displayBounds
+    const displayBounds =
+      mode === 'screen'
+        ? {
+            left: display.bounds.x,
+            top: display.bounds.y,
+            width: display.bounds.width,
+            height: display.bounds.height,
+            primary: display.id === primaryDisplay.id
+          }
+        : pointDiagnostic?.displayBounds
+
+    const computerState: ComputerState = {
+      id: createComputerStateId('desktop', stateHash),
+      scope: 'desktop',
+      capturedAt: Date.now(),
+      stateHash,
+      screenshotPath: filePath,
+      coordinateSpace:
+        mode === 'window' ? 'window-relative-or-global-physical' : 'display-image-or-global',
+      display: displayBounds
+        ? {
+            id: display.id,
+            x: displayBounds.left,
+            y: displayBounds.top,
+            width: displayBounds.width,
+            height: displayBounds.height,
+            scaleFactor: mode === 'screen' ? display.scaleFactor : pointDiagnostic?.scaleFactor
+          }
+        : undefined,
+      window: windowBounds
+        ? {
+            pid: targetWindow.processId,
+            processName: targetWindow.processName,
+            title: targetWindow.title,
+            ...windowBounds
+          }
+        : targetWindow
+    }
+    this.latestComputerStates.set(this.stateKey(context), computerState)
 
     return {
       content: `[截图完成]\n范围: ${mode === 'window' ? '窗口' : '显示器'}\n文件路径: ${filePath}\n分辨率: ${width}x${height}\n名称: ${source.name}\n视觉状态哈希: ${stateHash}\n状态较上一张截图${changedSincePrevious ? '已变化' : '未变化'}\n${delayMs > 0 ? `等待了 ${delayMs}ms 后截图\n` : ''}\n截图已自动传入视觉上下文；优先使用返回的窗口/显示器相对坐标或 UI Automation 元素。`,
@@ -251,13 +351,15 @@ export class ComputerExecutor implements IToolExecutor {
         mode,
         stateHash,
         changedSincePrevious,
-        coordinateSpace: mode === 'window' ? 'window-relative-or-global-physical' : 'display-image-or-global',
+        coordinateSpace:
+          mode === 'window' ? 'window-relative-or-global-physical' : 'display-image-or-global',
         displayId: display.id,
         displayBounds,
         scaleFactor: mode === 'screen' ? display.scaleFactor : pointDiagnostic?.scaleFactor,
         dpi: pointDiagnostic?.dpi,
         windowBounds,
-        window: targetWindow
+        window: targetWindow,
+        stateId: computerState.id
       },
       success: true
     }
@@ -276,13 +378,23 @@ export class ComputerExecutor implements IToolExecutor {
 
   private async mouseClick(args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
     const { x, y, button = 'left', double = false } = args
+    const stateError = this.validateComputerState(args, context)
+    if (stateError) return stateError
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return { content: '鼠标点击失败：x/y 必须是有限数字', success: false }
     }
     const fingerprint = desktopClickFingerprint({ scope: 'screen', x, y, button, double })
-    const guardDecision = this.actionGuard.shouldBlockClick(this.guardKey(context), fingerprint, Boolean(args.allow_repeat))
+    const guardDecision = this.actionGuard.shouldBlockClick(
+      this.guardKey(context),
+      fingerprint,
+      Boolean(args.allow_repeat)
+    )
     if (guardDecision.blocked) {
-      return { content: `[重复点击已拦截] ${guardDecision.reason}`, success: false, state: { duplicateBlocked: true } }
+      return {
+        content: `[重复点击已拦截] ${guardDecision.reason}`,
+        success: false,
+        state: { duplicateBlocked: true }
+      }
     }
     let dispatched = false
     if (process.platform === 'win32' && button !== 'middle') {
@@ -296,7 +408,8 @@ export class ComputerExecutor implements IToolExecutor {
     if (!dispatched) {
       const { mouse, Button, Point } = await import('@nut-tree/nut-js')
       await mouse.setPosition(new Point(x, y))
-      const btn = button === 'right' ? Button.RIGHT : button === 'middle' ? Button.MIDDLE : Button.LEFT
+      const btn =
+        button === 'right' ? Button.RIGHT : button === 'middle' ? Button.MIDDLE : Button.LEFT
       if (double) await mouse.doubleClick(btn)
       else await mouse.click(btn)
       dispatched = true
@@ -312,33 +425,40 @@ export class ComputerExecutor implements IToolExecutor {
     }
   }
 
-  private async mouseClickRelative(args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
+  private async mouseClickRelative(
+    args: Record<string, any>,
+    context: ToolContext
+  ): Promise<ToolResult> {
+    const stateError = this.validateComputerState(args, context)
+    if (stateError) return stateError
     const scope = args.scope === 'display' ? 'display' : 'window'
     const relativeX = Number(args.relative_x)
     const relativeY = Number(args.relative_y)
     if (!Number.isFinite(relativeX) || !Number.isFinite(relativeY)) {
       return { content: '相对点击失败：relative_x/relative_y 必须是数字', success: false }
     }
-    const target = scope === 'window'
-      ? await this.resolveWindowTarget(args)
-      : await this.resolveDisplayTarget(args)
+    const target =
+      scope === 'window'
+        ? await this.resolveWindowTarget(args)
+        : await this.resolveDisplayTarget(args)
     if (!target) return { content: '相对点击失败：无法解析目标窗口或显示器边界', success: false }
-    const point = target.scope === 'window'
-      ? await resolveDesktopRelativePoint({
-          windowTitle: target.title,
-          processName: target.processName,
-          relativeX,
-          relativeY
-        })
-      : await resolveDesktopDisplayPoint({
-          displayRelativeX: relativeX,
-          displayRelativeY: relativeY,
-          displayLeft: target.left,
-          displayTop: target.top,
-          displayWidth: target.width,
-          displayHeight: target.height,
-          displayPrimary: target.primary
-        })
+    const point =
+      target.scope === 'window'
+        ? await resolveDesktopRelativePoint({
+            windowTitle: target.title,
+            processName: target.processName,
+            relativeX,
+            relativeY
+          })
+        : await resolveDesktopDisplayPoint({
+            displayRelativeX: relativeX,
+            displayRelativeY: relativeY,
+            displayLeft: target.left,
+            displayTop: target.top,
+            displayWidth: target.width,
+            displayHeight: target.height,
+            displayPrimary: target.primary
+          })
     if (!point) return { content: '相对点击失败：Windows 未返回可用物理坐标', success: false }
     const fingerprint = desktopClickFingerprint({
       scope: scope === 'window' ? 'window' : 'screen',
@@ -350,9 +470,17 @@ export class ComputerExecutor implements IToolExecutor {
       button: args.button,
       double: args.double
     })
-    const guardDecision = this.actionGuard.shouldBlockClick(this.guardKey(context), fingerprint, Boolean(args.allow_repeat))
+    const guardDecision = this.actionGuard.shouldBlockClick(
+      this.guardKey(context),
+      fingerprint,
+      Boolean(args.allow_repeat)
+    )
     if (guardDecision.blocked) {
-      return { content: `[重复点击已拦截] ${guardDecision.reason}`, success: false, state: { duplicateBlocked: true } }
+      return {
+        content: `[重复点击已拦截] ${guardDecision.reason}`,
+        success: false,
+        state: { duplicateBlocked: true }
+      }
     }
     const ok = await clickDesktopPointNative({
       x: point.x,
@@ -364,14 +492,24 @@ export class ComputerExecutor implements IToolExecutor {
     this.actionGuard.recordClick(this.guardKey(context), fingerprint)
     return {
       content: `[相对点击] ${scope === 'window' ? '窗口' : '显示器'}相对坐标 (${relativeX.toFixed(3)}, ${relativeY.toFixed(3)}) → 全局物理坐标 (${point.x}, ${point.y})\n系统已派发点击事件；请按需用一次截图验证。`,
-      state: { dispatched: true, x: point.x, y: point.y, relativeX, relativeY, scope, coordinateSpace: 'global-physical' },
+      state: {
+        dispatched: true,
+        x: point.x,
+        y: point.y,
+        relativeX,
+        relativeY,
+        scope,
+        coordinateSpace: 'global-physical'
+      },
       success: true
     }
   }
 
   // ─── 鼠标滚轮 ─────────────────────────────────────────────────────────────────
 
-  private async mouseScroll(args: Record<string, any>): Promise<ToolResult> {
+  private async mouseScroll(args: Record<string, any>, context?: ToolContext): Promise<ToolResult> {
+    const stateError = context ? this.validateComputerState(args, context) : null
+    if (stateError) return stateError
     const { x, y, direction, amount = 3 } = args
     let dispatched = false
     if (process.platform === 'win32') {
@@ -464,7 +602,9 @@ export class ComputerExecutor implements IToolExecutor {
     let processName = args.process_name ? String(args.process_name) : undefined
     if (!processId && processName) {
       const windows = await listDesktopWindows()
-      const matched = windows.find(item => item.processName.toLowerCase() === processName!.toLowerCase())
+      const matched = windows.find(
+        (item) => item.processName.toLowerCase() === processName!.toLowerCase()
+      )
       if (matched) processId = matched.processId
     }
     const elements = await findDesktopElements({
@@ -475,26 +615,38 @@ export class ComputerExecutor implements IToolExecutor {
       limit: args.limit
     })
     return {
-      content: elements.length > 0
-        ? `[UIA 元素] 找到 ${elements.length} 个\n${elements.map((element, index) => `${index + 1}. name="${element.name}" automationId="${element.automationId}" controlType=${element.controlType} pid=${element.processId} bounds=(${element.x},${element.y},${element.width},${element.height}) enabled=${element.isEnabled}`).join('\n')}`
-        : '[UIA 元素] 未找到匹配元素。请补充 PID、name_contains 或 control_type，或回退到窗口相对坐标。',
+      content:
+        elements.length > 0
+          ? `[UIA 元素] 找到 ${elements.length} 个\n${elements.map((element, index) => `${index + 1}. name="${element.name}" automationId="${element.automationId}" controlType=${element.controlType} pid=${element.processId} bounds=(${element.x},${element.y},${element.width},${element.height}) enabled=${element.isEnabled}`).join('\n')}`
+          : '[UIA 元素] 未找到匹配元素。请补充 PID、name_contains 或 control_type，或回退到窗口相对坐标。',
       state: { elements },
       success: true
     }
   }
 
-  private async clickUiElement(args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
+  private async clickUiElement(
+    args: Record<string, any>,
+    context: ToolContext
+  ): Promise<ToolResult> {
+    const stateError = this.validateComputerState(args, context)
+    if (stateError) return stateError
     const name = args.name ? String(args.name) : ''
     const automationId = args.automation_id ? String(args.automation_id) : ''
-    if (!name && !automationId) return { content: 'UIA 点击失败：需要 name 或 automation_id', success: false }
+    if (!name && !automationId)
+      return { content: 'UIA 点击失败：需要 name 或 automation_id', success: false }
     let processId = Number.isFinite(args.pid) ? Math.trunc(Number(args.pid)) : 0
     let processName = args.process_name ? String(args.process_name) : ''
     if (!processId && !processName) {
-      return { content: 'UIA 点击失败：为了避免命中错误窗口，必须提供 pid 或 process_name', success: false }
+      return {
+        content: 'UIA 点击失败：为了避免命中错误窗口，必须提供 pid 或 process_name',
+        success: false
+      }
     }
     if (!processId && processName) {
       const windows = await listDesktopWindows()
-      const matched = windows.find(item => item.processName.toLowerCase() === processName.toLowerCase())
+      const matched = windows.find(
+        (item) => item.processName.toLowerCase() === processName.toLowerCase()
+      )
       if (matched) {
         processId = matched.processId
         processName = matched.processName
@@ -508,9 +660,17 @@ export class ComputerExecutor implements IToolExecutor {
       button: args.button,
       double: args.double
     })
-    const guardDecision = this.actionGuard.shouldBlockClick(this.guardKey(context), fingerprint, Boolean(args.allow_repeat))
+    const guardDecision = this.actionGuard.shouldBlockClick(
+      this.guardKey(context),
+      fingerprint,
+      Boolean(args.allow_repeat)
+    )
     if (guardDecision.blocked) {
-      return { content: `[重复点击已拦截] ${guardDecision.reason}`, success: false, state: { duplicateBlocked: true } }
+      return {
+        content: `[重复点击已拦截] ${guardDecision.reason}`,
+        success: false,
+        state: { duplicateBlocked: true }
+      }
     }
     const ok = await invokeDesktopElement({
       automationId: automationId || undefined,
@@ -533,7 +693,8 @@ export class ComputerExecutor implements IToolExecutor {
   private async focusUiElement(args: Record<string, any>): Promise<ToolResult> {
     const name = args.name ? String(args.name) : ''
     const automationId = args.automation_id ? String(args.automation_id) : ''
-    if (!name && !automationId) return { content: 'UIA 聚焦失败：需要 name 或 automation_id', success: false }
+    if (!name && !automationId)
+      return { content: 'UIA 聚焦失败：需要 name 或 automation_id', success: false }
     const ok = await focusDesktopElement({
       automationId: automationId || undefined,
       name: name || undefined,
@@ -541,11 +702,17 @@ export class ComputerExecutor implements IToolExecutor {
       processName: args.process_name ? String(args.process_name) : undefined
     })
     return ok
-      ? { content: `[UIA 聚焦] 已聚焦 ${automationId ? `automationId="${automationId}"` : `name="${name}"`}`, success: true }
+      ? {
+          content: `[UIA 聚焦] 已聚焦 ${automationId ? `automationId="${automationId}"` : `name="${name}"`}`,
+          success: true
+        }
       : { content: 'UIA 聚焦失败：未找到元素或元素不可聚焦', success: false }
   }
 
-  private async performComputerActions(args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
+  private async performComputerActions(
+    args: Record<string, any>,
+    context: ToolContext
+  ): Promise<ToolResult> {
     if (!Array.isArray(args.actions) || args.actions.length === 0) {
       return { content: '复合电脑动作失败：actions 不能为空', success: false }
     }
@@ -565,6 +732,9 @@ export class ComputerExecutor implements IToolExecutor {
         case 'click':
           result = await this.mouseClick(action, context)
           break
+        case 'scroll':
+          result = await this.mouseScroll(action, context)
+          break
         case 'click_relative':
           result = await this.mouseClickRelative(action, context)
           break
@@ -581,8 +751,11 @@ export class ComputerExecutor implements IToolExecutor {
           result = await this.keyPress({ keys: action.keys })
           break
         case 'wait': {
-          const milliseconds = Math.min(5000, Math.max(0, Math.round(Number(action.milliseconds) || 0)))
-          if (milliseconds > 0) await new Promise(resolve => setTimeout(resolve, milliseconds))
+          const milliseconds = Math.min(
+            5000,
+            Math.max(0, Math.round(Number(action.milliseconds) || 0))
+          )
+          if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds))
           result = { content: `[等待] ${milliseconds}ms`, success: true }
           break
         }
@@ -600,12 +773,15 @@ export class ComputerExecutor implements IToolExecutor {
     }
     let verification: ToolResult | undefined
     if (args.verify_after) {
-      verification = await this.screenshot({
-        mode: defaults.pid || defaults.title || defaults.process_name ? 'window' : 'screen',
-        pid: defaults.pid,
-        title: defaults.title,
-        process_name: defaults.process_name
-      }, context)
+      verification = await this.screenshot(
+        {
+          mode: defaults.pid || defaults.title || defaults.process_name ? 'window' : 'screen',
+          pid: defaults.pid,
+          title: defaults.title,
+          process_name: defaults.process_name
+        },
+        context
+      )
       results.push(verification.content)
     }
     return {
@@ -620,7 +796,11 @@ export class ComputerExecutor implements IToolExecutor {
 
   // ─── 获取窗口列表 ──────────────────────────────────────────────────────────────
 
-  private async getWindows(): Promise<ToolResult> {
+  private async getWindows(args: Record<string, any> = {}): Promise<ToolResult> {
+    const requestedProcessName = String(args.process_name || '')
+      .trim()
+      .replace(/\.exe$/i, '')
+    const includeBackground = args.include_background === true || Boolean(requestedProcessName)
     const ps = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -637,9 +817,9 @@ public class WindowInfo {
 public class WinAPI {
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     public static List<WindowInfo> GetWindows() {
         var list = new List<WindowInfo>();
@@ -663,7 +843,21 @@ public class WinAPI {
 }
 "@ -ErrorAction SilentlyContinue
 
-[WinAPI]::GetWindows() | Select-Object ProcessId, ProcessName, Title | ConvertTo-Json -Compress
+$windows = @([WinAPI]::GetWindows() | Select-Object ProcessId, ProcessName, Title)
+if (${includeBackground ? '$true' : '$false'} -and '${requestedProcessName.replace(/'/g, "''")}') {
+  Get-Process -Name '${requestedProcessName.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | ForEach-Object {
+    $process = $_
+    if (-not ($windows | Where-Object { $_.ProcessId -eq $process.Id })) {
+      $windows += [pscustomobject]@{
+        ProcessId = $process.Id
+        ProcessName = $process.ProcessName
+        Title = ''
+        BackgroundProcess = $true
+      }
+    }
+  }
+}
+$windows | ConvertTo-Json -Compress
 `
     const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], {
       timeout: 10000
@@ -682,7 +876,8 @@ public class WinAPI {
         const title = cleanWindowText(w.Title)
         const processName = cleanWindowText(w.ProcessName)
         const warning = hasEncodingDamage(title) ? '  [标题可能编码异常，建议截图确认]' : ''
-        return `PID=${w.ProcessId}  进程=${processName}  标题="${title}"${warning}`
+        const background = w.BackgroundProcess ? '  [后台进程，无标题窗口]' : ''
+        return `PID=${w.ProcessId}  进程=${processName}  标题="${title}"${background}${warning}`
       })
       .join('\n')
 
@@ -713,11 +908,16 @@ Write-Output "OK:Desktop"
     }
 
     if (!pid && !title && !process_name) {
-      return { content: '缺少参数：请提供 title、pid、process_name 或 show_desktop=true', success: false }
+      return {
+        content: '缺少参数：请提供 title、pid、process_name 或 show_desktop=true',
+        success: false
+      }
     }
 
     const safeTitle = title ? title.replace(/["'\`\\]/g, '') : ''
-    const safeProcessName = process_name ? String(process_name).replace(/["'\`\\]/g, '') : ''
+    const safeProcessName = process_name
+      ? String(process_name).replace(/["'\`\\]/g, '').replace(/\.exe$/i, '')
+      : ''
     const targetPid = pid ? pid : 0
 
     const ps = `
@@ -732,9 +932,9 @@ using System.Threading;
 public class WinAPI {
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextLength(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -752,51 +952,60 @@ public class WinAPI {
     
     public static string FocusWindow(string targetTitle, int targetPid, string targetProcessName) {
         IntPtr targetHWnd = IntPtr.Zero;
-        IntPtr processFallbackHWnd = IntPtr.Zero;
         string foundTitle = "";
-        string processFallbackTitle = "";
+        uint foundPid = 0;
+        int bestScore = -1;
+        bool processExists = false;
+
+        if (targetPid > 0) {
+            try { processExists = !Process.GetProcessById(targetPid).HasExited; } catch { }
+        }
+        if (!String.IsNullOrEmpty(targetProcessName)) {
+            try { processExists = processExists || Process.GetProcessesByName(targetProcessName).Length > 0; } catch { }
+        }
         
         EnumWindows((hWnd, lParam) => {
-            if (IsWindowVisible(hWnd)) {
-                int len = GetWindowTextLength(hWnd);
-                if (len > 0) {
-                    var sb = new StringBuilder(len + 1);
-                    GetWindowText(hWnd, sb, sb.Capacity);
-                    string wTitle = sb.ToString();
-                    uint wPid;
-                    GetWindowThreadProcessId(hWnd, out wPid);
-                    
-                    bool titleMatch = !string.IsNullOrEmpty(targetTitle) && (
-                        wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        NormalizeCaption(wTitle).IndexOf(NormalizeCaption(targetTitle), StringComparison.OrdinalIgnoreCase) >= 0
-                    );
-                    bool pidMatch = targetPid > 0 && wPid == targetPid;
-                    bool processMatch = false;
-                    if (!string.IsNullOrEmpty(targetProcessName)) {
-                        try {
-                            string processName = Process.GetProcessById((int)wPid).ProcessName;
-                            processMatch = processName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase);
-                        } catch { }
-                    }
+            // A tray/minimized app may have a hidden or empty-caption top-level
+            // window. Match by PID/process before requiring a non-empty title.
+            int len = GetWindowTextLength(hWnd);
+            var sb = new StringBuilder(Math.Max(1, len + 1));
+            if (len > 0) GetWindowText(hWnd, sb, sb.Capacity);
+            string wTitle = sb.ToString();
+            uint wPid;
+            GetWindowThreadProcessId(hWnd, out wPid);
 
-                    if (pidMatch || titleMatch) {
-                        targetHWnd = hWnd;
-                        foundTitle = wTitle;
-                        return false;
-                    }
-                    if (processFallbackHWnd == IntPtr.Zero && processMatch) {
-                        processFallbackHWnd = hWnd;
-                        processFallbackTitle = wTitle;
-                    }
-                }
+            bool titleMatch = !string.IsNullOrEmpty(targetTitle) && len > 0 && (
+                wTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                NormalizeCaption(wTitle).IndexOf(NormalizeCaption(targetTitle), StringComparison.OrdinalIgnoreCase) >= 0
+            );
+            bool pidMatch = targetPid > 0 && wPid == targetPid;
+            bool processMatch = false;
+            if (!string.IsNullOrEmpty(targetProcessName)) {
+                try {
+                    string processName = Process.GetProcessById((int)wPid).ProcessName;
+                    processMatch = processName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase);
+                } catch { }
+            }
+
+            if (!pidMatch && !titleMatch && !processMatch) return true;
+
+            // Chromium/Electron processes can own hidden helper windows. Rank
+            // visible titled windows above those helpers instead of accepting
+            // the first HWND that happens to share the requested PID/name.
+            int score = 0;
+            if (titleMatch) score += 100;
+            if (pidMatch) score += 80;
+            if (processMatch) score += 40;
+            if (IsWindowVisible(hWnd)) score += 20;
+            if (len > 0) score += 10;
+            if (score > bestScore) {
+                bestScore = score;
+                targetHWnd = hWnd;
+                foundTitle = wTitle;
+                foundPid = wPid;
             }
             return true;
         }, IntPtr.Zero);
-
-        if (targetHWnd == IntPtr.Zero && processFallbackHWnd != IntPtr.Zero) {
-            targetHWnd = processFallbackHWnd;
-            foundTitle = processFallbackTitle;
-        }
         
         if (targetHWnd != IntPtr.Zero) {
             ShowWindow(targetHWnd, 9);
@@ -807,9 +1016,9 @@ public class WinAPI {
                 keybd_event(0x12, 0, 2, UIntPtr.Zero);
             }
             Thread.Sleep(180);
-            return GetForegroundWindow() == targetHWnd ? "OK:" + foundTitle : "FOCUS_FAILED:" + foundTitle;
+            return GetForegroundWindow() == targetHWnd ? "OK:" + foundPid + ":" + foundTitle : "FOCUS_FAILED:" + foundTitle;
         }
-        return "NOT_FOUND";
+        return processExists ? "PROCESS_EXISTS_NO_WINDOW" : "NOT_FOUND";
     }
 }
 "@ -ErrorAction SilentlyContinue
@@ -823,22 +1032,32 @@ public class WinAPI {
 
     const result = stdout.trim()
     if (result.startsWith('OK:')) {
-      const windowTitle = result.slice(3)
+      const successPayload = result.slice(3)
+      const separator = successPayload.indexOf(':')
+      const focusedPid =
+        separator >= 0 ? Number(successPayload.slice(0, separator)) || targetPid : targetPid
+      const windowTitle = separator >= 0 ? successPayload.slice(separator + 1) : successPayload
       // 内置等待：给窗口动画和渲染留出时间，之后调用 screenshot 就能截到正确画面
       await new Promise((resolve) => setTimeout(resolve, 250))
       this.focusedWindow = {
-        processId: targetPid || undefined,
+        processId: focusedPid || undefined,
         processName: safeProcessName || undefined,
         title: windowTitle,
         expiresAt: Date.now() + 30_000
       }
       return {
-        content: `[窗口切换成功] 已聚焦: "${windowTitle}"\n提示：窗口已置顶，现在可以直接调用 screenshot 截图（无需再传 delay_ms）。`,
+        content: `[窗口切换成功] 已聚焦: "${windowTitle || safeProcessName || `PID=${focusedPid}`}"\n提示：窗口已置顶，现在可以直接调用 screenshot 截图（无需再传 delay_ms）。`,
         success: true
+      }
+    } else if (result === 'PROCESS_EXISTS_NO_WINDOW') {
+      return {
+        content:
+          `[窗口切换失败] 目标进程仍在运行，但没有可恢复的顶层窗口（process="${process_name ?? ''}" pid=${pid ?? ''}）。请通过系统托盘图标恢复 QQ；禁止重新启动该进程，以免产生重复 QQ 实例。`,
+        success: false
       }
     } else {
       return {
-        content: `[窗口切换失败] 未找到匹配的窗口（title="${title ?? ''}" process="${process_name ?? ''}" pid=${pid ?? ''}）\n建议先调用 get_windows 查看当前窗口列表。`,
+        content: `[窗口切换失败] 未找到匹配的窗口（title="${title ?? ''}" process="${process_name ?? ''}" pid=${pid ?? ''}）\n建议先调用 get_windows，并传入 process_name 查找后台进程；不要直接重新启动应用。`,
         success: false
       }
     }
@@ -850,16 +1069,40 @@ public class WinAPI {
     return `${context.sessionId || 'default'}:${context.messageId || 'turn'}`
   }
 
+  private stateKey(context: ToolContext): string {
+    return context.sessionId || 'default'
+  }
+
+  private validateComputerState(
+    args: Record<string, any>,
+    context: ToolContext
+  ): ToolResult | null {
+    const requested = typeof args.state_id === 'string' ? args.state_id.trim() : ''
+    if (!requested) return null
+    const current = this.latestComputerStates.get(this.stateKey(context))
+    if (!current || current.id !== requested) {
+      return {
+        content: stateMismatchMessage('desktop'),
+        success: false,
+        state: { stateExpired: true, requestedStateId: requested, currentStateId: current?.id }
+      }
+    }
+    return null
+  }
+
   private visualStateHash(image: any): string {
     try {
       const tiny = image.resize({ width: 16, height: 16, quality: 'good' })
       const bitmap = tiny.toBitmap()
       const luminances: number[] = []
       for (let index = 0; index < bitmap.length; index += 4) {
-        const luminance = Math.round(bitmap[index] * 0.21 + bitmap[index + 1] * 0.72 + bitmap[index + 2] * 0.07)
+        const luminance = Math.round(
+          bitmap[index] * 0.21 + bitmap[index + 1] * 0.72 + bitmap[index + 2] * 0.07
+        )
         luminances.push(luminance)
       }
-      const average = luminances.reduce((sum, value) => sum + value, 0) / Math.max(1, luminances.length)
+      const average =
+        luminances.reduce((sum, value) => sum + value, 0) / Math.max(1, luminances.length)
       let hash = ''
       for (let index = 0; index < luminances.length; index++) {
         hash += luminances[index] >= average ? '1' : '0'
@@ -870,7 +1113,9 @@ public class WinAPI {
     }
   }
 
-  private async resolveWindowTarget(args: Record<string, any>): Promise<{ scope: 'window'; processId?: number; processName?: string; title?: string } | null> {
+  private async resolveWindowTarget(
+    args: Record<string, any>
+  ): Promise<{ scope: 'window'; processId?: number; processName?: string; title?: string } | null> {
     const requestedPid = Number.isFinite(args.pid) ? Math.trunc(Number(args.pid)) : undefined
     const requestedTitle = args.title ? String(args.title) : undefined
     const requestedProcessName = args.process_name ? String(args.process_name) : undefined
@@ -878,28 +1123,55 @@ public class WinAPI {
     if (this.focusedWindow && this.focusedWindow.expiresAt > Date.now()) {
       const matchesRemembered =
         (requestedPid && this.focusedWindow.processId === requestedPid) ||
-        (!requestedPid && requestedTitle && this.focusedWindow.title?.toLowerCase().includes(requestedTitle.toLowerCase())) ||
-        (!requestedPid && !requestedTitle && requestedProcessName && this.focusedWindow.processName?.toLowerCase() === requestedProcessName.toLowerCase())
+        (!requestedPid &&
+          requestedTitle &&
+          this.focusedWindow.title?.toLowerCase().includes(requestedTitle.toLowerCase())) ||
+        (!requestedPid &&
+          !requestedTitle &&
+          requestedProcessName &&
+          this.focusedWindow.processName?.toLowerCase() === requestedProcessName.toLowerCase())
       if (matchesRemembered) return { scope: 'window', ...this.focusedWindow }
     }
     const windows = await listDesktopWindows()
-    const matched = windows.find(item =>
-      (requestedPid && item.processId === requestedPid) ||
-      (!requestedPid && requestedTitle && item.windowTitle.toLowerCase().includes(requestedTitle.toLowerCase())) ||
-      (!requestedPid && !requestedTitle && requestedProcessName && item.processName.toLowerCase() === requestedProcessName.toLowerCase())
+    const matched = windows.find(
+      (item) =>
+        (requestedPid && item.processId === requestedPid) ||
+        (!requestedPid &&
+          requestedTitle &&
+          item.windowTitle.toLowerCase().includes(requestedTitle.toLowerCase())) ||
+        (!requestedPid &&
+          !requestedTitle &&
+          requestedProcessName &&
+          item.processName.toLowerCase() === requestedProcessName.toLowerCase())
     )
     if (!matched) return null
-    return { scope: 'window', processId: matched.processId, processName: matched.processName, title: matched.windowTitle }
+    return {
+      scope: 'window',
+      processId: matched.processId,
+      processName: matched.processName,
+      title: matched.windowTitle
+    }
   }
 
-  private async resolveDisplayTarget(args: Record<string, any>): Promise<{ scope: 'display'; left: number; top: number; width: number; height: number; primary: boolean } | null> {
+  private async resolveDisplayTarget(
+    args: Record<string, any>
+  ): Promise<{
+    scope: 'display'
+    left: number
+    top: number
+    width: number
+    height: number
+    primary: boolean
+  } | null> {
     const { screen } = await import('electron')
     const displays = screen.getAllDisplays()
     const primary = screen.getPrimaryDisplay()
     const requestedId = Number.isFinite(args.display_id) ? Number(args.display_id) : undefined
-    const display = requestedId === undefined
-      ? primary
-      : displays.find(item => Number(item.id) === requestedId) || displays[Math.max(0, Math.min(displays.length - 1, Math.trunc(requestedId)))]
+    const display =
+      requestedId === undefined
+        ? primary
+        : displays.find((item) => Number(item.id) === requestedId) ||
+          displays[Math.max(0, Math.min(displays.length - 1, Math.trunc(requestedId)))]
     if (!display) return null
     return {
       scope: 'display',
@@ -911,7 +1183,11 @@ public class WinAPI {
     }
   }
 
-  private async resolveWindowBounds(target: { processId?: number; processName?: string; title?: string }): Promise<{ x: number; y: number; width: number; height: number } | undefined> {
+  private async resolveWindowBounds(target: {
+    processId?: number
+    processName?: string
+    title?: string
+  }): Promise<{ x: number; y: number; width: number; height: number } | undefined> {
     if (!target.title && !target.processName) return undefined
     const topLeft = await resolveDesktopRelativePoint({
       windowTitle: target.title,
@@ -925,7 +1201,8 @@ public class WinAPI {
       relativeX: 1,
       relativeY: 1
     })
-    if (!topLeft || !bottomRight || bottomRight.x <= topLeft.x || bottomRight.y <= topLeft.y) return undefined
+    if (!topLeft || !bottomRight || bottomRight.x <= topLeft.x || bottomRight.y <= topLeft.y)
+      return undefined
     return {
       x: topLeft.x,
       y: topLeft.y,

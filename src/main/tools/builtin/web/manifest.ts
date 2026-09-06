@@ -73,7 +73,11 @@ export const webManifest: ToolManifest = {
             description: 'DOM 元素类别'
           },
           index: { type: 'number', minimum: 1, description: '该类别中的第几个元素，默认 1' },
-          text: { type: 'string', description: '可选，按包含文本过滤后再取 index' }
+          text: { type: 'string', description: '可选，按包含文本过滤后再取 index' },
+          state_id: {
+            type: 'string',
+            description: '最近一次 browser_snapshot 返回的状态 ID；传入后会拒绝使用过期页面状态'
+          }
         },
         required: ['target']
       }
@@ -85,7 +89,8 @@ export const webManifest: ToolManifest = {
       parameters: {
         type: 'object',
         properties: {
-          ref: { type: 'string', description: 'browser_snapshot 输出中的 ref，例如 ap-1-0-25' }
+          ref: { type: 'string', description: 'browser_snapshot 输出中的 ref，例如 ap-1-0-25' },
+          state_id: { type: 'string', description: '最近一次 browser_snapshot 返回的状态 ID' }
         },
         required: ['ref']
       }

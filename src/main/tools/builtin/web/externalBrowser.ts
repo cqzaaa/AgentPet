@@ -3,6 +3,7 @@ import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, mkdirSync } from 'fs'
 import { basename, join } from 'path'
+import { createHash } from 'crypto'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,6 +42,9 @@ export interface BrowserDomSnapshot {
   totalElements: number
   truncated: boolean
   frames: DomFrameSnapshot[]
+  stateId: string
+  stateHash: string
+  changedSincePrevious: boolean
 }
 
 export interface BrowserTabSummary {
@@ -75,7 +79,13 @@ export class ExternalBrowser {
   private static readonly endpoint = 'http://127.0.0.1:9222'
   private static snapshotSequence = 0
   private static readonly maxSnapshotElements = 2_000
-  private static latestSnapshot: { id: number; page: Page; url: string } | null = null
+  private static latestSnapshot: {
+    id: number
+    page: Page
+    url: string
+    stateHash: string
+    stateId: string
+  } | null = null
   private static readonly pageIds = new WeakMap<Page, string>()
   private static pageSequence = 0
 
@@ -157,6 +167,14 @@ export class ExternalBrowser {
   ): Promise<void> {
     if (!preview.requiresConfirmation) return
     if (!guard || !(await guard(preview))) throw new Error(`用户未批准浏览器操作：${preview.label}`)
+  }
+
+  private static validateState(stateId?: string): void {
+    const requested = String(stateId || '').trim()
+    if (!requested) return
+    if (!this.latestSnapshot || this.latestSnapshot.stateId !== requested) {
+      throw new Error('浏览器状态已过期：请重新调用 browser_snapshot，再执行操作。')
+    }
   }
 
   private static async tryConnect(): Promise<boolean> {
@@ -414,10 +432,16 @@ export class ExternalBrowser {
   }
 
   public static async click(
-    input: { target: 'search_result' | 'link' | 'button'; index?: number; text?: string },
+    input: {
+      target: 'search_result' | 'link' | 'button'
+      index?: number
+      text?: string
+      stateId?: string
+    },
     guard?: BrowserActionGuard
   ): Promise<{ title: string; url: string; clickedText: string }> {
     const page = await this.getPage()
+    this.validateState(input.stateId)
     const context = this.context
     if (!context) throw new Error('浏览器上下文不可用')
     if (
@@ -493,9 +517,11 @@ export class ExternalBrowser {
 
   public static async clickByRef(
     ref: string,
-    guard?: BrowserActionGuard
+    guard?: BrowserActionGuard,
+    stateId?: string
   ): Promise<{ title: string; url: string; clickedText: string }> {
     const page = await this.getPage()
+    this.validateState(stateId)
     const context = this.context
     if (!context) throw new Error('Browser context is unavailable')
     const normalizedRef = String(ref || '').trim()
@@ -769,7 +795,7 @@ export class ExternalBrowser {
       }
     }
 
-    const snapshot = {
+    const snapshotBody = {
       snapshotId,
       title: await page.title().catch(() => ''),
       url: page.url(),
@@ -777,7 +803,27 @@ export class ExternalBrowser {
       truncated,
       frames
     }
-    this.latestSnapshot = { id: snapshotId, page, url: snapshot.url }
+    const stateHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          title: snapshotBody.title,
+          url: snapshotBody.url,
+          totalElements: snapshotBody.totalElements,
+          truncated: snapshotBody.truncated,
+          frames: snapshotBody.frames
+        })
+      )
+      .digest('hex')
+      .slice(0, 24)
+    const previousHash = this.latestSnapshot?.stateHash
+    const stateId = `browser-${snapshotId}-${stateHash}`
+    const snapshot: BrowserDomSnapshot = {
+      ...snapshotBody,
+      stateId,
+      stateHash,
+      changedSincePrevious: previousHash !== undefined && previousHash !== stateHash
+    }
+    this.latestSnapshot = { id: snapshotId, page, url: snapshot.url, stateHash, stateId }
     return snapshot
   }
 

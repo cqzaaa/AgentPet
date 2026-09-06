@@ -19,7 +19,8 @@ const formatDomSnapshot = (snapshot: BrowserDomSnapshot): string => {
     `Snapshot: ${snapshot.snapshotId}${snapshot.truncated ? ' (truncated)' : ''}`,
     `Page: ${snapshot.title}`,
     `URL: ${snapshot.url}`,
-    `Total elements: ${snapshot.totalElements}`
+    `Total elements: ${snapshot.totalElements}`,
+    `State: ${snapshot.stateId} (${snapshot.changedSincePrevious ? 'changed' : 'unchanged'})`
   ]
   for (const frame of snapshot.frames) {
     lines.push('', `[frame:${frame.index}] name="${frame.name}" url="${frame.url}"`)
@@ -100,8 +101,10 @@ export class WebExecutor implements IToolExecutor {
       }
 
       if (api === 'browser_click_ref' || (api === 'browser_click' && args.ref)) {
-        const result = await ExternalBrowser.clickByRef(String(args.ref), (preview) =>
-          this.approveBrowserAction(preview, context)
+        const result = await ExternalBrowser.clickByRef(
+          String(args.ref),
+          (preview) => this.approveBrowserAction(preview, context),
+          typeof args.state_id === 'string' ? args.state_id : undefined
         )
         const snapshot = await ExternalBrowser.snapshotFull()
         return {
@@ -137,7 +140,8 @@ export class WebExecutor implements IToolExecutor {
           {
             target: target as 'search_result' | 'link' | 'button',
             index: typeof args.index === 'number' ? args.index : undefined,
-            text: typeof args.text === 'string' ? args.text : undefined
+            text: typeof args.text === 'string' ? args.text : undefined,
+            stateId: typeof args.state_id === 'string' ? args.state_id : undefined
           },
           (preview) => this.approveBrowserAction(preview, context)
         )
