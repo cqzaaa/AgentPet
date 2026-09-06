@@ -8301,6 +8301,60 @@ body {
   transform: translateX(-2px);
 }
 
+.collab-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+}
+
+.collab-trajectory-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  height: 29px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--collab-blue, #3b82f6) 28%, var(--border-color, rgba(203, 213, 225, 0.8)));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--collab-blue, #3b82f6) 7%, var(--card-bg, #ffffff));
+  color: var(--collab-blue, #2563eb);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collab-trajectory-button svg {
+  color: var(--collab-blue, #2563eb);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.collab-trajectory-button:hover {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  background: color-mix(in srgb, #3b82f6 14%, var(--card-bg, #ffffff));
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.18);
+  transform: translateY(-1px);
+}
+
+.collab-trajectory-button:hover svg {
+  transform: scale(1.12);
+}
+
+.collab-trajectory-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.1);
+}
+
+.collab-trajectory-button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
 .collab-mode-switch { margin: 16px 20px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 11px; background: rgba(100, 116, 139, .09); }
 .collab-mode-switch button { display: flex; justify-content: center; align-items: center; gap: 7px; padding: 8px 12px; color: var(--collab-muted); border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 12.5px; cursor: pointer; }
 .collab-mode-switch button.active { color: var(--collab-blue); background: var(--bg-card, #fff); box-shadow: 0 1px 4px rgba(15, 23, 42, .12); font-weight: 650; }
@@ -8407,6 +8461,28 @@ html.collab-takeover-active .window-titlebar .titlebar-tabs-shell {
 html.collab-takeover-active .window-titlebar .titlebar-controls {
   margin-left: auto;
   pointer-events: auto;
+}
+
+html.collab-takeover-active .content-header {
+  display: none !important;
+}
+
+/* 保护：当处于轨迹视图或非会话面板时，确保标题栏与头部恢复正常，防止按钮重叠 */
+html.collab-takeover-active:has(.chat-mode-panel.trajectory.active) .window-titlebar,
+html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .window-titlebar {
+  position: static !important;
+  width: auto !important;
+  pointer-events: auto !important;
+}
+
+html.collab-takeover-active:has(.chat-mode-panel.trajectory.active) .window-titlebar .titlebar-tabs-shell,
+html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .window-titlebar .titlebar-tabs-shell {
+  display: flex !important;
+}
+
+html.collab-takeover-active:has(.chat-mode-panel.trajectory.active) .content-header,
+html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content-header {
+  display: flex !important;
 }
 
 .collab-overlay {

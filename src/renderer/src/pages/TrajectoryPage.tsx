@@ -1747,7 +1747,8 @@ export function TrajectoryPage(): React.JSX.Element {
               components={{
                 Header: () => hasMore || loadingOlder
                   ? <button className="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '正在读取…' : '载入更早事件'}</button>
-                  : <div className="ledger-origin">SESSION ORIGIN</div>
+                  : <div className="ledger-origin">SESSION ORIGIN</div>,
+                Footer: () => <div className="trajectory-ledger-footer" aria-hidden="true" />
               }}
               itemContent={(index, event) => {
                 const previous = index > 0 ? visibleEvents[index - 1] : undefined

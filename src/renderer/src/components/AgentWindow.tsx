@@ -229,6 +229,19 @@ export function AgentWindow(): React.JSX.Element {
 
   const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
 
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
+  const [showTrajectory, setShowTrajectory] = useState(false)
+  const historyDropdownRef = useRef<HTMLDivElement>(null)
+  const historyMenuRef = useRef<HTMLDivElement>(null)
+  const [historyMenuPosition, setHistoryMenuPosition] = useState({ top: 0, right: 0 })
+
+  // 保护：一旦进入轨迹视图或切换非 chat 页面，立即清除编排全屏沉浸样式，防止标题栏控制按钮与内容区按钮重叠
+  useEffect(() => {
+    if (showTrajectory || activeTab !== 'chat') {
+      document.documentElement.classList.remove('collab-takeover-active')
+    }
+  }, [showTrajectory, activeTab])
+
   const chatActions = useMemo(() => ({
     setInputValue: store.setInputValue,
     handleSendChat: store.handleSendChat,
@@ -251,7 +264,12 @@ export function AgentWindow(): React.JSX.Element {
     refreshMcpServers: store.refreshMcpServers,
     saveMcpConfig: store.saveMcpConfig,
     handlePreviewFile: store.handlePreviewFile,
-    setShowFilePanel: store.setShowFilePanel
+    setShowFilePanel: store.setShowFilePanel,
+    openTrajectory: () => {
+      document.documentElement.classList.remove('collab-takeover-active')
+      setShowTrajectory(true)
+      setShowHistoryDropdown(false)
+    }
   }), [
     store.setInputValue,
     store.handleSendChat,
@@ -276,12 +294,6 @@ export function AgentWindow(): React.JSX.Element {
     store.handlePreviewFile,
     store.setShowFilePanel
   ])
-
-  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
-  const [showTrajectory, setShowTrajectory] = useState(false)
-  const historyDropdownRef = useRef<HTMLDivElement>(null)
-  const historyMenuRef = useRef<HTMLDivElement>(null)
-  const [historyMenuPosition, setHistoryMenuPosition] = useState({ top: 0, right: 0 })
 
   // 侧边栏下方菜单组（控制/代理/日志/设置）默认收起，把空间让给最近会话
   const [menuCollapsed, setMenuCollapsed] = useState(true)
@@ -847,6 +859,7 @@ export function AgentWindow(): React.JSX.Element {
                 <button
                   className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
                   onClick={() => {
+                    document.documentElement.classList.remove('collab-takeover-active')
                     setShowTrajectory(current => !current)
                     setShowHistoryDropdown(false)
                   }}

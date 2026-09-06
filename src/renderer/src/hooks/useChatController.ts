@@ -86,6 +86,7 @@ export function useChatController() {
     refreshMcpServers: useChatAction('refreshMcpServers'),
     saveMcpConfig: useChatAction('saveMcpConfig'),
     handlePreviewFile: useChatAction('handlePreviewFile'),
-    setShowFilePanel: useChatAction('setShowFilePanel')
+    setShowFilePanel: useChatAction('setShowFilePanel'),
+    openTrajectory: useChatAction('openTrajectory')
   }
 }

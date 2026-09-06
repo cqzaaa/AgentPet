@@ -231,12 +231,23 @@ let mcpConfigHydrationPromise: Promise<any> | null = null
 
 function sanitizeLlmConfigForRenderer(config: any, fallbackHasApiKey = false): any {
   const rest = { ...(config || {}) }
-  delete rest.apiKey
   delete rest.apiKeyRef
   delete rest.secretMigrationPending
+  const profiles = Array.isArray(config?.profiles)
+    ? config.profiles.map((profile: any) => {
+        const sanitized = { ...profile }
+        delete sanitized.apiKeyRef
+        return {
+          ...sanitized,
+          apiKey: typeof sanitized.apiKey === 'string' ? sanitized.apiKey : '',
+          hasApiKey: Boolean(sanitized.apiKey) || Boolean(sanitized.hasApiKey)
+        }
+      })
+    : undefined
   return {
     ...rest,
-    apiKey: '',
+    ...(profiles ? { profiles } : {}),
+    apiKey: typeof config?.apiKey === 'string' ? config.apiKey : '',
     hasApiKey: Boolean(config?.apiKey) || Boolean(config?.hasApiKey) || fallbackHasApiKey
   }
 }

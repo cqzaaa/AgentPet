@@ -18,6 +18,37 @@ async function exists(candidate: string): Promise<boolean> {
   }
 }
 
+/**
+ * Repair the common Windows code-page failure where a CLI locator returns a
+ * path such as C:\Users\��\AppData\... for a non-ASCII account name.
+ * Only replacement-character usernames are rewritten, so an intentionally
+ * configured path belonging to another valid Windows user is never redirected.
+ */
+function repairCorruptedWindowsUserPath(candidate: string): string | null {
+  if (process.platform !== 'win32' || !candidate.includes('\uFFFD')) return null
+  const resolved = path.resolve(candidate)
+  const parts = resolved.split(path.sep)
+  const homeDir = path.resolve(os.homedir())
+  const homeParts = homeDir.split(path.sep)
+  if (
+    parts.length < 4 ||
+    homeParts.length < 3 ||
+    parts[0].toLowerCase() !== homeParts[0].toLowerCase() ||
+    parts[1].toLowerCase() !== homeParts[1].toLowerCase() ||
+    !parts[2].includes('\uFFFD')
+  ) {
+    return null
+  }
+  return path.join(homeDir, ...parts.slice(3))
+}
+
+async function firstExistingPath(candidates: Array<string | null | undefined>): Promise<string | null> {
+  for (const candidate of candidates) {
+    if (candidate && await exists(candidate)) return candidate
+  }
+  return null
+}
+
 async function locateOnPath(command: string): Promise<string | null> {
   const locator = process.platform === 'win32' ? 'where.exe' : 'which'
   return new Promise(resolve => {
@@ -69,28 +100,43 @@ async function newestMatch(parent: string, childName: string): Promise<string | 
 }
 
 async function windowsFallbacks(command: string): Promise<string[]> {
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-  const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
+  const homeDir = os.homedir()
+  // Some Windows launchers expose LOCALAPPDATA/APPDATA with a mis-decoded
+  // non-ASCII username. Keep the environment value as a candidate, but also
+  // derive the known folders from os.homedir(), which uses the native Windows
+  // Unicode API. The resolver validates every candidate before returning it.
+  const localAppDataRoots = Array.from(new Set([
+    process.env.LOCALAPPDATA,
+    path.join(homeDir, 'AppData', 'Local')
+  ].filter(Boolean))) as string[]
+  const appDataRoots = Array.from(new Set([
+    process.env.APPDATA,
+    path.join(homeDir, 'AppData', 'Roaming')
+  ].filter(Boolean))) as string[]
   const programFiles = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean) as string[]
   const base = path.basename(command).replace(/\.(cmd|exe|ps1)$/i, '').toLowerCase()
   if (base === 'codex') {
-    const bundled = await newestMatch(path.join(localAppData, 'OpenAI', 'Codex', 'bin'), 'codex.exe')
+    const bundledCandidates = await Promise.all(
+      localAppDataRoots.map(root => newestMatch(path.join(root, 'OpenAI', 'Codex', 'bin'), 'codex.exe'))
+    )
     return [
-      bundled,
-      path.join(appData, 'npm', 'codex.cmd'),
+      ...bundledCandidates,
+      ...appDataRoots.map(root => path.join(root, 'npm', 'codex.cmd')),
       ...programFiles.map(root => path.join(root, 'OpenAI', 'Codex', 'codex.exe'))
     ].filter(Boolean) as string[]
   }
   if (base === 'agy') {
     return [
-      path.join(localAppData, 'agy', 'bin', 'agy.exe'),
-      path.join(localAppData, 'Programs', 'agy', 'bin', 'agy.exe'),
-      path.join(appData, 'agy', 'bin', 'agy.exe'),
+      ...localAppDataRoots.flatMap(root => [
+        path.join(root, 'agy', 'bin', 'agy.exe'),
+        path.join(root, 'Programs', 'agy', 'bin', 'agy.exe')
+      ]),
+      ...appDataRoots.map(root => path.join(root, 'agy', 'bin', 'agy.exe')),
       ...programFiles.map(root => path.join(root, 'agy', 'bin', 'agy.exe'))
     ]
   }
   if (base === 'claude' || base === 'gemini') {
-    return [path.join(appData, 'npm', `${base}.cmd`)]
+    return appDataRoots.map(root => path.join(root, 'npm', `${base}.cmd`))
   }
   return []
 }
@@ -115,11 +161,19 @@ export async function resolveExecutable(command: string, aliases: string[] = [])
 async function resolveExecutableUncached(command: string, aliases: string[]): Promise<string | null> {
   for (const value of [command, ...aliases].map(item => item.trim()).filter(Boolean)) {
     if (path.isAbsolute(value) || value.includes('/') || value.includes('\\')) {
-      if (await exists(value)) return value
+      const resolvedPath = await firstExistingPath([value, repairCorruptedWindowsUserPath(value)])
+      if (resolvedPath) return resolvedPath
       continue
     }
     const fromPath = await locateOnPath(value)
-    if (fromPath) return fromPath
+    // `where.exe` writes using the active Windows code page. Decoding that
+    // output as UTF-8 can corrupt Chinese usernames, so never trust it until
+    // the returned path has been checked on disk.
+    const resolvedFromPath = await firstExistingPath([
+      fromPath,
+      fromPath ? repairCorruptedWindowsUserPath(fromPath) : null
+    ])
+    if (resolvedFromPath) return resolvedFromPath
     if (process.platform === 'win32') {
       for (const candidate of await windowsFallbacks(value)) {
         if (await exists(candidate)) return candidate

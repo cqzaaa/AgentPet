@@ -99,6 +99,7 @@ function ChatPageImpl(): React.JSX.Element {
     saveMcpConfig,
     handlePreviewFile: previewFile,
     setShowFilePanel,
+    openTrajectory,
     currentContextTokens
   } = useChatController()
   const activeWorkspacePath = useAppStoreRaw((state: any) =>
@@ -113,6 +114,18 @@ function ChatPageImpl(): React.JSX.Element {
   const [collaborationRuns, setCollaborationRuns] = useState<CollaborationSnapshot[]>([])
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+
+  useEffect(() => {
+    return () => {
+      document.documentElement.classList.remove('collab-takeover-active')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showCollaborationComposer) {
+      document.documentElement.classList.remove('collab-takeover-active')
+    }
+  }, [showCollaborationComposer])
 
   const handleCollaborationStarted = useCallback((collaborationTitle: string): void => {
     const normalized = collaborationTitle.replace(/\s+/g, ' ').trim() || '多 Agent 协作'
@@ -868,26 +881,29 @@ function ChatPageImpl(): React.JSX.Element {
     setShowScrollToBottom(!atBottom)
   }, [])
 
-  // 追踪 isSending 状态变化，在发送时和回复完成时滚动到底部
-  const prevIsSendingRef = useRef(isSending)
+  // 以实际加入的用户消息触发滚动，避免发送状态先变化时读到旧列表。
+  // 虚拟列表包含协作卡片，因此不能用聊天消息数量计算最后一项。
+  const latestUserMessageId = useMemo(() => {
+    for (let index = activeSessMessages.length - 1; index >= 0; index--) {
+      if (activeSessMessages[index].sender === 'user') return activeSessMessages[index].id
+    }
+    return null
+  }, [activeSessMessages])
+  const lastScrollMessageRef = useRef({ sessionId: activeSessionId, messageId: latestUserMessageId })
   useEffect(() => {
-    const wasSending = prevIsSendingRef.current
-    prevIsSendingRef.current = isSending
-
-    if (isSending && !wasSending) {
-      // 用户刚发送消息 — 立即滚动到底部
-      setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
-      }, 50)
+    if (isSessionSwitching) return
+    const previous = lastScrollMessageRef.current
+    if (previous.sessionId !== activeSessionId) {
+      lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
+      return
     }
-
-    if (!isSending && wasSending) {
-      // AI 回复完成 — 滚动到底部，让用户看到完整回复
-      setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
-      }, 100)
-    }
-  }, [isSending])
+    if (!latestUserMessageId || previous.messageId === latestUserMessageId) return
+    const frame = requestAnimationFrame(() => {
+      lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [activeSessionId, latestUserMessageId, isSessionSwitching])
 
   const handlePreviewFile = useCallback((f: { name: string; path: string; size: number }) => {
     previewFile(f)
@@ -905,7 +921,7 @@ function ChatPageImpl(): React.JSX.Element {
   }, [activePermissionRequest])
 
   const scrollToBottom = () => {
-    virtuosoRef.current?.scrollToIndex({ index: activeSessMessages.length - 1, align: 'end', behavior: 'smooth' })
+    virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
   }
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
@@ -1083,7 +1099,8 @@ function ChatPageImpl(): React.JSX.Element {
               computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
               followOutput={(isAtBottom) => isAtBottom ? 'auto' : false}
-              initialTopMostItemIndex={999999}
+              initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
+              atBottomThreshold={100}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}
             />
@@ -1863,7 +1880,17 @@ function ChatPageImpl(): React.JSX.Element {
           onRespondPermission={handleRespondPermission}
           onWorkspaceSelected={handleCollaborationWorkspaceSelected}
           onStarted={handleCollaborationStarted}
-          onClose={() => { setShowCollaborationComposer(false); setOpenedCollaborationRunId('') }}
+          onClose={() => {
+            setShowCollaborationComposer(false)
+            setOpenedCollaborationRunId('')
+            document.documentElement.classList.remove('collab-takeover-active')
+          }}
+          onOpenTrajectory={() => {
+            setShowCollaborationComposer(false)
+            setOpenedCollaborationRunId('')
+            document.documentElement.classList.remove('collab-takeover-active')
+            openTrajectory()
+          }}
           showToast={showToast}
         />
       )}

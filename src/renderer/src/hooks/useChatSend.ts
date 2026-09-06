@@ -2,6 +2,7 @@
 import { useCallback } from 'react'
 import type { MutableRefObject } from 'react'
 import { formatDateTime } from '../utils/helpers'
+import { mergeCollaborationHistory } from '../utils/collaborationContext'
 
 interface ChatSendState {
   sessions: any[]
@@ -223,8 +224,8 @@ export function useChatSend({
 
     try {
       if (!activeSession) throw new Error(`SessionNotFound: ${sessionId}`)
-      const chatMessages = activeSession.messages
-        .filter((message: any) => (message.sender === 'user' || message.sender === 'agent') && !message.isThinking && !message.isSuperseded)
+      const taskSnapshots = await window.api.listTaskRuns(sessionId)
+      const chatMessages = mergeCollaborationHistory(activeSession.messages, taskSnapshots, sessionId, userMessage.id)
         .slice(-state.contextRounds * 2)
         .map(toLlmMessage)
 

@@ -3117,11 +3117,12 @@ app.whenReady().then(() => {
 
   // 动态获取大模型服务商的模型列表
   ipcMain.handle('api:get-models', async (_, config: { provider: string; apiKey?: string; baseUrl: string; credentialScope?: 'system' | 'wechat' }) => {
-    const { provider, baseUrl } = config
+    const provider = config.provider
+    const baseUrl = (config.baseUrl || '').trim().replace(/\/+$/, '')
     const scopedApiKey = config.credentialScope === 'wechat'
       ? wechatBotManager?.getRuntimeLlmConfig().apiKey
       : systemLlmConfig.apiKey
-    const apiKey = config.apiKey || scopedApiKey || ''
+    const apiKey = (config.apiKey ?? scopedApiKey ?? '').trim()
 
     // 如果是 ollama，优先用原有的 api/tags 获取方式
     if (provider === 'ollama') {
@@ -3139,7 +3140,7 @@ app.whenReady().then(() => {
         throw new Error(`HTTP ${response.status}: 获取 Ollama 模型失败`)
       } catch (e: any) {
         console.warn('获取 Ollama 模型列表失败，保留当前模型配置:', e?.message || e)
-        return []
+        throw new Error('获取 Ollama 模型列表失败，请检查服务地址和网络；这不代表当前模型无法对话。')
       } finally {
         clearTimeout(timeout)
       }
@@ -3184,12 +3185,16 @@ app.whenReady().then(() => {
         if (data && Array.isArray(data.data)) {
           return data.data.map((m: any) => m.id)
         }
-        return []
+        if (Array.isArray(data?.models)) {
+          return [...new Set(data.models.map((m: any) => typeof m === 'string' ? m : m.id || m.name?.replace(/^models\//, '')).filter((id: unknown) => typeof id === 'string' && id.trim()))]
+        }
+        throw new Error('模型列表接口返回了无法识别的数据，可继续手动填写模型名称。')
       }
-      return []
+      throw new Error(`获取模型列表失败 (HTTP ${response.status})：${response.status === 401 || response.status === 403 ? '请检查 API Key 和模型列表访问权限' : '请检查 Base URL 或服务商是否支持 models 接口'}；这不代表当前模型无法对话。`)
     } catch (e: any) {
       console.warn('获取通用模型列表失败，保留当前模型配置:', e?.message || e)
-      return []
+      if (e?.name === 'AbortError') throw new Error('获取模型列表超时，请重试；可继续手动填写模型名称。')
+      throw new Error(e instanceof Error ? e.message : '获取模型列表失败，请检查网络或配置。')
     } finally {
       clearTimeout(timeout)
     }

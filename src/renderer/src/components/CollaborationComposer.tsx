@@ -5,7 +5,7 @@ import {
   type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, Bot, CheckCircle2, FolderOpen, GitBranch, Loader2, Network, Pause, Play, Plus, RotateCcw, ShieldAlert, Sparkles, TerminalSquare, Trash2, Zap } from 'lucide-react'
+import { ArrowLeft, Bot, CheckCircle2, FolderOpen, GitBranch, Loader2, Network, Pause, Play, Plus, RotateCcw, Route, ShieldAlert, Sparkles, TerminalSquare, Trash2, Zap } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { cleanResultSummary, CollaborationArtifactCards } from './CollaborationRunCard'
@@ -316,7 +316,7 @@ function OrchestrationApprovalCard({ request, onRespond }: { request: any; onRes
 }
 
 export function CollaborationComposer({
-  sessionId, workspacePath: sessionWorkspacePath, llmConfig, initialGoal, initialRunId, permissionRequest, onRespondPermission, onWorkspaceSelected, onStarted, onClose, showToast
+  sessionId, workspacePath: sessionWorkspacePath, llmConfig, initialGoal, initialRunId, permissionRequest, onRespondPermission, onWorkspaceSelected, onStarted, onClose, onOpenTrajectory, showToast
 }: {
   sessionId: string
   workspacePath?: string
@@ -328,6 +328,7 @@ export function CollaborationComposer({
   onWorkspaceSelected: (workspacePath: string) => Promise<void>
   onStarted?: (title: string) => void
   onClose: () => void
+  onOpenTrajectory: () => void
   showToast: (message: string, type: any) => void
 }): React.JSX.Element {
   const [mode, setMode] = React.useState<'auto' | 'manual'>('auto')
@@ -721,6 +722,12 @@ export function CollaborationComposer({
             <span>返回</span>
           </button>
           <h2 id="collab-title">{isReadonlyDetails ? '协作详情' : '多 Agent 编排'}</h2>
+          <div className="collab-header-actions">
+            <button className="collab-trajectory-button" type="button" onClick={onOpenTrajectory} title="查看当前会话执行轨迹">
+              <Route size={15} aria-hidden="true" />
+              <span>执行轨迹</span>
+            </button>
+          </div>
         </header>
 
         <div className={`collab-workbench-body ${isReadonlyDetails ? 'is-readonly-details' : ''}`}>

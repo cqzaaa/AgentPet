@@ -1,19 +1,14 @@
 import React from 'react'
-import { DEFAULT_MODELS } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
-import { getProviderIcon, getModelIcon } from '../utils/modelIcons'
+import { ModelConfigPanel } from '../components/ModelConfigPanel'
 import {
   AudioLines,
   Cat,
   Check,
-  CheckCircle2,
   ChevronDown,
-  Eye,
-  EyeOff,
   FolderOpen,
   MessageSquare,
   Pencil,
-  Plug,
   RotateCcw,
   Save,
   Settings2,
@@ -31,14 +26,6 @@ interface SettingsPageProps {
 export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const {
     settingsSubTab, setSettingsSubTab,
-    // llm
-    llmConfig, saveLlmConfig,
-    showApiKey, setShowApiKey,
-    showModelDropdown, setShowModelDropdown,
-    isLoadingModels, availableModels,
-    dropdownRef,
-    handleFetchModels, handleTestConnection,
-    testStatus,
     // storage
     storageInputPath, setStorageInputPath,
     actualStoragePath, storageSaveStatus,
@@ -63,8 +50,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   const [editAvatarYOffset, setEditAvatarYOffset] = React.useState(0)
   const [openAvatarDropdownId, setOpenAvatarDropdownId] = React.useState<string | null>(null)
   const [dropdownPos, setDropdownPos] = React.useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 })
-  const [apiKeyDraft, setApiKeyDraft] = React.useState('')
-  const [isSavingApiKey, setIsSavingApiKey] = React.useState(false)
   const [toolCacheStats, setToolCacheStats] = React.useState({ fileCount: 0, totalBytes: 0 })
   const [isLoadingToolCache, setIsLoadingToolCache] = React.useState(false)
 
@@ -106,23 +91,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     }
   }
 
-  const handleSaveApiKey = async (): Promise<void> => {
-    if (!apiKeyDraft) {
-      showToast('请输入要安全保存的 API 密钥', 'info')
-      return
-    }
-    setIsSavingApiKey(true)
-    try {
-      const saved = await saveLlmConfig({ ...llmConfig, apiKey: apiKeyDraft })
-      if (saved) {
-        setApiKeyDraft('')
-        showToast('API 密钥已使用系统凭据保护安全保存', 'success')
-      }
-    } finally {
-      setIsSavingApiKey(false)
-    }
-  }
-
   // 点击外部/滚动/缩放时关闭下拉菜单
   React.useEffect(() => {
     if (!openAvatarDropdownId) return
@@ -155,209 +123,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
       {/* Sub Panel */}
       <div className="sub-content-panel">
         {/* ── 模型配置 ── */}
-        {settingsSubTab === 'keys' && (
-          <div className="settings-sub-panel">
-            {/* Provider Selection */}
-            <div className="form-group">
-              <label className="form-label">API 服务商</label>
-              <div className="provider-grid">
-                {['gemini', 'deepseek', 'openai', 'ollama', 'custom'].map(prov => (
-                  <div
-                    key={prov}
-                    className={`provider-btn ${llmConfig.provider === prov ? 'active' : ''}`}
-                    onClick={() => {
-                      const defaults = { provider: prov, apiKey: '', hasApiKey: llmConfig.hasApiKey, baseUrl: '', model: '', temperature: llmConfig.temperature, maxTokens: undefined }
-                      if (prov === 'gemini') { defaults.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai' }
-                      else if (prov === 'openai') { defaults.baseUrl = 'https://api.openai.com/v1' }
-                      else if (prov === 'deepseek') { defaults.baseUrl = 'https://api.deepseek.com/v1' }
-                      else if (prov === 'ollama') { defaults.baseUrl = 'http://localhost:11434/v1' }
-                      saveLlmConfig(defaults)
-                    }}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                  >
-                    <img
-                      src={getProviderIcon(prov)}
-                      className="provider-btn-icon"
-                      alt={prov}
-                      style={{ width: '16px', height: '16px', borderRadius: '3px', objectFit: 'contain' }}
-                    />
-                    <span>{prov.toUpperCase()}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* API Key */}
-            {llmConfig.provider !== 'ollama' && (
-              <div className="form-group" style={{ position: 'relative' }}>
-                <label className="form-label">API 密钥 (API Key)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-                  <div style={{ display: 'flex', position: 'relative', flex: 1 }}>
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      className="form-input"
-                      placeholder={llmConfig.hasApiKey ? '密钥已安全保存；输入新密钥可替换' : '输入大模型提供商的 API 密钥'}
-                      value={apiKeyDraft}
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      onChange={e => setApiKeyDraft(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !isSavingApiKey) void handleSaveApiKey()
-                      }}
-                      style={{ flex: 1, paddingRight: '40px' }}
-                    />
-                    <button
-                      type="button"
-                      style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', userSelect: 'none', fontSize: '14px', opacity: 0.6, border: 'none', background: 'transparent', padding: 0, lineHeight: 0, color: 'currentColor' }}
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      title={showApiKey ? '隐藏密钥' : '显示密钥'}
-                      aria-label={showApiKey ? '隐藏密钥' : '显示密钥'}
-                    >
-                      {showApiKey
-                        ? <EyeOff size={16} strokeWidth={2} aria-hidden="true" />
-                        : <Eye size={16} strokeWidth={2} aria-hidden="true" />}
-                    </button>
-                  </div>
-                  <button
-                    className="btn-primary"
-                    type="button"
-                    disabled={!apiKeyDraft || isSavingApiKey}
-                    onClick={() => void handleSaveApiKey()}
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {isSavingApiKey ? '保存中…' : '安全保存'}
-                  </button>
-                </div>
-                <div style={{ marginTop: '6px', fontSize: '11px', opacity: 0.65 }}>
-                  {llmConfig.hasApiKey && <CheckCircle2 size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />}
-                  {llmConfig.hasApiKey ? '已保存到系统加密凭据库，页面不会回显密钥。' : '密钥不会写入 localStorage 或普通配置文件。'}
-                </div>
-              </div>
-            )}
-
-            {/* Base URL */}
-            <div className="form-group">
-              <label className="form-label">API 代理/基准接口地址 (Base URL)</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="https://api.example.com/v1"
-                value={llmConfig.baseUrl}
-                onChange={e => saveLlmConfig({ ...llmConfig, baseUrl: e.target.value })}
-              />
-            </div>
-
-            {/* Model name */}
-            <div className="form-group" style={{ position: 'relative' }} ref={dropdownRef}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                <label className="form-label">模型名称 (Model)</label>
-                {DEFAULT_MODELS[llmConfig.provider] && (
-                  <span
-                    style={{ fontSize: '11px', color: '#60a5fa', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
-                    onClick={() => saveLlmConfig({ ...llmConfig, model: DEFAULT_MODELS[llmConfig.provider] })}
-                  >
-                    填入默认模型 ({DEFAULT_MODELS[llmConfig.provider]})
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', position: 'relative', width: '100%' }}>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder={DEFAULT_MODELS[llmConfig.provider] ? `例如: ${DEFAULT_MODELS[llmConfig.provider]}` : '请输入模型名称'}
-                  value={llmConfig.model}
-                  onChange={e => saveLlmConfig({ ...llmConfig, model: e.target.value })}
-                  onClick={() => { if (!showModelDropdown) handleFetchModels() }}
-                  style={{ flex: 1, paddingRight: '30px' }}
-                />
-                <button
-                  type="button"
-                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', opacity: 0.6, fontSize: '11px', userSelect: 'none', color: 'var(--text-muted)', border: 0, background: 'transparent', padding: 0, lineHeight: 0 }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (showModelDropdown) { setShowModelDropdown(false) } else { handleFetchModels() }
-                  }}
-                >
-                  <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
-                </button>
-              </div>
-
-              {showModelDropdown && (
-                <div className="model-dropdown-list">
-                  {isLoadingModels ? (
-                    <div className="dropdown-loading-item">正在请求 models 接口获取模型...</div>
-                  ) : availableModels.length > 0 ? (
-                    <>
-                      <div className="dropdown-section-title">可用模型列表 ({availableModels.length})</div>
-                      {availableModels.map(m => (
-                        <div
-                          key={m}
-                          className={`dropdown-item ${llmConfig.model === m ? 'active' : ''}`}
-                          onClick={() => { saveLlmConfig({ ...llmConfig, model: m }); setShowModelDropdown(false) }}
-                          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                        >
-                          <img
-                            src={getModelIcon(m, llmConfig.provider)}
-                            className="model-item-icon"
-                            alt=""
-                            style={{ width: '16px', height: '16px', borderRadius: '3px', flexShrink: 0, objectFit: 'contain' }}
-                          />
-                          <span className="model-name-text" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
-                          {m === DEFAULT_MODELS[llmConfig.provider] && <span className="default-badge" style={{ flexShrink: 0 }}>推荐默认</span>}
-                        </div>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="dropdown-empty-item">未获取到模型列表，可手动输入</div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Temperature */}
-            <div className="form-group">
-              <label className="form-label">核采样温度 (Temperature)</label>
-              <div className="slider-group">
-                <input
-                  type="range"
-                  min="0.0"
-                  max="2.0"
-                  step="0.1"
-                  className="form-slider"
-                  value={llmConfig.temperature}
-                  onChange={e => saveLlmConfig({ ...llmConfig, temperature: parseFloat(e.target.value) })}
-                />
-                <span className="slider-val">{llmConfig.temperature.toFixed(1)}</span>
-              </div>
-            </div>
-
-            {/* Actions row */}
-            <div className="action-row">
-              <button className="btn-primary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
-                {testStatus === 'testing'
-                  ? '正在连通测试...'
-                  : <><Plug size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />测试大模型连接</>}
-              </button>
-            </div>
-
-            {testStatus !== 'idle' && testStatus !== 'testing' && (
-              <div style={{
-                fontSize: '12.5px',
-                color: testStatus.startsWith('连接成功') ? '#10b981' : '#f87171',
-                background: testStatus.startsWith('连接成功') ? 'rgba(16,185,129,0.05)' : 'rgba(248,113,113,0.05)',
-                border: `1px solid ${testStatus.startsWith('连接成功') ? 'rgba(16,185,129,0.2)' : 'rgba(248,113,113,0.2)'}`,
-                padding: '10px 14px',
-                borderRadius: '6px',
-                marginTop: '10px',
-                wordBreak: 'break-all'
-              }}>
-                {testStatus}
-              </div>
-            )}
-          </div>
-        )}
-
-
+        {settingsSubTab === 'keys' && <ModelConfigPanel store={store} />}
         {/* ── 本地存储 ── */}
         {settingsSubTab === 'storage' && (
           <div className="settings-sub-panel">
