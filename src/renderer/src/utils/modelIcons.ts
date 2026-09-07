@@ -18,7 +18,7 @@ import gemma from '@lobehub/icons-static-svg/icons/gemma-color.svg'
 import yi from '@lobehub/icons-static-svg/icons/yi-color.svg'
 import grok from '@lobehub/icons-static-svg/icons/grok.svg'
 import xai from '@lobehub/icons-static-svg/icons/xai.svg'
-import lobehub from '@lobehub/icons-static-svg/icons/lobehub-color.svg'
+import customProvider from '../assets/custom-provider.svg'
 
 // 提供商及厂商图标映射
 export const PROVIDER_ICON_MAP: Record<string, string> = {
@@ -45,7 +45,7 @@ export const PROVIDER_ICON_MAP: Record<string, string> = {
   yi,
   grok,
   xai,
-  custom: lobehub
+  custom: customProvider
 }
 
 /**
@@ -67,7 +67,12 @@ export function getModelIcon(modelName: string, provider: string): string {
   const prov = provider.toLowerCase()
 
   // 1. 根据模型名称中含有的关键字进行强匹配
-  if (name.includes('gpt') || name.includes('o1') || name.includes('o3') || name.includes('openai')) {
+  if (
+    name.includes('gpt') ||
+    name.includes('o1') ||
+    name.includes('o3') ||
+    name.includes('openai')
+  ) {
     return PROVIDER_ICON_MAP.openai
   }
   if (name.includes('claude') || name.includes('anthropic')) {
@@ -85,7 +90,12 @@ export function getModelIcon(modelName: string, provider: string): string {
   if (name.includes('qwen') || name.includes('qianwen') || name.includes('tongyi')) {
     return PROVIDER_ICON_MAP.qwen
   }
-  if (name.includes('glm') || name.includes('zhipu') || name.includes('cogview') || name.includes('characterglm')) {
+  if (
+    name.includes('glm') ||
+    name.includes('zhipu') ||
+    name.includes('cogview') ||
+    name.includes('characterglm')
+  ) {
     return PROVIDER_ICON_MAP.zhipu
   }
   if (name.includes('kimi') || name.includes('moonshot')) {
