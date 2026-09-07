@@ -582,6 +582,7 @@ export class PlaywrightRpaExecutor {
         const isDesktopSurface = String(node.data?.processName || '').toLowerCase() === 'explorer' &&
           /^(program manager|workerw)$/i.test(String(node.data?.windowTitle || ''))
         const relativePoint = isDesktopSurface ? null : await resolveDesktopRelativePoint({
+          processId: Number(node.data?.processId),
           windowTitle: node.data?.windowTitle,
           processName: node.data?.processName,
           relativeX: Number(node.data?.relativeX),
@@ -614,10 +615,12 @@ export class PlaywrightRpaExecutor {
         const previousNode = incoming ? this.nodes.find(item => item.id === incoming.source) : undefined
         const focusedOnlyOnWindow = /ControlType\.Window$/i.test(String(node.data?.controlType || ''))
         const targetWindowTitle = node.data?.windowTitle || previousNode?.data?.windowTitle
+        const inputProcessId = Number(node.data?.processId || previousNode?.data?.processId)
         const inputProcessName = node.data?.processName || previousNode?.data?.processName
         const isDesktopSurface = String(inputProcessName || '').toLowerCase() === 'explorer' &&
           /^(program manager|workerw)$/i.test(String(targetWindowTitle || ''))
         const relativePoint = isDesktopSurface ? null : await resolveDesktopRelativePoint({
+          processId: inputProcessId,
           windowTitle: targetWindowTitle,
           processName: inputProcessName,
           relativeX: Number(focusedOnlyOnWindow ? previousNode?.data?.relativeX : (node.data?.relativeX ?? previousNode?.data?.relativeX)),
@@ -653,6 +656,7 @@ export class PlaywrightRpaExecutor {
 
       case 'desktop_scroll': {
         const relativePoint = await resolveDesktopRelativePoint({
+          processId: Number(node.data?.processId),
           windowTitle: node.data?.windowTitle,
           processName: node.data?.processName,
           relativeX: Number(node.data?.relativeX),

@@ -115,15 +115,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [cronHours, setCronHours] = React.useState<number>(0)
   const [cronMinutes, setCronMinutes] = React.useState<number>(1)
   const [cronSeconds, setCronSeconds] = React.useState<number>(0)
+
   const [cronAction, setCronAction] = React.useState('')
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null)
-
-  // 点击空白处关闭下拉菜单
-  React.useEffect(() => {
-    const handleClick = () => setOpenDropdownId(null)
-    window.addEventListener('click', handleClick)
-    return () => window.removeEventListener('click', handleClick)
-  }, [])
 
   const formatInterval = (totalSeconds: number) => {
     const d = Math.floor(totalSeconds / (3600 * 24))
@@ -138,10 +132,17 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     return res.trim()
   }
 
+  // 点击空白处关闭下拉菜单
+  React.useEffect(() => {
+    const handleClick = () => setOpenDropdownId(null)
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="agent-page-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Sub Nav */}
-      <div className="sub-tab-nav">
+      <div className="sub-tab-nav" style={{ flexShrink: 0 }}>
         <div className={`sub-tab-item ${agentSubTab === 'skills' ? 'active' : ''}`} onClick={() => setAgentSubTab('skills')}>
           技能加入
         </div>
@@ -157,21 +158,21 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
       </div>
 
       {/* Sub Panel */}
-      <div className="sub-content-panel">
+      <div className="sub-content-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingRight: '4px' }}>
         {/* ── 技能加入 ── */}
         {agentSubTab === 'skills' && (
-          <div>
-            <div className="skills-action-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="skills-action-row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <span
                 className="storage-path-display"
-                style={{ flex: 1, marginRight: '16px', border: '1px solid var(--border-card)', cursor: 'pointer' }}
+                style={{ flex: 1, minWidth: '220px', marginRight: 0, border: '1px solid var(--border-card)', cursor: 'pointer', wordBreak: 'break-all' }}
                 onClick={handleSkillsPathClick}
                 title="点击选择新的存放路径"
               >
                 <FolderOpen size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                 存放路径: {skillsPath || '正在加载技能目录...'}
               </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                 <button className="btn-secondary" onClick={() => window.api.openSkillsFolder()}>
                   打开目录
                 </button>

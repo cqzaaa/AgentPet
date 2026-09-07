@@ -5,7 +5,7 @@ export const SUBAGENT_IDLE_TIMEOUT_MS = 90_000
 const READ_TOOLS = ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content']
 const WRITE_TOOLS = ['write_file', 'edit_file', 'move_file']
 const TERMINAL_TOOLS = ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command']
-const WEB_TOOLS = ['web_search', 'web_fetch', 'browser_search', 'browser_click']
+const WEB_TOOLS = ['web_search', 'web_fetch']
 
 export function getSubagentToolNames(role: SubagentRole | undefined): string[] {
   const byRole: Record<SubagentRole, string[]> = {

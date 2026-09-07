@@ -298,80 +298,82 @@ export function ModelConfigPanel({ store }: ModelConfigPanelProps): React.JSX.El
         </div>
 
         <form className="model-profile-form" noValidate onSubmit={event => { event.preventDefault(); void saveDraft() }}>
-          <div className="model-form-grid">
-            <label className="model-field">
-              <span>配置名称</span>
-              <input className="form-input" value={draft.name} onChange={event => updateDraft({ name: event.target.value })} placeholder="例如：日常对话" />
-            </label>
-
-            {draft.provider !== 'ollama' && (
-              <label className="model-field model-field-full">
-                <span>API Key</span>
-                <input
-                  className="form-input model-api-key-input"
-                  type="text"
-                  value={draft.apiKey}
-                  onChange={event => updateDraft({ apiKey: event.target.value })}
-                  placeholder="输入 API Key"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+          <div className="model-profile-form-scroll">
+            <div className="model-form-grid">
+              <label className="model-field">
+                <span>配置名称</span>
+                <input className="form-input" value={draft.name} onChange={event => updateDraft({ name: event.target.value })} placeholder="例如：日常对话" />
               </label>
-            )}
 
-            <label className="model-field model-field-full">
-              <span>Base URL</span>
-              <input className="form-input" value={draft.baseUrl} onChange={event => updateDraft({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
-            </label>
-
-            <div className="model-field model-field-full">
-              <span className="model-field-label-row">
-                <span>模型名称</span>
-                {DEFAULT_MODELS[draft.provider] && (
-                  <button type="button" onClick={() => updateDraft({ model: DEFAULT_MODELS[draft.provider] })}>使用默认值</button>
-                )}
-              </span>
-              <span className="model-input-action-row">
-                <span className="model-input-with-icon">
-                  <img src={getModelIcon(draft.model, draft.provider)} alt="" />
+              {draft.provider !== 'ollama' && (
+                <label className="model-field model-field-full">
+                  <span>API Key</span>
                   <input
-                    className="form-input"
-                    aria-label="模型名称"
-                    value={draft.model}
-                    onChange={event => updateDraft({ model: event.target.value })}
-                    placeholder={DEFAULT_MODELS[draft.provider] || '输入模型名称'}
+                    className="form-input model-api-key-input"
+                    type="text"
+                    value={draft.apiKey}
+                    onChange={event => updateDraft({ apiKey: event.target.value })}
+                    placeholder="输入 API Key"
+                    autoComplete="off"
+                    spellCheck={false}
                   />
+                </label>
+              )}
+
+              <label className="model-field model-field-full">
+                <span>Base URL</span>
+                <input className="form-input" value={draft.baseUrl} onChange={event => updateDraft({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+              </label>
+
+              <div className="model-field model-field-full">
+                <span className="model-field-label-row">
+                  <span>模型名称</span>
+                  {DEFAULT_MODELS[draft.provider] && (
+                    <button type="button" onClick={() => updateDraft({ model: DEFAULT_MODELS[draft.provider] })}>使用默认值</button>
+                  )}
                 </span>
-                <button type="button" className="btn-secondary model-fetch-button" onClick={() => void fetchModels()} disabled={isFetchingModels}>
-                  {isFetchingModels ? <LoaderCircle className="spin" size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
-                  获取模型
-                </button>
-              </span>
-              <select
-                className="form-input"
-                aria-label="已获取的模型列表"
-                value={availableModels.includes(draft.model) ? draft.model : ''}
-                disabled={isFetchingModels || availableModels.length === 0}
-                onChange={event => { if (event.target.value) updateDraft({ model: event.target.value }) }}
-              >
-                <option value="">{isFetchingModels ? '正在获取模型…' : availableModels.length ? `选择模型（共 ${availableModels.length} 个）` : '点击“获取模型”加载列表'}</option>
-                {availableModels.map(model => <option value={model} key={model}>{model}</option>)}
-              </select>
-              <span role="status">{modelsMessage}</span>
+                <span className="model-input-action-row">
+                  <span className="model-input-with-icon">
+                    <img src={getModelIcon(draft.model, draft.provider)} alt="" />
+                    <input
+                      className="form-input"
+                      aria-label="模型名称"
+                      value={draft.model}
+                      onChange={event => updateDraft({ model: event.target.value })}
+                      placeholder={DEFAULT_MODELS[draft.provider] || '输入模型名称'}
+                    />
+                  </span>
+                  <button type="button" className="btn-secondary model-fetch-button" onClick={() => void fetchModels()} disabled={isFetchingModels}>
+                    {isFetchingModels ? <LoaderCircle className="spin" size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                    获取模型
+                  </button>
+                </span>
+                <select
+                  className="form-input"
+                  aria-label="已获取的模型列表"
+                  value={availableModels.includes(draft.model) ? draft.model : ''}
+                  disabled={isFetchingModels || availableModels.length === 0}
+                  onChange={event => { if (event.target.value) updateDraft({ model: event.target.value }) }}
+                >
+                  <option value="">{isFetchingModels ? '正在获取模型…' : availableModels.length ? `选择模型（共 ${availableModels.length} 个）` : '点击“获取模型”加载列表'}</option>
+                  {availableModels.map(model => <option value={model} key={model}>{model}</option>)}
+                </select>
+                <span role="status">{modelsMessage}</span>
+              </div>
+
+              <label className="model-field model-field-full">
+                <span className="model-field-label-row"><span>温度</span><output>{draft.temperature.toFixed(1)}</output></span>
+                <input className="form-slider" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={event => updateDraft({ temperature: Number(event.target.value) })} />
+                <span className="model-slider-scale"><span>稳定</span><span>创意</span></span>
+              </label>
             </div>
 
-            <label className="model-field model-field-full">
-              <span className="model-field-label-row"><span>温度</span><output>{draft.temperature.toFixed(1)}</output></span>
-              <input className="form-slider" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={event => updateDraft({ temperature: Number(event.target.value) })} />
-              <span className="model-slider-scale"><span>稳定</span><span>创意</span></span>
-            </label>
+            {testStatus !== 'idle' && (
+              <div className={`model-test-status ${testStatus}`} role="status" aria-live="polite">
+                {testStatus === 'testing' ? <><LoaderCircle className="spin" size={15} aria-hidden="true" />正在测试连接…</> : testMessage}
+              </div>
+            )}
           </div>
-
-          {testStatus !== 'idle' && (
-            <div className={`model-test-status ${testStatus}`} role="status" aria-live="polite">
-              {testStatus === 'testing' ? <><LoaderCircle className="spin" size={15} aria-hidden="true" />正在测试连接…</> : testMessage}
-            </div>
-          )}
 
           <div className="model-editor-actions">
             <span className={isDirty ? 'visible' : ''}>有未保存的修改</span>

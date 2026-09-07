@@ -77,8 +77,8 @@ export function desktopClickFingerprint(target: {
 }): string {
   return JSON.stringify({
     scope: target.scope,
-    x: Number.isFinite(target.x) ? Math.round(Number(target.x)) : undefined,
-    y: Number.isFinite(target.y) ? Math.round(Number(target.y)) : undefined,
+    x: Number.isFinite(target.x) ? Math.round(Number(target.x) * 10000) / 10000 : undefined,
+    y: Number.isFinite(target.y) ? Math.round(Number(target.y) * 10000) / 10000 : undefined,
     windowTitle: target.windowTitle || '',
     processId: target.processId || 0,
     displayId: target.displayId || 0,

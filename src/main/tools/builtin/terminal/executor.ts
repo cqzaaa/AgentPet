@@ -32,6 +32,16 @@ function resolveShell(value: unknown, fallback: ShellKind): ShellKind {
   throw new Error(`不支持的 shell: ${String(value)}。可选值为 powershell、bash、cmd。`)
 }
 
+function launchesLocalGuiBrowser(command: unknown): boolean {
+  const text = String(command || '')
+  const browserExecutable = String.raw`(?:msedge|chrome|chromium|brave|firefox)(?:\.exe)?`
+  return (
+    new RegExp(String.raw`\bStart-Process\b[^\r\n;|]*(?:https?:\/\/|${browserExecutable}\b)`, 'i').test(text) ||
+    new RegExp(String.raw`(?:^|[;&|]\s*)(?:start\s+(?:""\s*)?)?(?:"[^"\r\n]*[\\/])?${browserExecutable}\b`, 'i').test(text) ||
+    /(?:^|[;&|]\s*)explorer(?:\.exe)?\s+["']?https?:\/\//i.test(text)
+  )
+}
+
 
 function resolveExecutionCwd(value: unknown, context: ToolContext): string {
   const cwd = typeof value === 'string' && value.trim()
@@ -97,6 +107,14 @@ export class TerminalExecutor implements IToolExecutor {
           return {
             content: `[远程 SSH 命令执行输出 | shell: ${shell}]\n${stdout || ''}\n${stderr ? '[错误输出]\n' + stderr : ''}`,
             success: true
+          }
+        }
+
+        if (launchesLocalGuiBrowser(command)) {
+          return {
+            content:
+              '错误：禁止通过终端启动本机浏览器。请加载 desktop-control，先调用 get_windows 检查现有 Edge/Chrome，再用 focus_window 操作系统浏览器；不要创建隔离或重复浏览器实例。',
+            success: false
           }
         }
 
@@ -220,6 +238,14 @@ export class TerminalExecutor implements IToolExecutor {
             content: `[远程 SSH 命令已启动 | shell: ${shell}]\nshell_id: ${session.id}\n命令: ${command}\n${description ? '描述: ' + description + '\n' : ''}使用 get_command_output 获取输出，使用 kill_command 终止命令。`,
             state: { shell_id: session.id, command, shell },
             success: true
+          }
+        }
+
+        if (launchesLocalGuiBrowser(command)) {
+          return {
+            content:
+              '错误：禁止通过终端启动本机浏览器。请加载 desktop-control，先调用 get_windows 检查现有 Edge/Chrome，再用 focus_window 操作系统浏览器；不要创建隔离或重复浏览器实例。',
+            success: false
           }
         }
 

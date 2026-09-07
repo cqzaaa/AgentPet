@@ -96,10 +96,6 @@ const COMPUTER_TOOL_NAMES = new Set([
   'click_ui_element', 'focus_ui_element', 'perform_computer_actions'
 ])
 
-// A normal search is intentionally a short, deterministic workflow.
-// browser_search starts/connects Edge itself; browser_click opens a result.
-const BING_SEARCH_TOOL_NAMES = new Set(['browser_search', 'browser_click'])
-
 function messageText(message: ChatMessage | undefined): string {
   if (!message) return ''
   if (typeof message.content === 'string') return message.content
@@ -149,7 +145,7 @@ function getActiveChatDir(): string {
 }
 
 export class AgentExecutor {
-  private toolListCache: { full?: any[], simplified?: any[], browserSimplified?: any[], browserSearchSimplified?: any[] } = {}
+  private toolListCache: { full?: any[]; simplified?: any[] } = {}
 
   private getToolImagePaths(state: any): string[] {
     const candidates = [
@@ -457,8 +453,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
   }
 
-  private getFormattedTools(_isFrontend: boolean, simplify = false, domBrowserOnly = false, forceBingSearch = false): any[] {
-    const cacheKey = forceBingSearch ? 'browserSearchSimplified' : domBrowserOnly ? 'browserSimplified' : simplify ? 'simplified' : 'full' as const
+  private getFormattedTools(_isFrontend: boolean, simplify = false): any[] {
+    const cacheKey = simplify ? 'simplified' : 'full'
     const cached = this.toolListCache[cacheKey]
     if (cached) return cached
 
@@ -467,8 +463,6 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     // 从 toolRegistry 获取所有内置工具定义
     const allTools = toolRegistry.getAllToolsInfo()
     for (const tool of Object.values(allTools)) {
-      if (forceBingSearch && !BING_SEARCH_TOOL_NAMES.has(tool.name)) continue
-      if (domBrowserOnly && COMPUTER_TOOL_NAMES.has(tool.name)) continue
       list.push({
         type: 'function',
         function: {
@@ -480,18 +474,16 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
 
     // 添加 MCP 外部工具
-    if (!forceBingSearch) {
-      const mcpTools = mcpManager.getTools()
-      for (const tool of mcpTools) {
-        list.push({
-          type: 'function',
-          function: {
-            name: tool.name,
-            description: tool.description || '',
-            parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
-          }
-        })
-      }
+    const mcpTools = mcpManager.getTools()
+    for (const tool of mcpTools) {
+      list.push({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description || '',
+          parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
+        }
+      })
     }
 
     this.toolListCache[cacheKey] = list
@@ -1029,7 +1021,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     }
     const availableToolDefinitions = config.disableTools
       ? []
-      : this.getFormattedTools(isFrontend, true, false, false)
+      : this.getFormattedTools(isFrontend, true)
           .filter((tool: any) => BOOTSTRAP_TOOL_NAMES.has(tool.function.name) || !allowedToolNames || allowedToolNames.has(tool.function.name))
           .filter((tool: any) => !blockedToolNames.has(tool.function.name))
     const availableToolNameSet = new Set(availableToolDefinitions.map((tool: any) => String(tool.function.name)))
@@ -1049,7 +1041,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       .map(message => messageText(message))
       .join('\n')
     const requiresPptMaster = isPptMasterRequest(recentConversationText)
-    const inferredPreloadedSkillIds = inferPreloadedSkillIds(recentConversationText)
+    const inferredPreloadedSkillIds = inferPreloadedSkillIds(latestUserText)
     let pptMasterPreparing = false
     const preloadedSkillIds = inferredPreloadedSkillIds.filter(id => {
       if (id !== 'ppt-master') return true

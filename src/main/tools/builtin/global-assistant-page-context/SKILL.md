@@ -27,7 +27,7 @@ For a simple request to replace text in one visible field:
 
 Never describe an attempt, input method, click, or verification that is absent from the current task's recorded tool events.
 
-Never call `browser_connect`, `browser_tabs`, `browser_select_tab`, `browser_snapshot`, `browser_click`, `browser_click_ref`, `browser_navigate`, or `browser_search`. These tools may open or foreground AgentPet's isolated automation browser instead of operating the page the user is already viewing.
+Browser interaction must use the existing visible system browser through desktop-control. Do not launch a second browser instance or expose credentials, cookies, tokens, password fields, or hidden form values to the model.
 
 ## Keep search separate
 

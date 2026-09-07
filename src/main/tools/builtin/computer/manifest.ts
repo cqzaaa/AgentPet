@@ -291,10 +291,15 @@ export const computerManifest: ToolManifest = {
                 milliseconds: { type: 'number' },
                 button: { type: 'string', enum: ['left', 'right', 'middle'] },
                 double: { type: 'boolean' },
-                allow_repeat: { type: 'boolean' }
+                allow_repeat: { type: 'boolean' },
+                state_id: { type: 'string' }
               },
               required: ['type']
             }
+          },
+          state_id: {
+            type: 'string',
+            description: '相对点击使用的最近一次窗口截图状态 ID'
           },
           verify_after: { type: 'boolean', description: '是否在所有动作完成后追加一次目标窗口截图' }
         },

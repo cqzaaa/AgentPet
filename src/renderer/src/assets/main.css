@@ -1708,6 +1708,66 @@ body {
   padding: 8px 16px;
 }
 
+.content-body.tab-settings {
+  overflow: hidden;
+  padding: 8px 20px 14px;
+}
+
+.content-body.tab-control {
+  overflow: hidden;
+  padding: 8px 20px 14px;
+}
+
+/* ── 控制面板自适应响应式布局 ── */
+.control-page-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  gap: 20px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.control-channel-sidebar {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  padding-right: 16px;
+  min-height: 0;
+}
+
+.control-channel-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+@media (max-width: 820px) {
+  .control-page-layout {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .control-channel-sidebar {
+    width: 100%;
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+    padding-right: 0;
+    padding-bottom: 8px;
+    overflow-x: auto;
+  }
+  .control-channel-sidebar .channel-item {
+    flex-shrink: 0;
+  }
+}
+
 .content-body.tab-chat.chat-view-host {
   padding: 0;
 }
@@ -1775,6 +1835,10 @@ body {
   border-radius: 10px;
   margin-bottom: 10px;
   align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .sub-tab-item {
@@ -4377,6 +4441,8 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   padding-top: 8px;
   margin-top: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .light .chat-control-toolbar {
@@ -4388,6 +4454,21 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 680px) {
+  .chat-control-toolbar {
+    gap: 6px;
+  }
+  .toolbar-group-left,
+  .toolbar-group-right {
+    gap: 4px;
+  }
+  .model-dropdown-container {
+    max-width: 120px;
+    padding: 0 4px;
+  }
 }
 
 /* 模型内联切换器 */
@@ -4909,11 +4990,14 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .skills-table {
   width: 100%;
+  min-width: 580px;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
@@ -5810,8 +5894,20 @@ body {
   gap: 16px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .charts-double-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 440px) {
+  .stats-cards-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -6133,12 +6229,15 @@ body {
 }
 
 .logs-table-container {
-  max-height: 220px;
+  max-height: 280px;
   overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .logs-table-container::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
 }
 
 .logs-table-container::-webkit-scrollbar-thumb {
@@ -6148,6 +6247,7 @@ body {
 
 .logs-table-container table {
   width: 100%;
+  min-width: 580px;
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;

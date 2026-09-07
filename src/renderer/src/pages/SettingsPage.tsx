@@ -106,9 +106,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
   }, [openAvatarDropdownId])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+    <div className="settings-page-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Sub Nav */}
-      <div className="sub-tab-nav">
+      <div className="sub-tab-nav" style={{ flexShrink: 0 }}>
         <div className={`sub-tab-item ${settingsSubTab === 'keys' ? 'active' : ''}`} onClick={() => setSettingsSubTab('keys')}>
           模型配置
         </div>
@@ -121,24 +121,24 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
       </div>
 
       {/* Sub Panel */}
-      <div className="sub-content-panel">
+      <div className="sub-content-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* ── 模型配置 ── */}
         {settingsSubTab === 'keys' && <ModelConfigPanel store={store} />}
         {/* ── 本地存储 ── */}
         {settingsSubTab === 'storage' && (
-          <div className="settings-sub-panel">
+          <div className="settings-sub-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
             <div className="form-desc-text">
               设置统一的顶头数据目录。系统将自动在该目录下建立并迁移您的聊天记录（chat/）、虚拟体形象（live2d/）、技能扩展包（skills/）及记忆信息（memory/）。如果留空保存，则退回默认的应用数据目录。
             </div>
 
             <div className="form-group">
               <label className="form-label">当前生效的物理路径</label>
-              <div className="storage-path-display">{actualStoragePath || '正在加载路径信息...'}</div>
+              <div className="storage-path-display" style={{ wordBreak: 'break-all' }}>{actualStoragePath || '正在加载路径信息...'}</div>
             </div>
 
             <div className="form-group">
               <label className="form-label">设置自定义存储路径</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <input
                   type="text"
                   className="form-input"
@@ -211,7 +211,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
 
         {/* ── 虚拟体设置 ── */}
         {settingsSubTab === 'avatar' && (
-          <div className="settings-sub-panel">
+          <div className="settings-sub-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
             <div className="form-desc-text">
               在这里更换挂件的 Live2D 形象。您可以点击“导入虚拟体”将外部模型拷贝归档到统一存储包中，系统会自动在此页面生成卡片列表供您一键切换。
             </div>
@@ -221,11 +221,12 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
               display: 'flex', alignItems: 'center', gap: '12px',
               padding: '12px 16px', marginBottom: '20px',
               background: 'var(--bg-secondary, #f8f9fa)',
-              borderRadius: '8px', border: '1px solid var(--border-color, #e9ecef)'
+              borderRadius: '8px', border: '1px solid var(--border-color, #e9ecef)',
+              flexWrap: 'wrap'
             }}>
               <Volume2 size={17} strokeWidth={2} aria-hidden="true" />
               <span style={{ fontSize: '13px', fontWeight: 500 }}>语音朗读</span>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', flex: 1 }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', flex: 1, minWidth: '180px' }}>
                 开启后 LLM 回复将自动朗读，声音在下方虚拟体卡片中设置
               </span>
               <div
@@ -250,7 +251,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
               </div>
             </div>
 
-            <div className="action-row" style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+            <div className="action-row" style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn-primary"
@@ -292,7 +293,7 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
 
             <div className="settings-section-title" style={{ marginBottom: '16px' }}>本地形象库</div>
 
-            <div className="avatar-table-container mcp-table-container">
+            <div className="avatar-table-container mcp-table-container" style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
               <table className="mcp-table">
                 <thead>
                   <tr>

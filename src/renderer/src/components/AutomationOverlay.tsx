@@ -5,13 +5,12 @@ const labels: Record<string, string> = {
   screenshot: '查看当前屏幕', mouse_move: '移动鼠标', mouse_click: '点击界面',
   mouse_scroll: '滚动页面', type_text: '输入文字', key_press: '按下快捷键',
   get_windows: '查找可用窗口', focus_window: '切换目标窗口',
-  browser_connect: '连接浏览器', browser_navigate: '打开网页',
-  browser_search: '搜索网页', browser_snapshot: '读取页面元素', browser_click: '点击页面元素', browser_click_ref: '按元素引用点击'
+  web_search: '搜索网页', web_fetch: '读取网页'
 }
 
 function iconFor(name: string) {
   if (name === 'screenshot') return Eye
-  if (name.startsWith('browser_')) return PanelTop
+  if (name.startsWith('web_')) return PanelTop
   if (name === 'type_text' || name === 'key_press') return Keyboard
   if (name === 'focus_window' || name === 'get_windows') return PanelTop
   return MousePointer2

@@ -174,7 +174,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     description: 'Run and monitor PowerShell, cmd, bash, SSH, and other terminal commands.',
     triggers: ['terminal', 'command', 'shell', 'powershell', 'cmd', 'bash', 'ssh', 'python', '命令', '终端', '脚本'],
     allowedTools: ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'],
-    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Local node/npm/npx commands automatically use AgentPet's managed portable Node runtime, isolated npm prefix and cache; never inspect or install into the system-global Node environment. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls.`
+    instructions: `# Terminal commands\nUse run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Local node/npm/npx commands automatically use AgentPet's managed portable Node runtime, isolated npm prefix and cache; never inspect or install into the system-global Node environment. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls. Never use Start-Process, start, explorer.exe, or a browser executable to open a local browser; load desktop-control, call get_windows first, and use focus_window on the user's existing browser.`
   }),
   staticSkill({
     id: 'web-research',
@@ -183,14 +183,6 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     triggers: ['web', 'internet', 'latest', 'current', 'search online', '网页', '联网', '最新', '搜索网络'],
     allowedTools: ['web_search', 'web_fetch'],
     instructions: `# Web research\nSearch before answering unstable or current questions. Fetch the most relevant primary pages, distinguish publication time from event time, and cite source URLs. Avoid repeating identical searches or fetches.`
-  }),
-  staticSkill({
-    id: 'browser-automation',
-    name: 'Browser automation',
-    description: 'Connect to the local browser and navigate, inspect, search, and click DOM elements.',
-    triggers: ['browser', 'website', 'open page', 'click link', '浏览器', '网站', '网页操作', '点击'],
-    allowedTools: ['browser_connect', 'browser_tabs', 'browser_select_tab', 'browser_navigate', 'browser_search', 'browser_snapshot', 'browser_click', 'browser_click_ref'],
-    instructions: `# Browser automation\nPrefer DOM snapshots and stable element references over screen coordinates. Connect before interacting, select the intended tab, inspect after navigation, and verify state after clicks. Use browser_search for ordinary web searches.`
   }),
   staticSkill({
     id: 'desktop-control',

@@ -1,5 +1,5 @@
 import React from 'react'
-import { CheckCircle2, LoaderCircle, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, LoaderCircle, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
 
 type AgentStatus = 'unchecked' | 'missing' | 'ready' | 'interactive' | 'auth_required' | 'error'
@@ -48,6 +48,13 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
   const [name, setName] = React.useState('')
   const [executable, setExecutable] = React.useState('')
   const [argsText, setArgsText] = React.useState('')
+
+  const handleCloseModal = (): void => {
+    setShowAdd(false)
+    setName('')
+    setExecutable('')
+    setArgsText('')
+  }
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -112,37 +119,72 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
   }
 
   return (
-    <div className="settings-sub-panel">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
+    <div className="settings-sub-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
         <div>
           <div className="settings-section-title" style={{ marginBottom: 6 }}>Agents</div>
           <div style={{ fontSize: 13, color: 'var(--text-secondary, #64748b)', lineHeight: 1.6 }}>
             AgentPet 是默认 Agent。Claude Code、Codex 和 Antigravity CLI 会使用用户本机安装。
           </div>
         </div>
-        <button className="btn-primary" type="button" onClick={() => setShowAdd(value => !value)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {showAdd ? <XCircle size={15} /> : <Plus size={15} />}
-          {showAdd ? '取消' : '添加 Agent'}
+        <button className="btn-primary" type="button" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={15} />
+          添加 Agent
         </button>
       </div>
 
       {showAdd && (
-        <div style={{ padding: 16, border: '1px solid var(--border-color, #dbe2ea)', borderRadius: 12, marginBottom: 18, background: 'var(--bg-card-sub, rgba(128,128,128,.04))' }}>
-          <div style={{ fontWeight: 650, marginBottom: 14 }}>添加自定义 ACP Agent</div>
-          <div className="form-group">
-            <label className="form-label">名称</label>
-            <input className="form-input" value={name} onChange={event => setName(event.target.value)} placeholder="例如：My Coding Agent" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">可执行文件</label>
-            <input className="form-input" value={executable} onChange={event => setExecutable(event.target.value)} placeholder="例如：my-agent-acp 或 D:\\tools\\agent.exe" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">参数（每行一个参数）</label>
-            <textarea className="form-input" rows={4} value={argsText} onChange={event => setArgsText(event.target.value)} placeholder={'--acp\n--profile\ndefault'} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button className="btn-primary" type="button" onClick={() => void addAgent()}>保存 Agent</button>
+        <div className="mcp-modal-overlay" onClick={handleCloseModal}>
+          <div className="mcp-modal-card" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div className="mcp-modal-header">
+              <div className="mcp-modal-title">
+                <Plus size={17} strokeWidth={2} />
+                <span>添加自定义 ACP Agent</span>
+              </div>
+              <button className="mcp-modal-close-btn" type="button" onClick={handleCloseModal} title="关闭">
+                <X size={18} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="mcp-modal-body">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" style={{ marginBottom: 6 }}>名称</label>
+                <input
+                  className="form-input"
+                  value={name}
+                  onChange={event => setName(event.target.value)}
+                  placeholder="例如：My Coding Agent"
+                  autoFocus
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" style={{ marginBottom: 6 }}>可执行文件</label>
+                <input
+                  className="form-input"
+                  value={executable}
+                  onChange={event => setExecutable(event.target.value)}
+                  placeholder="例如：my-agent-acp 或 D:\tools\agent.exe"
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" style={{ marginBottom: 6 }}>参数（每行一个参数）</label>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  value={argsText}
+                  onChange={event => setArgsText(event.target.value)}
+                  placeholder={'--acp\n--profile\ndefault'}
+                  style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
+                />
+              </div>
+            </div>
+            <div className="mcp-modal-footer">
+              <button className="btn-secondary" type="button" onClick={handleCloseModal}>
+                取消
+              </button>
+              <button className="btn-primary" type="button" onClick={() => void addAgent()}>
+                保存 Agent
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -156,9 +198,9 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
             const testing = testingId === agent.id
             return (
               <div key={agent.id} style={{ border: '1px solid var(--border-color, #dbe2ea)', borderRadius: 12, padding: '15px 16px', background: 'var(--bg-card, #fff)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <div className="agent-brand-icon"><AgentBrandIcon agentId={agent.id} /></div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ minWidth: '200px', flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 700 }}>{agent.name}</span>
                       {agent.id === 'agentpet' && <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 10, color: '#4f46e5', background: 'rgba(99,102,241,.12)' }}>默认</span>}

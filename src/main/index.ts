@@ -233,13 +233,12 @@ let rpaScheduleTimer: NodeJS.Timeout | null = null
 let isCheckingRpaSchedules = false
 
 const automationToolNames = new Set([
-  'screenshot', 'mouse_move', 'mouse_click', 'mouse_scroll',
+  'screenshot', 'mouse_move', 'mouse_click', 'mouse_click_relative', 'mouse_scroll',
   'type_text', 'key_press', 'get_windows', 'focus_window',
-  'browser_connect', 'browser_tabs', 'browser_select_tab', 'browser_navigate', 'browser_search', 'browser_snapshot', 'browser_click', 'browser_click_ref'
 ])
 
 const globalAssistantToolNames = new Set([
-  'screenshot', 'mouse_move', 'mouse_click', 'mouse_scroll',
+  'screenshot', 'mouse_move', 'mouse_click', 'mouse_click_relative', 'mouse_scroll',
   'type_text', 'key_press', 'get_windows', 'focus_window',
   'web_search', 'web_fetch'
 ])
@@ -5438,7 +5437,7 @@ app.whenReady().then(() => {
     const requiresCurrentContext = /(?:当前|这个|本页|页面|屏幕|窗口|这里|账号|输入框|按钮|表单|登录|看到|显示|有没有|是否有)/i.test(task.prompt)
     const explicitSearchRequest = /(?:搜索|搜一下|查询资料|查资料|联网查|网上查|检索|search\b|look\s*up)/i.test(task.prompt)
     const observationInstruction = requiresCurrentContext
-      ? '这是当前可见屏幕相关请求。必须先调用 screenshot 查看用户当前正在看的窗口，再根据画面使用 get_windows、focus_window、鼠标和键盘工具观察或操作。禁止调用任何 browser_* 工具；即使画面是网页，也不得连接、打开或切换 AgentPet 隔离浏览器。'
+      ? '这是当前可见屏幕相关请求。必须先调用 screenshot 查看用户当前正在看的窗口，再根据画面使用 get_windows、focus_window、鼠标和键盘工具观察或操作。网页也必须操作现有系统浏览器，禁止启动第二个浏览器实例。'
       : '先判断是否需要实时屏幕信息。普通知识问题可以直接简洁回答；只有用户明确要求搜索或确实需要外部资料时才使用后台搜索工具。'
     const searchInstruction = explicitSearchRequest
       ? '用户包含明确搜索意图，可以使用 web_search 或 web_fetch，但不得打开或切换可见浏览器。若同时提到当前屏幕，仍须先截图。'

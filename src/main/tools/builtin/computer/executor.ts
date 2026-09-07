@@ -7,13 +7,13 @@ import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { getActiveStorageDir } from '../../utils/paths'
 import {
   clickDesktopPointNative,
+  clickDesktopWindowRelativeNative,
   findDesktopElements,
   focusDesktopElement,
   inspectDesktopPoint,
   invokeDesktopElement,
   listDesktopWindows,
   resolveDesktopDisplayPoint,
-  resolveDesktopRelativePoint,
   scrollDesktopPointNative
 } from '../../../rpa/rpaDesktopPicker'
 import { DesktopActionGuard, desktopClickFingerprint } from './action-guard'
@@ -186,23 +186,31 @@ export class ComputerExecutor implements IToolExecutor {
       title: args.title ? String(args.title) : undefined
     }
     if (rememberedWindow) targetWindow = { ...rememberedWindow }
-    if (
-      mode === 'window' &&
-      !targetWindow.title &&
-      (targetWindow.processId || targetWindow.processName)
-    ) {
+    if (mode === 'window' && (targetWindow.processId || targetWindow.processName || targetWindow.title)) {
       const windows = await listDesktopWindows()
-      const matched = windows.find(
-        (item) =>
-          (targetWindow.processId && item.processId === targetWindow.processId) ||
-          (!targetWindow.processId &&
-            targetWindow.title &&
-            item.windowTitle.toLowerCase().includes(targetWindow.title.toLowerCase())) ||
-          (!targetWindow.processId &&
-            !targetWindow.title &&
-            targetWindow.processName &&
-            item.processName.toLowerCase() === targetWindow.processName.toLowerCase())
-      )
+      const title = targetWindow.title?.toLowerCase()
+      const processName = targetWindow.processName?.toLowerCase()
+      const matched =
+        windows.find(
+          (item) =>
+            Boolean(targetWindow.processId) &&
+            item.processId === targetWindow.processId &&
+            (!title || item.windowTitle.toLowerCase() === title)
+        ) ||
+        windows.find(
+          (item) =>
+            Boolean(targetWindow.processId) && item.processId === targetWindow.processId
+        ) ||
+        windows.find(
+          (item) =>
+            Boolean(title) &&
+            (item.windowTitle.toLowerCase() === title ||
+              item.windowTitle.toLowerCase().includes(title!)) &&
+            (!processName || item.processName.toLowerCase() === processName)
+        ) ||
+        windows.find(
+          (item) => Boolean(processName) && item.processName.toLowerCase() === processName
+        )
       if (matched) {
         targetWindow = {
           processId: matched.processId,
@@ -216,6 +224,22 @@ export class ComputerExecutor implements IToolExecutor {
       return {
         content:
           '[截图失败] 已找到进程，但无法解析它的可见窗口标题。请改用 mode="screen" 验证前台状态；不能把任意窗口源当作目标窗口。',
+        success: false
+      }
+    }
+
+    const prepared = mode === 'window'
+      ? await clickDesktopWindowRelativeNative({
+          prepareOnly: true, processId: Number(targetWindow.processId),
+          windowTitle: targetWindow.title,
+          screenshotX: 0, screenshotY: 0, screenshotWidth: 1, screenshotHeight: 1,
+          expectedX: 0, expectedY: 0, expectedWidth: 1, expectedHeight: 1
+        })
+      : undefined
+    const windowBounds = prepared?.status === 'ok' ? prepared.liveWindow : undefined
+    if (mode === 'window' && !windowBounds) {
+      return {
+        content: '[截图失败] 目标窗口无法完整移入显示器工作区，禁止使用完整窗口截图点击。请调整窗口大小或使用屏幕截图。',
         success: false
       }
     }
@@ -243,15 +267,34 @@ export class ComputerExecutor implements IToolExecutor {
       return { content: '截图失败：未找到可用的屏幕源', success: false }
     }
 
-    const source =
+    const windowSources =
       mode === 'window'
-        ? sources.find((item) => targetWindow.title && item.name === targetWindow.title) ||
-          sources.find(
+        ? sources.filter(
             (item) =>
               targetWindow.title &&
-              item.name.toLowerCase().includes(targetWindow.title.toLowerCase())
-          ) ||
-          sources[0]
+              (item.name.toLowerCase() === targetWindow.title.toLowerCase() ||
+                item.name.toLowerCase().includes(targetWindow.title.toLowerCase()))
+          )
+        : []
+    const source =
+      mode === 'window'
+        ? (windowSources.length > 0 ? windowSources : sources)
+            .slice()
+            .sort((left, right) => {
+              if (!windowBounds) return 0
+              const expectedAspect = windowBounds.width / windowBounds.height
+              const leftSize = left.thumbnail.getSize()
+              const rightSize = right.thumbnail.getSize()
+              const leftError =
+                leftSize.height > 0
+                  ? Math.abs(Math.log(leftSize.width / leftSize.height / expectedAspect))
+                  : Number.POSITIVE_INFINITY
+              const rightError =
+                rightSize.height > 0
+                  ? Math.abs(Math.log(rightSize.width / rightSize.height / expectedAspect))
+                  : Number.POSITIVE_INFINITY
+              return leftError - rightError
+            })[0]
         : sources.find((item) => String(item.display_id) === String(display.id)) || sources[0]
     if (
       mode === 'window' &&
@@ -265,6 +308,21 @@ export class ComputerExecutor implements IToolExecutor {
       }
     }
     const thumbnail = source.thumbnail
+    const { width, height } = thumbnail.getSize()
+    if (mode === 'window' && windowBounds && width > 0 && height > 0) {
+      const capturedAspect = width / height
+      const expectedAspect = windowBounds.width / windowBounds.height
+      const aspectError = Math.abs(capturedAspect / expectedAspect - 1)
+      if (aspectError > 0.06) {
+        return {
+          content:
+            `[窗口截图无效] 截图尺寸 ${width}x${height} 与真实窗口 ${windowBounds.width}x${windowBounds.height} 不一致` +
+            `（宽高比偏差 ${(aspectError * 100).toFixed(1)}%）。禁止基于该截图点击；请先恢复/最大化目标窗口，或改用 mode="screen" 截取当前可见屏幕。`,
+          state: { screenshotGeometryMismatch: true, width, height, windowBounds, aspectError },
+          success: false
+        }
+      }
+    }
 
     // 保存到 session 目录
     const screenshotDir = this.resolveScreenshotDir(context.sessionId)
@@ -277,12 +335,9 @@ export class ComputerExecutor implements IToolExecutor {
     const pngBuffer = thumbnail.toPNG()
     fs.writeFileSync(filePath, pngBuffer)
 
-    const { width, height } = thumbnail.getSize()
     const stateHash = this.visualStateHash(thumbnail)
     const guardKey = this.guardKey(context)
     const changedSincePrevious = this.actionGuard.updateVisualState(guardKey, stateHash)
-    const windowBounds =
-      mode === 'window' ? await this.resolveWindowBounds(targetWindow) : undefined
     let pointDiagnostic: any
     if (mode === 'window' && windowBounds) {
       const diagnosticKey = `${targetWindow.processId || 0}:${targetWindow.title || targetWindow.processName || ''}`
@@ -318,6 +373,7 @@ export class ComputerExecutor implements IToolExecutor {
       capturedAt: Date.now(),
       stateHash,
       screenshotPath: filePath,
+      screenshot: { mode, width, height },
       coordinateSpace:
         mode === 'window' ? 'window-relative-or-global-physical' : 'display-image-or-global',
       display: displayBounds
@@ -342,7 +398,7 @@ export class ComputerExecutor implements IToolExecutor {
     this.latestComputerStates.set(this.stateKey(context), computerState)
 
     return {
-      content: `[截图完成]\n范围: ${mode === 'window' ? '窗口' : '显示器'}\n文件路径: ${filePath}\n分辨率: ${width}x${height}\n名称: ${source.name}\n视觉状态哈希: ${stateHash}\n状态较上一张截图${changedSincePrevious ? '已变化' : '未变化'}\n${delayMs > 0 ? `等待了 ${delayMs}ms 后截图\n` : ''}\n截图已自动传入视觉上下文；优先使用返回的窗口/显示器相对坐标或 UI Automation 元素。`,
+      content: `[截图完成]\n范围: ${mode === 'window' ? '窗口' : '显示器'}\n文件路径: ${filePath}\n截图状态 ID: ${computerState.id}\n截图坐标尺寸: ${width}x${height}\n${windowBounds ? `真实窗口边界: (${windowBounds.x}, ${windowBounds.y}, ${windowBounds.width}, ${windowBounds.height})\n` : ''}名称: ${source.name}\n视觉状态哈希: ${stateHash}\n状态较上一张截图${changedSincePrevious ? '已变化' : '未变化'}\n${delayMs > 0 ? `等待了 ${delayMs}ms 后截图\n` : ''}\n请使用 mouse_click_relative：relative_x=目标截图x/截图宽，relative_y=目标截图y/截图高，scope=window；窗口变化后必须重新截图。`,
       state: {
         filePath,
         width,
@@ -431,42 +487,94 @@ export class ComputerExecutor implements IToolExecutor {
   ): Promise<ToolResult> {
     const stateError = this.validateComputerState(args, context)
     if (stateError) return stateError
-    const scope = args.scope === 'display' ? 'display' : 'window'
+    const scope: string = args.scope === 'display' ? 'display' : 'window'
+    if (scope === 'window') {
+      const state = this.latestComputerStates.get(this.stateKey(context))
+      if ((args.pid && Number(args.pid) !== state?.window?.pid) ||
+          (args.title && !state?.window?.title?.includes(String(args.title))) ||
+          (args.process_name && state?.window?.processName?.toLowerCase() !== String(args.process_name).toLowerCase())) {
+        return { content: '目标窗口与最近截图不匹配，请先截取目标窗口。', success: false }
+      }
+      return this.mouseClickWindowRelative({ ...args, state_id: args.state_id || state?.id }, context)
+    }
     const relativeX = Number(args.relative_x)
     const relativeY = Number(args.relative_y)
     if (!Number.isFinite(relativeX) || !Number.isFinite(relativeY)) {
       return { content: '相对点击失败：relative_x/relative_y 必须是数字', success: false }
     }
-    const target =
-      scope === 'window'
-        ? await this.resolveWindowTarget(args)
-        : await this.resolveDisplayTarget(args)
-    if (!target) return { content: '相对点击失败：无法解析目标窗口或显示器边界', success: false }
-    const point =
-      target.scope === 'window'
-        ? await resolveDesktopRelativePoint({
-            windowTitle: target.title,
-            processName: target.processName,
-            relativeX,
-            relativeY
-          })
-        : await resolveDesktopDisplayPoint({
-            displayRelativeX: relativeX,
-            displayRelativeY: relativeY,
-            displayLeft: target.left,
-            displayTop: target.top,
-            displayWidth: target.width,
-            displayHeight: target.height,
-            displayPrimary: target.primary
-          })
-    if (!point) return { content: '相对点击失败：Windows 未返回可用物理坐标', success: false }
+    const target = await this.resolveDisplayTarget(args)
+    if (!target) return { content: '无法解析显示器', success: false }
+    const point = await resolveDesktopDisplayPoint({
+      displayRelativeX: relativeX, displayRelativeY: relativeY,
+      displayLeft: target.left, displayTop: target.top, displayWidth: target.width,
+      displayHeight: target.height, displayPrimary: target.primary
+    })
+    if (!point) return { content: '无法解析显示器坐标', success: false }
+    return this.mouseClick({ ...args, x: point.x, y: point.y }, context)
+  }
+
+  private async mouseClickWindowRelative(
+    args: Record<string, any>,
+    context: ToolContext
+  ): Promise<ToolResult> {
+    const requestedStateId = typeof args.state_id === 'string' ? args.state_id.trim() : ''
+    if (!requestedStateId) {
+      return {
+        content: '窗口相对点击失败：必须传入最近一次 window screenshot 返回的 state_id。',
+        success: false
+      }
+    }
+    const stateError = this.validateComputerState(args, context)
+    if (stateError) return stateError
+    const state = this.latestComputerStates.get(this.stateKey(context))
+    const screenshot = state?.screenshot
+    const snapshotWindow = state?.window
+    if (
+      !state ||
+      screenshot?.mode !== 'window' ||
+      !Number.isFinite(screenshot.width) ||
+      !Number.isFinite(screenshot.height) ||
+      !snapshotWindow ||
+      !Number.isFinite(snapshotWindow.x) ||
+      !Number.isFinite(snapshotWindow.y) ||
+      !Number.isFinite(snapshotWindow.width) ||
+      !Number.isFinite(snapshotWindow.height)
+    ) {
+      return {
+        content: '窗口相对点击失败：state_id 没有绑定有效的窗口截图与窗口边界，请重新执行 window screenshot。',
+        success: false
+      }
+    }
+
+    const screenshotX = Number(args.relative_x) * screenshot.width
+    const screenshotY = Number(args.relative_y) * screenshot.height
+    if (
+      !Number.isFinite(screenshotX) ||
+      !Number.isFinite(screenshotY) ||
+      screenshotX < 0 ||
+      screenshotY < 0 ||
+      screenshotX >= screenshot.width ||
+      screenshotY >= screenshot.height
+    ) {
+      return {
+        content: `窗口相对点击失败：坐标必须位于截图 0≤x<${screenshot.width}、0≤y<${screenshot.height} 内。`,
+        success: false
+      }
+    }
+
+    if (!Number.isFinite(snapshotWindow.pid) || Number(snapshotWindow.pid) <= 0) {
+      return {
+        content: '窗口相对点击失败：截图状态没有绑定目标窗口 PID，请重新执行 window screenshot。',
+        success: false
+      }
+    }
+
     const fingerprint = desktopClickFingerprint({
-      scope: scope === 'window' ? 'window' : 'screen',
-      x: relativeX,
-      y: relativeY,
-      windowTitle: target.scope === 'window' ? target.title : undefined,
-      processId: target.scope === 'window' ? target.processId : undefined,
-      displayId: target.scope === 'display' ? Number(args.display_id) || 0 : undefined,
+      scope: 'window',
+      x: screenshotX / screenshot.width,
+      y: screenshotY / screenshot.height,
+      windowTitle: snapshotWindow.title,
+      processId: snapshotWindow.pid,
       button: args.button,
       double: args.double
     })
@@ -482,24 +590,57 @@ export class ComputerExecutor implements IToolExecutor {
         state: { duplicateBlocked: true }
       }
     }
-    const ok = await clickDesktopPointNative({
-      x: point.x,
-      y: point.y,
+    const clickResult = await clickDesktopWindowRelativeNative({
+      processId: Number(snapshotWindow.pid),
+      windowTitle: snapshotWindow.title,
+      screenshotX,
+      screenshotY,
+      screenshotWidth: screenshot.width,
+      screenshotHeight: screenshot.height,
+      expectedX: Number(snapshotWindow.x),
+      expectedY: Number(snapshotWindow.y),
+      expectedWidth: Number(snapshotWindow.width),
+      expectedHeight: Number(snapshotWindow.height),
       button: args.button === 'right' ? 'right' : 'left',
       double: Boolean(args.double)
     })
-    if (!ok) return { content: '相对点击失败：Windows 未接受输入事件', success: false }
+    if (clickResult.status === 'geometry_changed') {
+      return {
+        content: `${stateMismatchMessage('desktop')}\n窗口位置或尺寸已改变，旧截图坐标已作废。`,
+        state: {
+          stateExpired: true,
+          geometryChanged: true,
+          snapshotWindow,
+          liveWindow: clickResult.liveWindow
+        },
+        success: false
+      }
+    }
+    if (clickResult.status === 'target_mismatch') {
+      const owner = clickResult.actualTitle || `PID ${clickResult.actualProcessId || '未知'}`
+      return {
+        content: `窗口相对点击已拦截：目标点当前被任务栏或其他窗口覆盖（最上层：${owner}）。禁止点击其他应用；请在目标窗口内滚动，使控件进入真实可见区域后重新截图。`,
+        state: { occluded: true, ...clickResult },
+        success: false
+      }
+    }
+    if (clickResult.status === 'not_found') {
+      return { content: '窗口相对点击失败：目标窗口已经关闭或无法恢复。', success: false }
+    }
+    if (clickResult.status !== 'ok') {
+      return { content: '窗口相对点击失败：Windows 未接受安全输入事件。', success: false }
+    }
     this.actionGuard.recordClick(this.guardKey(context), fingerprint)
     return {
-      content: `[相对点击] ${scope === 'window' ? '窗口' : '显示器'}相对坐标 (${relativeX.toFixed(3)}, ${relativeY.toFixed(3)}) → 全局物理坐标 (${point.x}, ${point.y})\n系统已派发点击事件；请按需用一次截图验证。`,
+      content: `[窗口相对点击] (${screenshotX}, ${screenshotY}) @ ${requestedStateId} → 全局物理坐标 (${clickResult.x}, ${clickResult.y})`,
       state: {
         dispatched: true,
-        x: point.x,
-        y: point.y,
-        relativeX,
-        relativeY,
-        scope,
-        coordinateSpace: 'global-physical'
+        screenshotX,
+        screenshotY,
+        stateId: requestedStateId,
+        x: clickResult.x,
+        y: clickResult.y,
+        coordinateSpace: 'screenshot-window-bound'
       },
       success: true
     }
@@ -719,7 +860,8 @@ export class ComputerExecutor implements IToolExecutor {
     const defaults = {
       pid: Number.isFinite(args.pid) ? Math.trunc(Number(args.pid)) : undefined,
       title: args.title ? String(args.title) : undefined,
-      process_name: args.process_name ? String(args.process_name) : undefined
+      process_name: args.process_name ? String(args.process_name) : undefined,
+      state_id: typeof args.state_id === 'string' ? args.state_id : undefined
     }
     const results: string[] = []
     for (const rawAction of args.actions.slice(0, 20)) {
@@ -1113,46 +1255,6 @@ public class WinAPI {
     }
   }
 
-  private async resolveWindowTarget(
-    args: Record<string, any>
-  ): Promise<{ scope: 'window'; processId?: number; processName?: string; title?: string } | null> {
-    const requestedPid = Number.isFinite(args.pid) ? Math.trunc(Number(args.pid)) : undefined
-    const requestedTitle = args.title ? String(args.title) : undefined
-    const requestedProcessName = args.process_name ? String(args.process_name) : undefined
-    if (!requestedPid && !requestedTitle && !requestedProcessName) return null
-    if (this.focusedWindow && this.focusedWindow.expiresAt > Date.now()) {
-      const matchesRemembered =
-        (requestedPid && this.focusedWindow.processId === requestedPid) ||
-        (!requestedPid &&
-          requestedTitle &&
-          this.focusedWindow.title?.toLowerCase().includes(requestedTitle.toLowerCase())) ||
-        (!requestedPid &&
-          !requestedTitle &&
-          requestedProcessName &&
-          this.focusedWindow.processName?.toLowerCase() === requestedProcessName.toLowerCase())
-      if (matchesRemembered) return { scope: 'window', ...this.focusedWindow }
-    }
-    const windows = await listDesktopWindows()
-    const matched = windows.find(
-      (item) =>
-        (requestedPid && item.processId === requestedPid) ||
-        (!requestedPid &&
-          requestedTitle &&
-          item.windowTitle.toLowerCase().includes(requestedTitle.toLowerCase())) ||
-        (!requestedPid &&
-          !requestedTitle &&
-          requestedProcessName &&
-          item.processName.toLowerCase() === requestedProcessName.toLowerCase())
-    )
-    if (!matched) return null
-    return {
-      scope: 'window',
-      processId: matched.processId,
-      processName: matched.processName,
-      title: matched.windowTitle
-    }
-  }
-
   private async resolveDisplayTarget(
     args: Record<string, any>
   ): Promise<{
@@ -1180,34 +1282,6 @@ public class WinAPI {
       width: display.bounds.width,
       height: display.bounds.height,
       primary: display.id === primary.id
-    }
-  }
-
-  private async resolveWindowBounds(target: {
-    processId?: number
-    processName?: string
-    title?: string
-  }): Promise<{ x: number; y: number; width: number; height: number } | undefined> {
-    if (!target.title && !target.processName) return undefined
-    const topLeft = await resolveDesktopRelativePoint({
-      windowTitle: target.title,
-      processName: target.processName,
-      relativeX: 0,
-      relativeY: 0
-    })
-    const bottomRight = await resolveDesktopRelativePoint({
-      windowTitle: target.title,
-      processName: target.processName,
-      relativeX: 1,
-      relativeY: 1
-    })
-    if (!topLeft || !bottomRight || bottomRight.x <= topLeft.x || bottomRight.y <= topLeft.y)
-      return undefined
-    return {
-      x: topLeft.x,
-      y: topLeft.y,
-      width: bottomRight.x - topLeft.x,
-      height: bottomRight.y - topLeft.y
     }
   }
 

@@ -725,7 +725,20 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
         )}
 
         {/* 底部动作按钮栏 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '10px',
+          marginTop: 'auto',
+          paddingTop: '12px',
+          paddingBottom: '4px',
+          borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+          position: 'sticky',
+          bottom: 0,
+          background: 'var(--bg-content, #fff)',
+          zIndex: 5
+        }}>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button 
               onClick={handleTestBotConnection} 
@@ -830,23 +843,9 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
   // ── 双栏主布局渲染 ────────────────────────────────────────────────────────
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      minHeight: '100%', 
-      height: '100%', 
-      gap: '20px', 
-      background: 'transparent'
-    }}>
+    <div className="control-page-layout">
       {/* 左侧渠道列表 */}
-      <div style={{ 
-        width: '210px', 
-        flexShrink: 0, 
-        display: 'flex', 
-        flexDirection: 'column', 
-        gap: '6px', 
-        borderRight: '1px solid var(--border-color, rgba(128,128,128,0.15))', 
-        paddingRight: '16px' 
-      }}>
+      <div className="control-channel-sidebar">
         {/* WeChat */}
         <div 
           onClick={() => setActiveChannel('wechat')}
@@ -945,7 +944,7 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
       </div>
 
       {/* 右侧主区域：对应选中的渠道配置 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingRight: '4px' }}>
+      <div className="control-channel-content">
         {activeChannel === 'wechat' && renderWechatChannel()}
         {activeChannel === 'feishu' && renderUpcomingChannel('Feishu', <FeishuIcon size={32} active />, '将桌面宠物 Mao 接入您的企业飞书工作台，实现全自动的日程规划、会议协同和企业知识库智能答复。')}
         {activeChannel === 'qq' && renderUpcomingChannel('QQ', <QQIcon size={32} active />, '接入您的 QQ 个人号或群聊，让 Mao 随时充当您群聊里的智能暖场专家、自动答读者问或个人日程备忘助手。')}

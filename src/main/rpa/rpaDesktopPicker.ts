@@ -350,6 +350,7 @@ export async function clickDesktopPointNative(target: {
   y: number
   button?: 'left' | 'right'
   double?: boolean
+  expectedProcessId?: number
 }): Promise<boolean> {
   if (process.platform !== 'win32' || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return false
   const script = `
@@ -357,14 +358,23 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class RpaNativeClick {
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; public POINT(int x, int y) { X = x; Y = y; } }
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+  [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
+  [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
   [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
   [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
   public static void EnablePerMonitorDpi() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { try { SetProcessDPIAware(); } catch {} } }
+  public static uint ProcessIdAt(int x, int y) { IntPtr handle = GetAncestor(WindowFromPoint(new POINT(x, y)), 2); uint pid; GetWindowThreadProcessId(handle, out pid); return pid; }
 }
 '@
 [RpaNativeClick]::EnablePerMonitorDpi()
+if (${Number.isFinite(target.expectedProcessId) ? Math.trunc(Number(target.expectedProcessId)) : 0} -gt 0 -and [RpaNativeClick]::ProcessIdAt(${Math.round(target.x)}, ${Math.round(target.y)}) -ne ${Number.isFinite(target.expectedProcessId) ? Math.trunc(Number(target.expectedProcessId)) : 0}) {
+  'TARGET_MISMATCH'
+  exit
+}
 [void][RpaNativeClick]::SetCursorPos(${Math.round(target.x)}, ${Math.round(target.y)})
 Start-Sleep -Milliseconds 60
 $down = $(if ('${target.button || 'left'}' -eq 'right') { 0x0008 } else { 0x0002 })
@@ -379,6 +389,187 @@ for ($i = 0; $i -lt $count; $i++) {
 `
   const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', script], { timeout: 10000 })
   return stdout.trim().includes('OK')
+}
+
+export type DesktopWindowRelativeResult = {
+  status: 'ok' | 'not_found' | 'geometry_changed' | 'target_mismatch' | 'failed'
+  x?: number
+  y?: number
+  actualProcessId?: number
+  actualTitle?: string
+  liveWindow?: { x: number; y: number; width: number; height: number }
+}
+
+/**
+ * Focuses, validates and clicks a screenshot-bound window point in one native operation.
+ * WindowFromPoint is checked immediately before mouse injection so taskbar/other-app
+ * occlusion cannot turn a valid screenshot coordinate into a click on another app.
+ */
+export async function clickDesktopWindowRelativeNative(target: {
+  prepareOnly?: boolean
+  processId: number
+  windowTitle?: string
+  screenshotX: number
+  screenshotY: number
+  screenshotWidth: number
+  screenshotHeight: number
+  expectedX: number
+  expectedY: number
+  expectedWidth: number
+  expectedHeight: number
+  button?: 'left' | 'right'
+  double?: boolean
+}): Promise<DesktopWindowRelativeResult> {
+  const numericValues = [
+    target.processId,
+    target.screenshotX,
+    target.screenshotY,
+    target.screenshotWidth,
+    target.screenshotHeight,
+    target.expectedX,
+    target.expectedY,
+    target.expectedWidth,
+    target.expectedHeight
+  ]
+  if (
+    process.platform !== 'win32' ||
+    numericValues.some((value) => !Number.isFinite(value)) ||
+    target.processId <= 0 ||
+    target.screenshotWidth <= 0 ||
+    target.screenshotHeight <= 0
+  ) {
+    return { status: 'failed' }
+  }
+
+  const titleBase64 = Buffer.from(String(target.windowTitle || ''), 'utf8').toString('base64')
+  const script = `
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class RpaSafeWindowClick {
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; public POINT(int x, int y) { X = x; Y = y; } }
+  private delegate bool EnumWindowsProc(IntPtr handle, IntPtr data);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
+  [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr handle);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
+  [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int Size; public RECT Monitor; public RECT Work; public uint Flags; }
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr handle, uint flags);
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT point, uint flags);
+  [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle, IntPtr after, int x, int y, int width, int height, uint flags);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr handle, int command);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+  [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+  [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
+  public static void EnablePerMonitorDpi() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { try { SetProcessDPIAware(); } catch {} } }
+  public static string Title(IntPtr handle) { int length = GetWindowTextLength(handle); var text = new StringBuilder(length + 1); GetWindowText(handle, text, text.Capacity); return text.ToString(); }
+  public static uint ProcessId(IntPtr handle) { uint pid; GetWindowThreadProcessId(handle, out pid); return pid; }
+  public static IntPtr Find(int processId, string expectedTitle) {
+    IntPtr best = IntPtr.Zero; int bestScore = -1; long bestArea = -1;
+    EnumWindows(delegate(IntPtr handle, IntPtr data) {
+      if (!IsWindowVisible(handle) || ProcessId(handle) != (uint)processId) return true;
+      RECT rect; if (!GetWindowRect(handle, out rect)) return true;
+      long area = Math.Max(0, rect.Right - rect.Left) * (long)Math.Max(0, rect.Bottom - rect.Top);
+      string title = Title(handle); int score = 0;
+      if (!String.IsNullOrEmpty(expectedTitle)) {
+        if (title.Equals(expectedTitle, StringComparison.OrdinalIgnoreCase)) score = 3;
+        else if (title.IndexOf(expectedTitle, StringComparison.OrdinalIgnoreCase) >= 0 || expectedTitle.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) score = 2;
+      }
+      if (score > bestScore || (score == bestScore && area > bestArea)) { best = handle; bestScore = score; bestArea = area; }
+      return true;
+    }, IntPtr.Zero);
+    return best;
+  }
+}
+'@
+[RpaSafeWindowClick]::EnablePerMonitorDpi()
+$title = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${titleBase64}'))
+$hwnd = [RpaSafeWindowClick]::Find(${Math.trunc(target.processId)}, $title)
+if ($hwnd -eq [IntPtr]::Zero) {
+  [pscustomobject]@{ status = 'not_found' } | ConvertTo-Json -Compress
+  exit
+}
+if ([RpaSafeWindowClick]::IsIconic($hwnd)) { [void][RpaSafeWindowClick]::ShowWindowAsync($hwnd, 9) }
+[void][RpaSafeWindowClick]::SetForegroundWindow($hwnd)
+Start-Sleep -Milliseconds 120
+$rect = [RpaSafeWindowClick+RECT]::new()
+if (-not [RpaSafeWindowClick]::GetWindowRect($hwnd, [ref]$rect)) {
+  [pscustomobject]@{ status = 'failed' } | ConvertTo-Json -Compress
+  exit
+}
+$monitor = [RpaSafeWindowClick]::MonitorFromWindow($hwnd, 2)
+$info = [RpaSafeWindowClick+MONITORINFO]::new()
+$info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][RpaSafeWindowClick+MONITORINFO])
+if (-not [RpaSafeWindowClick]::GetMonitorInfo($monitor, [ref]$info)) { '{"status":"failed"}'; exit }
+if (${target.prepareOnly ? '$true' : '$false'}) {
+  $work = $info.Work
+  $w = [Math]::Min($rect.Right - $rect.Left, $work.Right - $work.Left)
+  $h = [Math]::Min($rect.Bottom - $rect.Top, $work.Bottom - $work.Top)
+  $left = [Math]::Max($work.Left, [Math]::Min($rect.Left, $work.Right - $w))
+  $top = [Math]::Max($work.Top, [Math]::Min($rect.Top, $work.Bottom - $h))
+  if ($left -ne $rect.Left -or $top -ne $rect.Top -or $w -ne ($rect.Right - $rect.Left) -or $h -ne ($rect.Bottom - $rect.Top)) {
+    [void][RpaSafeWindowClick]::SetWindowPos($hwnd, [IntPtr]::Zero, $left, $top, $w, $h, 0x0014)
+    Start-Sleep -Milliseconds 200
+  }
+  [void][RpaSafeWindowClick]::GetWindowRect($hwnd, [ref]$rect)
+  if ($rect.Left -lt $work.Left -or $rect.Top -lt $work.Top -or $rect.Right -gt $work.Right -or $rect.Bottom -gt $work.Bottom) {
+    '{"status":"target_mismatch"}'; exit
+  }
+  [pscustomobject]@{ status = 'ok'; liveWindow = @{ x = $rect.Left; y = $rect.Top; width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top } } | ConvertTo-Json -Compress
+  exit
+}
+$liveWidth = $rect.Right - $rect.Left
+$liveHeight = $rect.Bottom - $rect.Top
+$positionTolerance = 4
+$sizeTolerance = [Math]::Max(4, [Math]::Round([Math]::Max(${Math.round(target.expectedWidth)}, ${Math.round(target.expectedHeight)}) * 0.01))
+$geometryChanged = [Math]::Abs($rect.Left - ${Math.round(target.expectedX)}) -gt $positionTolerance -or [Math]::Abs($rect.Top - ${Math.round(target.expectedY)}) -gt $positionTolerance -or [Math]::Abs($liveWidth - ${Math.round(target.expectedWidth)}) -gt $sizeTolerance -or [Math]::Abs($liveHeight - ${Math.round(target.expectedHeight)}) -gt $sizeTolerance
+if ($geometryChanged) {
+  [pscustomobject]@{ status = 'geometry_changed'; liveWindow = @{ x = $rect.Left; y = $rect.Top; width = $liveWidth; height = $liveHeight } } | ConvertTo-Json -Compress
+  exit
+}
+$x = [Math]::Round($rect.Left + (${Number(target.screenshotX)} / ${Number(target.screenshotWidth)}) * $liveWidth)
+$y = [Math]::Round($rect.Top + (${Number(target.screenshotY)} / ${Number(target.screenshotHeight)}) * $liveHeight)
+$point = [RpaSafeWindowClick+POINT]::new([int]$x, [int]$y)
+if ([RpaSafeWindowClick]::MonitorFromPoint($point, 0) -eq [IntPtr]::Zero) { '{"status":"target_mismatch"}'; exit }
+$pointWindow = [RpaSafeWindowClick]::WindowFromPoint($point)
+$rootWindow = [RpaSafeWindowClick]::GetAncestor($pointWindow, 2)
+if ($rootWindow -eq [IntPtr]::Zero) { $rootWindow = $pointWindow }
+$actualProcessId = [RpaSafeWindowClick]::ProcessId($rootWindow)
+if ($actualProcessId -ne ${Math.trunc(target.processId)} -or $rootWindow -ne $hwnd) {
+  [pscustomobject]@{ status = 'target_mismatch'; x = $x; y = $y; actualProcessId = $actualProcessId; actualTitle = [RpaSafeWindowClick]::Title($rootWindow) } | ConvertTo-Json -Compress
+  exit
+}
+[void][RpaSafeWindowClick]::SetCursorPos($x, $y)
+$down = $(if ('${target.button || 'left'}' -eq 'right') { 0x0008 } else { 0x0002 })
+$up = $(if ('${target.button || 'left'}' -eq 'right') { 0x0010 } else { 0x0004 })
+$count = $(if (${target.double ? '$true' : '$false'}) { 2 } else { 1 })
+for ($i = 0; $i -lt $count; $i++) {
+  [RpaSafeWindowClick]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
+  [RpaSafeWindowClick]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero)
+  if ($count -gt 1) { Start-Sleep -Milliseconds 110 }
+}
+[pscustomobject]@{ status = 'ok'; x = $x; y = $y } | ConvertTo-Json -Compress
+`
+  try {
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', script], {
+      timeout: 10000
+    })
+    const result = JSON.parse(stdout.trim() || '{}') as DesktopWindowRelativeResult
+    return result?.status ? result : { status: 'failed' }
+  } catch {
+    return { status: 'failed' }
+  }
 }
 
 export async function scrollDesktopPointNative(target: {
@@ -450,21 +641,26 @@ foreach ($element in $elements) {
 }
 
 export async function resolveDesktopRelativePoint(target: {
+  processId?: number
   windowTitle?: string
   processName?: string
   relativeX?: number
   relativeY?: number
+  fresh?: boolean
 }): Promise<{ x: number; y: number } | null> {
   if (process.platform !== 'win32' || !Number.isFinite(target.relativeX) || !Number.isFinite(target.relativeY)) return null
+  const processId = Number.isFinite(target.processId) ? Math.trunc(Number(target.processId)) : 0
   const title = String(target.windowTitle || '').replace(/'/g, "''")
   const processName = String(target.processName || '').replace(/'/g, "''")
-  if (!title && !processName) return null
-  const cacheKey = `${title.toLowerCase()}\u0000${processName.toLowerCase()}`
+  if (!processId && !title && !processName) return null
+  const relativeX = Math.min(1, Math.max(0, Number(target.relativeX)))
+  const relativeY = Math.min(1, Math.max(0, Number(target.relativeY)))
+  const cacheKey = `${processId}\u0000${title.toLowerCase()}\u0000${processName.toLowerCase()}`
   const cached = desktopWindowBoundsCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) {
+  if (!target.fresh && cached && cached.expiresAt > Date.now()) {
     return {
-      x: Math.round(cached.left + cached.width * Number(target.relativeX)),
-      y: Math.round(cached.top + cached.height * Number(target.relativeY))
+      x: Math.round(cached.left + cached.width * relativeX),
+      y: Math.round(cached.top + cached.height * relativeY)
     }
   }
   const script = `
@@ -482,44 +678,64 @@ public static class RpaWindowBounds {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
+  [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
   [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
   [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
   public static void EnablePerMonitorDpi() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { try { SetProcessDPIAware(); } catch {} } }
-  public static IntPtr Find(string targetTitle, string targetProcessName) {
-    IntPtr titleMatch = IntPtr.Zero;
-    IntPtr processFallback = IntPtr.Zero;
+  public static IntPtr Find(int targetProcessId, string targetTitle, string targetProcessName) {
+    int resolvedProcessId = targetProcessId;
+    if (targetProcessId > 0) {
+      try {
+        Process targetProcess = Process.GetProcessById(targetProcessId);
+        if (!string.IsNullOrEmpty(targetProcessName) && !targetProcess.ProcessName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase)) {
+          resolvedProcessId = 0;
+        } else {
+          IntPtr mainHandle = targetProcess.MainWindowHandle;
+          int mainTitleLength = GetWindowTextLength(mainHandle);
+          var mainTitleBuilder = new StringBuilder(Math.Max(1, mainTitleLength + 1));
+          if (mainTitleLength > 0) GetWindowText(mainHandle, mainTitleBuilder, mainTitleBuilder.Capacity);
+          bool titleMatches = string.IsNullOrEmpty(targetTitle) || mainTitleBuilder.ToString().IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0;
+          if (mainHandle != IntPtr.Zero && IsWindowVisible(mainHandle) && titleMatches) return mainHandle;
+        }
+      } catch { resolvedProcessId = 0; }
+    }
+    IntPtr bestMatch = IntPtr.Zero;
+    long bestArea = -1;
     EnumWindows(delegate(IntPtr handle, IntPtr data) {
+      if (!IsWindowVisible(handle)) return true;
       int length = GetWindowTextLength(handle);
       var builder = new StringBuilder(Math.Max(1, length + 1));
       if (length > 0) GetWindowText(handle, builder, builder.Capacity);
       string windowTitle = builder.ToString();
       uint processId;
       GetWindowThreadProcessId(handle, out processId);
+      if (resolvedProcessId > 0 && processId != (uint)resolvedProcessId) return true;
       string processName = "";
       try { processName = Process.GetProcessById((int)processId).ProcessName; } catch {}
-      if (!string.IsNullOrEmpty(targetTitle) && length > 0 && windowTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) >= 0) {
-        titleMatch = handle;
-        return false;
-      }
-      if (processFallback == IntPtr.Zero && !string.IsNullOrEmpty(targetProcessName) && processName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase)) {
-        processFallback = handle;
-      }
+      if (!string.IsNullOrEmpty(targetProcessName) && !processName.Equals(targetProcessName, StringComparison.OrdinalIgnoreCase)) return true;
+      if (!string.IsNullOrEmpty(targetTitle) && (length == 0 || windowTitle.IndexOf(targetTitle, StringComparison.OrdinalIgnoreCase) < 0)) return true;
+      RECT rect;
+      if (!GetWindowRect(handle, out rect)) return true;
+      long width = Math.Max(0, rect.Right - rect.Left);
+      long height = Math.Max(0, rect.Bottom - rect.Top);
+      long area = width * height;
+      if (area > bestArea) { bestArea = area; bestMatch = handle; }
       return true;
     }, IntPtr.Zero);
-    return titleMatch != IntPtr.Zero ? titleMatch : processFallback;
+    return bestMatch;
   }
 }
 '@
 [RpaWindowBounds]::EnablePerMonitorDpi()
-$handle = [RpaWindowBounds]::Find('${title}', '${processName}')
+$handle = [RpaWindowBounds]::Find(${processId}, '${title}', '${processName}')
 if ($handle -eq [IntPtr]::Zero) { '{}' ; exit }
 $rect = New-Object RpaWindowBounds+RECT
 if (-not [RpaWindowBounds]::GetWindowRect($handle, [ref]$rect)) { '{}' ; exit }
 $width = $rect.Right - $rect.Left; $height = $rect.Bottom - $rect.Top
 if ($width -lt 100 -or $height -lt 100) { '{}' ; exit }
 [pscustomobject]@{
-  x = [int]($rect.Left + ($width * ${Number(target.relativeX)}))
-  y = [int]($rect.Top + ($height * ${Number(target.relativeY)}))
+  x = [int]($rect.Left + ($width * ${relativeX}))
+  y = [int]($rect.Top + ($height * ${relativeY}))
   left = $rect.Left; top = $rect.Top; width = $width; height = $height
 } | ConvertTo-Json -Compress
 `

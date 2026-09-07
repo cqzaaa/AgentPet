@@ -28,14 +28,23 @@ export function inferPreloadedSkillIds(userText: string): string[] {
   const text = String(userText || '').trim()
   if (!text) return []
 
-  const isCodingMutation = CODING_ACTION_PATTERN.test(text) && CODING_TARGET_PATTERN.test(text)
-  const isOfficeOnly = OFFICE_TARGET_PATTERN.test(text) && !/(?:代码|源码|脚本|程序|项目|仓库|repo)/i.test(text)
+  // URLs frequently contain tokens such as "appName" that must not turn a
+  // desktop-browser request into a coding request.
+  const intentText = text.replace(/https?:\/\/\S+/gi, ' ')
+  const explicitDesktopRequest =
+    DESKTOP_ACTION_PATTERN.test(intentText) &&
+    (DESKTOP_APPLICATION_PATTERN.test(intentText) || DESKTOP_SURFACE_PATTERN.test(intentText))
+  const discussesImplementation = /(?:代码|源码|函数|模块|实现|优化|方案|测试|bug|修复|修改|重构)/i.test(intentText)
+  if (explicitDesktopRequest && !discussesImplementation) return ['desktop-control']
+
+  const isCodingMutation = CODING_ACTION_PATTERN.test(intentText) && CODING_TARGET_PATTERN.test(intentText)
+  const isOfficeOnly = OFFICE_TARGET_PATTERN.test(intentText) && !/(?:代码|源码|脚本|程序|项目|仓库|repo)/i.test(intentText)
   if (isCodingMutation && !isOfficeOnly) return ['agentpet-coding']
   if (isPptMasterRequest(text)) return ['ppt-master']
 
-  if (!DESKTOP_ACTION_PATTERN.test(text)) return []
-  if (/(?:代码|源码|函数|模块|实现|优化|方案|测试|bug)/i.test(text) && !DESKTOP_APPLICATION_PATTERN.test(text)) return []
-  if (DESKTOP_APPLICATION_PATTERN.test(text) || DESKTOP_SURFACE_PATTERN.test(text)) {
+  if (!DESKTOP_ACTION_PATTERN.test(intentText)) return []
+  if (discussesImplementation && !DESKTOP_APPLICATION_PATTERN.test(intentText)) return []
+  if (DESKTOP_APPLICATION_PATTERN.test(intentText) || DESKTOP_SURFACE_PATTERN.test(intentText)) {
     return ['desktop-control']
   }
   return []
