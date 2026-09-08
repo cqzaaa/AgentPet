@@ -80,16 +80,38 @@
 .trajectory-workspace { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
 .trajectory-workspace.with-inspector { grid-template-columns: minmax(420px, 1fr) minmax(330px, 38%); }
 .trajectory-ledger { min-width: 0; min-height: 0; position: relative; overflow: hidden; }
-.trajectory-virtuoso { height: 100%; scrollbar-gutter: stable; }
-.trajectory-virtuoso::-webkit-scrollbar { width: 14px; }
-.trajectory-virtuoso::-webkit-scrollbar-track { border-left: 1px solid var(--trace-grid); background: color-mix(in srgb, var(--trace-blue) 7%, var(--bg-content)); }
-.trajectory-virtuoso::-webkit-scrollbar-thumb { min-height: 56px; border: 3px solid transparent; border-radius: 9px; background: color-mix(in srgb, var(--trace-blue) 52%, var(--text-muted)); background-clip: padding-box; }
-.trajectory-virtuoso::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--trace-blue) 72%, var(--text-muted)); background-clip: padding-box; }
+.trajectory-virtuoso { height: 100%; }
+.trajectory-virtuoso::-webkit-scrollbar,
+.trajectory-virtuoso [data-virtuoso-scroller="true"]::-webkit-scrollbar,
+.trajectory-virtuoso [data-testid="virtuoso-scroller"]::-webkit-scrollbar {
+  width: 10px;
+}
+.trajectory-virtuoso::-webkit-scrollbar-track,
+.trajectory-virtuoso [data-virtuoso-scroller="true"]::-webkit-scrollbar-track,
+.trajectory-virtuoso [data-testid="virtuoso-scroller"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+.trajectory-virtuoso::-webkit-scrollbar-thumb,
+.trajectory-virtuoso [data-virtuoso-scroller="true"]::-webkit-scrollbar-thumb,
+.trajectory-virtuoso [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--trace-blue) 55%, var(--text-muted));
+  background-clip: padding-box;
+}
+.trajectory-virtuoso::-webkit-scrollbar-thumb:hover,
+.trajectory-virtuoso [data-virtuoso-scroller="true"]::-webkit-scrollbar-thumb:hover,
+.trajectory-virtuoso [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb:hover {
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--trace-blue) 80%, var(--text-muted));
+  background-clip: padding-box;
+}
 .load-older { display: block; margin: 12px auto 8px; padding: 6px 12px; border: 1px solid var(--trace-grid); border-radius: 6px; color: var(--text-muted); background: var(--bg-card); font-size: 10.5px; cursor: pointer; }
 .load-older:hover { color: var(--trace-blue-soft); border-color: var(--border-menu-active); }
 .ledger-origin { padding: 10px 20px 4px 66px; color: var(--text-muted); font: 10px/1 "Cascadia Code", monospace; letter-spacing: .12em; }
 
-.trace-row-shell { position: relative; padding: 0 12px 0 20px; }
+.trace-row-shell { position: relative; padding: 0 18px 0 20px; }
 .trace-turn-rule { width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 0 0 38px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .trace-turn-rule svg { flex: none; color: var(--trace-blue-soft); transform: rotate(90deg); transition: transform .14s ease; }
 .trace-turn-rule.collapsed svg { transform: rotate(0deg); }
@@ -147,7 +169,7 @@
 .workflow-expand-icon { color: var(--text-muted); transition: transform .14s ease; }
 .delegate-workflow.expanded .workflow-expand-icon { transform: rotate(90deg); }
 .delegate-workflow-body { padding: 0 12px 18px 38px; }
-.workflow-flow { min-height: 116px; display: flex; align-items: center; gap: 6px; padding: 12px 6px 11px; overflow-x: auto; scrollbar-width: thin; }
+.workflow-flow { min-height: 116px; display: flex; align-items: center; gap: 6px; padding: 12px 6px 11px; overflow-x: auto; }
 .workflow-terminal { width: 46px; min-width: 46px; height: 28px; display: grid; place-items: center; border: 1px solid var(--trace-grid); border-radius: 14px; color: var(--text-muted); background: var(--bg-card); font: 700 8px/1 "Cascadia Code", Consolas, monospace; }
 .workflow-terminal.start { color: var(--trace-blue-soft); border-color: color-mix(in srgb, var(--trace-blue) 30%, var(--trace-grid)); }
 .workflow-terminal.end.status-completed { color: #37a67e; border-color: color-mix(in srgb, #37a67e 36%, var(--trace-grid)); }
@@ -353,8 +375,8 @@
 .json-tree-branch.frontend-consumed > .json-tree-toggle,
 .json-tree-branch.frontend-consumed > .json-tree-toggle .json-key { color: #ff5f67; }
 .json-tree .frontend-consumed { background: color-mix(in srgb, var(--trace-danger) 10%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--trace-danger) 78%, transparent); }
-.trajectory-inspector::-webkit-scrollbar { width: 7px; height: 7px; }
-.json-tree::-webkit-scrollbar { width: 11px; height: 11px; }
+.trajectory-inspector::-webkit-scrollbar { width: 5px; height: 5px; }
+.json-tree::-webkit-scrollbar { width: 5px; height: 5px; }
 .trajectory-inspector::-webkit-scrollbar-track, .json-tree::-webkit-scrollbar-track { border-radius: 8px; background: color-mix(in srgb, var(--trace-blue) 5%, transparent); }
 .trajectory-inspector::-webkit-scrollbar-thumb, .json-tree::-webkit-scrollbar-thumb { min-width: 32px; min-height: 32px; border: 2px solid transparent; border-radius: 8px; background: color-mix(in srgb, var(--trace-blue) 38%, transparent); background-clip: padding-box; }
 .trajectory-inspector::-webkit-scrollbar-thumb:hover, .json-tree::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--trace-blue) 62%, transparent); background-clip: padding-box; }

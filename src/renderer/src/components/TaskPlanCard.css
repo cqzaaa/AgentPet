@@ -656,7 +656,7 @@
   overflow-y: auto;
   padding: 0 14px 16px;
   overscroll-behavior: contain;
-}
+  }
 
 .task-plan-panel-scroll::-webkit-scrollbar {
   width: 4px;
@@ -867,7 +867,6 @@
   padding: 0;
   overflow-y: auto;
   list-style: none;
-  scrollbar-width: thin;
 }
 
 .task-plan-panel-artifacts a {
@@ -944,7 +943,7 @@
 .task-dag-header strong { color: var(--color-text-primary, #2c2f35); font-size: 12px; letter-spacing: .02em; }
 .task-dag-header small { font: 600 10px/1.2 Consolas, Monaco, monospace; color: #7067d9; }
 
-.task-dag-viewport { display: flex; align-items: center; justify-content: center; min-width: 100%; box-sizing: border-box; overflow: auto; scrollbar-width: thin; }
+.task-dag-viewport { display: flex; align-items: center; justify-content: center; min-width: 100%; box-sizing: border-box; overflow: auto; }
 .task-dag-canvas { position: relative; flex: none; margin: auto; }
 .task-dag-canvas > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .task-dag-canvas > svg path { fill: none; stroke: color-mix(in srgb, #7b8190 48%, transparent); stroke-width: 1.5; }

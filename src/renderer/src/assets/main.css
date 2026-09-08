@@ -1,22 +1,55 @@
 @import './base.css';
 
-/* 全局滚动条美化：与 Chat 页面保持一致 */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+/* ── 全局滚动条审美系统 (Ultra-thin Modern Minimalist Scrollbar) ── */
+:root {
+  --scrollbar-thumb: rgba(140, 150, 165, 0.22);
+  --scrollbar-thumb-hover: rgba(140, 150, 165, 0.42);
+  --scrollbar-thumb-active: rgba(140, 150, 165, 0.6);
 }
 
+/* 通配全应用所有滚动容器，宽度统一精简为 4px，彻底解决“太厚”问题 */
+*::-webkit-scrollbar,
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+*::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb {
-  background: rgba(96, 165, 250, 0.15);
-  border-radius: 4px;
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
 }
 
+*::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(96, 165, 250, 0.3);
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:active,
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+  background-clip: padding-box;
+}
+
+/* 彻底隐藏 Windows 原生上下箭头与交汇处黑白块 */
+*::-webkit-scrollbar-button,
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+*::-webkit-scrollbar-corner,
+::-webkit-scrollbar-corner {
+  background: transparent !important;
 }
 
 /* 覆写 base.css 中的 body，实现全透明窗口背景 */
@@ -200,6 +233,10 @@ body {
   --text-titlebar-tab-active: #bfdbfe;
   --bg-titlebar-btn-hover: rgba(255, 255, 255, 0.06);
   --bg-titlebar-close-hover: #ef4444;
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+  --scrollbar-thumb-active: rgba(255, 255, 255, 0.48);
 }
 
 .agent-window-container.light {
@@ -251,6 +288,10 @@ body {
   --text-titlebar-tab-active: #3b82f6;
   --bg-titlebar-btn-hover: rgba(0, 0, 0, 0.05);
   --bg-titlebar-close-hover: #ef4444;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.28);
+  --scrollbar-thumb-active: rgba(0, 0, 0, 0.44);
 }
 
 .agent-window-container {
@@ -907,33 +948,62 @@ body {
 .sidebar-recent-container {
   flex: 1 1 0;
   min-height: 0;
-  overflow-y: auto;
-  padding: 0 4px;
+  overflow: hidden;
+  position: relative;
+  padding: 0 2px 0 4px;
 }
 
 .agent-sidebar.collapsed .sidebar-recent-container {
   display: none;
 }
 
-.sidebar-recent-container::-webkit-scrollbar,
-.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar {
-  width: 3px;
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar,
+.sidebar-recent-container [data-virtuoso-scroller="true"]::-webkit-scrollbar,
+.sidebar-recent-container div::-webkit-scrollbar {
+  width: 4px;
 }
 
-.sidebar-recent-container::-webkit-scrollbar-track,
-.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-track {
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-track,
+.sidebar-recent-container [data-virtuoso-scroller="true"]::-webkit-scrollbar-track,
+.sidebar-recent-container div::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.sidebar-recent-container::-webkit-scrollbar-thumb,
-.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb {
-  background: rgba(96, 165, 250, 0.35);
-  border-radius: 2px;
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb,
+.sidebar-recent-container [data-virtuoso-scroller="true"]::-webkit-scrollbar-thumb,
+.sidebar-recent-container div::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
 }
 
-.sidebar-recent-container::-webkit-scrollbar-thumb:hover,
-.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb:hover {
-  background: rgba(96, 165, 250, 0.6);
+.sidebar-recent-container [data-testid="virtuoso-scroller"]::-webkit-scrollbar-thumb:hover,
+.sidebar-recent-container [data-virtuoso-scroller="true"]::-webkit-scrollbar-thumb:hover,
+.sidebar-recent-container div::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* 模型选择等下拉浮层超细精致滚动条 (4px 极窄，不贴边) */
+.model-popover-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.model-popover-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-popover-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.model-popover-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 /* 分组标题 */
@@ -9771,7 +9841,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 .collab-artifacts-header { display: flex; align-items: center; justify-content: space-between; }
 .collab-artifacts-header h3 { margin: 0; color: #475569; font-size: 10.5px; font-weight: 700; }
 .collab-artifacts-badge { padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, #3b82f6 12%, transparent); color: #2563eb; font-size: 9px; font-weight: 700; }
-.collab-artifacts-list { display: flex; flex-direction: column; gap: 6px; max-height: 185px; overflow-y: auto; padding: 4px 4px 6px; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--border-color, #cbd5e1) 70%, transparent) transparent; }
+.collab-artifacts-list { display: flex; flex-direction: column; gap: 6px; max-height: 185px; overflow-y: auto; padding: 4px 4px 6px; box-sizing: border-box; }
 .collab-artifacts-list::-webkit-scrollbar { width: 4px; }
 .collab-artifacts-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border-color, #cbd5e1) 70%, transparent); border-radius: 4px; }
 .collab-artifacts-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
@@ -9797,7 +9867,6 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   color: #1e293b;
   font-size: 11.5px;
   line-height: 1.65;
-  scrollbar-width: thin;
 }
 
 .collab-node-result-content > :first-child { margin-top: 0; }

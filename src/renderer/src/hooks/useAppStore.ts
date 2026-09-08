@@ -64,6 +64,7 @@ function compareMessagesChronologically(left: any, right: any): number {
 
 // ── 类型定义 ─────────────────────────────────────────────────
 export interface CronLog {
+  taskRunId?: string
   id: string
   time: string
   status: 'success' | 'failed' | 'running'
@@ -72,6 +73,8 @@ export interface CronLog {
 }
 
 export interface CronTask {
+  kind?: 'prompt' | 'workflow'
+  workflowId?: string
   id: string
   name: string
   interval: number
@@ -1021,6 +1024,10 @@ export function useAppStore() {
       console.error('解析 URL 定位参数失败', e)
     }
   }, [])
+
+  useEffect(() => window.api.onWorkflowCronUpdated(() => {
+    void window.api.getCronTasks().then(tasks => { if (tasks) setCronTasks(tasks) }).catch(console.error)
+  }), [])
 
   // 监听主进程的大模型定时任务更新通知
   useEffect(() => {

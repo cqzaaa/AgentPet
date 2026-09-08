@@ -1,6 +1,7 @@
 import React from 'react'
 import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
+import type { WorkflowDefinition } from '../../../preload/workflow-types'
 import { ChatMessageItem, MarkdownText } from '../components/ChatMessageItem'
 import {
   Brain,
@@ -115,9 +116,18 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [cronHours, setCronHours] = React.useState<number>(0)
   const [cronMinutes, setCronMinutes] = React.useState<number>(1)
   const [cronSeconds, setCronSeconds] = React.useState<number>(0)
-
   const [cronAction, setCronAction] = React.useState('')
+  const [cronKind, setCronKind] = React.useState<'prompt' | 'workflow'>('prompt')
+  const [cronWorkflowId, setCronWorkflowId] = React.useState('')
+  const [workflowChoices, setWorkflowChoices] = React.useState<WorkflowDefinition[]>([])
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (agentSubTab !== 'cron') return
+    void window.api.listWorkflows()
+      .then(items => setWorkflowChoices(items || []))
+      .catch(error => console.error('加载工作流失败:', error))
+  }, [agentSubTab])
 
   const formatInterval = (totalSeconds: number) => {
     const d = Math.floor(totalSeconds / (3600 * 24))
@@ -395,6 +405,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   setCronMinutes(1)
                   setCronSeconds(0)
                   setCronAction('')
+                  setCronKind('prompt')
+                  setCronWorkflowId('')
                   setShowCronModal(true)
                 }}
                 style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -409,6 +421,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 <thead>
                   <tr>
                     <th>任务名称</th>
+                    <th>类型</th>
                     <th>执行间隔</th>
                     <th>最近触发时间</th>
                     <th>触发次数</th>
@@ -420,6 +433,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   {cronTasks.map(task => (
                     <tr key={task.id}>
                       <td style={{ fontWeight: 600 }}>{task.name}</td>
+                      <td><span className="cron-badge-trigger">{task.kind === 'workflow' ? '工作流' : '提示词'}</span></td>
                       <td>{formatInterval(task.interval)}</td>
                       <td>{task.lastTriggered}</td>
                       <td><span className="cron-badge-trigger">{task.triggerCount} 次</span></td>
@@ -487,6 +501,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 setCronMinutes(Math.floor((task.interval % 3600) / 60))
                                 setCronSeconds(task.interval % 60)
                                 setCronAction(task.action || '')
+                                setCronKind(task.kind || 'prompt')
+                                setCronWorkflowId(task.workflowId || '')
                                 setShowCronModal(true)
                                 setOpenDropdownId(null)
                               }}
@@ -578,7 +594,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
                       <strong>触发周期</strong>：每 {selectedTaskForLog.interval} 秒一次 | <strong>当前累计触发</strong>：{selectedTaskForLog.triggerCount} 次
                       <br />
-                      <strong>动作指令</strong>：<code style={{ background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '4px' }}>{selectedTaskForLog.action || '无'}</code>
+                      <strong>{selectedTaskForLog.kind === 'workflow' ? '工作流' : '动作指令'}</strong>：<code style={{ background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '4px' }}>{selectedTaskForLog.kind === 'workflow' ? workflowChoices.find(item => item.id === selectedTaskForLog.workflowId)?.title || '工作流已不存在' : selectedTaskForLog.action || '无'}</code>
                     </div>
 
                     <h4 style={{ margin: '16px 0 8px 0', fontSize: '13px', fontWeight: '600' }}>
@@ -798,17 +814,31 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         </div>
                       </div>
                     </div>
-                    <div>
+                    {editingCron?.name !== '系统画像提纯与经验沉淀' && <div style={{ marginBottom: '12px' }}>
+                      <label className="mcp-form-label" htmlFor="cron-task-kind">任务类型</label>
+                      <select id="cron-task-kind" className="mcp-input-fancy" value={cronKind} onChange={event => setCronKind(event.target.value as 'prompt' | 'workflow')}>
+                        <option value="prompt">提示词任务</option>
+                        <option value="workflow">工作流</option>
+                      </select>
+                    </div>}
+                    {cronKind === 'workflow' && editingCron?.name !== '系统画像提纯与经验沉淀' ? <div>
+                      <label className="mcp-form-label" htmlFor="cron-workflow-id">选择工作流</label>
+                      <select id="cron-workflow-id" className="mcp-input-fancy" value={cronWorkflowId} onChange={event => setCronWorkflowId(event.target.value)}>
+                        <option value="">请选择已保存的工作流</option>
+                        {workflowChoices.map(workflow => <option key={workflow.id} value={workflow.id}>{workflow.title}</option>)}
+                      </select>
+                      {!workflowChoices.length && <div style={{ marginTop: '6px', color: 'var(--text-muted)', fontSize: '11px' }}>请先在“工作流”页面保存一个流程。</div>}
+                    </div> : <div>
                       <label className="mcp-form-label">动作指令 / 提示词</label>
                       <textarea
-                        className="mcp-input-fancy"
-                        style={{ minHeight: '80px', resize: 'vertical', ...(editingCron?.name === '系统画像提纯与经验沉淀' ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                        className="mcp-input-fancy resize-none"
+                        style={{ minHeight: '80px', ...(editingCron?.name === '系统画像提纯与经验沉淀' ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
                         placeholder="给助手的执行指令，例如：检查当前系统 CPU 状态"
                         value={cronAction}
                         onChange={e => setCronAction(e.target.value)}
                         disabled={editingCron?.name === '系统画像提纯与经验沉淀'}
                       />
-                    </div>
+                    </div>}
                   </div>
                   <div className="mcp-modal-footer">
                     <button
@@ -827,8 +857,12 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           showToast('请填写任务名称', 'error')
                           return
                         }
-                        if (!cronAction.trim()) {
+                        if (cronKind === 'prompt' && !cronAction.trim()) {
                           showToast('请填写动作指令/提示词', 'error')
+                          return
+                        }
+                        if (cronKind === 'workflow' && !cronWorkflowId) {
+                          showToast('请选择要执行的工作流', 'error')
                           return
                         }
                         const totalInterval = cronHours * 3600 + cronMinutes * 60 + cronSeconds
@@ -841,13 +875,17 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           await handleEditCronTask(editingCron.id, {
                             name: cronName.trim(),
                             interval: totalInterval,
-                            action: cronAction.trim()
+                            kind: cronKind,
+                            workflowId: cronKind === 'workflow' ? cronWorkflowId : undefined,
+                            action: cronKind === 'prompt' ? cronAction.trim() : undefined
                           })
                         } else {
                           await handleAddCronTask({
                             name: cronName.trim(),
                             interval: totalInterval,
-                            action: cronAction.trim(),
+                            kind: cronKind,
+                            workflowId: cronKind === 'workflow' ? cronWorkflowId : undefined,
+                            action: cronKind === 'prompt' ? cronAction.trim() : undefined,
                             isActive: true
                           })
                         }
@@ -1649,7 +1687,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
 
               {isEditingProfile ? (
                 <textarea
-                  className="mcp-input-fancy"
+                  className="mcp-input-fancy resize-none"
                   style={{
                     flex: 1,
                     width: '100%',

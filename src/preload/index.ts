@@ -248,6 +248,14 @@ const api = {
   deleteAgent: (agentId: string): Promise<boolean> => ipcRenderer.invoke('api:delete-agent', agentId),
   runAgentPrompt: (request: { agentId: string; prompt: string; cwd: string; model?: string }): Promise<any> =>
     ipcRenderer.invoke('api:run-agent-prompt', request),
+  listWorkflows: () => ipcRenderer.invoke('api:list-workflows'),
+  onWorkflowCronUpdated: (callback: () => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('api:workflow-cron-updated', handler)
+    return () => ipcRenderer.removeListener('api:workflow-cron-updated', handler)
+  },
+  saveWorkflow: (input: import('./workflow-types').WorkflowDraft) => ipcRenderer.invoke('api:save-workflow', input),
+  runWorkflow: (id: string, sessionId?: string) => ipcRenderer.invoke('api:run-workflow', id, sessionId),
   startAgentCollaboration: (input: any): Promise<any> =>
     ipcRenderer.invoke('api:start-agent-collaboration', input),
   onAgentEvent: (callback: (data: any) => void): (() => void) => {

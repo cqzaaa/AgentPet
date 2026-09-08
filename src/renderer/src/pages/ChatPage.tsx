@@ -708,14 +708,14 @@ function ChatPageImpl(): React.JSX.Element {
             autoFocus
           />
         )}
-        <div
+        <div className="model-popover-list"
           style={{
             maxHeight: isModelOverflow ? '220px' : 'none',
             overflowY: isModelOverflow ? 'auto' : 'visible',
             display: 'flex',
             flexDirection: 'column',
             gap: '4px',
-            padding: '2px 0'
+            padding: '2px 2px 2px 0'
           }}
         >
           {filteredModels.length === 0 ? (
@@ -1379,7 +1379,7 @@ function ChatPageImpl(): React.JSX.Element {
           )}
 
           <textarea
-            className="chat-textarea-field"
+            className="chat-textarea-field resize-none"
             rows={2}
             placeholder={
               estimatedContextTokens >= contextLimit
@@ -1967,7 +1967,7 @@ function ChatPageImpl(): React.JSX.Element {
               ) : (
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>PEM 私钥内容 (Private Key)</label>
-                  <textarea rows={4} className="form-input" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px', resize: 'vertical' }} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." value={sshForm.privateKey} onChange={e => setSshForm(prev => ({ ...prev, privateKey: e.target.value }))} />
+                  <textarea rows={4} className="form-input resize-none" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px' }} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." value={sshForm.privateKey} onChange={e => setSshForm(prev => ({ ...prev, privateKey: e.target.value }))} />
                 </div>
               )}
             </div>

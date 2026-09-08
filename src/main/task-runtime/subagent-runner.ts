@@ -41,6 +41,7 @@ export class SubagentRunner {
         model: input.model,
         dependencies: input.dependencies,
         acceptanceCriteria: input.acceptanceCriteria
+        ,control: input.control
       }))
     })
     const now = Date.now()
@@ -95,6 +96,7 @@ export class SubagentRunner {
       if (seen.has(id)) id = `${id}-${index + 1}`
       seen.add(id)
       return {
+        control: input.control,
         id,
         title: String(input.title || '').trim().slice(0, 180),
         prompt: String(input.prompt || '').trim().slice(0, 8000),

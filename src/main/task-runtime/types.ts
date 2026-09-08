@@ -1,13 +1,14 @@
 export const TASK_RUN_STATUSES = ['pending', 'running', 'paused', 'completed', 'failed', 'blocked', 'cancelled'] as const
 export type TaskRunStatus = typeof TASK_RUN_STATUSES[number]
 
-export const TASK_STEP_STATUSES = ['pending', 'running', 'paused', 'completed', 'failed', 'blocked', 'cancelled'] as const
+export const TASK_STEP_STATUSES = ['pending', 'running', 'paused', 'completed', 'skipped', 'failed', 'blocked', 'cancelled'] as const
 export type TaskStepStatus = typeof TASK_STEP_STATUSES[number]
 
 export const SUBAGENT_ROLES = ['general', 'researcher', 'coder', 'reviewer'] as const
 export type SubagentRole = typeof SUBAGENT_ROLES[number]
 
 export interface TaskPlanInputStep {
+  control?: import('../../preload/workflow-types').WorkflowControl
   id: string
   title: string
   status: 'pending' | 'in_progress' | 'completed' | 'blocked'
@@ -103,6 +104,7 @@ export interface SubagentTask {
 }
 
 export interface DelegateTaskInput {
+  control?: import('../../preload/workflow-types').WorkflowControl
   id: string
   title: string
   prompt: string

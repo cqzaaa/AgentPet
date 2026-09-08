@@ -38,6 +38,10 @@ import { AgentExecutor } from './agent-runtime'
 import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { ModelRuntimeFactory } from './model-runtime'
 import { taskRunner } from './task-runtime/task-runner'
+import { workflowStore } from './task-runtime/workflow-store'
+import { WorkflowCron } from './task-runtime/workflow-cron'
+import { validateWorkflow } from './task-runtime/workflow-validation'
+import { executeRpaWorkflowStep } from './task-runtime/workflow-rpa'
 import { subagentRunner } from './task-runtime/subagent-runner'
 import { extractExecutionResult } from './task-runtime/prompt-builder'
 import { getSubagentToolNames, nextWithIdleTimeout, SUBAGENT_IDLE_TIMEOUT_MS } from './task-runtime/subagent-execution'
@@ -1342,6 +1346,27 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  ipcMain.handle('api:list-workflows', () => workflowStore.list())
+  ipcMain.handle('api:save-workflow', (_event, input) => workflowStore.save(input))
+  ipcMain.handle('api:run-workflow', (_event, id: string, sessionId?: string) => runSavedWorkflow(id, sessionId))
+  async function runSavedWorkflow(id: string, sessionId?: string): Promise<{ taskRunId: string; status: string }> {
+    const workflow = (await workflowStore.list()).find(item => item.id === id)
+    if (!workflow) throw new Error('工作流已不存在，请刷新列表')
+    validateWorkflow(workflow)
+    return startAgentCollaboration({
+      ...workflow, sessionId: sessionId || `workflow:${id}:${randomUUID()}`,
+      tasks: workflow.nodes.map(node => ({
+        id: node.id, title: node.data.title, prompt: node.data.prompt || node.data.title,
+        agentId: node.data.agentId, model: node.data.model,
+        dependencies: workflow.edges.filter(edge => edge.target === node.id).map(edge => edge.source),
+        control: { ...node.data.control, kind: node.data.control?.kind || 'agent', branches: Object.fromEntries(workflow.edges.filter(edge => edge.target === node.id && ['true', 'false'].includes(edge.sourceHandle || '')).map(edge => [edge.source, edge.sourceHandle])) }
+      }))
+    })
+  }
+  const workflowCron = new WorkflowCron(id => runSavedWorkflow(id), () => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('api:workflow-cron-updated')
+  })
+  app.on('before-quit', () => workflowCron.stop())
   ipcMain.handle('api:list-agents', () => externalAgentManager.list())
   ipcMain.handle('api:agent-model-status', (_event, agentId: string, cwd?: string, model?: string) => externalAgentManager.getModelStatus(agentId, cwd, model))
   ipcMain.handle('api:login-agent', (_event, agentId: string) => externalAgentManager.login(agentId))
@@ -1360,7 +1385,8 @@ app.whenReady().then(() => {
       }
     })
   )
-  ipcMain.handle('api:start-agent-collaboration', async (_event, input) => {
+  ipcMain.handle('api:start-agent-collaboration', (_event, input) => startAgentCollaboration(input))
+  async function startAgentCollaboration(input: any): Promise<{ taskRunId: string; status: string }> {
     const tasks = Array.isArray(input?.tasks) ? input.tasks : []
     const sessionId = String(input?.sessionId || 'default')
     const title = String(input?.title || '多 Agent 协作').trim().slice(0, 120)
@@ -1418,7 +1444,7 @@ app.whenReady().then(() => {
         if (!started) rejectStart(error)
       })
     })
-  })
+  }
 
   const taskRecovery = taskRunner.recoverInterruptedRuns().catch((error) => {
     console.error('[TaskRunner] Failed to restore interrupted task state', error)
@@ -2863,8 +2889,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('api:save-cron-tasks', async (_, tasks: any[]) => {
     try {
-      const cronPath = join(getActiveStorageDir(), 'cron_tasks.json')
-      await fs.promises.writeFile(cronPath, JSON.stringify(tasks, null, 2), 'utf-8')
+      await workflowCron.save(tasks)
       return true
     } catch (e) {
       console.error('保存 cron_tasks.json 失败', e)
@@ -4803,6 +4828,10 @@ app.whenReady().then(() => {
 
   function configureTaskExecutor(): void {
     taskRunner.setExecutor(async (request) => {
+      if (request.step.control?.kind === 'rpa') {
+        if (!agentWindow || agentWindow.isDestroyed()) throw new Error('RPA 执行需要打开 AgentPet 窗口')
+        return executeRpaWorkflowStep(request, agentWindow.webContents)
+      }
       const selectedAgentId = request.step.agentId || 'agentpet'
       if (selectedAgentId !== 'agentpet') {
         await request.reportProgress(`正在由 ${selectedAgentId} 执行`)
@@ -5032,6 +5061,7 @@ app.whenReady().then(() => {
   }
 
   configureTaskExecutor()
+  workflowCron.start()
 
   async function callLlmInternal(
     config: any,

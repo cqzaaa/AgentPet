@@ -765,8 +765,8 @@ export function RpaPage(): React.JSX.Element {
             <div className="attr-group">
               <label className="attr-label">Prompt 提示词模板 (支持 {"{{var}}"} 插值)</label>
               <textarea
-                className="attr-input"
-                style={{ height: '120px', resize: 'vertical' }}
+                className="attr-input resize-none"
+                style={{ height: '120px' }}
                 value={selectedNode.data?.prompt || ''}
                 onChange={(e) => handleAttrChange('prompt', e.target.value)}
               />
@@ -954,53 +954,56 @@ export function RpaPage(): React.JSX.Element {
     return (
       <div className="rpa-container">
         <div className="rpa-list-view">
-          <div className="rpa-command-hero">
-            <div className="rpa-hero-copy">
-              <div className="rpa-kicker">Hybrid automation console</div>
-              <h1>RPA 自动化任务清单</h1>
-              <p>把浏览器 DOM、桌面坐标操作、视觉定位和凭据注入编排成可审计的桌面流程。</p>
+          <div className="rpa-list-header">
+            <div className="rpa-list-title">
+              录制任务 <span>{tasks.length} 个</span>
             </div>
-
-            <div className="rpa-hero-actions">
-              <div className="rpa-hero-metric">
-                <strong>{tasks.length}</strong>
-                <span>工作流</span>
-              </div>
-              <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
-                <Plus size={17} strokeWidth={2} aria-hidden="true" />
-                新建 RPA 任务
-              </button>
-            </div>
+            <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
+              <Plus size={17} strokeWidth={2} aria-hidden="true" />
+              新建录制
+            </button>
           </div>
 
           <div className="rpa-task-grid">
             {tasks.map(task => (
-              <div key={task.id} className="glass-panel rpa-task-card" onClick={() => selectTask(task.id)}>
-                <div className="rpa-card-rail" aria-hidden="true">
-                  <span className="rpa-card-rail-node browser" />
-                  <span className="rpa-card-rail-line" />
-                  <span className="rpa-card-rail-node desktop" />
+              <div key={task.id} className="rpa-task-card" onClick={() => selectTask(task.id)}>
+                <div className="rpa-card-header">
+                  <div className="rpa-card-title-wrap">
+                    <span className="rpa-card-name" title={task.name}>{task.name}</span>
+                  </div>
+                  <div className="rpa-card-header-right">
+                    <span className={`status-badge ${task.lastRunStatus || 'idle'}`}>
+                      <span className="status-dot" aria-hidden="true" />
+                      {statusLabels[task.lastRunStatus || 'idle'] || task.lastRunStatus}
+                    </span>
+                    <div className="rpa-card-actions" onClick={e => e.stopPropagation()}>
+                      <button
+                        className="btn-card-action danger"
+                        onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }}
+                        title="删除任务"
+                      >
+                        <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="rpa-card-actions" onClick={e => e.stopPropagation()}>
-                  <button className="btn-card-action danger" onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }} title="删除任务">
-                    <Trash2 size={15} strokeWidth={2} aria-hidden="true" />
-                  </button>
+
+                <div className={`rpa-card-desc ${!task.description ? 'empty' : ''}`}>
+                  {task.description || '暂无描述'}
                 </div>
-                <div className="rpa-card-topline">
-                  <span className={`status-badge ${task.lastRunStatus || 'idle'}`}>{statusLabels[task.lastRunStatus || 'idle'] || task.lastRunStatus}</span>
+
+                <div className="rpa-card-footer">
+                  <div className="rpa-task-policy" onClick={event => event.stopPropagation()}>
+                    <button
+                      className={`rpa-task-state ${task.enabled === false ? 'off' : task.lastRunStatus === 'failed' ? 'error' : 'on'}`}
+                      onClick={() => updateTask(task.id, { enabled: task.enabled === false })}
+                      title="切换任务是否允许自动执行"
+                    >
+                      {task.enabled === false ? '关闭' : task.lastRunStatus === 'failed' ? '异常' : '允许'}
+                    </button>
+                    <span className="rpa-task-schedule">{scheduleLabel(task)}</span>
+                  </div>
                   <span className="rpa-card-date">{task.createdAt?.split(' ')[0] || '-'}</span>
-                </div>
-                <div className="rpa-card-name">{task.name}</div>
-                <div className="rpa-card-desc">{task.description || '还没有说明。建议写清触发场景、输入来源和期望结果。'}</div>
-                <div className="rpa-task-policy" onClick={event => event.stopPropagation()}>
-                  <button
-                    className={`rpa-task-state ${task.enabled === false ? 'off' : task.lastRunStatus === 'failed' ? 'error' : 'on'}`}
-                    onClick={() => updateTask(task.id, { enabled: task.enabled === false })}
-                    title="切换任务是否允许自动执行"
-                  >
-                    {task.enabled === false ? '关闭' : task.lastRunStatus === 'failed' ? '异常' : '允许'}
-                  </button>
-                  <span>{scheduleLabel(task)}</span>
                 </div>
               </div>
             ))}

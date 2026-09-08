@@ -31,7 +31,7 @@ export function useCronScheduler({
       setCronTasks(previous => {
         let changed = false
         const next = previous.map(task => {
-          if (!task.isActive) return task
+          if (!task.isActive || task.kind === 'workflow') return task
           const currentElapsed = (elapsedTimesRef.current[task.id] || 0) + 1
           if (currentElapsed < task.interval) {
             elapsedTimesRef.current[task.id] = currentElapsed

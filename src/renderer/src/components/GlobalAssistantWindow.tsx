@@ -430,6 +430,7 @@ export function GlobalAssistantWindow(): React.JSX.Element {
         <div className="ga-body">
           <div className="ga-composer">
             <textarea
+              className="resize-none"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               placeholder="输入问题或任务；定时查看可直接写在这里…"

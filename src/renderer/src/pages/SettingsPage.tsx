@@ -1,6 +1,7 @@
 import React from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { ModelConfigPanel } from '../components/ModelConfigPanel'
+import { AgentSettingsPanel } from '../components/AgentSettingsPanel'
 import {
   AudioLines,
   Cat,
@@ -112,6 +113,9 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
         <div className={`sub-tab-item ${settingsSubTab === 'keys' ? 'active' : ''}`} onClick={() => setSettingsSubTab('keys')}>
           模型配置
         </div>
+        <div className={`sub-tab-item ${settingsSubTab === 'agents' ? 'active' : ''}`} onClick={() => setSettingsSubTab('agents')}>
+          Agents
+        </div>
         <div className={`sub-tab-item ${settingsSubTab === 'storage' ? 'active' : ''}`} onClick={() => setSettingsSubTab('storage')}>
           本地存储
         </div>
@@ -124,6 +128,8 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
       <div className="sub-content-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* ── 模型配置 ── */}
         {settingsSubTab === 'keys' && <ModelConfigPanel store={store} />}
+        {/* ── Agents 配置 ── */}
+        {settingsSubTab === 'agents' && <AgentSettingsPanel showToast={showToast} />}
         {/* ── 本地存储 ── */}
         {settingsSubTab === 'storage' && (
           <div className="settings-sub-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>

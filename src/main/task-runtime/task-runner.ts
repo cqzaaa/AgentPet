@@ -9,6 +9,7 @@ import type {
 import { TaskStore } from './task-store'
 import { buildTaskStepPrompt } from './prompt-builder'
 import { getReadyPendingSteps, validateTaskDependencies } from './task-scheduler'
+import { evaluateWorkflowCondition } from './workflow-validation'
 
 export type TaskControlAction = 'pause' | 'resume' | 'cancel'
 export type TaskRunUpdate = {
@@ -302,22 +303,80 @@ export class TaskRunner {
 
   private async executeStep(run: TaskRun, step: TaskStep, allSteps: TaskStep[], signal: AbortSignal): Promise<void> {
     if (!this.executor || signal.aborted) return
+    const parents = allSteps.filter(parent => (step.dependencies || []).includes(parent.id))
+    const inactiveParent = parents.some(
+      parent =>
+        parent.status === 'skipped' ||
+        (step.control?.branches?.[parent.id] &&
+          parent.resultSummary !== step.control.branches[parent.id])
+    )
+    if (inactiveParent) {
+      await this.store.setStepStatus(run.id, step.id, 'skipped', {
+        detail: '条件未选中此分支',
+        resultSummary: ''
+      })
+      await this.publish(run.id, 'step_skipped', step.id)
+      return
+    }
     await this.store.setStepStatus(run.id, step.id, 'running', { detail: 'Agent is working on this step.' })
     await this.publish(run.id, 'step_running', step.id)
     try {
       const completedSteps = allSteps.filter(candidate => candidate.status === 'completed')
-      const result: TaskStepExecutionResult = await this.executor({
-        run,
-        step,
-        completedSteps,
-        prompt: buildTaskStepPrompt(run, step, completedSteps),
-        signal,
-        reportProgress: async (detail: string) => {
-          if (signal.aborted) return
-          await this.store.setStepStatus(run.id, step.id, 'running', { detail })
-          await this.publish(run.id, 'step_progress', step.id)
+      let result: TaskStepExecutionResult = { resultSummary: '' }
+      const count = Math.max(1, Math.min(20, step.control?.repeat || 1))
+      // Each successful iteration is checkpointed; resume does not repeat completed side effects.
+      const snapshot = count > 1 ? await this.store.getRun(run.id) : null
+      const iterations =
+        snapshot?.events.filter(
+          event => event.taskStepId === step.id && event.type === 'workflow_iteration'
+        ) || []
+      let completedIterations = iterations.length
+      if (iterations.length) {
+        result = iterations[iterations.length - 1].payload
+          ?.result as unknown as TaskStepExecutionResult
+      }
+      while (completedIterations < count) {
+        if (signal.aborted) throw new Error('TaskExecutionAborted')
+        if (step.control?.kind === 'condition') {
+          const condition = step.control.condition
+          if (!condition) throw new Error('条件配置缺失')
+          const source = completedSteps.find(parent => parent.id === condition.source)
+          if (!source) throw new Error('条件来源未执行，无法判断')
+          result = {
+            resultSummary: String(
+              evaluateWorkflowCondition(condition, source.resultSummary || '')
+            )
+          }
+        } else {
+          result = await this.executor({
+            run,
+            step,
+            completedSteps,
+            prompt:
+              buildTaskStepPrompt(run, step, completedSteps) +
+              (count > 1
+                ? `\n\n当前是第 ${completedIterations + 1}/${count} 轮。上一轮输出：${result.resultSummary || '无'}`
+                : ''),
+            signal,
+            reportProgress: async (detail: string) => {
+              if (signal.aborted) return
+              await this.store.setStepStatus(run.id, step.id, 'running', { detail })
+              await this.publish(run.id, 'step_progress', step.id)
+            }
+          })
         }
-      })
+        completedIterations++
+        if (count > 1) {
+          await this.store.appendEvent(run.id, step.id, 'workflow_iteration', {
+            iteration: completedIterations,
+            result
+          })
+          await this.publish(run.id, 'workflow_iteration', step.id, {
+            iteration: completedIterations,
+            count
+          })
+        }
+      }
       if (signal.aborted) throw new Error('TaskExecutionAborted')
       await this.store.setStepStatus(run.id, step.id, 'completed', {
         detail: result.resultSummary,
@@ -336,7 +395,7 @@ export class TaskRunner {
       const message = error instanceof Error ? error.message : String(error)
       const retryCount = step.retryCount || 0
       const transientExternalFailure = TRANSIENT_EXTERNAL_AGENT_ERROR.test(message)
-      const maxRetries = transientExternalFailure ? 4 : 2
+      const maxRetries = step.control?.kind === 'rpa' || step.control?.kind === 'condition' ? 0 : transientExternalFailure ? 4 : 2
       if (retryCount < maxRetries) {
         const retryDelayMs = transientExternalFailure ? Math.min(15_000, 2_000 * (2 ** retryCount)) : 0
         await this.store.setStepStatus(run.id, step.id, 'pending', {

@@ -135,6 +135,10 @@ declare global {
       upsertAgent: (input: any) => Promise<any>
       deleteAgent: (agentId: string) => Promise<boolean>
       runAgentPrompt: (request: { agentId: string; prompt: string; cwd: string; model?: string }) => Promise<any>
+      listWorkflows: () => Promise<import('./workflow-types').WorkflowDefinition[]>
+      onWorkflowCronUpdated: (callback: () => void) => () => void
+      saveWorkflow: (input: import('./workflow-types').WorkflowDraft) => Promise<import('./workflow-types').WorkflowDefinition>
+      runWorkflow: (id: string, sessionId?: string) => Promise<{ taskRunId: string; status: string }>
       startAgentCollaboration: (input: any) => Promise<any>
       onAgentEvent: (callback: (data: any) => void) => () => void
       getTaskRun: (taskRunId: string) => Promise<any | null>

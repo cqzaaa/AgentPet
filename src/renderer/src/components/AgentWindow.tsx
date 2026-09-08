@@ -7,7 +7,6 @@ import { ChatControllerProvider } from '../hooks/useChatController'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import {
   CheckCircle2,
-  Bot,
   ChevronDown,
   ChevronRight,
   CircleX,
@@ -34,11 +33,9 @@ import {
   Workflow,
   X
 } from 'lucide-react'
-import { useRpaStore } from '../rpa/useRpaStore'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
 import { normalizeSearchCitations } from '../utils/helpers'
-import { AgentSettingsPanel } from './AgentSettingsPanel'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -47,7 +44,7 @@ const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => (
 const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
 const TrajectoryPage = lazy(() => import('../pages/TrajectoryPage').then(module => ({ default: module.TrajectoryPage })))
 const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(module => ({ default: module.KnowledgeBasePage })))
-const RpaPage = lazy(() => import('../rpa/RpaPage').then(module => ({ default: module.RpaPage })))
+const WorkflowPage = lazy(() => import('../pages/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
 const SkillHubPage = lazy(() => import('../pages/SkillHubPage').then(module => ({ default: module.SkillHubPage })))
 const FilePreviewPanel = lazy(() =>
   import('./FilePreviewPanel').then(module => ({ default: module.FilePreviewPanel }))
@@ -57,11 +54,11 @@ function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
 }
 
-type FunctionPageId = 'control' | 'agents' | 'agent' | 'skillhub' | 'knowledge' | 'rpa' | 'logs' | 'settings'
+type FunctionPageId = 'control' | 'agents' | 'agent' | 'skillhub' | 'knowledge' | 'workflow' | 'logs' | 'settings'
 
 type WorkspaceTab =
   | { key: string; kind: 'session'; sessionId: string }
-  | { key: string; kind: 'page'; pageId: FunctionPageId; detailId?: string }
+  | { key: string; kind: 'page'; pageId: FunctionPageId }
 
 const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
   agents: 'Agents',
@@ -69,7 +66,7 @@ const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
   control: '订阅频道',
   agent: '代理',
   knowledge: '知识库',
-  rpa: 'RPA 任务',
+  workflow: '工作流',
   logs: '日志',
   settings: '设置'
 }
@@ -83,6 +80,7 @@ const AGENT_SUB_TAB_LABELS: Record<string, string> = {
 
 const SETTINGS_SUB_TAB_LABELS: Record<string, string> = {
   keys: '模型配置',
+  agents: 'Agents',
   storage: '存储管理',
   avatar: '虚拟体'
 }
@@ -168,16 +166,9 @@ export function AgentWindow(): React.JSX.Element {
   const openTabs = useAppStoreRaw(state => state.openTabs)
   const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
   const isSessionsInitialized = useAppStoreRaw(state => state.isSessionsInitialized)
-  const rpaTasks = useRpaStore(state => state.tasks)
-  const activeRpaTaskId = useRpaStore(state => state.activeTaskId)
-  const selectRpaTask = useRpaStore(state => state.selectTask)
   const sessionsById = useMemo(
     () => new Map(sessions.map(session => [session.id, session])),
     [sessions]
-  )
-  const rpaTasksById = useMemo(
-    () => new Map(rpaTasks.map(task => [task.id, task])),
-    [rpaTasks]
   )
   const visibleFileCount = useMemo(
     () => new Set([...generatedFiles, ...openTabs].map(file => file.path)).size,
@@ -329,9 +320,6 @@ export function AgentWindow(): React.JSX.Element {
     if (tab.kind === 'session') {
       return sessionsById.get(tab.sessionId)?.name || '新会话'
     }
-    if (tab.pageId === 'rpa' && tab.detailId) {
-      return `RPA-${rpaTasksById.get(tab.detailId)?.name || '未知任务'}`
-    }
     if (tab.pageId === 'agent') {
       return `代理-${AGENT_SUB_TAB_LABELS[agentSubTab] || '技能加入'}`
     }
@@ -367,9 +355,11 @@ export function AgentWindow(): React.JSX.Element {
 
   const activeWorkspaceKey = activeTab === 'chat'
     ? `session:${activeSessionId}`
-    : activeTab === 'rpa' && activeRpaTaskId
-      ? `page:rpa:${activeRpaTaskId}`
-      : `page:${activeTab}`
+    : `page:${activeTab}`
+
+  useEffect(() => {
+    if (activeTab === 'rpa') setActiveTab('workflow')
+  }, [activeTab, setActiveTab])
 
   useEffect(() => {
     if (activeTab === 'chat' && activeSessionId && sessionsById.has(activeSessionId)) {
@@ -382,13 +372,12 @@ export function AgentWindow(): React.JSX.Element {
 
   useEffect(() => {
     if (isFunctionPage(activeTab)) {
-      const detailId = activeTab === 'rpa' ? activeRpaTaskId || undefined : undefined
-      const key = detailId ? `page:${activeTab}:${detailId}` : `page:${activeTab}`
+      const key = `page:${activeTab}`
       setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
         ? prev
-        : [...prev, { key, kind: 'page', pageId: activeTab, detailId }])
+        : [...prev, { key, kind: 'page', pageId: activeTab }])
     }
-  }, [activeRpaTaskId, activeTab])
+  }, [activeTab])
 
   useEffect(() => {
     const validIds = new Set(sessions.map(s => s.id))
@@ -402,8 +391,6 @@ export function AgentWindow(): React.JSX.Element {
     if (tab.kind === 'session') {
       setActiveSessionId(tab.sessionId)
       setActiveTab('chat')
-    } else if (tab.pageId === 'rpa') {
-      void selectRpaTask(tab.detailId || null).then(() => setActiveTab('rpa'))
     } else {
       setActiveTab(tab.pageId)
     }
@@ -534,13 +521,13 @@ export function AgentWindow(): React.JSX.Element {
         </div>
       ); break
       case 'control': page = <ControlPage store={store} />; break
-      case 'agents': page = <AgentSettingsPanel showToast={store.showToast} />; break
+      case 'agents': page = <SettingsPage store={{ ...store, settingsSubTab: 'agents' }} />; break
       case 'agent': page = <AgentPage store={store} />; break
       case 'skillhub': page = <SkillHubPage />; break
       case 'knowledge': page = <KnowledgeBasePage />; break
       case 'logs': page = <LogsPage store={store} />; break
       case 'settings': page = <SettingsPage store={store} />; break
-      case 'rpa': page = <RpaPage />; break
+      case 'workflow': page = <WorkflowPage store={store} />; break
       default: page = <div>Overview</div>
     }
     return <Suspense fallback={<PageLoadingFallback />}>{page}</Suspense>
@@ -623,10 +610,6 @@ export function AgentWindow(): React.JSX.Element {
           </div>
           {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
-              <div className={`menu-item ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')} title="Agents">
-                <div className="menu-item-left"><Bot size={18} strokeWidth={2} aria-hidden="true" /><span>Agents</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
-              </div>
               <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="订阅频道">
                 <div className="menu-item-left"><OverviewIcon /><span>订阅频道</span></div>
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
@@ -644,11 +627,11 @@ export function AgentWindow(): React.JSX.Element {
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div
-                className={`menu-item ${activeTab === 'rpa' ? 'active' : ''}`}
-                onClick={() => { void selectRpaTask(null).then(() => setActiveTab('rpa')) }}
-                title="RPA 任务"
+                className={`menu-item ${activeTab === 'workflow' ? 'active' : ''}`}
+                onClick={() => setActiveTab('workflow')}
+                title="工作流"
               >
-                <div className="menu-item-left"><Workflow size={18} strokeWidth={2} aria-hidden="true" /><span>RPA 任务</span></div>
+                <div className="menu-item-left"><Workflow size={18} strokeWidth={2} aria-hidden="true" /><span>工作流</span></div>
                 <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
               </div>
               <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
@@ -791,7 +774,7 @@ export function AgentWindow(): React.JSX.Element {
           </div>
         </div>
 
-        {activeTab !== 'rpa' && (
+        {activeTab !== 'workflow' && (
         <div className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div className="content-title">

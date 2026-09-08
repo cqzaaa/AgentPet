@@ -168,12 +168,12 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ marginBottom: 6 }}>参数（每行一个参数）</label>
                 <textarea
-                  className="form-input"
+                  className="form-input resize-none"
                   rows={4}
                   value={argsText}
                   onChange={event => setArgsText(event.target.value)}
                   placeholder={'--acp\n--profile\ndefault'}
-                  style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
+                  style={{ fontFamily: 'monospace', fontSize: 13 }}
                 />
               </div>
             </div>
