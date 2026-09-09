@@ -11263,7 +11263,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   display: flex;
   align-items: center;
   align-self: flex-start;
-  max-width: min(100%, 520px);
+  max-width: min(100%, 220px);
   min-height: 28px;
   margin: -1px 0 8px;
   padding: 3px 5px 3px 4px;
