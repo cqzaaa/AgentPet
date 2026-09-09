@@ -1326,6 +1326,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
   const [citationPopover, setCitationPopover] = useState<KnowledgeCitationPopoverState | null>(null)
   const citationPopoverRef = useRef<HTMLDivElement>(null)
+  const promptModalRef = useRef<HTMLDivElement>(null)
+  const promptModalCloseRef = useRef<HTMLButtonElement>(null)
+  const promptModalTriggerRef = useRef<HTMLButtonElement>(null)
   const promptInfo = msg.promptInfo || loadedPromptInfo
 
   useEffect(() => {
@@ -1346,6 +1349,36 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       window.removeEventListener('scroll', closeOnScroll, true)
     }
   }, [citationPopover])
+
+  useEffect(() => {
+    if (!showPromptModal) return undefined
+    const previousOverflow = document.documentElement.style.overflow
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setShowPromptModal(false)
+      if (event.key !== 'Tab') return
+      const focusable = promptModalRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+      if (!focusable?.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.documentElement.style.overflow = 'hidden'
+    document.addEventListener('keydown', closeOnEscape)
+    promptModalCloseRef.current?.focus()
+    return () => {
+      document.documentElement.style.overflow = previousOverflow
+      document.removeEventListener('keydown', closeOnEscape)
+      promptModalTriggerRef.current?.focus()
+    }
+  }, [showPromptModal])
 
   const openKnowledgeCitation = async (event: React.MouseEvent): Promise<void> => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.knowledge-citation')
@@ -1875,6 +1908,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           )}
           {msg.sender === 'user' && (msg.promptInfo || msg.hasPromptInfo) && (
             <button
+              ref={promptModalTriggerRef}
               className="msg-prompt-btn"
               onClick={handleOpenPromptInfo}
               disabled={promptInfoLoading}
@@ -1887,8 +1921,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       )}
 
       {/* 提示词弹框 */}
-      {showPromptModal && promptInfo && (
+      {showPromptModal && promptInfo && createPortal(
         <div
+          role="presentation"
           style={{
             position: 'fixed',
             top: 0,
@@ -1905,6 +1940,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           onClick={() => setShowPromptModal(false)}
         >
           <div
+            ref={promptModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`prompt-analysis-title-${msg.id}`}
             style={{
               width: '85vw',
               maxWidth: '960px',
@@ -1930,11 +1969,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 backgroundColor: 'var(--color-bg-secondary, #f5f5f5)'
               }}
             >
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 id={`prompt-analysis-title-${msg.id}`} style={{ margin: 0, fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Search size={18} strokeWidth={2} aria-hidden="true" />
                 Agent 提问参数与调试分析面板
               </h3>
               <button
+                ref={promptModalCloseRef}
+                type="button"
+                aria-label="关闭调试分析面板"
                 onClick={() => setShowPromptModal(false)}
                 style={{
                   background: 'none',
@@ -2254,7 +2296,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {previewImageSrc && (
