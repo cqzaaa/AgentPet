@@ -23,6 +23,8 @@ import {
   Lightbulb,
   LoaderCircle,
   MessageSquare,
+  Quote,
+  ArrowUp,
   Monitor,
   Network,
   Orbit,
@@ -1207,6 +1209,13 @@ interface MessageItemProps {
   requestMessage?: any
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
+  onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
+}
+
+export interface QuotedSelection {
+  text: string
+  messageId: string | number
+  senderName: string
 }
 
 interface KnowledgeCitationPopoverState {
@@ -1217,8 +1226,114 @@ interface KnowledgeCitationPopoverState {
   loading: boolean
 }
 
+interface TextSelectionPopoverState {
+  text: string
+  top: number
+  left: number
+}
+
+const ACTIVE_SELECTION_HIGHLIGHT = 'agent-active-selection'
+let activeSelectionHighlightOwner: string | null = null
+
+interface CssHighlightRegistry {
+  set: (name: string, highlight: unknown) => void
+  delete: (name: string) => void
+}
+
+function getCssHighlightRegistry(): CssHighlightRegistry | null {
+  if (typeof CSS === 'undefined') return null
+  return (CSS as unknown as { highlights?: CssHighlightRegistry }).highlights || null
+}
+
+function showPersistentSelectionHighlight(owner: string, range: Range): void {
+  const registry = getCssHighlightRegistry()
+  const HighlightConstructor = (window as unknown as {
+    Highlight?: new (...ranges: Range[]) => unknown
+  }).Highlight
+  if (!registry || !HighlightConstructor) return
+  registry.set(ACTIVE_SELECTION_HIGHLIGHT, new HighlightConstructor(range.cloneRange()))
+  activeSelectionHighlightOwner = owner
+}
+
+function clearPersistentSelectionHighlight(owner: string): void {
+  if (activeSelectionHighlightOwner !== owner) return
+  getCssHighlightRegistry()?.delete(ACTIVE_SELECTION_HIGHLIGHT)
+  activeSelectionHighlightOwner = null
+}
+
+interface ParsedQuotedMessage {
+  sourceName: string
+  quote: string
+  prompt: string
+}
+
+function parseQuotedMessage(text: string): ParsedQuotedMessage | null {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const header = lines[0]?.match(/^> 引用自 (.+)$/)
+  if (!header) return null
+  const quoteLines: string[] = []
+  let index = 1
+  while (index < lines.length && lines[index].startsWith('>')) {
+    quoteLines.push(lines[index].replace(/^> ?/, ''))
+    index += 1
+  }
+  while (index < lines.length && !lines[index].trim()) index += 1
+  const quote = quoteLines.join('\n').trim()
+  if (!quote) return null
+  return {
+    sourceName: header[1].trim(),
+    quote,
+    prompt: lines.slice(index).join('\n').trim()
+  }
+}
+
+function QuotedSelectionPreview({ sourceName, quote }: { sourceName: string; quote: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const [canExpand, setCanExpand] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content) return undefined
+    const measure = (): void => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(content).lineHeight) || 21
+      setCanExpand(content.scrollHeight > lineHeight * 4 + 1)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [quote])
+
+  return (
+    <div className="quoted-selection-preview">
+      <div className="quoted-selection-heading">
+        <Quote size={14} strokeWidth={2} aria-hidden="true" />
+        <span>引用自 {sourceName}</span>
+      </div>
+      <div
+        ref={contentRef}
+        className={`quoted-selection-content ${expanded ? 'expanded' : ''}`}
+      >
+        {quote}
+      </div>
+      {canExpand && (
+        <button
+          type="button"
+          className="quoted-selection-toggle"
+          onClick={() => setExpanded(current => !current)}
+          aria-expanded={expanded}
+        >
+          {expanded ? '收起引用' : '展开引用'}
+          <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile) {
+  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1303,7 +1418,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1325,11 +1440,87 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [promptInfoLoading, setPromptInfoLoading] = useState(false)
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
   const [citationPopover, setCitationPopover] = useState<KnowledgeCitationPopoverState | null>(null)
+  const [selectionPopover, setSelectionPopover] = useState<TextSelectionPopoverState | null>(null)
+  const [selectionPrompt, setSelectionPrompt] = useState('')
   const citationPopoverRef = useRef<HTMLDivElement>(null)
+  const selectionPopoverRef = useRef<HTMLDivElement>(null)
+  const selectionPromptRef = useRef<HTMLInputElement>(null)
   const promptModalRef = useRef<HTMLDivElement>(null)
   const promptModalCloseRef = useRef<HTMLButtonElement>(null)
   const promptModalTriggerRef = useRef<HTMLButtonElement>(null)
   const promptInfo = msg.promptInfo || loadedPromptInfo
+  const selectionHighlightOwner = String(msg.id)
+
+  useEffect(() => {
+    if (!selectionPopover) return undefined
+    const close = (event: PointerEvent): void => {
+      if (!selectionPopoverRef.current?.contains(event.target as Node)) {
+        setSelectionPopover(null)
+        clearPersistentSelectionHighlight(selectionHighlightOwner)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setSelectionPopover(null)
+        clearPersistentSelectionHighlight(selectionHighlightOwner)
+      }
+    }
+    const closeOnViewportChange = (): void => {
+      setSelectionPopover(null)
+      clearPersistentSelectionHighlight(selectionHighlightOwner)
+    }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', closeOnViewportChange)
+    window.addEventListener('scroll', closeOnViewportChange, true)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', closeOnViewportChange)
+      window.removeEventListener('scroll', closeOnViewportChange, true)
+    }
+  }, [selectionHighlightOwner, selectionPopover])
+
+  useEffect(() => {
+    return () => clearPersistentSelectionHighlight(selectionHighlightOwner)
+  }, [selectionHighlightOwner])
+
+  const openSelectionActions = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (!onQuoteSelection || event.button !== 0) return
+    const selection = window.getSelection()
+    const text = selection?.toString().trim() || ''
+    if (!selection || selection.isCollapsed || !text || selection.rangeCount === 0) {
+      setSelectionPopover(null)
+      clearPersistentSelectionHighlight(selectionHighlightOwner)
+      return
+    }
+    const range = selection.getRangeAt(0)
+    if (!event.currentTarget.contains(range.commonAncestorContainer)) return
+    const rect = range.getBoundingClientRect()
+    if (!rect.width && !rect.height) return
+    const width = Math.min(360, window.innerWidth - 24)
+    const estimatedHeight = 46
+    const top = rect.top > estimatedHeight + 12
+      ? rect.top - estimatedHeight - 8
+      : Math.min(window.innerHeight - estimatedHeight - 12, rect.bottom + 8)
+    const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left + rect.width / 2 - width / 2))
+    showPersistentSelectionHighlight(selectionHighlightOwner, range)
+    setSelectionPrompt('')
+    setSelectionPopover({ text: text.slice(0, 4000), top, left })
+  }
+
+  const commitSelection = (sendNow: boolean): void => {
+    if (!selectionPopover || !onQuoteSelection) return
+    onQuoteSelection({
+      text: selectionPopover.text,
+      messageId: msg.id,
+      senderName
+    }, selectionPrompt.trim(), sendNow)
+    setSelectionPopover(null)
+    setSelectionPrompt('')
+    clearPersistentSelectionHighlight(selectionHighlightOwner)
+    window.getSelection()?.removeAllRanges()
+  }
 
   useEffect(() => {
     if (!citationPopover) return undefined
@@ -1418,14 +1609,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const deferredStreamingText = useDeferredValue(msg.isThinking ? msg.text : null)
   const textForRender = msg.isThinking ? deferredStreamingText : msg.text
+  const quotedMessage = useMemo(
+    () => msg.sender === 'user' && textForRender ? parseQuotedMessage(textForRender) : null,
+    [msg.sender, textForRender]
+  )
 
   const renderedText = useMemo(() => {
-    if (!textForRender) return null
-    let displayText = textForRender === '__WELCOME_MSG__'
+    const sourceText = quotedMessage?.prompt || textForRender
+    if (!sourceText) return null
+    let displayText = sourceText === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
-      : textForRender === '__SYSTEM_INIT_MSG__'
+      : sourceText === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
-        : textForRender
+        : sourceText
     // Resolve source IDs emitted by the model (for example [新浪新闻 S32])
     // to the URL retained in the corresponding web_sources tool event.
     displayText = normalizeSearchCitations(displayText)
@@ -1442,7 +1638,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       return source ? `[${sourceId}](${source.url})` : citation
     })
     return renderAdvancedMessage(displayText, onPreviewFile)
-  }, [textForRender, currentAvatarName, msg.toolSteps, onPreviewFile])
+  }, [textForRender, quotedMessage, currentAvatarName, msg.toolSteps, onPreviewFile])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1810,11 +2006,16 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           </div>
         )}
 
+        {quotedMessage && (
+          <QuotedSelectionPreview sourceName={quotedMessage.sourceName} quote={quotedMessage.quote} />
+        )}
+
         {/* 最终大模型回复文本渲染 */}
         {renderedText && (
           <div
             className="message-text"
             onClick={(event) => void openKnowledgeCitation(event)}
+            onMouseUp={openSelectionActions}
             onContextMenu={(e) => {
               const selection = window.getSelection()
               const selectedText = selection?.toString().trim()
@@ -1826,6 +2027,50 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           >
             {renderedText}
           </div>
+        )}
+
+        {selectionPopover && createPortal(
+          <div
+            ref={selectionPopoverRef}
+            className="text-selection-popover"
+            style={{ top: selectionPopover.top, left: selectionPopover.left }}
+            role="dialog"
+            aria-label="处理选中的内容"
+          >
+            <input
+              ref={selectionPromptRef}
+              autoFocus
+              value={selectionPrompt}
+              onChange={(event) => setSelectionPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing && selectionPrompt.trim()) {
+                  event.preventDefault()
+                  commitSelection(true)
+                }
+              }}
+              placeholder="修改或提问，留空仅引用"
+              aria-label="针对选中内容提问"
+            />
+            {selectionPrompt.trim() && (
+              <button
+                type="button"
+                className="text-selection-send"
+                onClick={() => commitSelection(true)}
+                aria-label="引用并发送"
+              >
+                <ArrowUp size={17} strokeWidth={2} aria-hidden="true" />
+              </button>
+            )}
+            <button
+              type="button"
+              className="text-selection-quote"
+              onClick={() => commitSelection(false)}
+              aria-label="将选中内容添加到输入框"
+            >
+              <Quote size={17} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </div>,
+          document.querySelector('.agent-window-container') || document.body
         )}
 
         {citationPopover && createPortal(

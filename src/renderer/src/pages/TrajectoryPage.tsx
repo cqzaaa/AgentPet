@@ -1739,6 +1739,7 @@ export function TrajectoryPage(): React.JSX.Element {
               ref={ledgerRef}
               className="trajectory-virtuoso"
               data={visibleEvents}
+              initialTopMostItemIndex={Math.max(0, visibleEvents.length - 1)}
               computeItemKey={(_index, event) => event.seq}
               startReached={() => { if (hasMore) void loadOlder() }}
               followOutput={followTail ? 'smooth' : false}

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
-import { ChatMessageItem } from '../components/ChatMessageItem'
+import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
 import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
@@ -29,6 +29,7 @@ import {
   Palette,
   Plug,
   Plus,
+  Quote,
   Puzzle,
   Radar,
   Server,
@@ -51,6 +52,12 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
   color: 'var(--text-color)',
   outline: 'none',
   boxSizing: 'border-box'
+}
+
+function formatQuotedPrompt(selection: QuotedSelection, prompt: string): string {
+  const quotedLines = selection.text.split(/\r?\n/).map(line => `> ${line}`).join('\n')
+  const question = prompt.trim() || '请结合这段引用继续。'
+  return `> 引用自 ${selection.senderName}\n${quotedLines}\n\n${question}`
 }
 
 function ChatPageImpl(): React.JSX.Element {
@@ -112,8 +119,35 @@ function ChatPageImpl(): React.JSX.Element {
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
   const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
   const [collaborationRuns, setCollaborationRuns] = useState<CollaborationSnapshot[]>([])
+  const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
+  const [showQuotedSelectionPreview, setShowQuotedSelectionPreview] = useState(false)
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const chatTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerSelectionContextRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setQuotedSelection(null)
+    setShowQuotedSelectionPreview(false)
+  }, [activeSessionId])
+
+  useEffect(() => {
+    if (!showQuotedSelectionPreview) return
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!composerSelectionContextRef.current?.contains(event.target as Node)) {
+        setShowQuotedSelectionPreview(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setShowQuotedSelectionPreview(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [showQuotedSelectionPreview])
 
   useEffect(() => {
     return () => {
@@ -801,8 +835,11 @@ function ChatPageImpl(): React.JSX.Element {
   const [showContextTooltip, setShowContextTooltip] = useState(false)
   const contextLimit = Number((llmConfig as any).contextWindow) || 168000
   const estimatedContextTokens = useMemo(
-    () => currentContextTokens + estimateDraftTokens(inputValue, attachedFiles),
-    [attachedFiles, currentContextTokens, inputValue]
+    () => currentContextTokens + estimateDraftTokens(
+      quotedSelection ? formatQuotedPrompt(quotedSelection, inputValue) : inputValue,
+      attachedFiles
+    ),
+    [attachedFiles, currentContextTokens, inputValue, quotedSelection]
   )
 
 
@@ -815,8 +852,45 @@ function ChatPageImpl(): React.JSX.Element {
       showToast('上下文额度已用满，请创建新会话以继续对话！', 'error')
       return
     }
-    handleSendChat()
+    if (!quotedSelection) {
+      void handleSendChat()
+      return
+    }
+    const draft = inputValue
+    const payload = formatQuotedPrompt(quotedSelection, draft)
+    setInputValue(payload)
+    void handleSendChat()
+    if (useAppStoreRaw.getState().inputValue === '') {
+      setQuotedSelection(null)
+      setShowQuotedSelectionPreview(false)
+    } else {
+      setInputValue(draft)
+    }
   }
+
+  const handleQuoteSelection = useCallback((selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
+    if (sendNow) {
+      const payload = formatQuotedPrompt(selection, prompt)
+      if (currentContextTokens + estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
+        showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
+        return
+      }
+      const draft = inputValue
+      setInputValue(payload)
+      void handleSendChat()
+      if (useAppStoreRaw.getState().inputValue === '') {
+        setQuotedSelection(null)
+        setShowQuotedSelectionPreview(false)
+      } else {
+        setInputValue(draft)
+      }
+      return
+    }
+    setQuotedSelection(selection)
+    setShowQuotedSelectionPreview(false)
+    if (prompt) setInputValue(current => current ? `${current}\n${prompt}` : prompt)
+    window.requestAnimationFrame(() => chatTextareaRef.current?.focus())
+  }, [attachedFiles, contextLimit, currentContextTokens, handleSendChat, inputValue, setInputValue, showToast])
 
   // SSH 弹窗控制本地状态
   const [showSshModal, setShowSshModal] = useState(false)
@@ -1016,9 +1090,10 @@ function ChatPageImpl(): React.JSX.Element {
         requestMessage={requestMessageById.get(message.id)}
         highlightedMessageId={highlightedMessageId}
         onPreviewFile={handlePreviewFile}
+        onQuoteSelection={handleQuoteSelection}
       />
     )
-  }, [collaborationById, messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile])
+  }, [collaborationById, messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile, handleQuoteSelection])
 
   const computeMessageKey = useCallback((_index: number, timelineId: string) => timelineId, [])
 
@@ -1378,7 +1453,65 @@ function ChatPageImpl(): React.JSX.Element {
             </section>
           )}
 
+          {quotedSelection && (
+            <div
+              ref={composerSelectionContextRef}
+              className="composer-selection-context"
+              role="group"
+              aria-label="已引用的会话内容"
+            >
+              {showQuotedSelectionPreview && (
+                <div
+                  id="composer-selection-bubble"
+                  className="composer-selection-bubble"
+                  role="dialog"
+                  aria-label="引用全文"
+                >
+                  <div className="composer-selection-bubble-header">
+                    <Quote size={13} strokeWidth={2} aria-hidden="true" />
+                    <span className="composer-selection-bubble-title">引用自 {quotedSelection.senderName}</span>
+                    <button
+                      type="button"
+                      className="composer-selection-bubble-close"
+                      onClick={() => setShowQuotedSelectionPreview(false)}
+                      aria-label="收起引用全文"
+                    >
+                      <X size={13} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="composer-selection-bubble-content">{quotedSelection.text}</div>
+                </div>
+              )}
+              <button
+                type="button"
+                className="composer-selection-trigger"
+                onClick={() => setShowQuotedSelectionPreview(current => !current)}
+                aria-expanded={showQuotedSelectionPreview}
+                aria-controls="composer-selection-bubble"
+                title="查看引用全文"
+              >
+                <span className="composer-selection-index">1</span>
+                <Quote size={14} strokeWidth={2} aria-hidden="true" />
+                <span className="composer-selection-label">
+                  选中「{quotedSelection.text.replace(/\s+/g, ' ').slice(0, 34)}{quotedSelection.text.length > 34 ? '…' : ''}」
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuotedSelection(null)
+                  setShowQuotedSelectionPreview(false)
+                  chatTextareaRef.current?.focus()
+                }}
+                aria-label="移除引用内容"
+              >
+                <X size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
           <textarea
+            ref={chatTextareaRef}
             className="chat-textarea-field resize-none"
             rows={2}
             placeholder={
@@ -1437,7 +1570,7 @@ function ChatPageImpl(): React.JSX.Element {
               }
             }}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 handleSendIntercept()
               }
@@ -1841,7 +1974,7 @@ function ChatPageImpl(): React.JSX.Element {
                     className="toolbar-send-btn"
                     onClick={handleSendIntercept}
                     title="发送追加指引并调整当前任务"
-                    disabled={(!inputValue.trim() && attachedFiles.length === 0) || estimatedContextTokens >= contextLimit}
+                    disabled={(!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) || estimatedContextTokens >= contextLimit}
                   >
                     <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                   </button>
@@ -1851,7 +1984,7 @@ function ChatPageImpl(): React.JSX.Element {
                   className="toolbar-send-btn"
                   onClick={handleSendIntercept}
                   title="发送消息"
-                  disabled={(!inputValue.trim() && attachedFiles.length === 0) || estimatedContextTokens >= contextLimit}
+                  disabled={(!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) || estimatedContextTokens >= contextLimit}
                 >
                   <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                 </button>
