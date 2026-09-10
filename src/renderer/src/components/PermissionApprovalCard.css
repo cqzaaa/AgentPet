@@ -1,0 +1,321 @@
+.consent-card {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 9px);
+  z-index: 40;
+  display: grid;
+  gap: 12px;
+  padding: 19px 20px 17px;
+  overflow: visible;
+  color: var(--text-primary, #1c211d);
+  background: color-mix(in srgb, var(--bg-card, #fafbf9) 96%, #eef1ec);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #1c211d) 11%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px color-mix(in srgb, #39463d 18%, transparent);
+  animation: consent-card-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.consent-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.consent-shield {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  color: #667067;
+}
+.consent-card.is-danger .consent-shield,
+.consent-card.is-danger .consent-risk-note {
+  color: #a64236;
+}
+.consent-heading-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 18px;
+  row-gap: 3px;
+  padding-top: 1px;
+}
+.consent-heading h2,
+.consent-heading p,
+.consent-risk-note {
+  margin: 0;
+}
+.consent-heading h2 {
+  color: var(--text-primary, #1c211d);
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 670;
+  white-space: nowrap;
+}
+.consent-heading p {
+  min-width: 180px;
+  flex: 1 1 280px;
+  color: var(--text-muted, #6f766f);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.consent-command {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text-primary, #1c211d) 5.5%, var(--bg-card, #fafbf9));
+  border: 1px solid color-mix(in srgb, var(--text-primary, #1c211d) 7%, transparent);
+  border-radius: 12px;
+}
+.consent-command-summary {
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  color: var(--text-primary, #252a26);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.consent-command-summary:hover {
+  background: color-mix(in srgb, var(--text-primary, #1c211d) 3.5%, transparent);
+}
+.consent-command-summary:focus-visible,
+.consent-button:focus-visible,
+.consent-reject-form button:focus-visible,
+.consent-reject-form textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color, #47705a) 68%, transparent);
+  outline-offset: 2px;
+}
+.consent-prompt {
+  color: var(--text-muted, #697169);
+  font:
+    650 15px/1 Consolas,
+    'Cascadia Code',
+    monospace;
+}
+.consent-command-summary code {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font:
+    12.5px/1.55 Consolas,
+    'Cascadia Code',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.consent-command-summary svg {
+  color: var(--text-muted, #697169);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.consent-command-summary svg.is-expanded {
+  transform: rotate(180deg);
+}
+.consent-command-details {
+  padding: 0 13px 12px 41px;
+}
+.consent-command-details pre {
+  max-height: 190px;
+  margin: 0;
+  padding-top: 10px;
+  overflow: auto;
+  color: var(--text-primary, #252a26);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary, #1c211d) 9%, transparent);
+  font:
+    12px/1.55 Consolas,
+    'Cascadia Code',
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.consent-command-details p {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin: 9px 0 0;
+  color: var(--text-muted, #6f766f);
+  font-size: 11px;
+}
+.consent-command-details p code {
+  overflow: hidden;
+  color: var(--text-primary, #252a26);
+  font-family: Consolas, 'Cascadia Code', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.consent-risk-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted, #737a73);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.consent-risk-note svg {
+  flex: 0 0 auto;
+}
+.consent-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.consent-button,
+.consent-reject-form button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  color: var(--text-primary, #252a26);
+  background: var(--bg-card, #fafbf9);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #1c211d) 12%, transparent);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+.consent-button:hover,
+.consent-reject-form button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary, #1c211d) 5%, var(--bg-card, #fafbf9));
+  border-color: color-mix(in srgb, var(--text-primary, #1c211d) 23%, transparent);
+}
+.consent-button:active,
+.consent-reject-form button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.consent-button.primary {
+  color: #f4f7f3;
+  background: #172019;
+  border-color: #172019;
+}
+.consent-button.primary:hover {
+  color: #f4f7f3;
+  background: #263229;
+  border-color: #263229;
+}
+.agent-window-container.dark .consent-button.primary {
+  color: #172019;
+  background: #eef2ed;
+  border-color: #eef2ed;
+}
+.agent-window-container.dark .consent-button.primary:hover {
+  color: #172019;
+  background: #dfe6df;
+  border-color: #dfe6df;
+}
+.consent-reject-form {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, #a64236 5%, var(--bg-card, #fafbf9));
+  border: 1px solid color-mix(in srgb, #a64236 18%, transparent);
+  border-radius: 12px;
+  animation: consent-feedback-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.consent-reject-form label {
+  color: var(--text-primary, #252a26);
+  font-size: 12px;
+  font-weight: 650;
+}
+.consent-reject-form textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: none;
+  padding: 9px 10px;
+  color: var(--text-primary, #252a26);
+  background: var(--bg-card, #fafbf9);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #1c211d) 13%, transparent);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.consent-reject-form textarea::placeholder {
+  color: var(--text-muted, #777f78);
+}
+.consent-reject-form > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.consent-reject-form button[type='submit'] {
+  color: #f7f3f2;
+  background: #8f372e;
+  border-color: #8f372e;
+}
+.consent-reject-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@keyframes consent-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes consent-feedback-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 640px) {
+  .consent-card {
+    bottom: calc(100% + 7px);
+    gap: 10px;
+    padding: 15px 14px 14px;
+    border-radius: 14px;
+  }
+  .consent-heading-copy {
+    display: grid;
+    gap: 2px;
+  }
+  .consent-heading h2 {
+    white-space: normal;
+  }
+  .consent-command-summary {
+    min-height: 46px;
+  }
+  .consent-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .consent-button.primary {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .consent-card,
+  .consent-reject-form {
+    animation: none;
+  }
+  .consent-command-summary svg,
+  .consent-button,
+  .consent-reject-form button {
+    transition: none;
+  }
+}

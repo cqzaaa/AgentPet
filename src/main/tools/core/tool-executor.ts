@@ -66,7 +66,7 @@ export class UnifiedToolExecutor {
           input_keys: args.inputs && typeof args.inputs === 'object' ? Object.keys(args.inputs) : []
         })}`
         : args.command || `${name} ${JSON.stringify(args)}`
-      const approved = await permissionManager.requestCommandPermission({
+      const permission = await permissionManager.requestCommandPermission({
         command: approvalCommand,
         execCwd: args.cwd
           ? resolveSessionPath(args.cwd, context.sessionId, context.workspacePath)
@@ -79,9 +79,10 @@ export class UnifiedToolExecutor {
         taskStepId: context.taskStepId
       })
 
-      if (!approved) {
+      if (!permission.approved) {
+        const rejectionReason = permission.reason ? ` 用户说明：${permission.reason}` : ''
         return {
-          content: `[安全提示] 用户拒绝了工具 ${name} 的执行。`,
+          content: `[安全提示] 用户拒绝了工具 ${name} 的执行。${rejectionReason}`,
           success: false
         }
       }

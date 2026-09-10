@@ -72,8 +72,13 @@ function normalizeSearchCitations(text: string): string {
     .replace(/\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
     .replace(/\bnewsDetail_forward_[\w-]+\b/gi, '')
 }
+// Keep long-form source material (PDFs, manuals, code listings) in the active
+// context until the request is genuinely close to the provider limit. We still
+// leave headroom for the next assistant response and tool definitions, because
+// waiting for a hard overflow would make the API call fail before compaction.
 const TOOL_CONTEXT_SOFT_LIMIT = 16000
-const CONTEXT_COMPACT_RATIO = 0.75
+const CONTEXT_COMPACT_RATIO = 0.9
+const TOOL_COMPACTION_GUARD_RATIO = 0.8
 const DEFAULT_CONTEXT_WINDOW = 168000
 
 const MUTATING_TOOL_NAMES = new Set([
@@ -318,7 +323,13 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       .filter(message => message.role === 'tool')
       .reduce((total, message) => total + countTokens(messageText(message)), 0)
     const totalLimitReached = beforeTokens >= Math.max(24000, contextWindow * CONTEXT_COMPACT_RATIO)
-    const toolLimitReached = currentToolTokens >= TOOL_CONTEXT_SOFT_LIMIT
+    // A large tool result alone is not sufficient reason to compact: it may be
+    // the source document the model is actively translating. Only allow the
+    // soft tool limit to participate once the whole context is already close
+    // to its limit.
+    const toolLimitReached =
+      currentToolTokens >= TOOL_CONTEXT_SOFT_LIMIT &&
+      beforeTokens >= Math.max(24000, contextWindow * TOOL_COMPACTION_GUARD_RATIO)
     if (!totalLimitReached && !toolLimitReached) return null
 
     const currentToolCycles = chatHistory

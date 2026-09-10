@@ -220,8 +220,9 @@ export class TaskRunner {
     return this.store.getRun(snapshot.run.id)
   }
 
-  public notify(taskRunId: string, action: string, taskStepId?: string, payload?: Record<string, unknown>): Promise<void> {
-    return this.publish(taskRunId, action, taskStepId, payload)
+  public async notify(taskRunId: string, action: string, taskStepId?: string, payload?: Record<string, unknown>): Promise<void> {
+    await this.store.appendEvent(taskRunId, taskStepId, action, payload || {})
+    await this.publish(taskRunId, action, taskStepId, payload)
   }
 
   /** Read one task snapshot per batch while preserving each original event. */
@@ -230,6 +231,7 @@ export class TaskRunner {
     const snapshot = await this.store.getRun(taskRunId)
     if (!snapshot) return
     for (const event of events) {
+      await this.store.appendEvent(taskRunId, event.taskStepId, event.action, event.payload || {})
       const update = { taskRunId, run: snapshot.run, steps: snapshot.steps, ...event }
       for (const listener of this.listeners) {
         try { listener(update) } catch (error) { console.error('[TaskRunner] update listener failed', error) }

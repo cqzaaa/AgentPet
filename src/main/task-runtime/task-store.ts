@@ -145,7 +145,7 @@ export class TaskStore {
     return { ...this.mapRun(existing), status, updatedAt: now, completedAt: completedAt || undefined }
   }
 
-  public async appendEvent(runId: string, stepId: string, type: string, payload: Record<string, unknown>): Promise<void> {
+  public async appendEvent(runId: string, stepId: string | undefined, type: string, payload: Record<string, unknown>): Promise<void> {
     const database = await this.getDatabase()
     await this.insertEvent(database, runId, stepId, type, payload, Date.now())
   }

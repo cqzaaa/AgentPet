@@ -1210,6 +1210,7 @@ interface MessageItemProps {
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
   onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
+  delegateTaskAttachments?: React.ReactNode[]
 }
 
 export interface QuotedSelection {
@@ -1333,7 +1334,7 @@ function QuotedSelectionPreview({ sourceName, quote }: { sourceName: string; quo
 }
 
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection) {
+  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1418,7 +1419,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1800,6 +1801,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const collapseText = `${summaryText}`
 
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
+  const combinedVisibleToolSteps = combineToolSteps(visibleToolSteps, msg.isThinking)
+  let delegateAttachmentIndex = 0
 
   return (
     <div id={`msg-${msg.id}`} className={`message-row ${msg.sender} ${highlightedMessageId === msg.id ? 'highlight-pulse' : ''}`}>
@@ -1978,11 +1981,15 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     paddingRight: '6px'
                   }}
                 >
-                  {combineToolSteps(visibleToolSteps, msg.isThinking).map((step: any) => {
+                  {combinedVisibleToolSteps.map((step: any) => {
                     if (step.type === 'tool') {
-                      return (
-                        <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />
-                      )
+                      const attachment = step.name === 'delegate_tasks'
+                        ? delegateTaskAttachments?.[delegateAttachmentIndex++]
+                        : null
+                      return <React.Fragment key={step.id}>
+                        <ToolStepItem step={step} isThinking={msg.isThinking} />
+                        {attachment}
+                      </React.Fragment>
                     } else if (step.type === 'compaction') {
                       return <ContextCompactionItem key={step.id} step={step} />
                     } else {

@@ -2,12 +2,13 @@
 
 import * as fs from 'fs'
 import { basename, extname } from 'path'
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
+import { Packer } from 'docx'
 import JSZip from 'jszip'
 import * as mammoth from 'mammoth'
 
 import type { ToolContext, ToolResult } from '../../../../core/types'
 import { jsonResult, writeGeneratedFile } from '../shared'
+import { markdownToDocx } from '../markdown-docx'
 import { assertOfficeConversionSupported, normalizeConversionFormat } from './capabilities'
 import { createConversionRuntime, resolveConversionSource } from './runtime'
 
@@ -55,56 +56,13 @@ function htmlToText(html: string): string {
     .trim()
 }
 
-function markdownToParagraphs(markdown: string): Paragraph[] {
-  const paragraphs: Paragraph[] = []
-  for (const line of markdown.replace(/\r\n?/g, '\n').split('\n')) {
-    const heading = line.match(/^(#{1,6})\s+(.+)$/)
-    if (heading) {
-      const levels = [
-        HeadingLevel.HEADING_1,
-        HeadingLevel.HEADING_2,
-        HeadingLevel.HEADING_3,
-        HeadingLevel.HEADING_4,
-        HeadingLevel.HEADING_5,
-        HeadingLevel.HEADING_6
-      ]
-      paragraphs.push(new Paragraph({ text: heading[2], heading: levels[heading[1].length - 1] }))
-      continue
-    }
-    const bullet = line.match(/^\s*[-*+]\s+(.+)$/)
-    if (bullet) {
-      paragraphs.push(new Paragraph({ text: bullet[1], bullet: { level: 0 } }))
-      continue
-    }
-    const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/)
-    if (numbered) {
-      paragraphs.push(
-        new Paragraph({ text: numbered[1], numbering: { reference: 'ordered-list', level: 0 } })
-      )
-      continue
-    }
-    paragraphs.push(new Paragraph({ children: [new TextRun(line)] }))
-  }
-  return paragraphs.length > 0 ? paragraphs : [new Paragraph('')]
-}
-
 async function createDocx(
   content: string,
   outputName: unknown,
   fallback: string,
   context: ToolContext
 ): Promise<{ filePath: string; fileName: string }> {
-  const document = new Document({
-    numbering: {
-      config: [
-        {
-          reference: 'ordered-list',
-          levels: [{ level: 0, format: 'decimal', text: '%1.', alignment: 'left' }]
-        }
-      ]
-    },
-    sections: [{ children: markdownToParagraphs(content) }]
-  })
+  const document = markdownToDocx(content)
   return writeGeneratedFile(await Packer.toBuffer(document), outputName, fallback, '.docx', context)
 }
 

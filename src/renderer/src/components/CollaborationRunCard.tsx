@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import type { TaskEvent } from '../../../main/task-runtime/types'
 import { CheckCircle2, ChevronRight, CircleDashed, ExternalLink, FileText, Loader2, Network, XCircle } from 'lucide-react'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { TaskDagGraph, type TaskPlan, type TaskPlanStep, type TaskStepStatus } from './TaskPlanCard'
@@ -6,6 +7,7 @@ import { TaskDagGraph, type TaskPlan, type TaskPlanStep, type TaskStepStatus } f
 export interface CollaborationSnapshot {
   run: any
   steps: any[]
+  events?: TaskEvent[]
 }
 
 type PreviewFileHandler = (file: { name: string; path: string; size: number }) => void

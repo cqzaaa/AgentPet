@@ -5,6 +5,7 @@ import { join } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveSessionPath, getGeneratedFilesDir, sessionLastXlsxMap } from '../../utils/paths'
 import { normalizeXlsxStyles } from './xlsx-styles'
+import { markdownToDocx } from './skills/markdown-docx'
 
 export class OfficeExecutor implements IToolExecutor {
   public async execute(
@@ -169,6 +170,32 @@ export class OfficeExecutor implements IToolExecutor {
           const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } = docx
           const lines = content.split('\n')
 
+          // Use the shared structured Markdown renderer so headings, lists, code fences,
+          // inline code and pipe tables become native Word elements instead of literal Markdown.
+          const structuredDoc = markdownToDocx(content, {
+            resolveImage: (line) => {
+              const imageMatch = line.trim().match(/^!\[(.*?)\]\((.*?)\)/)
+              if (!imageMatch) return null
+              const imagePath = resolveSessionPath(imageMatch[2].trim(), context.sessionId)
+              if (!fs.existsSync(imagePath)) {
+                return new Paragraph({ children: [new TextRun({ text: `[图片文件未找到: ${imageMatch[2]}]`, color: 'FF0000' })] })
+              }
+              try {
+                const imageBuffer = fs.readFileSync(imagePath)
+                return new Paragraph({
+                  alignment: 'center',
+                  children: [new ImageRun({ data: imageBuffer, transformation: { width: 450, height: 300 } })]
+                })
+              } catch (error) {
+                console.error('[docx-generation] 读取图片失败:', imagePath, error)
+                return new Paragraph({ children: [new TextRun({ text: `[读取图片失败: ${imageMatch[2]}]`, color: 'FF0000' })] })
+              }
+            }
+          })
+          await fs.promises.writeFile(filePath, await Packer.toBuffer(structuredDoc))
+          // Kept behind an opt-in flag for rollback during development.
+          if (process.env.AGENTPET_LEGACY_DOCX_PARSER === '1') {
+
           // 辅助解析 PNG/JPEG 图片宽高的函数
           const getImageSize = (buffer: Buffer): { width: number; height: number } | null => {
             try {
@@ -221,14 +248,14 @@ export class OfficeExecutor implements IToolExecutor {
                   let width = 450
                   let height = 300
                   const dimensions = getImageSize(imgBuffer)
-                  if (dimensions && dimensions.width && dimensions.height) {
+                  if (dimensions && dimensions!.width && dimensions!.height) {
                     const maxWidth = 480
-                    if (dimensions.width > maxWidth) {
+                    if (dimensions!.width > maxWidth) {
                       width = maxWidth
-                      height = Math.round((dimensions.height * maxWidth) / dimensions.width)
+                      height = Math.round((dimensions!.height * maxWidth) / dimensions!.width)
                     } else {
-                      width = dimensions.width
-                      height = dimensions.height
+                      width = dimensions!.width
+                      height = dimensions!.height
                     }
                   }
                   children.push(
@@ -312,6 +339,7 @@ export class OfficeExecutor implements IToolExecutor {
           const doc = new Document({ sections: [{ children }] })
           const buffer = await Packer.toBuffer(doc)
           await fs.promises.writeFile(filePath, buffer)
+          }
         } else if (file_type === 'pdf') {
           const PDFDocument = require('pdfkit')
           await new Promise<void>((resolve, reject) => {

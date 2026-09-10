@@ -6,7 +6,9 @@ import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
-import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
+import type { CollaborationSnapshot } from '../components/CollaborationRunCard'
+import { SubtaskCapsuleGroup, SubtaskDetailDrawer } from '../components/SubtaskCapsuleGroup'
+import { PermissionApprovalCard } from '../components/PermissionApprovalCard'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
 import {
@@ -40,7 +42,6 @@ import {
   X
 } from 'lucide-react'
 
-
 // ── 模块级样式常量（避免每次渲染分配临时对象） ─────────────
 const SEARCH_INPUT_STYLE: React.CSSProperties = {
   width: '100%',
@@ -55,7 +56,10 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
 }
 
 function formatQuotedPrompt(selection: QuotedSelection, prompt: string): string {
-  const quotedLines = selection.text.split(/\r?\n/).map(line => `> ${line}`).join('\n')
+  const quotedLines = selection.text
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join('\n')
   const question = prompt.trim() || '请结合这段引用继续。'
   return `> 引用自 ${selection.senderName}\n${quotedLines}\n\n${question}`
 }
@@ -67,7 +71,8 @@ function ChatPageImpl(): React.JSX.Element {
     activeSessionId,
     currentAvatarName,
     isSending,
-    inputValue, setInputValue,
+    inputValue,
+    setInputValue,
     handleSendChat,
     availableModels,
     saveLlmConfig,
@@ -109,8 +114,10 @@ function ChatPageImpl(): React.JSX.Element {
     openTrajectory,
     currentContextTokens
   } = useChatController()
-  const activeWorkspacePath = useAppStoreRaw((state: any) =>
-    state.sessions?.find((session: any) => session.id === state.activeSessionId)?.workspacePath || ''
+  const activeWorkspacePath = useAppStoreRaw(
+    (state: any) =>
+      state.sessions?.find((session: any) => session.id === state.activeSessionId)?.workspacePath ||
+      ''
   )
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
@@ -118,6 +125,7 @@ function ChatPageImpl(): React.JSX.Element {
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
   const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
+  const [openedSubtask, setOpenedSubtask] = useState<{ runId: string; stepId: string } | null>(null)
   const [collaborationRuns, setCollaborationRuns] = useState<CollaborationSnapshot[]>([])
   const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
   const [showQuotedSelectionPreview, setShowQuotedSelectionPreview] = useState(false)
@@ -161,72 +169,131 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }, [showCollaborationComposer])
 
-  const handleCollaborationStarted = useCallback((collaborationTitle: string): void => {
-    const normalized = collaborationTitle.replace(/\s+/g, ' ').trim() || '多 Agent 协作'
-    const sessionName = normalized.length > 15 ? `${normalized.slice(0, 15)}...` : normalized
-    let renamed = false
-    useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session => {
-      if (session.id !== activeSessionId) return session
-      const currentName = String(session.name || '')
-      const isDefaultName = currentName === '(未命名)' || currentName === '新会话' || currentName.startsWith('agent:main:dashboard:')
-      if (!isDefaultName) return session
-      renamed = true
-      return { ...session, name: sessionName }
-    }))
-    if (!renamed) return
-    void window.api.updateSession(activeSessionId, { name: sessionName }).then(updated => {
-      if (!updated) showToast('协作已启动，但会话名称保存失败', 'error')
-    }).catch(error => {
-      console.error('保存协作会话名称失败:', error)
-      showToast('协作已启动，但会话名称保存失败', 'error')
-    })
-  }, [activeSessionId, showToast])
+  const handleCollaborationStarted = useCallback(
+    (collaborationTitle: string): void => {
+      const normalized = collaborationTitle.replace(/\s+/g, ' ').trim() || '多 Agent 协作'
+      const sessionName = normalized.length > 15 ? `${normalized.slice(0, 15)}...` : normalized
+      let renamed = false
+      useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+        sessions.map((session) => {
+          if (session.id !== activeSessionId) return session
+          const currentName = String(session.name || '')
+          const isDefaultName =
+            currentName === '(未命名)' ||
+            currentName === '新会话' ||
+            currentName.startsWith('agent:main:dashboard:')
+          if (!isDefaultName) return session
+          renamed = true
+          return { ...session, name: sessionName }
+        })
+      )
+      if (!renamed) return
+      void window.api
+        .updateSession(activeSessionId, { name: sessionName })
+        .then((updated) => {
+          if (!updated) showToast('协作已启动，但会话名称保存失败', 'error')
+        })
+        .catch((error) => {
+          console.error('保存协作会话名称失败:', error)
+          showToast('协作已启动，但会话名称保存失败', 'error')
+        })
+    },
+    [activeSessionId, showToast]
+  )
 
-  const handleCollaborationWorkspaceSelected = useCallback(async (workspacePath: string): Promise<void> => {
-    const normalizedPath = workspacePath.trim()
-    if (!normalizedPath) throw new Error('请选择有效的工作文件夹')
-    useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session =>
-      session.id === activeSessionId ? { ...session, workspacePath: normalizedPath } : session
-    ))
-    try {
-      const updated = await window.api.updateSession(activeSessionId, { workspacePath: normalizedPath })
-      if (!updated) throw new Error('工作文件夹保存失败')
-    } catch (error) {
-      useAppStoreRaw.getState().setSessions((sessions: any[]) => sessions.map(session =>
-        session.id === activeSessionId ? { ...session, workspacePath: activeWorkspacePath || undefined } : session
-      ))
-      throw error
-    }
-  }, [activeSessionId, activeWorkspacePath])
+  const handleCollaborationWorkspaceSelected = useCallback(
+    async (workspacePath: string): Promise<void> => {
+      const normalizedPath = workspacePath.trim()
+      if (!normalizedPath) throw new Error('请选择有效的工作文件夹')
+      useAppStoreRaw
+        .getState()
+        .setSessions((sessions: any[]) =>
+          sessions.map((session) =>
+            session.id === activeSessionId ? { ...session, workspacePath: normalizedPath } : session
+          )
+        )
+      try {
+        const updated = await window.api.updateSession(activeSessionId, {
+          workspacePath: normalizedPath
+        })
+        if (!updated) throw new Error('工作文件夹保存失败')
+      } catch (error) {
+        useAppStoreRaw
+          .getState()
+          .setSessions((sessions: any[]) =>
+            sessions.map((session) =>
+              session.id === activeSessionId
+                ? { ...session, workspacePath: activeWorkspacePath || undefined }
+                : session
+            )
+          )
+        throw error
+      }
+    },
+    [activeSessionId, activeWorkspacePath]
+  )
 
   useEffect(() => {
     let active = true
     setCollaborationRuns([])
-    if (!activeSessionId) return () => { active = false }
-    const isCanvasRun = (run: any): boolean => String(run?.parentToolCallId || '').startsWith('orchestration-')
+    if (!activeSessionId)
+      return () => {
+        active = false
+      }
+    const isChatDelegatedRun = (run: any): boolean =>
+      String(run?.messageId || '').startsWith('delegate-') &&
+      !String(run?.parentToolCallId || '').startsWith('orchestration-')
     const deletedRunIds = new Set<string>()
-    void window.api.listTaskRuns(activeSessionId).then((items: any[]) => {
-      if (!active) return
-      const snapshots = (Array.isArray(items) ? items : []).filter(item => isCanvasRun(item?.run) && !deletedRunIds.has(item.run.id))
-      setCollaborationRuns(snapshots)
-      const earliestRun = [...snapshots].sort((left, right) => Number(left?.run?.createdAt || 0) - Number(right?.run?.createdAt || 0))[0]?.run
-      if (earliestRun?.title) handleCollaborationStarted(String(earliestRun.title))
-    }).catch(() => undefined)
+    void window.api
+      .listTaskRuns(activeSessionId)
+      .then((items: any[]) => {
+        if (!active) return
+        const snapshots = (Array.isArray(items) ? items : []).filter(
+          (item) => isChatDelegatedRun(item?.run) && !deletedRunIds.has(item.run.id)
+        )
+        setCollaborationRuns(snapshots)
+        const earliestRun = [...snapshots].sort(
+          (left, right) => Number(left?.run?.createdAt || 0) - Number(right?.run?.createdAt || 0)
+        )[0]?.run
+        if (earliestRun?.title) handleCollaborationStarted(String(earliestRun.title))
+      })
+      .catch(() => undefined)
     const unsubscribe = window.api.onTaskRunUpdated((update: any) => {
-      if (!active || update?.run?.sessionId !== activeSessionId || !isCanvasRun(update.run)) return
+      if (!active || update?.run?.sessionId !== activeSessionId || !isChatDelegatedRun(update.run))
+        return
       if (update.action === 'deleted') deletedRunIds.add(update.run.id)
       else if (deletedRunIds.has(update.run.id)) return
-      setCollaborationRuns(current => {
-        if (update.action === 'deleted') return current.filter(item => item.run.id !== update.run.id)
-        const snapshot = { run: update.run, steps: Array.isArray(update.steps) ? update.steps : [] }
-        const index = current.findIndex(item => item.run.id === update.run.id)
+      setCollaborationRuns((current) => {
+        if (update.action === 'deleted')
+          return current.filter((item) => item.run.id !== update.run.id)
+        const index = current.findIndex((item) => item.run.id === update.run.id)
+        const previousEvents =
+          index >= 0 && Array.isArray(current[index].events) ? current[index].events || [] : []
+        const liveEvent = update.payload
+          ? {
+              id: `live-${update.action}-${update.taskStepId || 'run'}-${Date.now()}`,
+              taskRunId: String(update.run.id),
+              taskStepId: update.taskStepId,
+              type: String(update.action || 'update'),
+              payload: update.payload,
+              createdAt: Date.now()
+            }
+          : null
+        const snapshot = {
+          run: update.run,
+          steps: Array.isArray(update.steps) ? update.steps : [],
+          events: liveEvent ? [...previousEvents, liveEvent] : previousEvents
+        }
         if (index < 0) return [...current, snapshot]
         const next = [...current]
         next[index] = snapshot
         return next
       })
     })
-    return () => { active = false; unsubscribe() }
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [activeSessionId, handleCollaborationStarted])
 
   useEffect(() => {
@@ -242,8 +309,6 @@ function ChatPageImpl(): React.JSX.Element {
   const [showModelPopover, setShowModelPopover] = useState(false)
   const [showKnowledgePopover, setShowKnowledgePopover] = useState(false)
   const [knowledgeBases, setKnowledgeBases] = useState<any[]>([])
-  const [approvalDetailsExpanded, setApprovalDetailsExpanded] = useState(false)
-  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false)
   const skillsPopoverRef = useRef<HTMLDivElement>(null)
   const mcpPopoverRef = useRef<HTMLDivElement>(null)
   const featurePopoverRef = useRef<HTMLDivElement>(null)
@@ -290,7 +355,10 @@ function ChatPageImpl(): React.JSX.Element {
     try {
       const bases = await window.api.knowledgeListBases()
       setKnowledgeBases(Array.isArray(bases) ? bases : [])
-      if (selectedKnowledgeBaseId && !bases.some((base: any) => base.id === selectedKnowledgeBaseId)) {
+      if (
+        selectedKnowledgeBaseId &&
+        !bases.some((base: any) => base.id === selectedKnowledgeBaseId)
+      ) {
         setSelectedKnowledgeBase(null)
       }
     } catch (error) {
@@ -305,7 +373,11 @@ function ChatPageImpl(): React.JSX.Element {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showSkillsPopover && skillsPopoverRef.current && !skillsPopoverRef.current.contains(event.target as Node)) {
+      if (
+        showSkillsPopover &&
+        skillsPopoverRef.current &&
+        !skillsPopoverRef.current.contains(event.target as Node)
+      ) {
         // 只有在点击非按钮（或者非 popover 内部）时才关闭，为了保证按钮点击切换正常，我们仅检查 popover 外部
         // 因为点击按钮时如果直接在 handleClickOutside 触发关闭，会和按钮本身的 onClick 冲突（按钮点击 -> handleClickOutside(由于非popover内) -> 关闭 -> 按钮onClick -> 打开。结果又打开了）
         // 实际上, 我们只要判断如果点击的 target 在 Popover 之外，且不在对应的 Button 内部，就将其关闭
@@ -315,31 +387,53 @@ function ChatPageImpl(): React.JSX.Element {
           setShowSkillsPopover(false)
         }
       }
-      if (showMcpPopover && mcpPopoverRef.current && !mcpPopoverRef.current.contains(event.target as Node)) {
+      if (
+        showMcpPopover &&
+        mcpPopoverRef.current &&
+        !mcpPopoverRef.current.contains(event.target as Node)
+      ) {
         const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-mcp')
         if (!isClickOnBtn) {
           setShowMcpPopover(false)
         }
       }
-      if (showFeaturePopover && featurePopoverRef.current && !featurePopoverRef.current.contains(event.target as Node)) {
+      if (
+        showFeaturePopover &&
+        featurePopoverRef.current &&
+        !featurePopoverRef.current.contains(event.target as Node)
+      ) {
         const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-features')
         if (!isClickOnBtn) {
           setShowFeaturePopover(false)
         }
       }
-      if (showModelPopover && modelPopoverRef.current && !modelPopoverRef.current.contains(event.target as Node)) {
+      if (
+        showModelPopover &&
+        modelPopoverRef.current &&
+        !modelPopoverRef.current.contains(event.target as Node)
+      ) {
         const isClickOnBtn = (event.target as HTMLElement).closest('.model-dropdown-container')
         if (!isClickOnBtn) {
           setShowModelPopover(false)
         }
       }
-      if (showKnowledgePopover && knowledgePopoverRef.current && !knowledgePopoverRef.current.contains(event.target as Node)) {
+      if (
+        showKnowledgePopover &&
+        knowledgePopoverRef.current &&
+        !knowledgePopoverRef.current.contains(event.target as Node)
+      ) {
         setShowKnowledgePopover(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showSkillsPopover, showMcpPopover, showFeaturePopover, showModelPopover, showKnowledgePopover])
+  }, [
+    showSkillsPopover,
+    showMcpPopover,
+    showFeaturePopover,
+    showModelPopover,
+    showKnowledgePopover
+  ])
 
   // 挂载时刷新技能与 MCP 状态
   useEffect(() => {
@@ -351,22 +445,25 @@ function ChatPageImpl(): React.JSX.Element {
   const searchInputStyle = SEARCH_INPUT_STYLE
 
   // MCP 服务开关切换
-  const toggleMcpServerEnable = useCallback((serverId: string) => {
-    const newConfig = {
-      ...mcpConfig,
-      servers: mcpConfig.servers.map((s: any) =>
-        s.id === serverId ? { ...s, enabled: !s.enabled } : s
-      )
-    }
-    saveMcpConfig(newConfig)
-  }, [mcpConfig, saveMcpConfig])
+  const toggleMcpServerEnable = useCallback(
+    (serverId: string) => {
+      const newConfig = {
+        ...mcpConfig,
+        servers: mcpConfig.servers.map((s: any) =>
+          s.id === serverId ? { ...s, enabled: !s.enabled } : s
+        )
+      }
+      saveMcpConfig(newConfig)
+    },
+    [mcpConfig, saveMcpConfig]
+  )
 
   // 全部 MCP 服务列表（用于 popover 展示，含未启用的）
   const allMcpServers: any[] = mcpConfig?.servers || []
 
   const renderSkillsPopover = () => {
     const filtered = skillsSearchKey
-      ? skillsList.filter(s => s.name.toLowerCase().includes(skillsSearchKey.toLowerCase()))
+      ? skillsList.filter((s) => s.name.toLowerCase().includes(skillsSearchKey.toLowerCase()))
       : skillsList
     return (
       <div
@@ -391,8 +488,24 @@ function ChatPageImpl(): React.JSX.Element {
           animation: 'slideUpMenu 0.15s ease-out'
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+            paddingBottom: '6px'
+          }}
+        >
+          <span
+            style={{
+              fontSize: '12.5px',
+              fontWeight: 700,
+              color: 'var(--text-color)',
+              display: 'inline-flex',
+              alignItems: 'center'
+            }}
+          >
             <Puzzle size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
             已装载的技能包
           </span>
@@ -403,20 +516,34 @@ function ChatPageImpl(): React.JSX.Element {
             style={searchInputStyle}
             placeholder="搜索技能..."
             value={skillsSearchKey}
-            onChange={e => setSkillsSearchKey(e.target.value)}
+            onChange={(e) => setSkillsSearchKey(e.target.value)}
             autoFocus
           />
         )}
         <div
           ref={skillsListRef}
-          style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', padding: '2px 0' }}
+          style={{
+            maxHeight: '180px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '2px 0'
+          }}
         >
           {filtered.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+            <div
+              style={{
+                fontSize: '12px',
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                padding: '12px 0'
+              }}
+            >
               {skillsList.length === 0 ? '暂未安装任何技能扩展包' : '无匹配的技能'}
             </div>
           ) : (
-            filtered.map(skill => {
+            filtered.map((skill) => {
               const isEnabled = !disabledSkillNames.includes(skill.name)
               return (
                 <label
@@ -433,8 +560,11 @@ function ChatPageImpl(): React.JSX.Element {
                     transition: 'background 0.15s ease',
                     userSelect: 'none'
                   }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.backgroundColor =
+                      'var(--bg-menu-hover, rgba(128,128,128,0.04))')
+                  }
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
                   <span
                     style={{
@@ -449,23 +579,46 @@ function ChatPageImpl(): React.JSX.Element {
                   >
                     {skill.name.replace(/\.zip$/i, '')}
                   </span>
-                  <div style={{ position: 'relative', width: '28px', height: '16px', borderRadius: '8px', backgroundColor: isEnabled ? 'var(--accent-color, #4f8cff)' : 'var(--border-color, rgba(128,128,128,0.3))', transition: 'background-color 0.2s ease', flexShrink: 0 }}>
-                    <div style={{
-                      position: 'absolute',
-                      top: '2px',
-                      left: isEnabled ? '14px' : '2px',
-                      width: '12px',
-                      height: '12px',
-                      backgroundColor: '#ffffff',
-                      borderRadius: '50%',
-                      transition: 'left 0.2s ease',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-                    }} />
+                  <div
+                    style={{
+                      position: 'relative',
+                      width: '28px',
+                      height: '16px',
+                      borderRadius: '8px',
+                      backgroundColor: isEnabled
+                        ? 'var(--accent-color, #4f8cff)'
+                        : 'var(--border-color, rgba(128,128,128,0.3))',
+                      transition: 'background-color 0.2s ease',
+                      flexShrink: 0
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '2px',
+                        left: isEnabled ? '14px' : '2px',
+                        width: '12px',
+                        height: '12px',
+                        backgroundColor: '#ffffff',
+                        borderRadius: '50%',
+                        transition: 'left 0.2s ease',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                      }}
+                    />
                     <input
                       type="checkbox"
                       checked={isEnabled}
                       onChange={() => toggleSkillEnable(skill.name)}
-                      style={{ opacity: 0, width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, margin: 0, cursor: 'pointer' }}
+                      style={{
+                        opacity: 0,
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        margin: 0,
+                        cursor: 'pointer'
+                      }}
                     />
                   </div>
                 </label>
@@ -473,7 +626,13 @@ function ChatPageImpl(): React.JSX.Element {
             })
           )}
         </div>
-        <div style={{ borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingTop: '6px', marginTop: '4px' }}>
+        <div
+          style={{
+            borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+            paddingTop: '6px',
+            marginTop: '4px'
+          }}
+        >
           <button
             style={{
               width: '100%',
@@ -531,8 +690,13 @@ function ChatPageImpl(): React.JSX.Element {
             setShowFeaturePopover(false)
           }}
         >
-          <span><Mic size={16} /></span>
-          <span><strong>AI 会议录音</strong><small>实时录音、转写并整理会议总结</small></span>
+          <span>
+            <Mic size={16} />
+          </span>
+          <span>
+            <strong>AI 会议录音</strong>
+            <small>实时录音、转写并整理会议总结</small>
+          </span>
         </button>
         <button
           type="button"
@@ -541,8 +705,13 @@ function ChatPageImpl(): React.JSX.Element {
             setShowFeaturePopover(false)
           }}
         >
-          <span><Radar size={16} /></span>
-          <span><strong>悬浮助手</strong><small>常驻右上角，实时查看屏幕或页面</small></span>
+          <span>
+            <Radar size={16} />
+          </span>
+          <span>
+            <strong>悬浮助手</strong>
+            <small>常驻右上角，实时查看屏幕或页面</small>
+          </span>
         </button>
       </div>
     </div>
@@ -575,8 +744,24 @@ function ChatPageImpl(): React.JSX.Element {
           animation: 'slideUpMenu 0.15s ease-out'
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+            paddingBottom: '6px'
+          }}
+        >
+          <span
+            style={{
+              fontSize: '12.5px',
+              fontWeight: 700,
+              color: 'var(--text-color)',
+              display: 'inline-flex',
+              alignItems: 'center'
+            }}
+          >
             <Link size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
             MCP 服务
           </span>
@@ -588,16 +773,30 @@ function ChatPageImpl(): React.JSX.Element {
             style={searchInputStyle}
             placeholder="搜索 MCP 服务..."
             value={mcpSearchKey}
-            onChange={e => setMcpSearchKey(e.target.value)}
+            onChange={(e) => setMcpSearchKey(e.target.value)}
             autoFocus
           />
         )}
         <div
           ref={mcpListRef}
-          style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', padding: '2px 0' }}
+          style={{
+            maxHeight: '180px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '2px 0'
+          }}
         >
           {filtered.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+            <div
+              style={{
+                fontSize: '12px',
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                padding: '12px 0'
+              }}
+            >
               {allMcpServers.length === 0 ? '暂未配置任何 MCP 服务' : '无匹配的 MCP 服务'}
             </div>
           ) : (
@@ -616,8 +815,11 @@ function ChatPageImpl(): React.JSX.Element {
                   transition: 'background 0.15s ease',
                   userSelect: 'none'
                 }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.backgroundColor =
+                    'var(--bg-menu-hover, rgba(128,128,128,0.04))')
+                }
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
                 <span
                   style={{
@@ -633,30 +835,59 @@ function ChatPageImpl(): React.JSX.Element {
                   {server.name}
                 </span>
                 {/* CSS Toggle Switch */}
-                <div style={{ position: 'relative', width: '28px', height: '16px', borderRadius: '8px', backgroundColor: server.enabled ? 'var(--accent-color, #4f8cff)' : 'var(--border-color, rgba(128,128,128,0.3))', transition: 'background-color 0.2s ease', flexShrink: 0 }}>
-                  <div style={{
-                    position: 'absolute',
-                    top: '2px',
-                    left: server.enabled ? '14px' : '2px',
-                    width: '12px',
-                    height: '12px',
-                    backgroundColor: '#ffffff',
-                    borderRadius: '50%',
-                    transition: 'left 0.2s ease',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-                  }} />
+                <div
+                  style={{
+                    position: 'relative',
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '8px',
+                    backgroundColor: server.enabled
+                      ? 'var(--accent-color, #4f8cff)'
+                      : 'var(--border-color, rgba(128,128,128,0.3))',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '2px',
+                      left: server.enabled ? '14px' : '2px',
+                      width: '12px',
+                      height: '12px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '50%',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }}
+                  />
                   <input
                     type="checkbox"
                     checked={!!server.enabled}
                     onChange={() => toggleMcpServerEnable(server.id)}
-                    style={{ opacity: 0, width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, margin: 0, cursor: 'pointer' }}
+                    style={{
+                      opacity: 0,
+                      width: '100%',
+                      height: '100%',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      margin: 0,
+                      cursor: 'pointer'
+                    }}
                   />
                 </div>
               </label>
             ))
           )}
         </div>
-        <div style={{ borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingTop: '6px', marginTop: '4px' }}>
+        <div
+          style={{
+            borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+            paddingTop: '6px',
+            marginTop: '4px'
+          }}
+        >
           <button
             style={{
               width: '100%',
@@ -698,7 +929,7 @@ function ChatPageImpl(): React.JSX.Element {
   // 根据 modelSearchKey 过滤模型列表
   const filteredModels = useMemo(() => {
     if (!modelSearchKey) return displayModels
-    return displayModels.filter(m => m.toLowerCase().includes(modelSearchKey.toLowerCase()))
+    return displayModels.filter((m) => m.toLowerCase().includes(modelSearchKey.toLowerCase()))
   }, [displayModels, modelSearchKey])
 
   // 决定是否出现滑动条和搜索框（模型总数 >= 8）
@@ -728,9 +959,21 @@ function ChatPageImpl(): React.JSX.Element {
           animation: 'slideUpMenu 0.15s ease-out'
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>选择模型</span>
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>共 {displayModels.length} 个模型</span>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+            paddingBottom: '6px'
+          }}
+        >
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>
+            选择模型
+          </span>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+            共 {displayModels.length} 个模型
+          </span>
         </div>
         {/* 搜索框：仅在列表项数量 >= 8 时显示 */}
         {isModelOverflow && (
@@ -738,11 +981,12 @@ function ChatPageImpl(): React.JSX.Element {
             style={searchInputStyle}
             placeholder="搜索模型..."
             value={modelSearchKey}
-            onChange={e => setModelSearchKey(e.target.value)}
+            onChange={(e) => setModelSearchKey(e.target.value)}
             autoFocus
           />
         )}
-        <div className="model-popover-list"
+        <div
+          className="model-popover-list"
           style={{
             maxHeight: isModelOverflow ? '220px' : 'none',
             overflowY: isModelOverflow ? 'auto' : 'visible',
@@ -753,11 +997,18 @@ function ChatPageImpl(): React.JSX.Element {
           }}
         >
           {filteredModels.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+            <div
+              style={{
+                fontSize: '12px',
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                padding: '12px 0'
+              }}
+            >
               无匹配的模型
             </div>
           ) : (
-            filteredModels.map(modelName => {
+            filteredModels.map((modelName) => {
               const isSelected = llmConfig.model === modelName
               return (
                 <div
@@ -780,18 +1031,27 @@ function ChatPageImpl(): React.JSX.Element {
                     saveLlmConfig({ ...llmConfig, model: modelName })
                     setShowModelPopover(false)
                   }}
-                  onMouseEnter={e => {
+                  onMouseEnter={(e) => {
                     if (!isSelected) {
-                      e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.04))'
+                      e.currentTarget.style.backgroundColor =
+                        'var(--bg-menu-hover, rgba(128,128,128,0.04))'
                     }
                   }}
-                  onMouseLeave={e => {
+                  onMouseLeave={(e) => {
                     if (!isSelected) {
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      flex: 1,
+                      minWidth: 0
+                    }}
+                  >
                     <img
                       src={getModelIcon(modelName, llmConfig.provider)}
                       alt=""
@@ -801,7 +1061,9 @@ function ChatPageImpl(): React.JSX.Element {
                         borderRadius: '3px',
                         flexShrink: 0,
                         objectFit: 'contain',
-                        filter: isSelected ? 'brightness(1.1) drop-shadow(0 1px 2px rgba(255,255,255,0.25))' : 'none'
+                        filter: isSelected
+                          ? 'brightness(1.1) drop-shadow(0 1px 2px rgba(255,255,255,0.25))'
+                          : 'none'
                       }}
                     />
                     <span
@@ -817,9 +1079,7 @@ function ChatPageImpl(): React.JSX.Element {
                       {modelName}
                     </span>
                   </div>
-                  {isSelected && (
-                    <Check size={14} strokeWidth={2} aria-hidden="true" />
-                  )}
+                  {isSelected && <Check size={14} strokeWidth={2} aria-hidden="true" />}
                 </div>
               )
             })
@@ -829,19 +1089,18 @@ function ChatPageImpl(): React.JSX.Element {
     )
   }
 
-
-
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
   const contextLimit = Number((llmConfig as any).contextWindow) || 168000
   const estimatedContextTokens = useMemo(
-    () => currentContextTokens + estimateDraftTokens(
-      quotedSelection ? formatQuotedPrompt(quotedSelection, inputValue) : inputValue,
-      attachedFiles
-    ),
+    () =>
+      currentContextTokens +
+      estimateDraftTokens(
+        quotedSelection ? formatQuotedPrompt(quotedSelection, inputValue) : inputValue,
+        attachedFiles
+      ),
     [attachedFiles, currentContextTokens, inputValue, quotedSelection]
   )
-
 
   const contextPercent = useMemo(() => {
     return Math.min(100, (estimatedContextTokens / contextLimit) * 100)
@@ -868,29 +1127,40 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }
 
-  const handleQuoteSelection = useCallback((selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
-    if (sendNow) {
-      const payload = formatQuotedPrompt(selection, prompt)
-      if (currentContextTokens + estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
-        showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
+  const handleQuoteSelection = useCallback(
+    (selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
+      if (sendNow) {
+        const payload = formatQuotedPrompt(selection, prompt)
+        if (currentContextTokens + estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
+          showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
+          return
+        }
+        const draft = inputValue
+        setInputValue(payload)
+        void handleSendChat()
+        if (useAppStoreRaw.getState().inputValue === '') {
+          setQuotedSelection(null)
+          setShowQuotedSelectionPreview(false)
+        } else {
+          setInputValue(draft)
+        }
         return
       }
-      const draft = inputValue
-      setInputValue(payload)
-      void handleSendChat()
-      if (useAppStoreRaw.getState().inputValue === '') {
-        setQuotedSelection(null)
-        setShowQuotedSelectionPreview(false)
-      } else {
-        setInputValue(draft)
-      }
-      return
-    }
-    setQuotedSelection(selection)
-    setShowQuotedSelectionPreview(false)
-    if (prompt) setInputValue(current => current ? `${current}\n${prompt}` : prompt)
-    window.requestAnimationFrame(() => chatTextareaRef.current?.focus())
-  }, [attachedFiles, contextLimit, currentContextTokens, handleSendChat, inputValue, setInputValue, showToast])
+      setQuotedSelection(selection)
+      setShowQuotedSelectionPreview(false)
+      if (prompt) setInputValue((current) => (current ? `${current}\n${prompt}` : prompt))
+      window.requestAnimationFrame(() => chatTextareaRef.current?.focus())
+    },
+    [
+      attachedFiles,
+      contextLimit,
+      currentContextTokens,
+      handleSendChat,
+      inputValue,
+      setInputValue,
+      showToast
+    ]
+  )
 
   // SSH 弹窗控制本地状态
   const [showSshModal, setShowSshModal] = useState(false)
@@ -912,7 +1182,10 @@ function ChatPageImpl(): React.JSX.Element {
       privateKey: ''
     }
   })
-  const [testSshStatus, setTestSshStatus] = useState<{ type: 'idle' | 'testing' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' })
+  const [testSshStatus, setTestSshStatus] = useState<{
+    type: 'idle' | 'testing' | 'success' | 'error'
+    message: string
+  }>({ type: 'idle', message: '' })
   const [connectSshLoading, setConnectSshLoading] = useState(false)
 
   // 设备下拉菜单控制状态与 Ref
@@ -963,7 +1236,10 @@ function ChatPageImpl(): React.JSX.Element {
     }
     return null
   }, [activeSessMessages])
-  const lastScrollMessageRef = useRef({ sessionId: activeSessionId, messageId: latestUserMessageId })
+  const lastScrollMessageRef = useRef({
+    sessionId: activeSessionId,
+    messageId: latestUserMessageId
+  })
   useEffect(() => {
     if (isSessionSwitching) return
     const previous = lastScrollMessageRef.current
@@ -979,20 +1255,18 @@ function ChatPageImpl(): React.JSX.Element {
     return () => cancelAnimationFrame(frame)
   }, [activeSessionId, latestUserMessageId, isSessionSwitching])
 
-  const handlePreviewFile = useCallback((f: { name: string; path: string; size: number }) => {
-    previewFile(f)
-    setShowFilePanel(true)
-  }, [previewFile, setShowFilePanel])
+  const handlePreviewFile = useCallback(
+    (f: { name: string; path: string; size: number }) => {
+      previewFile(f)
+      setShowFilePanel(true)
+    },
+    [previewFile, setShowFilePanel]
+  )
 
   // 切换会话时重置滚动状态
   useEffect(() => {
     setShowScrollToBottom(false)
   }, [activeSessionId])
-
-  useEffect(() => {
-    setApprovalDetailsExpanded(false)
-    setApprovalMenuOpen(false)
-  }, [activePermissionRequest])
 
   const scrollToBottom = () => {
     virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
@@ -1008,13 +1282,19 @@ function ChatPageImpl(): React.JSX.Element {
   // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
     if (highlightedMessageId == null) return () => {}
-    const messageIndex = activeSessMessages.findIndex(message => message.id === highlightedMessageId)
+    const messageIndex = activeSessMessages.findIndex(
+      (message) => message.id === highlightedMessageId
+    )
     if (messageIndex < 0) return () => {}
 
     const scrollTimer = window.setTimeout(() => {
       // Virtuoso may not have mounted an old message in the DOM yet, so locate
       // by data index first instead of relying on document.getElementById().
-      virtuosoRef.current?.scrollToIndex({ index: messageIndex, align: 'center', behavior: 'smooth' })
+      virtuosoRef.current?.scrollToIndex({
+        index: messageIndex,
+        align: 'center',
+        behavior: 'smooth'
+      })
     }, 80)
     const clearTimer = window.setTimeout(() => setHighlightedMessageId(null), 2600)
     return () => {
@@ -1035,26 +1315,24 @@ function ChatPageImpl(): React.JSX.Element {
   }, [])
 
   // Keep the virtual list data stable while only a message's streaming text is
-  // changing. Virtuoso now tracks lightweight IDs instead of full messages.
+  // changing. Delegated runs render inside their owning message instead of as
+  // separate timeline rows.
   const messageIdsRef = useRef<string[]>([])
   const messageIds = useMemo(() => {
-    const next = [
-      ...activeSessMessages.map((message: any, index: number) => ({
+    const next = activeSessMessages
+      .map((message: any, index: number) => ({
         key: `message:${String(message.id)}`,
         createdAt: Number(message.id) || index
-      })),
-      ...collaborationRuns.map((snapshot, index) => ({
-        key: `collaboration:${String(snapshot.run.id)}`,
-        createdAt: Number(snapshot.run.createdAt) || activeSessMessages.length + index
       }))
-    ].sort((left, right) => left.createdAt - right.createdAt).map(item => item.key)
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map((item) => item.key)
     const previous = messageIdsRef.current
     if (previous.length === next.length && previous.every((id, index) => id === next[index])) {
       return previous
     }
     messageIdsRef.current = next
     return next
-  }, [activeSessMessages, collaborationRuns])
+  }, [activeSessMessages])
 
   // Build message and request relationships once per message update. This
   // replaces the previous slice(0, index).findLast(...) work performed by
@@ -1066,54 +1344,93 @@ function ChatPageImpl(): React.JSX.Element {
     for (const message of activeSessMessages) {
       byId.set(message.id, message)
       if (message.sender === 'user') latestUserMessage = message
-      else if (message.sender === 'agent' && latestUserMessage) requestById.set(message.id, latestUserMessage)
+      else if (message.sender === 'agent' && latestUserMessage)
+        requestById.set(message.id, latestUserMessage)
     }
     return { messageById: byId, requestMessageById: requestById }
   }, [activeSessMessages])
 
-  const collaborationById = useMemo(() => new Map(
-    collaborationRuns.map(snapshot => [String(snapshot.run.id), snapshot])
-  ), [collaborationRuns])
-
-  const itemContent = useCallback((_index: number, timelineId: string) => {
-    if (timelineId.startsWith('collaboration:')) {
-      const snapshot = collaborationById.get(timelineId.slice('collaboration:'.length))
-      return snapshot ? <CollaborationRunCard snapshot={snapshot} onPreviewFile={handlePreviewFile} onOpenDetails={(taskRunId) => { setOpenedCollaborationRunId(taskRunId); setShowCollaborationComposer(true) }} /> : null
+  const collaborationById = useMemo(
+    () => new Map(collaborationRuns.map((snapshot) => [String(snapshot.run.id), snapshot])),
+    [collaborationRuns]
+  )
+  const collaborationsByParentMessageId = useMemo(() => {
+    const grouped = new Map<string, CollaborationSnapshot[]>()
+    for (const snapshot of [...collaborationRuns].sort(
+      (left, right) => Number(left.run.createdAt || 0) - Number(right.run.createdAt || 0)
+    )) {
+      const parentMessageId = String(snapshot.run.parentMessageId || '')
+      if (!parentMessageId) continue
+      grouped.set(parentMessageId, [...(grouped.get(parentMessageId) || []), snapshot])
     }
-    const rawId = timelineId.slice('message:'.length)
-    const message = messageById.get(rawId) || messageById.get(Number(rawId))
-    if (!message) return null
-    return (
-      <ChatMessageItem
-        msg={message}
-        currentAvatarName={currentAvatarName}
-        requestMessage={requestMessageById.get(message.id)}
-        highlightedMessageId={highlightedMessageId}
-        onPreviewFile={handlePreviewFile}
-        onQuoteSelection={handleQuoteSelection}
-      />
-    )
-  }, [collaborationById, messageById, requestMessageById, currentAvatarName, highlightedMessageId, handlePreviewFile, handleQuoteSelection])
+    return grouped
+  }, [collaborationRuns])
+
+  const handleOpenSubtask = useCallback((runId: string, stepId: string): void => {
+    setShowMeetingRecorder(false)
+    setOpenedSubtask({ runId, stepId })
+    void window.api
+      .getTaskRun(runId)
+      .then((hydrated: CollaborationSnapshot | null) => {
+        if (!hydrated) return
+        setCollaborationRuns((current) =>
+          current.map((snapshot) => (String(snapshot.run.id) === runId ? hydrated : snapshot))
+        )
+      })
+      .catch(() => undefined)
+  }, [])
+
+  const itemContent = useCallback(
+    (_index: number, timelineId: string) => {
+      const rawId = timelineId.slice('message:'.length)
+      const message = messageById.get(rawId) || messageById.get(Number(rawId))
+      if (!message) return null
+      const delegatedRuns = collaborationsByParentMessageId.get(String(message.id)) || []
+      return (
+        <ChatMessageItem
+          msg={message}
+          currentAvatarName={currentAvatarName}
+          requestMessage={requestMessageById.get(message.id)}
+          highlightedMessageId={highlightedMessageId}
+          onPreviewFile={handlePreviewFile}
+          onQuoteSelection={handleQuoteSelection}
+          delegateTaskAttachments={delegatedRuns.map((snapshot) => (
+            <SubtaskCapsuleGroup
+              key={snapshot.run.id}
+              snapshot={snapshot}
+              selectedStepId={
+                openedSubtask?.runId === String(snapshot.run.id) ? openedSubtask.stepId : undefined
+              }
+              onOpenDetails={handleOpenSubtask}
+            />
+          ))}
+        />
+      )
+    },
+    [
+      collaborationsByParentMessageId,
+      messageById,
+      requestMessageById,
+      currentAvatarName,
+      highlightedMessageId,
+      handlePreviewFile,
+      handleQuoteSelection,
+      handleOpenSubtask,
+      openedSubtask
+    ]
+  )
 
   const computeMessageKey = useCallback((_index: number, timelineId: string) => timelineId, [])
 
-  const approvalCommand = activePermissionRequest?.command || '内置 API 调用'
-  const approvalWarning = (activePermissionRequest as any)?.warning || '这项操作需要你确认后才会继续执行。'
-  const approvalAllowTurnScope = (activePermissionRequest as any)?.allowTurnScope !== false
-  const approvalIsDangerous = /删除|高危|rm\b|del\b|remove-item|delete/i.test(`${approvalCommand}\n${approvalWarning}`)
-  const approvalLines = approvalCommand.split(/\r?\n/)
-  const approvalHasMore = approvalLines.length > 6 || approvalCommand.length > 700
-  const approvalPreview = approvalDetailsExpanded
-    ? approvalCommand
-    : approvalLines.slice(0, 6).join('\n').slice(0, 700)
-
   return (
-    <div className={`chat-split-container ${showMeetingRecorder ? 'has-meeting-recorder' : ''}`}>
+    <div
+      className={`chat-split-container ${showMeetingRecorder ? 'has-meeting-recorder' : ''} ${openedSubtask ? 'has-subtask-detail' : ''}`}
+    >
       <div
         className="chat-main"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => {
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
           e.preventDefault()
           if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             handlePasteFiles(e.dataTransfer.files)
@@ -1151,17 +1468,33 @@ function ChatPageImpl(): React.JSX.Element {
             <div className="chat-empty-state">
               <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
               <div className="chat-empty-suggestions">
-                <div className="suggestion-chip" onClick={() => setInputValue('帮我处理一下这份文档的内容，提取关键信息')}>
-                  <FileText size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />文档处理
+                <div
+                  className="suggestion-chip"
+                  onClick={() => setInputValue('帮我处理一下这份文档的内容，提取关键信息')}
+                >
+                  <FileText size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
+                  文档处理
                 </div>
-                <div className="suggestion-chip" onClick={() => setInputValue('帮我分析这组数据并生成一份可视化报告')}>
-                  <BarChart3 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />数据分析与可视化
+                <div
+                  className="suggestion-chip"
+                  onClick={() => setInputValue('帮我分析这组数据并生成一份可视化报告')}
+                >
+                  <BarChart3 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
+                  数据分析与可视化
                 </div>
-                <div className="suggestion-chip" onClick={() => setInputValue('请为我构思一个独特的UI设计方案')}>
-                  <Palette size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />设计创意
+                <div
+                  className="suggestion-chip"
+                  onClick={() => setInputValue('请为我构思一个独特的UI设计方案')}
+                >
+                  <Palette size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
+                  设计创意
                 </div>
-                <div className="suggestion-chip" onClick={() => setInputValue('用最佳实践编写这段代码功能')}>
-                  <Code2 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />代码开发
+                <div
+                  className="suggestion-chip"
+                  onClick={() => setInputValue('用最佳实践编写这段代码功能')}
+                >
+                  <Code2 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
+                  代码开发
                 </div>
               </div>
             </div>
@@ -1173,7 +1506,7 @@ function ChatPageImpl(): React.JSX.Element {
               data={messageIds}
               computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
-              followOutput={(isAtBottom) => isAtBottom ? 'auto' : false}
+              followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
               initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
               atBottomThreshold={100}
               atBottomStateChange={handleAtBottomStateChange}
@@ -1190,21 +1523,80 @@ function ChatPageImpl(): React.JSX.Element {
 
         {/* 附件在输入框上方的实时预览 */}
         {attachedFiles && attachedFiles.length > 0 && (
-          <div className="input-files-preview-container" style={{ display: 'flex', gap: '8px', padding: '0 16px 8px', flexWrap: 'wrap', overflowX: 'auto' }}>
+          <div
+            className="input-files-preview-container"
+            style={{
+              display: 'flex',
+              gap: '8px',
+              padding: '0 16px 8px',
+              flexWrap: 'wrap',
+              overflowX: 'auto'
+            }}
+          >
             {attachedFiles.map((file, idx) => (
-              <div key={idx} className="input-file-preview" style={{ margin: 0, position: 'relative', display: 'flex', alignItems: 'center', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '6px 12px' }}>
+              <div
+                key={idx}
+                className="input-file-preview"
+                style={{
+                  margin: 0,
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '8px',
+                  padding: '6px 12px'
+                }}
+              >
                 {file.objectUrl ? (
                   <img
                     src={file.objectUrl}
                     alt={file.name}
-                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', marginRight: '8px', cursor: 'pointer' }}
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      objectFit: 'cover',
+                      borderRadius: '4px',
+                      marginRight: '8px',
+                      cursor: 'pointer'
+                    }}
                     onClick={() => setPreviewImageSrc(file.objectUrl || null)}
                   />
                 ) : (
-                  <FileText size={17} strokeWidth={2} className="preview-icon" style={{ marginRight: '6px' }} aria-hidden="true" />
+                  <FileText
+                    size={17}
+                    strokeWidth={2}
+                    className="preview-icon"
+                    style={{ marginRight: '6px' }}
+                    aria-hidden="true"
+                  />
                 )}
-                <span className="preview-name" title={file.name} style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>{file.name}</span>
-                <button className="preview-remove-btn" onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} title="移除文件" style={{ marginLeft: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '2px' }}>
+                <span
+                  className="preview-name"
+                  title={file.name}
+                  style={{
+                    maxWidth: '120px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: '13px'
+                  }}
+                >
+                  {file.name}
+                </span>
+                <button
+                  className="preview-remove-btn"
+                  onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                  title="移除文件"
+                  style={{
+                    marginLeft: '8px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--color-text-secondary)',
+                    padding: '2px'
+                  }}
+                >
                   <X size={14} strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
@@ -1213,31 +1605,48 @@ function ChatPageImpl(): React.JSX.Element {
         )}
 
         {false && activePermissionRequest && (
-          <div className="permission-approval-card" style={{
-            margin: '0 16px 12px 16px',
-            background: 'var(--bg-card, #ffffff)',
-            border: '1.5px solid var(--border-color, rgba(128,128,128,0.25))',
-            borderRadius: '12px',
-            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.08)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            animation: 'slideUpMenu 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)'
-          }}>
-            {/* 头部标题区域 */}
-            <div style={{
+          <div
+            className="permission-approval-card"
+            style={{
+              margin: '0 16px 12px 16px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1.5px solid var(--border-color, rgba(128,128,128,0.25))',
+              borderRadius: '12px',
+              boxShadow: '0 8px 30px rgba(0, 0, 0, 0.08)',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 16px',
-              borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))',
-              backgroundColor: 'var(--bg-card-sub, rgba(128,128,128,0.03))'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 700, color: 'var(--text-color)' }}>
+              flexDirection: 'column',
+              overflow: 'hidden',
+              animation: 'slideUpMenu 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)'
+            }}
+          >
+            {/* 头部标题区域 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 16px',
+                borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                backgroundColor: 'var(--bg-card-sub, rgba(128,128,128,0.03))'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '13.5px',
+                  fontWeight: 700,
+                  color: 'var(--text-color)'
+                }}
+              >
                 <ShieldAlert size={17} strokeWidth={2} aria-hidden="true" />
                 <span>问题</span>
               </div>
-              <span className="approval-status-pulse" style={{ fontSize: '12px', color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}>
+              <span
+                className="approval-status-pulse"
+                style={{ fontSize: '12px', color: 'var(--accent-color, #4f8cff)', fontWeight: 600 }}
+              >
                 等待核对审批...
               </span>
             </div>
@@ -1246,36 +1655,72 @@ function ChatPageImpl(): React.JSX.Element {
             <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-color)' }}>
                 {(activePermissionRequest as any).warning ? (
-                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'flex-start', gap: '4px' }}>
-                    <TriangleAlert size={15} strokeWidth={2} style={{ transform: 'translateY(1px)' }} aria-hidden="true" />
+                  <div
+                    style={{
+                      color: '#ef4444',
+                      fontWeight: 600,
+                      marginBottom: '8px',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '4px'
+                    }}
+                  >
+                    <TriangleAlert
+                      size={15}
+                      strokeWidth={2}
+                      style={{ transform: 'translateY(1px)' }}
+                      aria-hidden="true"
+                    />
                     <span>{(activePermissionRequest as any).warning}</span>
                   </div>
                 ) : (
-                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div
+                    style={{
+                      color: '#ef4444',
+                      fontWeight: 600,
+                      marginBottom: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
                     <TriangleAlert size={15} strokeWidth={2} aria-hidden="true" />
                     检测到文件删除等敏感指令，系统默认不授予自动执行权限：
                   </div>
                 )}
 
-                <div style={{
-                  background: 'var(--bg-card-sub, rgba(128,128,128,0.04))',
-                  padding: '12px 14px',
-                  borderRadius: '8px',
-                  border: '1px dashed var(--border-color, rgba(128,128,128,0.25))',
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  fontSize: '12.5px',
-                  color: 'var(--text-color-strong)'
-                }}>
+                <div
+                  style={{
+                    background: 'var(--bg-card-sub, rgba(128,128,128,0.04))',
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: '1px dashed var(--border-color, rgba(128,128,128,0.25))',
+                    fontFamily: 'Consolas, Monaco, monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    fontSize: '12.5px',
+                    color: 'var(--text-color-strong)'
+                  }}
+                >
                   {activePermissionRequest.command || '内置 API: delete_file'}
                 </div>
 
                 {activePermissionRequest.execCwd && (
-                  <div style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div
+                    style={{
+                      marginTop: '8px',
+                      color: 'var(--text-muted)',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
                     <FolderOpen size={14} strokeWidth={2} aria-hidden="true" />
                     <span>执行路径:</span>
-                    <span style={{ fontFamily: 'monospace' }}>{activePermissionRequest.execCwd}</span>
+                    <span style={{ fontFamily: 'monospace' }}>
+                      {activePermissionRequest.execCwd}
+                    </span>
                   </div>
                 )}
               </div>
@@ -1297,31 +1742,46 @@ function ChatPageImpl(): React.JSX.Element {
                     fontWeight: 500,
                     userSelect: 'none'
                   }}
-                  onMouseEnter={e => {
+                  onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = '#10b981'
                     e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.05)'
                   }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'var(--border-color, rgba(128,128,128,0.15))'
-                    e.currentTarget.style.backgroundColor = 'var(--bg-card-sub, rgba(128,128,128,0.03))'
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor =
+                      'var(--border-color, rgba(128,128,128,0.15))'
+                    e.currentTarget.style.backgroundColor =
+                      'var(--bg-card-sub, rgba(128,128,128,0.03))'
                   }}
                 >
-                  <div style={{
-                    width: '18px',
-                    height: '18px',
-                    borderRadius: '4px',
-                    border: '1px solid #10b981',
-                    color: '#10b981',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    marginRight: '12px',
-                    backgroundColor: 'rgba(16,185,129,0.08)'
-                  }}>A</div>
+                  <div
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '4px',
+                      border: '1px solid #10b981',
+                      color: '#10b981',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      marginRight: '12px',
+                      backgroundColor: 'rgba(16,185,129,0.08)'
+                    }}
+                  >
+                    A
+                  </div>
                   <span style={{ color: 'var(--text-color)', fontWeight: 600 }}>确认允许执行</span>
-                  <span style={{ marginLeft: 'auto', color: '#10b981', fontWeight: 'bold', fontSize: '14px' }}>&gt;</span>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      color: '#10b981',
+                      fontWeight: 'bold',
+                      fontSize: '14px'
+                    }}
+                  >
+                    &gt;
+                  </span>
                 </div>
 
                 <div
@@ -1339,31 +1799,46 @@ function ChatPageImpl(): React.JSX.Element {
                     fontWeight: 500,
                     userSelect: 'none'
                   }}
-                  onMouseEnter={e => {
+                  onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = '#ef4444'
                     e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.05)'
                   }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'var(--border-color, rgba(128,128,128,0.15))'
-                    e.currentTarget.style.backgroundColor = 'var(--bg-card-sub, rgba(128,128,128,0.03))'
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor =
+                      'var(--border-color, rgba(128,128,128,0.15))'
+                    e.currentTarget.style.backgroundColor =
+                      'var(--bg-card-sub, rgba(128,128,128,0.03))'
                   }}
                 >
-                  <div style={{
-                    width: '18px',
-                    height: '18px',
-                    borderRadius: '4px',
-                    border: '1px solid #ef4444',
-                    color: '#ef4444',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    marginRight: '12px',
-                    backgroundColor: 'rgba(239,68,68,0.08)'
-                  }}>B</div>
+                  <div
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '4px',
+                      border: '1px solid #ef4444',
+                      color: '#ef4444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      marginRight: '12px',
+                      backgroundColor: 'rgba(239,68,68,0.08)'
+                    }}
+                  >
+                    B
+                  </div>
                   <span style={{ color: '#ef4444', fontWeight: 600 }}>取消并拦截</span>
-                  <span style={{ marginLeft: 'auto', color: '#ef4444', fontWeight: 'bold', fontSize: '14px' }}>&gt;</span>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      color: '#ef4444',
+                      fontWeight: 'bold',
+                      fontSize: '14px'
+                    }}
+                  >
+                    &gt;
+                  </span>
                 </div>
               </div>
             </div>
@@ -1373,85 +1848,14 @@ function ChatPageImpl(): React.JSX.Element {
         {/* 现代卡片式输入控制面板 */}
         <div className="chat-control-card">
           {/* 人机协作安全核对面板：锚定在输入框上方 */}
-          {activePermissionRequest && activePermissionRequest.interactionOrigin !== 'orchestration' && (
-            <section className={`permission-approval-card compact ${approvalIsDangerous ? 'is-danger' : ''}`}>
-              <div className="approval-card-head">
-                <div className="approval-card-title">
-                  <span className="approval-icon">⌁</span>
-                  <div>
-                    <div className="approval-kicker">{approvalIsDangerous ? '高风险操作' : '需要审批'}</div>
-                    <div className="approval-title">是否允许执行这项操作？</div>
-                  </div>
-                </div>
-                <span className="approval-status-pulse">等待确认</span>
-              </div>
-
-              <div className="approval-card-body">
-                <p className="approval-reason">{approvalWarning}</p>
-
-                <div className="approval-command-box">
-                  <pre>{approvalPreview}{!approvalDetailsExpanded && approvalHasMore ? '\n...' : ''}</pre>
-                  {approvalHasMore && (
-                    <button
-                      type="button"
-                      className="approval-link-button"
-                      onClick={() => setApprovalDetailsExpanded(prev => !prev)}
-                    >
-                      {approvalDetailsExpanded ? '收起详情' : '展开详情'}
-                    </button>
-                  )}
-                </div>
-
-                {activePermissionRequest.execCwd && (
-                  <div className="approval-meta">
-                    <span>目录</span>
-                    <code>{activePermissionRequest.execCwd}</code>
-                  </div>
-                )}
-
-                <div className="approval-actions">
-                  <button
-                    type="button"
-                    className="approval-action reject"
-                    onClick={() => handleRespondPermission(false)}
-                  >
-                    拒绝
-                  </button>
-
-                  <div className="approval-allow-group">
-                    <button
-                      type="button"
-                      className="approval-action allow"
-                      onClick={() => handleRespondPermission(true)}
-                    >
-                      允许一次
-                    </button>
-                    {approvalAllowTurnScope && (
-                      <button
-                        type="button"
-                        className="approval-action allow menu"
-                        onClick={() => setApprovalMenuOpen(prev => !prev)}
-                        aria-label="更多允许选项"
-                        aria-expanded={approvalMenuOpen}
-                      >
-                        <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-                      </button>
-                    )}
-                    {approvalAllowTurnScope && approvalMenuOpen && (
-                      <div className="approval-menu">
-                        <button
-                          type="button"
-                          onClick={() => handleRespondPermission(true, 'turn')}
-                        >
-                          本次提问全部允许
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
+          {activePermissionRequest &&
+            activePermissionRequest.interactionOrigin !== 'orchestration' && (
+              <PermissionApprovalCard
+                key={activePermissionRequest.requestId}
+                request={activePermissionRequest}
+                onRespond={handleRespondPermission}
+              />
+            )}
 
           {quotedSelection && (
             <div
@@ -1469,7 +1873,9 @@ function ChatPageImpl(): React.JSX.Element {
                 >
                   <div className="composer-selection-bubble-header">
                     <Quote size={13} strokeWidth={2} aria-hidden="true" />
-                    <span className="composer-selection-bubble-title">引用自 {quotedSelection.senderName}</span>
+                    <span className="composer-selection-bubble-title">
+                      引用自 {quotedSelection.senderName}
+                    </span>
                     <button
                       type="button"
                       className="composer-selection-bubble-close"
@@ -1485,7 +1891,7 @@ function ChatPageImpl(): React.JSX.Element {
               <button
                 type="button"
                 className="composer-selection-trigger"
-                onClick={() => setShowQuotedSelectionPreview(current => !current)}
+                onClick={() => setShowQuotedSelectionPreview((current) => !current)}
                 aria-expanded={showQuotedSelectionPreview}
                 aria-controls="composer-selection-bubble"
                 title="查看引用全文"
@@ -1493,7 +1899,8 @@ function ChatPageImpl(): React.JSX.Element {
                 <span className="composer-selection-index">1</span>
                 <Quote size={14} strokeWidth={2} aria-hidden="true" />
                 <span className="composer-selection-label">
-                  选中「{quotedSelection.text.replace(/\s+/g, ' ').slice(0, 34)}{quotedSelection.text.length > 34 ? '…' : ''}」
+                  选中「{quotedSelection.text.replace(/\s+/g, ' ').slice(0, 34)}
+                  {quotedSelection.text.length > 34 ? '…' : ''}」
                 </span>
               </button>
               <button
@@ -1523,8 +1930,8 @@ function ChatPageImpl(): React.JSX.Element {
             }
             value={inputValue}
             disabled={estimatedContextTokens >= contextLimit}
-            onChange={e => setInputValue(e.target.value)}
-            onPaste={async e => {
+            onChange={(e) => setInputValue(e.target.value)}
+            onPaste={async (e) => {
               // 优先检查内部剪贴板（从消息复制的文件+文本）
               const internalClip = getInternalClipboard()
               if (internalClip && internalClip.files.length > 0) {
@@ -1532,34 +1939,40 @@ function ChatPageImpl(): React.JSX.Element {
                 setInternalClipboard(null)
                 // 先同步插入文本，避免等待文件复制/解析 IPC 期间输入框看不到粘贴内容
                 if (internalClip.text) {
-                  setInputValue(prev => prev ? prev + internalClip.text : internalClip.text)
+                  setInputValue((prev) => (prev ? prev + internalClip.text : internalClip.text))
                 }
                 // 异步将内部剪贴板文件转为附件（复制到当前会话目录确保路径有效），完成后追加到附件列表
-                Promise.all(internalClip.files.map(async f => {
-                  const ext = f.name.split('.').pop()?.toLowerCase() || ''
-                  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
-                  const isImage = imageExts.includes(ext)
-                  // 将文件复制到当前会话目录，确保路径有效
-                  let filePath = f.path
-                  if (window.api.copyToChatFile) {
-                    const result = await window.api.copyToChatFile(activeSessionId, f.path)
-                    filePath = result.path
-                  }
-                  // 如果没有预加载内容，尝试解析文件内容
-                  let content = f.content
-                  if (!content && filePath) {
-                    try {
-                      content = await window.api.parseFileContent(filePath)
-                    } catch { /* 忽略解析失败 */ }
-                  }
-                  return {
-                    name: f.name,
-                    path: filePath,
-                    content,
-                    objectUrl: isImage ? `local-file:///${filePath.replace(/\\/g, '/')}` : undefined
-                  }
-                })).then(newAttachments => {
-                  setAttachedFiles(prev => [...prev, ...newAttachments])
+                Promise.all(
+                  internalClip.files.map(async (f) => {
+                    const ext = f.name.split('.').pop()?.toLowerCase() || ''
+                    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+                    const isImage = imageExts.includes(ext)
+                    // 将文件复制到当前会话目录，确保路径有效
+                    let filePath = f.path
+                    if (window.api.copyToChatFile) {
+                      const result = await window.api.copyToChatFile(activeSessionId, f.path)
+                      filePath = result.path
+                    }
+                    // 如果没有预加载内容，尝试解析文件内容
+                    let content = f.content
+                    if (!content && filePath) {
+                      try {
+                        content = await window.api.parseFileContent(filePath)
+                      } catch {
+                        /* 忽略解析失败 */
+                      }
+                    }
+                    return {
+                      name: f.name,
+                      path: filePath,
+                      content,
+                      objectUrl: isImage
+                        ? `local-file:///${filePath.replace(/\\/g, '/')}`
+                        : undefined
+                    }
+                  })
+                ).then((newAttachments) => {
+                  setAttachedFiles((prev) => [...prev, ...newAttachments])
                 })
                 return
               }
@@ -1569,7 +1982,7 @@ function ChatPageImpl(): React.JSX.Element {
                 handlePasteFiles(e.clipboardData.files)
               }
             }}
-            onKeyDown={e => {
+            onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 handleSendIntercept()
@@ -1579,8 +1992,15 @@ function ChatPageImpl(): React.JSX.Element {
 
           <div className="chat-control-toolbar">
             {/* 左侧：模型切换 */}
-            <div className="toolbar-group-left" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <div className="custom-model-select-container" style={{ position: 'relative' }} ref={modelPopoverRef}>
+            <div
+              className="toolbar-group-left"
+              style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+            >
+              <div
+                className="custom-model-select-container"
+                style={{ position: 'relative' }}
+                ref={modelPopoverRef}
+              >
                 <div
                   className="model-dropdown-container"
                   onClick={() => {
@@ -1608,11 +2028,26 @@ function ChatPageImpl(): React.JSX.Element {
                       objectFit: 'contain'
                     }}
                   />
-                  <span className="model-select-inline" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85px' }}>
+                  <span
+                    className="model-select-inline"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '85px'
+                      }}
+                    >
                       {llmConfig.model || '选择模型'}
                     </span>
-                    <ChevronDown size={13} strokeWidth={2} style={{ opacity: 0.7 }} aria-hidden="true" />
+                    <ChevronDown
+                      size={13}
+                      strokeWidth={2}
+                      style={{ opacity: 0.7 }}
+                      aria-hidden="true"
+                    />
                   </span>
                 </div>
                 {showModelPopover && renderModelPopover()}
@@ -1628,7 +2063,11 @@ function ChatPageImpl(): React.JSX.Element {
                     setShowModelPopover(false)
                     if (next) void refreshKnowledgeBases()
                   }}
-                  title={selectedKnowledgeBaseId ? `当前知识库：${selectedKnowledgeBaseName}` : '选择本轮聊天使用的知识库'}
+                  title={
+                    selectedKnowledgeBaseId
+                      ? `当前知识库：${selectedKnowledgeBaseName}`
+                      : '选择本轮聊天使用的知识库'
+                  }
                 >
                   <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
                   <span>{selectedKnowledgeBaseName || '知识库'}</span>
@@ -1638,7 +2077,10 @@ function ChatPageImpl(): React.JSX.Element {
                 {showKnowledgePopover && (
                   <div className="chat-knowledge-popover">
                     <div className="chat-knowledge-popover__header">
-                      <div><strong>对话知识库</strong><small>发送时自动检索并附带引用</small></div>
+                      <div>
+                        <strong>对话知识库</strong>
+                        <small>发送时自动检索并附带引用</small>
+                      </div>
                       <BookOpen size={17} strokeWidth={1.8} aria-hidden="true" />
                     </div>
                     <button
@@ -1650,7 +2092,10 @@ function ChatPageImpl(): React.JSX.Element {
                       }}
                     >
                       <span className="chat-knowledge-option__mark" />
-                      <span><strong>不使用知识库</strong><small>仅使用当前对话与记忆</small></span>
+                      <span>
+                        <strong>不使用知识库</strong>
+                        <small>仅使用当前对话与记忆</small>
+                      </span>
                       {!selectedKnowledgeBaseId && <Check size={14} aria-hidden="true" />}
                     </button>
                     <div className="chat-knowledge-options">
@@ -1664,9 +2109,18 @@ function ChatPageImpl(): React.JSX.Element {
                             setShowKnowledgePopover(false)
                           }}
                         >
-                          <span className={`chat-knowledge-option__mark ${selectedKnowledgeBaseId === base.id ? 'filled' : ''}`} />
-                          <span><strong>{base.name}</strong><small>{base.documentCount || 0} 个文档 · {base.nodeCount || 0} 个结构节点</small></span>
-                          {selectedKnowledgeBaseId === base.id && <Check size={14} aria-hidden="true" />}
+                          <span
+                            className={`chat-knowledge-option__mark ${selectedKnowledgeBaseId === base.id ? 'filled' : ''}`}
+                          />
+                          <span>
+                            <strong>{base.name}</strong>
+                            <small>
+                              {base.documentCount || 0} 个文档 · {base.nodeCount || 0} 个结构节点
+                            </small>
+                          </span>
+                          {selectedKnowledgeBaseId === base.id && (
+                            <Check size={14} aria-hidden="true" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -1687,10 +2141,16 @@ function ChatPageImpl(): React.JSX.Element {
               </div>
 
               {/* 执行设备选择 */}
-              <div className="custom-device-select-container" style={{ position: 'relative' }} ref={deviceMenuRef}>
+              <div
+                className="custom-device-select-container"
+                style={{ position: 'relative' }}
+                ref={deviceMenuRef}
+              >
                 <div
                   className={`toolbar-icon-btn custom-device-trigger ${showDeviceMenu ? 'active' : ''}`}
-                  onClick={() => { if (!isSending) setShowDeviceMenu(!showDeviceMenu) }}
+                  onClick={() => {
+                    if (!isSending) setShowDeviceMenu(!showDeviceMenu)
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1701,9 +2161,11 @@ function ChatPageImpl(): React.JSX.Element {
                   }}
                   title={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
                 >
-                  {executionDevice === 'ssh'
-                    ? <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
-                    : <Monitor size={17} strokeWidth={2} aria-hidden="true" />}
+                  {executionDevice === 'ssh' ? (
+                    <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
+                  ) : (
+                    <Monitor size={17} strokeWidth={2} aria-hidden="true" />
+                  )}
                 </div>
 
                 {showDeviceMenu && (
@@ -1736,9 +2198,21 @@ function ChatPageImpl(): React.JSX.Element {
                       onMouseEnter={handleMenuItemMouseEnter}
                       onMouseLeave={handleMenuItemMouseLeave}
                     >
-                      <Monitor size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      <Monitor
+                        size={16}
+                        strokeWidth={2}
+                        className="ui-icon-leading"
+                        aria-hidden="true"
+                      />
                       <span>本机执行</span>
-                      {executionDevice === 'local' && <Check size={16} strokeWidth={2} style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }} aria-hidden="true" />}
+                      {executionDevice === 'local' && (
+                        <Check
+                          size={16}
+                          strokeWidth={2}
+                          style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
+                          aria-hidden="true"
+                        />
+                      )}
                     </div>
 
                     {sshConnected ? (
@@ -1752,11 +2226,31 @@ function ChatPageImpl(): React.JSX.Element {
                         onMouseEnter={handleMenuItemMouseEnter}
                         onMouseLeave={handleMenuItemMouseLeave}
                       >
-                        <Globe2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '110px' }} title={`${sshUsername}@${sshHost}`}>
+                        <Globe2
+                          size={16}
+                          strokeWidth={2}
+                          className="ui-icon-leading"
+                          aria-hidden="true"
+                        />
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '110px'
+                          }}
+                          title={`${sshUsername}@${sshHost}`}
+                        >
                           SSH: {sshUsername}@${sshHost}
                         </span>
-                        {executionDevice === 'ssh' && <Check size={16} strokeWidth={2} style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }} aria-hidden="true" />}
+                        {executionDevice === 'ssh' && (
+                          <Check
+                            size={16}
+                            strokeWidth={2}
+                            style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
+                            aria-hidden="true"
+                          />
+                        )}
                       </div>
                     ) : null}
 
@@ -1770,13 +2264,24 @@ function ChatPageImpl(): React.JSX.Element {
                       onMouseEnter={handleMenuItemMouseEnter}
                       onMouseLeave={handleMenuItemMouseLeave}
                     >
-                      <Settings2 size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                      <Settings2
+                        size={16}
+                        strokeWidth={2}
+                        className="ui-icon-leading"
+                        aria-hidden="true"
+                      />
                       <span>{sshConnected ? '配置其它 SSH...' : '配置远程 SSH...'}</span>
                     </div>
 
                     {sshConnected && (
                       <>
-                        <div style={{ height: '1px', background: 'var(--border-color, rgba(128,128,128,0.12))', margin: '4px 0' }} />
+                        <div
+                          style={{
+                            height: '1px',
+                            background: 'var(--border-color, rgba(128,128,128,0.12))',
+                            margin: '4px 0'
+                          }}
+                        />
                         <div
                           className="device-menu-item disconnect"
                           onClick={async () => {
@@ -1795,10 +2300,20 @@ function ChatPageImpl(): React.JSX.Element {
                             fontWeight: 500,
                             transition: 'background 0.15s ease'
                           }}
-                          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'}
-                          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.backgroundColor =
+                              'var(--bg-menu-hover, rgba(128,128,128,0.06))')
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.backgroundColor = 'transparent')
+                          }
                         >
-                          <Plug size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                          <Plug
+                            size={16}
+                            strokeWidth={2}
+                            className="ui-icon-leading"
+                            aria-hidden="true"
+                          />
                           <span>断开连接</span>
                         </div>
                       </>
@@ -1809,11 +2324,18 @@ function ChatPageImpl(): React.JSX.Element {
             </div>
 
             {/* 右侧：文件上传与发送按钮 */}
-            <div className="toolbar-group-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div
+              className="toolbar-group-right"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
               <button
                 className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
                 type="button"
-                onClick={() => { setOpenedCollaborationRunId(''); setShowCollaborationComposer(true) }}
+                onClick={() => {
+                  setOpenedSubtask(null)
+                  setOpenedCollaborationRunId('')
+                  setShowCollaborationComposer(true)
+                }}
                 title="新建多 Agent 协作任务"
                 aria-label="新建多 Agent 协作任务"
               >
@@ -1846,7 +2368,13 @@ function ChatPageImpl(): React.JSX.Element {
                     cy="18"
                     r="15.9155"
                     fill="none"
-                    stroke={contextPercent >= 100 ? '#ef4444' : contextPercent > 75 ? '#f59e0b' : '#3b82f6'}
+                    stroke={
+                      contextPercent >= 100
+                        ? '#ef4444'
+                        : contextPercent > 75
+                          ? '#f59e0b'
+                          : '#3b82f6'
+                    }
                     strokeWidth="3.5"
                     strokeDasharray={`${contextPercent} ${100 - contextPercent}`}
                     strokeDashoffset="25"
@@ -1876,7 +2404,9 @@ function ChatPageImpl(): React.JSX.Element {
                       animation: 'slideUpMenu 0.15s ease-out'
                     }}
                   >
-                    <div style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>背景信息窗口：</div>
+                    <div style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+                      背景信息窗口：
+                    </div>
                     <div style={{ fontSize: '12px' }}>{`${Math.round(contextPercent)}% 已用`}</div>
                     <div>{`已用 ${Math.round(estimatedContextTokens / 1000)}k 标记，共 ${Math.round(contextLimit / 1000)}k`}</div>
                   </div>
@@ -1896,7 +2426,7 @@ function ChatPageImpl(): React.JSX.Element {
                       refreshSkillsAndStorage()
                     }
                   }}
-                  title={`管理与启用技能扩展包 (当前启用: ${skillsList.filter(s => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`}
+                  title={`管理与启用技能扩展包 (当前启用: ${skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`}
                 >
                   <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
                 </div>
@@ -1956,7 +2486,9 @@ function ChatPageImpl(): React.JSX.Element {
                 className="toolbar-icon-btn toolbar-action-btn upload"
                 onClick={handleUploadFile}
                 disabled={estimatedContextTokens >= contextLimit}
-                title={estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'}
+                title={
+                  estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'
+                }
               >
                 <Plus size={18} strokeWidth={2} aria-hidden="true" />
               </button>
@@ -1974,7 +2506,10 @@ function ChatPageImpl(): React.JSX.Element {
                     className="toolbar-send-btn"
                     onClick={handleSendIntercept}
                     title="发送追加指引并调整当前任务"
-                    disabled={(!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) || estimatedContextTokens >= contextLimit}
+                    disabled={
+                      (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
+                      estimatedContextTokens >= contextLimit
+                    }
                   >
                     <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                   </button>
@@ -1984,7 +2519,10 @@ function ChatPageImpl(): React.JSX.Element {
                   className="toolbar-send-btn"
                   onClick={handleSendIntercept}
                   title="发送消息"
-                  disabled={(!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) || estimatedContextTokens >= contextLimit}
+                  disabled={
+                    (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
+                    estimatedContextTokens >= contextLimit
+                  }
                 >
                   <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                 </button>
@@ -2002,6 +2540,15 @@ function ChatPageImpl(): React.JSX.Element {
         />
       )}
 
+      {openedSubtask && collaborationById.get(openedSubtask.runId) && (
+        <SubtaskDetailDrawer
+          snapshot={collaborationById.get(openedSubtask.runId)!}
+          stepId={openedSubtask.stepId}
+          onClose={() => setOpenedSubtask(null)}
+          onPreviewFile={handlePreviewFile}
+        />
+      )}
+
       {showCollaborationComposer && (
         <CollaborationComposer
           sessionId={activeSessionId}
@@ -2009,7 +2556,13 @@ function ChatPageImpl(): React.JSX.Element {
           llmConfig={llmConfig}
           initialGoal={inputValue}
           initialRunId={openedCollaborationRunId || undefined}
-          permissionRequest={activePermissionRequest?.interactionOrigin === 'orchestration' && (!openedCollaborationRunId || activePermissionRequest.taskRunId === openedCollaborationRunId) ? activePermissionRequest : undefined}
+          permissionRequest={
+            activePermissionRequest?.interactionOrigin === 'orchestration' &&
+            (!openedCollaborationRunId ||
+              activePermissionRequest.taskRunId === openedCollaborationRunId)
+              ? activePermissionRequest
+              : undefined
+          }
           onRespondPermission={handleRespondPermission}
           onWorkspaceSelected={handleCollaborationWorkspaceSelected}
           onStarted={handleCollaborationStarted}
@@ -2031,34 +2584,110 @@ function ChatPageImpl(): React.JSX.Element {
       {previewImageSrc && (
         <div
           className="fullscreen-image-preview"
-          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.8)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'zoom-out'
+          }}
           onClick={() => setPreviewImageSrc(null)}
           onContextMenu={(e) => {
             e.preventDefault()
             handleImageContextMenu(e, previewImageSrc)
           }}
         >
-          <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+          <img
+            src={previewImageSrc}
+            style={{
+              maxWidth: '90%',
+              maxHeight: '90%',
+              objectFit: 'contain',
+              borderRadius: '8px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+            }}
+          />
         </div>
       )}
 
       {showSshModal && (
-        <div className="ssh-modal-overlay" style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-          zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }} onClick={() => { setShowSshModal(false); setTestSshStatus({ type: 'idle', message: '' }) }}>
-          <div className="ssh-modal-card" style={{
-            width: '420px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
-            borderRadius: '16px', boxShadow: '0 12px 40px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column',
-            overflow: 'hidden', padding: '24px'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-color)', display: 'inline-flex', alignItems: 'center' }}>
+        <div
+          className="ssh-modal-overlay"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 10000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={() => {
+            setShowSshModal(false)
+            setTestSshStatus({ type: 'idle', message: '' })
+          }}
+        >
+          <div
+            className="ssh-modal-card"
+            style={{
+              width: '420px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+              borderRadius: '16px',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              padding: '24px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '18px'
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '16px',
+                  fontWeight: 700,
+                  color: 'var(--text-color)',
+                  display: 'inline-flex',
+                  alignItems: 'center'
+                }}
+              >
                 <Server size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                 远程 SSH 连接配置
               </span>
-              <button disabled={connectSshLoading} onClick={() => { setShowSshModal(false); setTestSshStatus({ type: 'idle', message: '' }) }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-muted)' }} title="关闭">
+              <button
+                disabled={connectSshLoading}
+                onClick={() => {
+                  setShowSshModal(false)
+                  setTestSshStatus({ type: 'idle', message: '' })
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)'
+                }}
+                title="关闭"
+              >
                 <X size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
@@ -2066,57 +2695,235 @@ function ChatPageImpl(): React.JSX.Element {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 2 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>主机地址 (Host)</label>
-                  <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="192.168.1.100" value={sshForm.host} onChange={e => setSshForm(prev => ({ ...prev, host: e.target.value }))} />
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: 'var(--text-muted)',
+                      display: 'block',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    主机地址 (Host)
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    placeholder="192.168.1.100"
+                    value={sshForm.host}
+                    onChange={(e) => setSshForm((prev) => ({ ...prev, host: e.target.value }))}
+                  />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>端口 (Port)</label>
-                  <input type="number" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="22" value={sshForm.port} onChange={e => setSshForm(prev => ({ ...prev, port: e.target.value }))} />
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: 'var(--text-muted)',
+                      display: 'block',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    端口 (Port)
+                  </label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    placeholder="22"
+                    value={sshForm.port}
+                    onChange={(e) => setSshForm((prev) => ({ ...prev, port: e.target.value }))}
+                  />
                 </div>
               </div>
 
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>用户名 (Username)</label>
-                <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="root" value={sshForm.username} onChange={e => setSshForm(prev => ({ ...prev, username: e.target.value }))} />
+                <label
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: 'var(--text-muted)',
+                    display: 'block',
+                    marginBottom: '6px'
+                  }}
+                >
+                  用户名 (Username)
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  placeholder="root"
+                  value={sshForm.username}
+                  onChange={(e) => setSshForm((prev) => ({ ...prev, username: e.target.value }))}
+                />
               </div>
 
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>认证方式</label>
+                <label
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: 'var(--text-muted)',
+                    display: 'block',
+                    marginBottom: '6px'
+                  }}
+                >
+                  认证方式
+                </label>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'password' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'password' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'password' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'password' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
-                    <KeyRound size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />密码认证
+                  <button
+                    type="button"
+                    onClick={() => setSshForm((prev) => ({ ...prev, authType: 'password' }))}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '6px',
+                      border:
+                        sshForm.authType === 'password'
+                          ? '1.5px solid var(--accent-color, #4f8cff)'
+                          : '1px solid var(--border-color, rgba(128,128,128,0.2))',
+                      background:
+                        sshForm.authType === 'password' ? 'rgba(79,140,255,0.08)' : 'transparent',
+                      color:
+                        sshForm.authType === 'password'
+                          ? 'var(--accent-color, #4f8cff)'
+                          : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 600
+                    }}
+                  >
+                    <KeyRound
+                      size={15}
+                      strokeWidth={2}
+                      className="ui-icon-leading"
+                      aria-hidden="true"
+                    />
+                    密码认证
                   </button>
-                  <button type="button" onClick={() => setSshForm(prev => ({ ...prev, authType: 'privateKey' }))} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: sshForm.authType === 'privateKey' ? '1.5px solid var(--accent-color, #4f8cff)' : '1px solid var(--border-color, rgba(128,128,128,0.2))', background: sshForm.authType === 'privateKey' ? 'rgba(79,140,255,0.08)' : 'transparent', color: sshForm.authType === 'privateKey' ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
-                    <FileKey2 size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />私钥认证
+                  <button
+                    type="button"
+                    onClick={() => setSshForm((prev) => ({ ...prev, authType: 'privateKey' }))}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '6px',
+                      border:
+                        sshForm.authType === 'privateKey'
+                          ? '1.5px solid var(--accent-color, #4f8cff)'
+                          : '1px solid var(--border-color, rgba(128,128,128,0.2))',
+                      background:
+                        sshForm.authType === 'privateKey' ? 'rgba(79,140,255,0.08)' : 'transparent',
+                      color:
+                        sshForm.authType === 'privateKey'
+                          ? 'var(--accent-color, #4f8cff)'
+                          : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 600
+                    }}
+                  >
+                    <FileKey2
+                      size={15}
+                      strokeWidth={2}
+                      className="ui-icon-leading"
+                      aria-hidden="true"
+                    />
+                    私钥认证
                   </button>
                 </div>
               </div>
 
               {sshForm.authType === 'password' ? (
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>密码 (Password)</label>
-                  <input type="password" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="输入连接密码" value={sshForm.password} onChange={e => setSshForm(prev => ({ ...prev, password: e.target.value }))} />
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: 'var(--text-muted)',
+                      display: 'block',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    密码 (Password)
+                  </label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    placeholder="输入连接密码"
+                    value={sshForm.password}
+                    onChange={(e) => setSshForm((prev) => ({ ...prev, password: e.target.value }))}
+                  />
                 </div>
               ) : (
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>PEM 私钥内容 (Private Key)</label>
-                  <textarea rows={4} className="form-input resize-none" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px' }} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." value={sshForm.privateKey} onChange={e => setSshForm(prev => ({ ...prev, privateKey: e.target.value }))} />
+                  <label
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: 'var(--text-muted)',
+                      display: 'block',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    PEM 私钥内容 (Private Key)
+                  </label>
+                  <textarea
+                    rows={4}
+                    className="form-input resize-none"
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      fontFamily: 'monospace',
+                      fontSize: '11px'
+                    }}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+                    value={sshForm.privateKey}
+                    onChange={(e) =>
+                      setSshForm((prev) => ({ ...prev, privateKey: e.target.value }))
+                    }
+                  />
                 </div>
               )}
             </div>
 
             {testSshStatus.type !== 'idle' && (
-              <div style={{
-                fontSize: '12.5px', padding: '10px 12px', borderRadius: '8px', marginTop: '14px',
-                color: testSshStatus.type === 'success' ? '#10b981' : testSshStatus.type === 'testing' ? '#6b7280' : '#ef4444',
-                background: testSshStatus.type === 'success' ? 'rgba(16,185,129,0.06)' : testSshStatus.type === 'testing' ? 'rgba(107,114,128,0.06)' : 'rgba(239,68,68,0.06)',
-                border: `1px solid ${testSshStatus.type === 'success' ? 'rgba(16,185,129,0.2)' : testSshStatus.type === 'testing' ? 'rgba(107,114,128,0.2)' : 'rgba(239,68,68,0.2)'}`
-              }}>
+              <div
+                style={{
+                  fontSize: '12.5px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  marginTop: '14px',
+                  color:
+                    testSshStatus.type === 'success'
+                      ? '#10b981'
+                      : testSshStatus.type === 'testing'
+                        ? '#6b7280'
+                        : '#ef4444',
+                  background:
+                    testSshStatus.type === 'success'
+                      ? 'rgba(16,185,129,0.06)'
+                      : testSshStatus.type === 'testing'
+                        ? 'rgba(107,114,128,0.06)'
+                        : 'rgba(239,68,68,0.06)',
+                  border: `1px solid ${testSshStatus.type === 'success' ? 'rgba(16,185,129,0.2)' : testSshStatus.type === 'testing' ? 'rgba(107,114,128,0.2)' : 'rgba(239,68,68,0.2)'}`
+                }}
+              >
                 {testSshStatus.message}
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '20px' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                marginTop: '20px'
+              }}
+            >
               <button
                 disabled={connectSshLoading || testSshStatus.type === 'testing'}
                 onClick={async () => {
@@ -2136,7 +2943,10 @@ function ChatPageImpl(): React.JSX.Element {
                     if (res.success) {
                       setTestSshStatus({ type: 'success', message: '连接测试成功！' })
                     } else {
-                      setTestSshStatus({ type: 'error', message: `测试失败: ${res.message || '未知错误'}` })
+                      setTestSshStatus({
+                        type: 'error',
+                        message: `测试失败: ${res.message || '未知错误'}`
+                      })
                     }
                   } catch (e: any) {
                     setTestSshStatus({ type: 'error', message: `异常: ${e.message || String(e)}` })
@@ -2170,7 +2980,10 @@ function ChatPageImpl(): React.JSX.Element {
                       setShowSshModal(false)
                       setTestSshStatus({ type: 'idle', message: '' })
                     } else {
-                      setTestSshStatus({ type: 'error', message: `连接失败: ${res.message || '连接超时'}` })
+                      setTestSshStatus({
+                        type: 'error',
+                        message: `连接失败: ${res.message || '连接超时'}`
+                      })
                     }
                   } catch (e: any) {
                     setTestSshStatus({ type: 'error', message: `异常: ${e.message || String(e)}` })

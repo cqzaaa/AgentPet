@@ -5,6 +5,7 @@ type PermissionScope = 'once' | 'turn'
 type PermissionResponse = {
   approved: boolean
   scope: PermissionScope
+  reason?: string
 }
 
 export class PermissionManager {
@@ -15,13 +16,14 @@ export class PermissionManager {
   private nextPermissionRequestId = 1
 
   private constructor() {
-    ipcMain.on('api:permission-response', (_, { requestId, approved, scope }) => {
+    ipcMain.on('api:permission-response', (_, { requestId, approved, scope, reason }) => {
       const resolve = this.pendingPermissions.get(requestId)
       if (!resolve) return
 
       resolve({
         approved: !!approved,
-        scope: scope === 'turn' ? 'turn' : 'once'
+        scope: scope === 'turn' ? 'turn' : 'once',
+        reason: typeof reason === 'string' ? reason.trim().slice(0, 1000) : undefined
       })
       this.pendingPermissions.delete(requestId)
       this.closeNotification(requestId)
@@ -46,12 +48,12 @@ export class PermissionManager {
     interactionOrigin?: 'chat' | 'orchestration'
     taskRunId?: string
     taskStepId?: string
-  }): Promise<boolean> {
+  }): Promise<PermissionResponse> {
     const approvalScopeId = params.interactionOrigin === 'orchestration' && params.taskRunId
       ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
       : params.sessionId
     if (!params.forcePrompt && this.isTurnApprovalGranted(approvalScopeId)) {
-      return true
+      return { approved: true, scope: 'turn' }
     }
 
     const ownerWin = params.sender ? BrowserWindow.fromWebContents(params.sender) : null
@@ -59,11 +61,11 @@ export class PermissionManager {
       ownerWin || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     if (!activeWin) {
       console.warn('[PermissionManager] No active window found for command approval')
-      return false
+      return { approved: false, scope: 'once' }
     }
 
     const reqId = this.nextPermissionRequestId++
-    return new Promise<boolean>((resolve) => {
+    return new Promise<PermissionResponse>((resolve) => {
       this.pendingPermissions.set(reqId, (response) => {
         if (
           response.approved &&
@@ -73,7 +75,7 @@ export class PermissionManager {
         ) {
           this.grantTurnApproval(approvalScopeId)
         }
-        resolve(response.approved)
+        resolve(response)
       })
 
       activeWin.webContents.send('api:request-permission', {
@@ -96,7 +98,7 @@ export class PermissionManager {
         if (!this.pendingPermissions.has(reqId)) return
         this.pendingPermissions.delete(reqId)
         this.closeNotification(reqId)
-        resolve(false)
+        resolve({ approved: false, scope: 'once' })
       }, 300000)
     })
   }

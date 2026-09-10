@@ -369,8 +369,8 @@ const api = {
       ipcRenderer.removeListener('api:request-permission', subscription)
     }
   },
-  respondPermission: (requestId: number, approved: boolean, scope: 'once' | 'turn' = 'once'): void => {
-    ipcRenderer.send('api:permission-response', { requestId, approved, scope })
+  respondPermission: (requestId: number, approved: boolean, scope: 'once' | 'turn' = 'once', reason?: string): void => {
+    ipcRenderer.send('api:permission-response', { requestId, approved, scope, reason })
   },
   respondClarification: (requestId: number, answers: Record<string, string>, cancelled = false): void => {
     ipcRenderer.send('api:clarification-response', { requestId, answers, cancelled })

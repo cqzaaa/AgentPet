@@ -189,7 +189,7 @@ declare global {
       getSandboxMode: () => Promise<boolean>
       setSandboxMode: (enabled: boolean) => Promise<boolean>
       onRequestPermission: (callback: (data: any) => void) => () => void
-      respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn') => void
+      respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn', reason?: string) => void
       respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
       respondCredential: (requestId: number, token: string, cancelled?: boolean) => void
       respondOfficeRuntimeInstall: (requestId: number, approved: boolean) => void

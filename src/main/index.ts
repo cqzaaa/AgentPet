@@ -4975,6 +4975,15 @@ app.whenReady().then(() => {
       }, [{ role: 'user', content: request.prompt }], request.run.workspacePath || getActiveStorageDir(), executionController.signal)
       const iterator = stream[Symbol.asyncIterator]()
       let writingReported = false
+      let streamedThinking = ''
+      const flushStreamedThinking = async (): Promise<void> => {
+        const detail = streamedThinking.trim()
+        streamedThinking = ''
+        if (!detail) return
+        await taskRunner.notify(request.run.id, 'think', request.step.id, {
+          detail: sanitizeTraceValue(detail.slice(0, 20_000))
+        })
+      }
       try {
         while (true) {
           const next = await nextWithIdleTimeout(iterator, SUBAGENT_IDLE_TIMEOUT_MS, cancelExecution)
@@ -5015,10 +5024,20 @@ app.whenReady().then(() => {
               completedAt: Date.now()
             })
           }
-          if (step.type === 'text') finalResponse = step.content
+          if (step.type === 'think_delta') streamedThinking += step.detail
+          if (step.type === 'text') {
+            await flushStreamedThinking()
+            finalResponse = step.content
+          }
           if (step.type === 'generated_files') generatedPaths.push(...step.files.map(file => file.path))
-          if (step.type === 'think') await request.reportProgress('子 Agent 正在推理')
+          if (step.type === 'think') {
+            await taskRunner.notify(request.run.id, 'think', request.step.id, {
+              detail: sanitizeTraceValue(step.detail)
+            })
+            await request.reportProgress('子 Agent 正在推理')
+          }
           if (step.type === 'tool_call') {
+            await flushStreamedThinking()
             const kind = toolRegistry.getManifest(step.name) ? 'tool' : 'mcp'
             await taskRunner.notify(request.run.id, 'tool_call', request.step.id, {
               callId: step.id,
@@ -5051,6 +5070,7 @@ app.whenReady().then(() => {
         for (const [stepNumber, pending] of pendingModelRequests) {
           await emitModelRequest(stepNumber, pending.fallbackRequest)
         }
+        await flushStreamedThinking()
       } finally {
         request.signal.removeEventListener('abort', cancelExecution)
       }

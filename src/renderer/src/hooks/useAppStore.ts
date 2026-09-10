@@ -1744,9 +1744,9 @@ export function useAppStore() {
     }
   }
 
-  const handleRespondPermission = (approved: boolean, scope: 'once' | 'turn' = 'once'): void => {
+  const handleRespondPermission = (approved: boolean, scope: 'once' | 'turn' = 'once', reason?: string): void => {
     if (activePermissionRequest) {
-      window.api.respondPermission(activePermissionRequest.requestId, approved, scope)
+      window.api.respondPermission(activePermissionRequest.requestId, approved, scope, reason)
       setActivePermissionRequest(null)
     }
   }
