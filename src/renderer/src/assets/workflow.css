@@ -515,16 +515,8 @@
   overflow: hidden;
 }
 
-.workflow-rpa-note {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 32px;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-muted);
-  background: var(--workflow-accent-soft);
-  font-size: 10.5px;
+.workflow-page-rpa {
+  background: var(--bg-content);
 }
 
 .workflow-rpa > :last-child {

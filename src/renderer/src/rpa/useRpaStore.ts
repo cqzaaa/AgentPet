@@ -105,8 +105,8 @@ export const useRpaStore = create<RpaStore>((set, get) => {
         } else {
           // 初始化默认流程
           const defaultNodes = [
-            { id: 'start', type: 'start', position: { x: 250, y: 50 }, data: { label: '开始' } },
-            { id: 'end', type: 'end', position: { x: 250, y: 400 }, data: { label: '结束' } }
+            { id: 'start', type: 'start', position: { x: 80, y: 160 }, data: { label: '开始' } },
+            { id: 'end', type: 'end', position: { x: 330, y: 160 }, data: { label: '结束' } }
           ]
           const defaultEdges: any[] = []
           set({
@@ -147,8 +147,8 @@ export const useRpaStore = create<RpaStore>((set, get) => {
       
       // 初始化默认的流程图数据
       const defaultNodes = [
-        { id: 'start', type: 'start', position: { x: 250, y: 50 }, data: { label: '开始' } },
-        { id: 'end', type: 'end', position: { x: 250, y: 400 }, data: { label: '结束' } }
+        { id: 'start', type: 'start', position: { x: 80, y: 160 }, data: { label: '开始' } },
+        { id: 'end', type: 'end', position: { x: 330, y: 160 }, data: { label: '结束' } }
       ]
       await window.api.saveRpaTaskFlow(newId, { id: newId, nodes: defaultNodes, edges: [] })
 

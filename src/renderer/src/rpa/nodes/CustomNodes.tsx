@@ -60,7 +60,7 @@ export function StartNode({ id, data }: any): React.JSX.Element {
           <span>{data?.label || '开始'}</span>
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -72,7 +72,7 @@ export function EndNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="control">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip" style={{ background: 'var(--rpa-danger)' }}></div>
       <div className="rpa-node-content" style={{ alignItems: 'center' }}>
         <div className="rpa-node-header" style={{ color: 'var(--rpa-danger)', marginBottom: 0 }}>
@@ -91,7 +91,7 @@ export function OpenUrlNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="web">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -100,7 +100,7 @@ export function OpenUrlNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc" title={data?.url}>{data?.url || '未配置 URL'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -112,7 +112,7 @@ export function ClickNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="mouse">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -121,7 +121,7 @@ export function ClickNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc" title={data?.selector}>{data?.selector || '未选择元素'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -133,7 +133,7 @@ export function FillNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="keyboard">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -142,7 +142,7 @@ export function FillNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc" title={data?.value}>内容: {data?.value || '未配置'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -154,7 +154,7 @@ export function ExtractNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="data">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -163,7 +163,7 @@ export function ExtractNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc">存至: {data?.varName || '未命名'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -175,7 +175,7 @@ export function WaitNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="control">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip" style={{ background: '#d97706' }}></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -184,7 +184,7 @@ export function WaitNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc">等待: {data?.ms || '1000'} ms</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -196,7 +196,7 @@ export function ManualConfirmNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="control">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip" style={{ background: 'var(--rpa-warn)' }}></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header" style={{ color: 'var(--rpa-warn)' }}>
@@ -205,7 +205,7 @@ export function ManualConfirmNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc" title={data?.prompt}>{data?.prompt || '等待人工核实'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -217,7 +217,7 @@ export function AiNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="ai">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header" style={{ color: '#2f54eb' }}>
@@ -226,7 +226,7 @@ export function AiNode({ id, data }: any): React.JSX.Element {
         </div>
         <div className="rpa-node-desc">存至: {data?.varName || '未命名'}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -238,7 +238,7 @@ export function ConditionNode({ id, data }: any): React.JSX.Element {
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block ${getStateClass(state)}`} data-kind="control">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip"></div>
       <div className="rpa-node-content">
         <div className="rpa-node-header">
@@ -249,11 +249,11 @@ export function ConditionNode({ id, data }: any): React.JSX.Element {
       </div>
       
       {/* 左右两侧分支桩 */}
-      <Handle type="source" position={Position.Right} id="true" style={{ background: 'var(--rpa-success)', top: '50%' }} />
+      <Handle type="source" position={Position.Right} id="true" style={{ background: 'var(--rpa-success)', top: '36%' }} />
       <span style={{ position: 'absolute', right: '4px', top: '30%', fontSize: '9px', fontWeight: 'bold', color: 'var(--rpa-success)' }}>T</span>
       
-      <Handle type="source" position={Position.Left} id="false" style={{ background: 'var(--rpa-danger)', top: '50%' }} />
-      <span style={{ position: 'absolute', left: '4px', top: '30%', fontSize: '9px', fontWeight: 'bold', color: 'var(--rpa-danger)' }}>F</span>
+      <Handle type="source" position={Position.Right} id="false" style={{ background: 'var(--rpa-danger)', top: '70%' }} />
+      <span style={{ position: 'absolute', right: '4px', top: '63%', fontSize: '9px', fontWeight: 'bold', color: 'var(--rpa-danger)' }}>F</span>
     </div>
   )
 }
@@ -262,13 +262,13 @@ function DesktopNode({ id, icon: Icon, title, description }: { id: string; icon:
   const state = useNodeState(id)
   return (
     <div className={`rpa-node-block rpa-node-desktop ${getStateClass(state)}`} data-kind="desktop">
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
       <div className="rpa-node-strip" />
       <div className="rpa-node-content">
         <div className="rpa-node-header"><span className="rpa-node-icon"><Icon size={16} strokeWidth={2} aria-hidden="true" /></span><span>{title}</span></div>
         <div className="rpa-node-desc">{description}</div>
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }

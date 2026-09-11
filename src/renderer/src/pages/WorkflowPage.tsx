@@ -148,7 +148,8 @@ export function WorkflowPage({ store }: { store: AppStore }): React.JSX.Element 
   }
 
   return (
-    <div className="workflow-page">
+    <div className={`workflow-page ${view === 'rpa' ? 'workflow-page-rpa' : ''}`}>
+      {view !== 'rpa' && <>
       <header className="workflow-hero">
         <div>
           <span className="workflow-eyebrow">
@@ -231,14 +232,11 @@ export function WorkflowPage({ store }: { store: AppStore }): React.JSX.Element 
           </div>
         )}
       </nav>
+      </>}
 
       {view === 'rpa' ? (
         <section className="workflow-rpa">
-          <div className="workflow-rpa-note">
-            <Monitor size={15} />
-            <span>录制浏览器或桌面操作，然后在编排画布中以 RPA 子流程节点复用。</span>
-          </div>
-          <RpaPage />
+          <RpaPage onExit={() => setView('library')} />
         </section>
       ) : (
         <main className="workflow-content">

@@ -87,6 +87,12 @@
   align-items: center;
 }
 
+.rpa-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .rpa-list-title {
   font-size: 18px;
   font-weight: 600;
@@ -145,27 +151,27 @@
   z-index: 1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .rpa-task-card {
-  min-height: 124px;
-  padding: 16px 18px;
+  min-height: 92px;
+  padding: 14px 16px 13px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   position: relative;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #ffffff;
   border: 1px solid rgba(226, 232, 240, 0.85);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
 }
 
 .rpa-task-card:hover {
-  border-color: rgba(79, 70, 229, 0.32);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px -2px rgba(79, 70, 229, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+  border-color: rgba(79, 70, 229, 0.28);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
 }
 
 .rpa-card-header {
@@ -203,8 +209,8 @@
 .status-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
+  gap: 4px;
+  padding: 2px 7px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 500;
@@ -213,8 +219,8 @@
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
   flex-shrink: 0;
@@ -284,20 +290,18 @@
 }
 
 .rpa-card-desc {
-  margin: 10px 0 14px;
-  font-size: 12.5px;
+  margin: 7px 0 0;
+  font-size: 12px;
   color: #64748b;
   line-height: 1.5;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 38px;
 }
 
 .rpa-card-desc.empty {
-  color: #94a3b8;
-  font-style: italic;
+  display: none;
 }
 
 .rpa-card-footer {
@@ -305,15 +309,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding-top: 11px;
-  border-top: 1px solid rgba(241, 245, 249, 1);
+  padding-top: 10px;
   margin-top: auto;
 }
 
 .rpa-task-policy {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   font-size: 11.5px;
 }
 
@@ -329,34 +332,41 @@
 }
 
 .rpa-task-state {
-  height: 20px;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  height: 18px;
+  padding: 0 2px 0 0;
+  border: 0;
+  border-radius: 3px;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  background: transparent;
+}
+
+.rpa-task-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .rpa-task-state.on {
   color: #059669;
-  border-color: rgba(5, 150, 105, 0.2);
-  background: #ecfdf5;
+  background: transparent;
 }
 
 .rpa-task-state.off {
   color: #64748b;
-  border-color: rgba(100, 116, 139, 0.2);
-  background: #f1f5f9;
+  background: transparent;
 }
 
 .rpa-task-state.error {
   color: #dc2626;
-  border-color: rgba(220, 38, 38, 0.2);
-  background: #fef2f2;
+  background: transparent;
 }
 
 /* 暗色模式适配 */
@@ -384,7 +394,7 @@
 }
 
 .dark .rpa-card-footer {
-  border-top-color: rgba(255, 255, 255, 0.06);
+  border-top-color: transparent;
 }
 
 .dark .rpa-task-schedule {

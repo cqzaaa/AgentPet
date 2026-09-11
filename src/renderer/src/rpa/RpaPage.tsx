@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { ReactFlow, Background, Controls, MiniMap, Connection, addEdge } from '@xyflow/react'
+import { ReactFlow, Background, Controls, MiniMap, Connection, addEdge, type ReactFlowInstance } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useRpaStore } from './useRpaStore'
 import { useAppStoreRaw } from '../hooks/useAppStore'
@@ -59,7 +59,7 @@ const nodeTypes = {
   desktop_scroll: DesktopScrollNode
 }
 
-export function RpaPage(): React.JSX.Element {
+export function RpaPage({ onExit }: { onExit?: () => void }): React.JSX.Element {
   const store = useRpaStore()
   const appLlmConfig = useAppStoreRaw(state => state.llmConfig)
 
@@ -115,6 +115,14 @@ export function RpaPage(): React.JSX.Element {
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const flowRef = useRef<ReactFlowInstance | null>(null)
+
+  const fitCanvas = useCallback(() => {
+    requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      void flowRef.current?.fitView({ padding: 0.18, maxZoom: 1, duration: reduceMotion ? 0 : 280 })
+    })
+  }, [])
 
   // 4. 状态：创建新任务 Modal
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -362,6 +370,7 @@ export function RpaPage(): React.JSX.Element {
 
             setNodes(currentNodes)
             setEdges(currentEdges)
+            fitCanvas()
             applied = true
 
             store.appendLog(
@@ -498,6 +507,7 @@ export function RpaPage(): React.JSX.Element {
 
             setNodes(currentNodes)
             setEdges(currentEdges)
+            fitCanvas()
             applied = true
 
             store.appendLog(
@@ -526,7 +536,7 @@ export function RpaPage(): React.JSX.Element {
       console.error('Failed to parse and apply JSON from chat', e)
       store.appendLog('error', `[AI 助手] 解析同步 JSON 发生异常: ${e.message}`)
     }
-  }, [activeTaskId, saveToHistory, setNodes, setEdges])
+  }, [activeTaskId, fitCanvas, saveToHistory, setNodes, setEdges])
 
   // ── 浏览器 / Windows 桌面录制 ────────────────────────────────────
   const handleRecordBrowser = async (
@@ -574,15 +584,16 @@ export function RpaPage(): React.JSX.Element {
         return
       }
 
-      const startX = 250
-      const startY = 60
+      const startX = 80
+      const startY = 160
+      const horizontalGap = 250
       const stamp = Date.now()
       const generatedNodes = filteredActions.map((action: any, index: number) => {
         const previousRecordedAt = Number(filteredActions[index - 1]?.recordedAt || action.recordedAt || 0)
         const recordedDelayMs = Math.max(0, Number(action.recordedAt || 0) - previousRecordedAt)
         const common = {
           id: `recorded_${stamp}_${index}`,
-          position: { x: startX, y: startY + (index + 1) * 120 },
+          position: { x: startX + (index + 1) * horizontalGap, y: startY },
           recordedDelayMs
         }
         switch (action.type) {
@@ -604,7 +615,7 @@ export function RpaPage(): React.JSX.Element {
       }
 
       const startNode = { id: 'start', type: 'start', position: { x: startX, y: startY }, data: { label: '开始' } }
-      const endNode = { id: 'end', type: 'end', position: { x: startX, y: startY + (generatedNodes.length + 1) * 120 }, data: { label: '结束' } }
+      const endNode = { id: 'end', type: 'end', position: { x: startX + (generatedNodes.length + 1) * horizontalGap, y: startY }, data: { label: '结束' } }
       const chainNodes = [startNode, ...generatedNodes, endNode]
       const updatedEdges = chainNodes.slice(0, -1).map((sourceNode, index) => ({
         id: `e_recorded_${stamp}_${index}`,
@@ -615,6 +626,7 @@ export function RpaPage(): React.JSX.Element {
       saveToHistory()
       setNodes(updatedNodes)
       setEdges(updatedEdges)
+      fitCanvas()
       if (activeTaskId) await window.api.saveRpaTaskFlow(activeTaskId, { id: activeTaskId, nodes: updatedNodes, edges: updatedEdges })
       store.appendLog('info', `[录制] 已生成 ${generatedNodes.length} 个流程节点，其中桌面节点 ${generatedNodes.filter(item => item.type.startsWith('desktop_')).length} 个。`)
 
@@ -835,11 +847,12 @@ export function RpaPage(): React.JSX.Element {
 如果用户要求你调整流程图（例如调整节点坐标位置、修改节点名称、修改 selector 等属性，或者追加新节点）：
 1. 如果是调整或修改已有的节点，请在返回的 JSON 代码块中，务必保持它们原本的 "id" 不变，仅更新对应的坐标坐标 "position"、标签 label 或配置属性。
 2. 如果是增加新节点，请为它们分配一个全新的唯一 id（如 "node_xxx"），并在 "edges" 中建立正确的连接关系。
-3. 请务必返回完整的 RPA 流程节点图数据结构 (React Flow 格式) 作为 JSON 代码块，格式如下：
+3. 主流程必须从左到右横向排列：保持相同或接近的 y 坐标，并让后续节点的 x 坐标每步增加约 250。
+4. 请务必返回完整的 RPA 流程节点图数据结构 (React Flow 格式) 作为 JSON 代码块，格式如下：
 \`\`\`json
 {
   "nodes": [
-    { "id": "node_existing_or_new", "type": "click", "position": { "x": 250, "y": 250 }, "data": { "label": "点击按钮", "selector": ".btn" } }
+    { "id": "node_existing_or_new", "type": "click", "position": { "x": 330, "y": 160 }, "data": { "label": "点击按钮", "selector": ".btn" } }
   ],
   "edges": [
     { "id": "e_link", "source": "node_source", "target": "node_target" }
@@ -958,10 +971,18 @@ export function RpaPage(): React.JSX.Element {
             <div className="rpa-list-title">
               录制任务 <span>{tasks.length} 个</span>
             </div>
-            <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
-              <Plus size={17} strokeWidth={2} aria-hidden="true" />
-              新建录制
-            </button>
+            <div className="rpa-list-actions">
+              {onExit && (
+                <button className="btn-back" onClick={onExit}>
+                  <ArrowLeft size={15} strokeWidth={2} aria-hidden="true" />
+                  工作流中心
+                </button>
+              )}
+              <button className="btn-primary rpa-create-primary" onClick={() => { setNewName(''); setNewDesc(''); setShowCreateModal(true) }}>
+                <Plus size={17} strokeWidth={2} aria-hidden="true" />
+                新建录制
+              </button>
+            </div>
           </div>
 
           <div className="rpa-task-grid">
@@ -1149,6 +1170,7 @@ export function RpaPage(): React.JSX.Element {
           </div>
 
           <ReactFlow
+            onInit={(instance) => { flowRef.current = instance }}
             nodes={nodes}
             edges={edges}
             onNodesChange={(changes) => {

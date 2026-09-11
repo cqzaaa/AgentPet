@@ -2252,8 +2252,8 @@ body {
   flex-direction: column;
   width: 100%;
   padding-bottom: 20px;
-  padding-left: clamp(16px, 4vw, 56px);
-  padding-right: clamp(16px, 4vw, 56px);
+  padding-left: clamp(16px, 3vw, 56px);
+  padding-right: clamp(16px, 3vw, 56px);
   box-sizing: border-box;
 }
 
@@ -2791,7 +2791,7 @@ body {
 }
 
 .code-lang {
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   color: var(--code-muted);
   text-transform: uppercase;
@@ -2820,7 +2820,7 @@ body {
   padding: 12px 14px;
   overflow-x: auto;
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12.5px;
+  font-size: 10.5px;
   background: var(--code-bg);
   color: var(--code-text);
   line-height: 1.5;
@@ -6711,7 +6711,7 @@ body {
    大模型 Markdown 消息体高级渲染样式
  * =================================================================*/
 .markdown-body {
-  font-size: 14.5px;
+  font-size: 12.5px;
   line-height: 1.75;
   color: var(--text-secondary);
   font-family: inherit;
@@ -6744,35 +6744,35 @@ body {
   gap: 6px;
 }
 
-.markdown-body > h1:first-child,
-.markdown-body > h2:first-child,
-.markdown-body > h3:first-child,
-.markdown-body > h4:first-child,
-.markdown-body > h5:first-child,
-.markdown-body > h6:first-child {
+.markdown-body>h1:first-child,
+.markdown-body>h2:first-child,
+.markdown-body>h3:first-child,
+.markdown-body>h4:first-child,
+.markdown-body>h5:first-child,
+.markdown-body>h6:first-child {
   margin-top: 0;
 }
 
 .markdown-body h1 {
-  font-size: 21px;
+  font-size: 19px;
 }
 
 .markdown-body h2 {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .markdown-body h3 {
-  font-size: 16.5px;
+  font-size: 14.5px;
 }
 
 .markdown-body h4 {
-  font-size: 15px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
 .markdown-body h5,
 .markdown-body h6 {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -7143,7 +7143,7 @@ body {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
-  font-size: 11.5px;
+  font-size: 9.5px;
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
@@ -7434,20 +7434,20 @@ body {
 
 @media (max-width: 720px) {
   .markdown-body {
-    font-size: 14px;
+    font-size: 12px;
     line-height: 1.72;
   }
 
   .markdown-body h1 {
-    font-size: 19px;
-  }
-
-  .markdown-body h2 {
     font-size: 17px;
   }
 
+  .markdown-body h2 {
+    font-size: 15px;
+  }
+
   .markdown-body h3 {
-    font-size: 16px;
+    font-size: 14px;
   }
 }
 
@@ -11387,13 +11387,13 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   min-width: 0;
   overflow: hidden;
   color: inherit;
-  font-size: 11.5px;
+  font-size: 9.5px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-selection-context > button:not(.composer-selection-trigger) {
+.composer-selection-context>button:not(.composer-selection-trigger) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -11409,17 +11409,17 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   transition: color 140ms, background 140ms, transform 140ms;
 }
 
-.composer-selection-context > button:not(.composer-selection-trigger):hover {
+.composer-selection-context>button:not(.composer-selection-trigger):hover {
   color: var(--text-primary);
   background: rgba(128, 128, 128, 0.1);
 }
 
-.composer-selection-context > button:not(.composer-selection-trigger):active {
+.composer-selection-context>button:not(.composer-selection-trigger):active {
   transform: scale(.94);
 }
 
 .composer-selection-trigger:focus-visible,
-.composer-selection-context > button:not(.composer-selection-trigger):focus-visible,
+.composer-selection-context>button:not(.composer-selection-trigger):focus-visible,
 .composer-selection-bubble-close:focus-visible {
   outline: 2px solid rgba(59, 130, 246, 0.64);
   outline-offset: 2px;
@@ -11447,7 +11447,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   gap: 6px;
   margin-bottom: 7px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.4;
 }
 
@@ -11521,6 +11521,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .text-selection-popover,
   .composer-selection-bubble {
     animation: none;
@@ -11532,6 +11533,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
     transition: none;
   }
 }
+
 /* Generated artifacts: delivery files stay prominent; working files remain available but quiet. */
 .generated-file-groups {
   flex: 1;
@@ -11540,7 +11542,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   scrollbar-gutter: stable;
 }
 
-.generated-file-section + .generated-file-section {
+.generated-file-section+.generated-file-section {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--border-color);
@@ -11692,6 +11694,7 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .generated-file-row,
   .generated-file-delete {
     transition: none;
