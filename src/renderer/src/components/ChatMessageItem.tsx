@@ -34,6 +34,16 @@ import {
   X
 } from 'lucide-react'
 import { normalizeSearchCitations } from '../utils/helpers'
+import {
+  createMessageLinkRegex,
+  isLocalFileReference,
+  isPreviewableLocalFile,
+  isStandaloneLocalFilePath,
+  localFileDisplayName,
+  localFileSystemPath,
+  normalizeLocalFileUrl,
+  trimDetectedFileReference
+} from './localFileLinks'
 
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
@@ -235,14 +245,16 @@ function parseInlineMarkdown(text: string): string {
   let html = escapeHtml(text)
   // 1. 粗体 **text**
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  // 2. 内联代码 `code`
+  // 2. 强调 *text*。用空白边界避免误伤 URL、文件名与代码内容。
+  html = html.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1<em>$2</em>')
+  // 3. 内联代码 `code`
   html = html.replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
-  // 3. 图片 ![alt](url)
+  // 4. 图片 ![alt](url)
   html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
-  // 4. 链接 [text](url)
+  // 5. 链接 [text](url)
   html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
-  // 5. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
+  // 6. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
   html = html.replace(/(?:\[KB(\d+)\]|【KB(\d+)】)/gi, (_match, squareId, bracketId) => {
     const id = squareId || bracketId
     return `<button type="button" class="knowledge-citation" data-citation-id="KB${id}" aria-label="查看知识库引用 KB${id}">【KB${id}】</button>`
@@ -252,45 +264,7 @@ function parseInlineMarkdown(text: string): string {
   return html
 }
 
-function normalizeLocalFileUrl(value: string): string {
-  const trimmed = value.trim()
-  const destination = trimmed.startsWith('<') && trimmed.endsWith('>')
-    ? trimmed.slice(1, -1).trim()
-    : trimmed
-  if (destination.startsWith('file:///')) {
-    return destination.replace('file:///', 'local-file:///')
-  }
-  if (/^[A-Za-z]:[/\\]/.test(destination)) {
-    return `local-file:///${destination.replace(/\\/g, '/')}`
-  }
-  return destination
-}
-
-function localFileDisplayName(value: string): string {
-  const withoutScheme = decodeURIComponent(
-    value.replace(/^local-file:\/\/\/?/i, '').replace(/^file:\/\/\/?/i, '')
-  )
-  return withoutScheme.replace(/\\/g, '/').split('/').filter(Boolean).pop() || value
-}
-
-function localFileSystemPath(value: string): string {
-  let path = decodeURIComponent(value.trim())
-  path = path.replace(/^local-file:\/\/\/?/i, '').replace(/^file:\/\/\/?/i, '')
-  if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1)
-  return path.replace(/\//g, '\\')
-}
-
 type PreviewFileHandler = (file: { name: string; path: string; size: number }) => void
-
-function isStandaloneLocalFilePath(value: string): boolean {
-  const trimmed = value.trim()
-  return (
-    (/^[A-Za-z]:[\\/].+\.[A-Za-z0-9]{1,12}$/s.test(trimmed) ||
-      /^local-file:\/\/\/.+\.[A-Za-z0-9]{1,12}$/is.test(trimmed) ||
-      /^file:\/\/\/.+\.[A-Za-z0-9]{1,12}$/is.test(trimmed)) &&
-    !trimmed.includes('\n')
-  )
-}
 
 function LocalFileButton({
   path,
@@ -305,7 +279,7 @@ function LocalFileButton({
 
   const handleOpen = async (): Promise<void> => {
     if (opening) return
-    if (onPreviewFile) {
+    if (onPreviewFile && isPreviewableLocalFile(normalizedPath)) {
       onPreviewFile({ name: fileName, path: localFileSystemPath(normalizedPath), size: 0 })
       return
     }
@@ -313,10 +287,17 @@ function LocalFileButton({
     setOpening(true)
     try {
       const result = await window.api.openLocalFile(normalizedPath)
-      if (result && !result.success) alert(result.error || '无法打开此文件')
+      if (result && !result.success) console.error(result.error || '无法打开此文件')
     } finally {
       setOpening(false)
     }
+  }
+
+  const handleContextMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    if (!window.api?.showFileContextMenu) return
+    event.preventDefault()
+    event.stopPropagation()
+    window.api.showFileContextMenu(normalizedPath)
   }
 
   return (
@@ -325,11 +306,12 @@ function LocalFileButton({
       className="chat-local-file-button"
       title={path.trim()}
       onClick={() => void handleOpen()}
+      onContextMenu={handleContextMenu}
     >
       <FileText size={18} strokeWidth={2} aria-hidden="true" />
       <span>{fileName}</span>
       <span className="chat-local-file-action">
-        {opening ? '打开中…' : onPreviewFile ? '点击预览' : '点击打开'}
+        {opening ? '打开中…' : onPreviewFile && isPreviewableLocalFile(normalizedPath) ? '点击预览' : '点击打开'}
       </span>
     </button>
   )
@@ -349,7 +331,9 @@ function parseMarkdownToHtml(markdown: string): string {
   let inOl = false
   let inTable = false
   let inP = false
+  let inBlockquote = false
   let pContent = ''
+  let blockquoteLines: string[] = []
 
   const closePending = () => {
     if (inUl) {
@@ -368,6 +352,11 @@ function parseMarkdownToHtml(markdown: string): string {
       html += `<p>${pContent}</p>`
       inP = false
       pContent = ''
+    }
+    if (inBlockquote) {
+      html += `<blockquote class="markdown-quote">${blockquoteLines.map(content => `<p>${content}</p>`).join('')}</blockquote>`
+      inBlockquote = false
+      blockquoteLines = []
     }
   }
 
@@ -398,7 +387,18 @@ function parseMarkdownToHtml(markdown: string): string {
       continue
     }
 
-    // 4. 表格行 (| col1 | col2 |)
+    // 4. 引用块 (> quote)
+    const blockquoteMatch = trimmed.match(/^>\s?(.*)$/)
+    if (blockquoteMatch) {
+      if (!inBlockquote) {
+        closePending()
+        inBlockquote = true
+      }
+      blockquoteLines.push(parseInlineMarkdown(blockquoteMatch[1]))
+      continue
+    }
+
+    // 5. 表格行 (| col1 | col2 |)
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
       const isSeparator = /^\|[\s-|-|:|.]+$/.test(trimmed)
       if (isSeparator) {
@@ -424,8 +424,8 @@ function parseMarkdownToHtml(markdown: string): string {
       continue
     }
 
-    // 5. 无序列表 (- item)
-    const ulMatch = line.match(/^([-\*])\s+(.*)$/)
+    // 6. 无序列表 (- item / * item)，允许模型输出少量前导空格
+    const ulMatch = line.match(/^\s*([-*+])\s+(.*)$/)
     if (ulMatch) {
       if (!inUl) {
         closePending()
@@ -436,8 +436,8 @@ function parseMarkdownToHtml(markdown: string): string {
       continue
     }
 
-    // 6. 有序列表 (1. item)
-    const olMatch = line.match(/^(\d+)\.\s+(.*)$/)
+    // 7. 有序列表 (1. item / 1) item)，允许模型输出少量前导空格
+    const olMatch = line.match(/^\s*(\d+)[.)]\s+(.*)$/)
     if (olMatch) {
       if (!inOl) {
         closePending()
@@ -448,7 +448,7 @@ function parseMarkdownToHtml(markdown: string): string {
       continue
     }
 
-    // 7. 普通文本行
+    // 8. 普通文本行
     if (inTable || inUl || inOl) {
       closePending()
     }
@@ -534,7 +534,7 @@ export function renderPlainOrImageText(
   keyIdxStart: { val: number },
   onPreviewFile?: PreviewFileHandler
 ): React.ReactNode[] {
-  const linkOrImgRegex = /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/|file:\/\/\/|local-file:\/\/)[^\s\])<>"'`*，。！？；：（）]+)|([a-zA-Z]:[\\\/](?:[^<>:"|?*\s，。！？；：、\[\]()]*[^<>:"|?*\s，。！？；：、\[\]().,!?;'"`])?)/g
+  const linkOrImgRegex = createMessageLinkRegex()
   let match
   let lastIndex = 0
 
@@ -577,15 +577,16 @@ export function renderPlainOrImageText(
       } else {
         processedText += match[1]
       }
-    } else if (match[2] || match[3]) {
-      const rawUrl = match[2] || match[3]
+    } else if (match[2]) {
+      const { reference: rawUrl, suffix } = trimDetectedFileReference(match[2])
       const src = normalizeLocalFileUrl(rawUrl)
       const shouldRenderAsImg = isImageSrc(src) && !src.startsWith('local-file://')
       if (shouldRenderAsImg) {
         processedText += `![image](${src})`
       } else {
-        processedText += `[${localFileDisplayName(rawUrl)}](${src})`
+        processedText += `[${rawUrl}](${src})`
       }
+      processedText += suffix
     }
 
     lastIndex = linkOrImgRegex.lastIndex
@@ -619,9 +620,9 @@ export function MarkdownText({
     const a = (e.target as HTMLElement).closest('a.local-link')
     if (a) {
       const href = a.getAttribute('href')
-      if (href && (href.startsWith('local-file://') || href.startsWith('wechat-file://'))) {
+      if (href && isLocalFileReference(href)) {
         e.preventDefault()
-        if (onPreviewFile && href.startsWith('local-file://')) {
+        if (onPreviewFile && href.startsWith('local-file://') && isPreviewableLocalFile(href)) {
           onPreviewFile({
             name: localFileDisplayName(href),
             path: localFileSystemPath(href),
@@ -631,10 +632,8 @@ export function MarkdownText({
         }
         if (window.api && typeof window.api.openLocalFile === 'function') {
           window.api.openLocalFile(href).then((res: any) => {
-            if (res && !res.success) alert(res.error || '无法打开此本地文件')
+            if (res && !res.success) console.error(res.error || '无法打开此本地文件')
           })
-        } else {
-          alert('当前环境不支持直接打开本地文件')
         }
       }
       return
@@ -648,6 +647,15 @@ export function MarkdownText({
   }
 
   const handleContextMenu = (e: React.MouseEvent) => {
+    const link = (e.target as HTMLElement).closest('a.local-link')
+    const href = link?.getAttribute('href')
+    if (href && isLocalFileReference(href) && window.api?.showFileContextMenu) {
+      e.preventDefault()
+      e.stopPropagation()
+      window.api.showFileContextMenu(href)
+      return
+    }
+
     const img = (e.target as HTMLElement).closest('img.chat-inline-image')
     if (img) {
       const src = img.getAttribute('src')
@@ -1745,6 +1753,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const generatedToolFiles = toolSteps
     .filter((step: any) => step.type === 'generatedFiles' && Array.isArray(step.files))
     .flatMap((step: any) => step.files)
+    .filter((file: any) => file?.role !== 'intermediate')
   const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
   const webSources = Array.from(new Map(
     toolSteps

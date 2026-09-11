@@ -9,7 +9,7 @@ export type AgentStepEvent =
   | { type: 'tool_call'; name: string; args: any; id: string; rawArguments?: string }
   | { type: 'tool_result'; name: string; result: string; modelResult?: string; callId?: string; contextTokens?: number }
   | { type: 'context_compaction'; status: 'started' | 'completed' | 'failed'; beforeTokens: number; afterTokens?: number; activeToolContextTokens?: number; archivePath?: string; removedMessages?: number; detail?: string }
-  | { type: 'generated_files'; files: Array<{ name: string; path: string; size: number }>; autoPreview?: boolean }
+  | { type: 'generated_files'; files: Array<{ name: string; path: string; size: number; role?: 'final' | 'intermediate' }>; autoPreview?: boolean }
   | { type: 'web_sources'; sources: Array<{ id: string; title: string; url: string; snippet?: string; fetchedAt: string; sourceType: 'search' | 'fetch' }> }
   | { type: 'text_delta'; content: string }
   | { type: 'text'; content: string }

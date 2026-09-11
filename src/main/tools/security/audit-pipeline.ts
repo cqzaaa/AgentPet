@@ -1,5 +1,5 @@
 import { ToolManifest, ToolContext } from '../core/types'
-import { checkCommandSafety, getCommandSegments, isReadOnlyCommand, looksLikeReadOnlyInspection } from './safety-checker'
+import { checkCommandSafety, isReadOnlyCommand, looksLikeReadOnlyInspection } from './safety-checker'
 
 export interface AuditResult {
   blocked: boolean
@@ -11,7 +11,9 @@ export interface AuditResult {
 export class AuditPipeline {
   private static instance: AuditPipeline
 
-  private constructor() {}
+  private constructor() {
+    // Singleton: use getInstance().
+  }
 
   public static getInstance(): AuditPipeline {
     if (!AuditPipeline.instance) {
@@ -22,17 +24,24 @@ export class AuditPipeline {
 
   public async audit(
     toolName: string,
-    args: Record<string, any>,
+    args: Record<string, unknown>,
     manifest: ToolManifest,
-    _context: ToolContext
+    context: ToolContext
   ): Promise<AuditResult> {
-    const api = manifest.api.find(a => a.name === toolName)
+    const api = manifest.api.find((a) => a.name === toolName)
+    const permissionMode = context.sandboxMode
+    const command = typeof args.command === 'string' ? args.command : ''
+
+    // 完全访问权限放行全部操作，包括删除及其他高敏感操作。
+    if (permissionMode === false) {
+      return { blocked: false, requireApproval: false }
+    }
 
     if (api?.humanIntervention === 'never') {
       return { blocked: false, requireApproval: false }
     }
 
-    if (api?.humanIntervention === 'required') {
+    if (api?.humanIntervention === 'required' && permissionMode !== 'assist') {
       return {
         blocked: false,
         requireApproval: true,
@@ -44,7 +53,7 @@ export class AuditPipeline {
     // while creating or modifying a file uses the regular approval flow.
     if (toolName === 'run_office_skill') {
       const action = typeof args.action === 'string' ? args.action.toLowerCase() : ''
-      if (action === 'create' || action === 'modify') {
+      if ((action === 'create' || action === 'modify') && permissionMode !== 'assist') {
         return {
           blocked: false,
           requireApproval: true,
@@ -55,21 +64,11 @@ export class AuditPipeline {
     }
 
     if (toolName === 'run_terminal_command' || toolName === 'run_command') {
-      const command = typeof args.command === 'string' ? args.command : ''
-
       // Allow pure inspection commands without interrupting the user. This is
       // segment-based, so code text such as PowerShell Add-Type is not mistaken
       // for the CMD "type" command.
       if (isReadOnlyCommand(command)) {
         return { blocked: false, requireApproval: false }
-      }
-
-      if (this.hasPermanentDeleteCommand(command)) {
-        return {
-          blocked: true,
-          requireApproval: false,
-          reason: '检测到终端永久删除命令。删除文件必须改用 delete_file 工具，以便移入回收站并允许用户回退。'
-        }
       }
 
       const safety = checkCommandSafety(command)
@@ -85,13 +84,14 @@ export class AuditPipeline {
         return {
           blocked: false,
           requireApproval: true,
-          warning: '命令包含只读查看片段，但还混合了未识别或可能改变状态的操作。请核对完整命令后再允许。'
+          warning:
+            '命令包含只读查看片段，但还混合了未识别或可能改变状态的操作。请核对完整命令后再允许。'
         }
       }
     }
 
     if (toolName === 'delete_file') {
-      const filePath = args.file_path || ''
+      const filePath = typeof args.file_path === 'string' ? args.file_path : ''
       return {
         blocked: false,
         requireApproval: true,
@@ -99,12 +99,19 @@ export class AuditPipeline {
       }
     }
 
-    return { blocked: false, requireApproval: false }
-  }
+    // “帮我审批”自动放行普通写入、修改和执行；删除及安全
+    // 检查识别出的高风险命令仍然走用户确认。
+    if (permissionMode === 'assist') {
+      if (toolName === 'run_terminal_command' || toolName === 'run_command') {
+        const safety = checkCommandSafety(command)
+        if (!safety.safe) {
+          return { blocked: false, requireApproval: true, warning: safety.warning }
+        }
+      }
+      return { blocked: false, requireApproval: false }
+    }
 
-  private hasPermanentDeleteCommand(command: string): boolean {
-    const deleteCommands = new Set(['rm', 'del', 'erase', 'rd', 'rmdir', 'unlink', 'remove-item'])
-    return getCommandSegments(command).some(segment => deleteCommands.has(segment.command))
+    return { blocked: false, requireApproval: false }
   }
 }
 

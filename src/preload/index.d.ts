@@ -69,7 +69,7 @@ declare global {
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
-      getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string }[]>
+      getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
       exportToolTrace: (payload: { defaultFileName?: string; trace: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
@@ -186,8 +186,8 @@ declare global {
       onPlayTtsAudio: (callback: (audioBuffer: ArrayBuffer) => void) => () => void
       switchAvatar: (params: { dir: string; configFile: string }) => Promise<any>
       deleteAvatar: (dirPath: string) => Promise<boolean>
-      getSandboxMode: () => Promise<boolean>
-      setSandboxMode: (enabled: boolean) => Promise<boolean>
+      getSandboxMode: () => Promise<boolean | 'assist'>
+      setSandboxMode: (enabled: boolean | 'assist') => Promise<boolean | 'assist'>
       onRequestPermission: (callback: (data: any) => void) => () => void
       respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn', reason?: string) => void
       respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
@@ -260,7 +260,8 @@ declare global {
       rpaPickElement: (url: string) => Promise<string | null>
       listRpaDesktopWindows: () => Promise<Array<{ processId: number; processName: string; windowTitle: string }>>
       completeRpaRecordingProcessing: () => Promise<boolean>
-      rpaRecordActions: (input: string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }) => Promise<any[]>
+      rpaRecordActions: (input:
+          | string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }) => Promise<any[]>
       normalizeRpaRecordedActions: (actions: any[]) => Promise<any[]>
       listRpaSecrets: () => Promise<any[]>
       createRpaSecret: (input: { ref: string; plaintext: string; label: string; allowedWorkflowIds: string[]; allowedSurfaces: Array<'browser' | 'desktop' | 'system' | 'agent'> }) => Promise<any>
@@ -274,4 +275,3 @@ declare global {
     }
   }
 }
-

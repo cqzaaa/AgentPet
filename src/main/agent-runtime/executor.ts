@@ -1,5 +1,5 @@
 import * as fs from 'fs'
-import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { basename, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions } from '../model-runtime'
 import { ModelStreamInterruptedError } from '../model-runtime/providers'
 import { AgentStepEvent } from './types'
@@ -14,6 +14,7 @@ import { skillRegistry } from '../skills/skill-registry'
 import { startManagedPptMasterPreparation } from '../skills/managed-skill-runtime'
 import { isSimpleSingleFileMutationRequest } from './tool-routing'
 import { taskRunner } from '../task-runtime/task-runner'
+import { ArtifactTracker } from './artifact-tracker'
 import {
   BOOTSTRAP_TOOL_NAMES,
   activateAllowedTools,
@@ -797,7 +798,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       blockedToolNames?: string[]
       dedupeMutatingToolCalls?: boolean
       disableMemoryPersistence?: boolean
-      sandboxMode?: boolean
+      sandboxMode?: boolean | 'assist'
       event?: Electron.IpcMainInvokeEvent
       onTraceEvent?: (event: {
         type: string
@@ -811,6 +812,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     abortSignal?: AbortSignal
   ): AsyncGenerator<AgentStepEvent, string, unknown> {
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, sandboxMode, event } = config
+    const effectiveSandboxMode: boolean | 'assist' =
+      sandboxMode === 'assist' ? 'assist' : !!sandboxMode
     const contextWindow = Math.max(32000, Number(config.contextWindow) || DEFAULT_CONTEXT_WINDOW)
     const isFrontend = !config.isBackground
 
@@ -980,45 +983,8 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     let resumedTextPrefix = ''
     const successfulInputFingerprints = new Set<string>()
     let currentInputTarget = 'current-focus'
-    const artifactCandidates = new Map<string, { name: string; path: string; size: number }>()
-    const consumedArtifactPaths = new Set<string>()
-    const artifactKey = (filePath: string): string => resolve(filePath).toLocaleLowerCase()
-    const persistArtifactVisibility = (): void => {
-      const pathsByDirectory = new Map<string, Set<string>>()
-      for (const file of artifactCandidates.values()) {
-        if (!/[\\/]generated_files[\\/][^\\/]+$/i.test(file.path)) continue
-        const directory = dirname(file.path)
-        const paths = pathsByDirectory.get(directory) || new Set<string>()
-        paths.add(resolve(file.path))
-        pathsByDirectory.set(directory, paths)
-      }
-      for (const [directory, currentPaths] of pathsByDirectory) {
-        const manifestPath = join(directory, '.agentpet-artifacts.json')
-        let hiddenPaths = new Set<string>()
-        try {
-          const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-          hiddenPaths = new Set(
-            (Array.isArray(parsed?.hiddenPaths) ? parsed.hiddenPaths : [])
-              .filter((item: unknown): item is string => typeof item === 'string')
-              .map(item => resolve(item).toLocaleLowerCase())
-          )
-        } catch {
-          // The manifest is optional on first use.
-        }
-        for (const filePath of currentPaths) {
-          const key = artifactKey(filePath)
-          if (consumedArtifactPaths.has(key)) hiddenPaths.add(key)
-          else hiddenPaths.delete(key)
-        }
-        fs.writeFileSync(manifestPath, JSON.stringify({ hiddenPaths: [...hiddenPaths] }, null, 2), 'utf8')
-      }
-    }
-    const getDeliverableFiles = (): Array<{ name: string; path: string; size: number }> => {
-      persistArtifactVisibility()
-      return [...artifactCandidates.entries()]
-        .filter(([key, file]) => !consumedArtifactPaths.has(key) && fs.existsSync(file.path))
-        .map(([, file]) => file)
-    }
+    const artifactTracker = new ArtifactTracker()
+    const getDeliverableFiles = () => artifactTracker.getFinalFiles()
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
     const allowedToolNames = Array.isArray(config.allowedToolNames)
@@ -1486,7 +1452,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                     taskRunId: config.taskRunId,
                     taskStepId: config.taskStepId,
                     isFrontend,
-                    sandboxMode: !!sandboxMode,
+                    sandboxMode: effectiveSandboxMode,
                     event,
                     abortSignal,
                     traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
@@ -1512,7 +1478,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
                 taskRunId: config.taskRunId,
                 taskStepId: config.taskStepId,
                 isFrontend,
-                sandboxMode: !!sandboxMode,
+                sandboxMode: effectiveSandboxMode,
                 event,
                 abortSignal,
                 traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
@@ -1590,21 +1556,18 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
           const transfersArtifact = /^(?:move|copy)_file$/i.test(res.toolName)
-          if (res.toolSuccess && (transfersArtifact || (res.generatedFiles?.length || 0) > 0)) {
-            for (const inputPath of this.getArtifactInputPaths(res.toolArgs)) {
-              consumedArtifactPaths.add(artifactKey(inputPath))
-            }
-          }
-          for (const file of res.generatedFiles || []) {
-            const key = artifactKey(file.path)
-            consumedArtifactPaths.delete(key)
-            artifactCandidates.set(key, file)
-          }
+          const generatedArtifacts = [...(res.generatedFiles || [])]
           if (res.toolSuccess && transfersArtifact) {
             const destination = this.getExistingArtifact(
               res.toolArgs?.destination_path || res.toolArgs?.target_path
             )
-            if (destination) artifactCandidates.set(artifactKey(destination.path), destination)
+            if (destination) generatedArtifacts.push(destination)
+          }
+          if (res.toolSuccess) {
+            artifactTracker.noteSuccessfulTool(
+              this.getArtifactInputPaths(res.toolArgs),
+              generatedArtifacts
+            )
           }
           if (res.toolSuccess && (res.toolName === 'request_skill' || res.toolName === 'wait_skill_ready')) {
             for (const skillId of Array.isArray(res.toolState?.loadedSkillIds) ? res.toolState.loadedSkillIds : []) {

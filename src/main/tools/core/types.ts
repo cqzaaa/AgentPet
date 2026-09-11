@@ -64,7 +64,7 @@ export interface ToolContext {
   taskStepId?: string
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
-  sandboxMode: boolean
+  sandboxMode: boolean | 'assist'
   abortSignal?: AbortSignal
   /** Emits durable protocol-level events for tools with an external transport. */
   traceEvent?: (event: ToolTraceEvent) => void | Promise<void>

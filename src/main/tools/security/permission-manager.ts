@@ -49,10 +49,12 @@ export class PermissionManager {
     taskRunId?: string
     taskStepId?: string
   }): Promise<PermissionResponse> {
-    const approvalScopeId = params.interactionOrigin === 'orchestration' && params.taskRunId
-      ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
-      : params.sessionId
-    if (!params.forcePrompt && this.isTurnApprovalGranted(approvalScopeId)) {
+    const approvalScopeId =
+      params.interactionOrigin === 'orchestration' && params.taskRunId
+        ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
+        : params.sessionId
+    const highRisk = this.isHighRiskRequest(params.command, params.warning)
+    if (!params.forcePrompt && !highRisk && this.isTurnApprovalGranted(approvalScopeId)) {
       return { approved: true, scope: 'turn' }
     }
 
@@ -129,13 +131,18 @@ export class PermissionManager {
     this.turnApprovals.clear()
   }
 
-  private showPermissionNotification(requestId: number, win: BrowserWindow, interactionOrigin?: 'chat' | 'orchestration'): void {
+  private showPermissionNotification(
+    requestId: number,
+    win: BrowserWindow,
+    interactionOrigin?: 'chat' | 'orchestration'
+  ): void {
     if (!Notification.isSupported()) return
     const notification = new Notification({
       title: interactionOrigin === 'orchestration' ? '多 Agent 编排需要审批' : 'AgentPet 需要审批',
-      body: interactionOrigin === 'orchestration'
-        ? '协作节点正在等待确认，点击返回编排运行台查看详情。'
-        : '有一项操作正在等待你的确认，点击返回应用查看详情。'
+      body:
+        interactionOrigin === 'orchestration'
+          ? '协作节点正在等待确认，点击返回编排运行台查看详情。'
+          : '有一项操作正在等待你的确认，点击返回应用查看详情。'
     })
     this.pendingNotifications.set(requestId, notification)
     notification.on('click', () => {
@@ -159,7 +166,15 @@ export class PermissionManager {
   }
 
   private grantTurnApproval(sessionId: string): void {
-    this.turnApprovals.set(sessionId, Date.now() + 10 * 60 * 1000)
+    // Conversation-scoped approval lasts until the session permission state is
+    // cleared. High-risk requests are filtered before this grant is consulted.
+    this.turnApprovals.set(sessionId, Number.POSITIVE_INFINITY)
+  }
+
+  private isHighRiskRequest(command: string, warning?: string): boolean {
+    return /删除|永久|高危|敏感|delete_file|\brm\b|\bdel\b|remove-item|purge|format\b/i.test(
+      `${command}\n${warning || ''}`
+    )
   }
 }
 

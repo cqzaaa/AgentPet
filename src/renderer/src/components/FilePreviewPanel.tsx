@@ -4,6 +4,8 @@ import '@open-file-viewer/core/style.css'
 import JSZip from 'jszip'
 import { AppStore } from '../hooks/useAppStore'
 import {
+  ChevronDown,
+  ChevronRight,
   File,
   FileArchive,
   FileCode2,
@@ -39,6 +41,85 @@ interface SpreadsheetSheetMetadata {
 }
 
 type SpreadsheetMetadata = Map<string, SpreadsheetSheetMetadata>
+
+type GeneratedFileRecord = {
+  name: string
+  path: string
+  size: number
+  time?: string
+  role?: 'final' | 'intermediate'
+}
+
+function GeneratedFileSection({
+  title,
+  files,
+  collapsible = false,
+  onPreview,
+  onDelete
+}: {
+  title: string
+  files: GeneratedFileRecord[]
+  collapsible?: boolean
+  onPreview: (file: GeneratedFileRecord) => void
+  onDelete: (file: GeneratedFileRecord) => void
+}): React.JSX.Element | null {
+  const [expanded, setExpanded] = useState(!collapsible)
+  if (files.length === 0) return null
+
+  return (
+    <section className="generated-file-section" aria-label={`${title}，共 ${files.length} 个`}>
+      {collapsible ? (
+        <button
+          type="button"
+          className="generated-file-section-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          <span>{title}</span>
+          <span className="generated-file-section-count">{files.length}</span>
+        </button>
+      ) : (
+        <div className="generated-file-section-heading">
+          <span>{title}</span>
+          <span className="generated-file-section-count">{files.length}</span>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="generated-file-section-list">
+          {files.map((file) => (
+            <div className="generated-file-row" key={file.path}>
+              <button
+                type="button"
+                className="generated-file-open"
+                title={`预览 ${file.name}`}
+                onClick={() => onPreview(file)}
+              >
+                <span className="generated-file-icon">
+                  <FileTypeIcon fileName={file.name} size={21} />
+                </span>
+                <span className="generated-file-copy">
+                  <span className="generated-file-name">{file.name}</span>
+                  <span className="generated-file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="generated-file-delete"
+                onClick={() => onDelete(file)}
+                title={`删除 ${file.name}`}
+                aria-label={`删除 ${file.name}`}
+              >
+                <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 function xmlElements(root: Document | Element, localName: string): Element[] {
   return Array.from(root.getElementsByTagNameNS('*', localName))
@@ -232,6 +313,7 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
     setOfficePreviewRequest,
     handlePreviewFile,
     handleDeleteFile,
+    loadGeneratedFiles,
     isCollapsed
   } = store
 
@@ -260,8 +342,22 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
   const [canZoomIn, setCanZoomIn] = useState(false)
   const [canZoomOut, setCanZoomOut] = useState(false)
   const visibleFileCount = new Set([...generatedFiles, ...openTabs].map(file => file.path)).size
+  const finalFiles = generatedFiles.filter(file => file.role !== 'intermediate')
+  const intermediateFiles = generatedFiles.filter(file => file.role === 'intermediate')
+  const finalArtifactSyncKey = generatedFiles
+    .filter(file => file.role === 'final')
+    .map(file => file.path)
+    .sort()
+    .join('\n')
+  const lastArtifactSyncKeyRef = useRef('')
   const [canRotate, setCanRotate] = useState(false)
   const [hasToolbarCtx, setHasToolbarCtx] = useState(false)
+
+  useEffect(() => {
+    if (captureOnly || !finalArtifactSyncKey || lastArtifactSyncKeyRef.current === finalArtifactSyncKey) return
+    lastArtifactSyncKeyRef.current = finalArtifactSyncKey
+    void loadGeneratedFiles()
+  }, [captureOnly, finalArtifactSyncKey, loadGeneratedFiles])
 
   const syncZoomStatus = () => {
     const ctx = toolbarContextRef.current
@@ -1038,54 +1134,20 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
             </>
           ) : (
             /* 无预览文件时：垂直文件列表 */
-            <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
-              {generatedFiles.map((f, i) => {
-                return (
-                  <div
-                    key={i}
-                    onClick={() => handlePreviewFileLocal(f)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      padding: '8px 10px',
-                      cursor: 'pointer',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                      marginBottom: '2px'
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-menu-hover)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                      <FileTypeIcon fileName={f.name} size={21} />
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{(f.size / 1024).toFixed(1)} KB</div>
-                    </div>
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDeleteFileLocal(f)
-                      }}
-                      title="删除文件"
-                      style={{
-                        fontSize: '11px',
-                        opacity: 0,
-                        cursor: 'pointer',
-                        padding: '2px 4px',
-                        borderRadius: '3px',
-                        color: 'var(--text-muted)',
-                        transition: 'opacity 0.15s',
-                        flexShrink: 0
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; e.currentTarget.style.color = '#ef4444' }}
-                      onMouseLeave={e => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                    ><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></span>
-                  </div>
-                )
-              })}
+            <div className="generated-file-groups">
+              <GeneratedFileSection
+                title="最终产物"
+                files={finalFiles}
+                onPreview={handlePreviewFileLocal}
+                onDelete={handleDeleteFileLocal}
+              />
+              <GeneratedFileSection
+                title="中间产物"
+                files={intermediateFiles}
+                collapsible
+                onPreview={handlePreviewFileLocal}
+                onDelete={handleDeleteFileLocal}
+              />
             </div>
           )}
         </div>

@@ -7,6 +7,7 @@ type PermissionRequest = {
   command?: string
   execCwd?: string
   warning?: string
+  allowTurnScope?: boolean
 }
 type Props = {
   request: PermissionRequest
@@ -132,6 +133,15 @@ export function PermissionApprovalCard({ request, onRespond }: Props): React.JSX
             <MessageSquareText size={16} strokeWidth={1.9} aria-hidden="true" />
             拒绝并说明
           </button>
+          {request.allowTurnScope !== false && (
+            <button
+              type="button"
+              className="consent-button secondary"
+              onClick={() => onRespond(true, 'turn')}
+            >
+              本次对话帮我审批
+            </button>
+          )}
           <button type="button" className="consent-button primary" onClick={() => onRespond(true)}>
             本次允许
           </button>

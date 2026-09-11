@@ -358,9 +358,9 @@ const api = {
     ipcRenderer.invoke('api:switch-avatar', params),
   deleteAvatar: (dirPath: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-avatar', dirPath),
-  getSandboxMode: (): Promise<boolean> =>
+  getSandboxMode: (): Promise<boolean | 'assist'> =>
     ipcRenderer.invoke('api:get-sandbox-mode'),
-  setSandboxMode: (enabled: boolean): Promise<boolean> =>
+  setSandboxMode: (enabled: boolean | 'assist'): Promise<boolean | 'assist'> =>
     ipcRenderer.invoke('api:set-sandbox-mode', enabled),
   onRequestPermission: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
@@ -467,6 +467,11 @@ const api = {
   showTextContextMenu: (selectedText: string): void => {
     ipcRenderer.send('api:show-text-context-menu', selectedText)
   },
+  showFileContextMenu: (filePath: string): void => {
+    ipcRenderer.send('api:show-file-context-menu', filePath)
+  },
+  showItemInFolder: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:show-item-in-folder', filePath),
   showPetContextMenu: (): void => {
     ipcRenderer.send('api:show-pet-context-menu')
   },
@@ -596,7 +601,8 @@ const api = {
   rpaPickElement: (url: string): Promise<string | null> => ipcRenderer.invoke('api:rpa-pick-element', url),
   listRpaDesktopWindows: (): Promise<Array<{ processId: number; processName: string; windowTitle: string }>> => ipcRenderer.invoke('api:list-rpa-desktop-windows'),
   completeRpaRecordingProcessing: (): Promise<boolean> => ipcRenderer.invoke('api:complete-rpa-recording-processing'),
-  rpaRecordActions: (input: string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', input),
+  rpaRecordActions: (input:
+      | string | { url?: string; mode?: 'browser' | 'desktop'; desktopTarget?: { processId: number; processName?: string; windowTitle?: string } }): Promise<any[]> => ipcRenderer.invoke('api:rpa-record-actions', input),
   normalizeRpaRecordedActions: (actions: any[]): Promise<any[]> => ipcRenderer.invoke('api:normalize-rpa-recorded-actions', actions),
   listRpaSecrets: (): Promise<any[]> => ipcRenderer.invoke('api:list-rpa-secrets'),
   createRpaSecret: (input: any): Promise<any> => ipcRenderer.invoke('api:create-rpa-secret', input),
@@ -622,4 +628,3 @@ if (process.contextIsolated) {
   // @ts-ignore (define in dts)
   window.api = api
 }
-

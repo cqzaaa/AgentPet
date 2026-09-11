@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
+import { PermissionModeControl } from './PermissionModeControl'
 import { normalizeSearchCitations } from '../utils/helpers'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
@@ -54,7 +55,8 @@ function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
 }
 
-type FunctionPageId = 'control' | 'agents' | 'agent' | 'skillhub' | 'knowledge' | 'workflow' | 'logs' | 'settings'
+type FunctionPageId =
+  | 'control' | 'agents' | 'agent' | 'skillhub' | 'knowledge' | 'workflow' | 'logs' | 'settings'
 
 type WorkspaceTab =
   | { key: string; kind: 'session'; sessionId: string }
@@ -123,15 +125,17 @@ function createShellSessionsSelector(): (state: { sessions: Session[] }) => Sess
   let cachedSignatures: string[] = []
   return (state: { sessions: Session[] }) => {
     const sessions = state.sessions
-    const signatures = sessions.map(session => [
-      session.id,
-      session.name,
-      session.pinned ? '1' : '0',
-      session.workspacePath || '',
-      session.createdAt || session.time,
-      checkIsThinking(session) ? '1' : '0',
-      getSessionPreview(session)
-    ].join('\u0000'))
+    const signatures = sessions.map((session) =>
+      [
+        session.id,
+        session.name,
+        session.pinned ? '1' : '0',
+        session.workspacePath || '',
+        session.createdAt || session.time,
+        checkIsThinking(session) ? '1' : '0',
+        getSessionPreview(session)
+      ].join('\u0000')
+    )
     if (
       signatures.length === cachedSignatures.length &&
       signatures.every((signature, index) => signature === cachedSignatures[index])
@@ -149,29 +153,29 @@ export function AgentWindow(): React.JSX.Element {
   const selectShellSessions = useMemo(() => createShellSessionsSelector(), [])
 
   // 使用 Zustand 细粒度选择器订阅状态以阻止全局无用重渲染
-  const theme = useAppStoreRaw(state => state.theme)
-  const isCollapsed = useAppStoreRaw(state => state.isCollapsed)
-  const activeTab = useAppStoreRaw(state => state.activeTab)
-  const agentSubTab = useAppStoreRaw(state => state.agentSubTab)
-  const settingsSubTab = useAppStoreRaw(state => state.settingsSubTab)
-  const showApiKeyModal = useAppStoreRaw(state => state.showApiKeyModal)
+  const theme = useAppStoreRaw((state) => state.theme)
+  const isCollapsed = useAppStoreRaw((state) => state.isCollapsed)
+  const activeTab = useAppStoreRaw((state) => state.activeTab)
+  const agentSubTab = useAppStoreRaw((state) => state.agentSubTab)
+  const settingsSubTab = useAppStoreRaw((state) => state.settingsSubTab)
+  const showApiKeyModal = useAppStoreRaw((state) => state.showApiKeyModal)
   const sessions = useAppStoreRaw(selectShellSessions)
-  const activeSessionId = useAppStoreRaw(state => state.activeSessionId)
-  const customModelFile = useAppStoreRaw(state => state.customModelFile)
-  const skillsList = useAppStoreRaw(state => state.skillsList)
-  const contextRounds = useAppStoreRaw(state => state.contextRounds)
-  const toast = useAppStoreRaw(state => state.toast)
-  const activePermissionRequest = useAppStoreRaw(state => state.activePermissionRequest)
-  const generatedFiles = useAppStoreRaw(state => state.generatedFiles)
-  const openTabs = useAppStoreRaw(state => state.openTabs)
-  const showFilePanel = useAppStoreRaw(state => state.showFilePanel)
-  const isSessionsInitialized = useAppStoreRaw(state => state.isSessionsInitialized)
+  const activeSessionId = useAppStoreRaw((state) => state.activeSessionId)
+  const customModelFile = useAppStoreRaw((state) => state.customModelFile)
+  const skillsList = useAppStoreRaw((state) => state.skillsList)
+  const contextRounds = useAppStoreRaw((state) => state.contextRounds)
+  const toast = useAppStoreRaw((state) => state.toast)
+  const activePermissionRequest = useAppStoreRaw((state) => state.activePermissionRequest)
+  const generatedFiles = useAppStoreRaw((state) => state.generatedFiles)
+  const openTabs = useAppStoreRaw((state) => state.openTabs)
+  const showFilePanel = useAppStoreRaw((state) => state.showFilePanel)
+  const isSessionsInitialized = useAppStoreRaw((state) => state.isSessionsInitialized)
   const sessionsById = useMemo(
-    () => new Map(sessions.map(session => [session.id, session])),
+    () => new Map(sessions.map((session) => [session.id, session])),
     [sessions]
   )
   const visibleFileCount = useMemo(
-    () => new Set([...generatedFiles, ...openTabs].map(file => file.path)).size,
+    () => new Set([...generatedFiles, ...openTabs].map((file) => file.path)).size,
     [generatedFiles, openTabs]
   )
 
@@ -215,10 +219,13 @@ export function AgentWindow(): React.JSX.Element {
     setHighlightedMessageId,
     setShowFilePanel,
     setPreviewFile,
-    setOpenTabs
+    setOpenTabs,
+    loadGeneratedFiles
   } = store
 
-  const currentAvatarName = customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao'
+  const currentAvatarName = customModelFile
+    ? customModelFile.replace(/\.model3\.json$/i, '')
+    : 'Mao'
 
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const [showTrajectory, setShowTrajectory] = useState(false)
@@ -233,58 +240,61 @@ export function AgentWindow(): React.JSX.Element {
     }
   }, [showTrajectory, activeTab])
 
-  const chatActions = useMemo(() => ({
-    setInputValue: store.setInputValue,
-    handleSendChat: store.handleSendChat,
-    saveLlmConfig: store.saveLlmConfig,
-    setAttachedFiles: store.setAttachedFiles,
-    setSelectedKnowledgeBase: store.setSelectedKnowledgeBase,
-    handlePasteFiles: store.handlePasteFiles,
-    handleUploadFile: store.handleUploadFile,
-    setHighlightedMessageId: store.setHighlightedMessageId,
-    handleAbortLlm: store.handleAbortLlm,
-    handleUpdateExecutionDevice: store.handleUpdateExecutionDevice,
-    handleConnectSsh: store.handleConnectSsh,
-    handleDisconnectSsh: store.handleDisconnectSsh,
-    showToast: store.showToast,
-    handleRespondPermission: store.handleRespondPermission,
-    toggleSkillEnable: store.toggleSkillEnable,
-    setActiveTab: store.setActiveTab,
-    setAgentSubTab: store.setAgentSubTab,
-    refreshSkillsAndStorage: store.refreshSkillsAndStorage,
-    refreshMcpServers: store.refreshMcpServers,
-    saveMcpConfig: store.saveMcpConfig,
-    handlePreviewFile: store.handlePreviewFile,
-    setShowFilePanel: store.setShowFilePanel,
-    openTrajectory: () => {
-      document.documentElement.classList.remove('collab-takeover-active')
-      setShowTrajectory(true)
-      setShowHistoryDropdown(false)
-    }
-  }), [
-    store.setInputValue,
-    store.handleSendChat,
-    store.saveLlmConfig,
-    store.setAttachedFiles,
-    store.setSelectedKnowledgeBase,
-    store.handlePasteFiles,
-    store.handleUploadFile,
-    store.setHighlightedMessageId,
-    store.handleAbortLlm,
-    store.handleUpdateExecutionDevice,
-    store.handleConnectSsh,
-    store.handleDisconnectSsh,
-    store.showToast,
-    store.handleRespondPermission,
-    store.toggleSkillEnable,
-    store.setActiveTab,
-    store.setAgentSubTab,
-    store.refreshSkillsAndStorage,
-    store.refreshMcpServers,
-    store.saveMcpConfig,
-    store.handlePreviewFile,
-    store.setShowFilePanel
-  ])
+  const chatActions = useMemo(
+    () => ({
+      setInputValue: store.setInputValue,
+      handleSendChat: store.handleSendChat,
+      saveLlmConfig: store.saveLlmConfig,
+      setAttachedFiles: store.setAttachedFiles,
+      setSelectedKnowledgeBase: store.setSelectedKnowledgeBase,
+      handlePasteFiles: store.handlePasteFiles,
+      handleUploadFile: store.handleUploadFile,
+      setHighlightedMessageId: store.setHighlightedMessageId,
+      handleAbortLlm: store.handleAbortLlm,
+      handleUpdateExecutionDevice: store.handleUpdateExecutionDevice,
+      handleConnectSsh: store.handleConnectSsh,
+      handleDisconnectSsh: store.handleDisconnectSsh,
+      showToast: store.showToast,
+      handleRespondPermission: store.handleRespondPermission,
+      toggleSkillEnable: store.toggleSkillEnable,
+      setActiveTab: store.setActiveTab,
+      setAgentSubTab: store.setAgentSubTab,
+      refreshSkillsAndStorage: store.refreshSkillsAndStorage,
+      refreshMcpServers: store.refreshMcpServers,
+      saveMcpConfig: store.saveMcpConfig,
+      handlePreviewFile: store.handlePreviewFile,
+      setShowFilePanel: store.setShowFilePanel,
+      openTrajectory: () => {
+        document.documentElement.classList.remove('collab-takeover-active')
+        setShowTrajectory(true)
+        setShowHistoryDropdown(false)
+      }
+    }),
+    [
+      store.setInputValue,
+      store.handleSendChat,
+      store.saveLlmConfig,
+      store.setAttachedFiles,
+      store.setSelectedKnowledgeBase,
+      store.handlePasteFiles,
+      store.handleUploadFile,
+      store.setHighlightedMessageId,
+      store.handleAbortLlm,
+      store.handleUpdateExecutionDevice,
+      store.handleConnectSsh,
+      store.handleDisconnectSsh,
+      store.showToast,
+      store.handleRespondPermission,
+      store.toggleSkillEnable,
+      store.setActiveTab,
+      store.setAgentSubTab,
+      store.refreshSkillsAndStorage,
+      store.refreshMcpServers,
+      store.saveMcpConfig,
+      store.handlePreviewFile,
+      store.setShowFilePanel
+    ]
+  )
 
   // 侧边栏下方菜单组（控制/代理/日志/设置）默认收起，把空间让给最近会话
   const [menuCollapsed, setMenuCollapsed] = useState(true)
@@ -330,12 +340,18 @@ export function AgentWindow(): React.JSX.Element {
   }
 
   const workspacePaths = useMemo(
-    () => Array.from(new Set(sessions.map(session => session.workspacePath).filter(Boolean) as string[])),
+    () =>
+      Array.from(
+        new Set(sessions.map((session) => session.workspacePath).filter(Boolean) as string[])
+      ),
     [sessions]
   )
 
   const workspaceName = (path: string): string => {
-    const segments = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean)
+    const segments = path
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .filter(Boolean)
     return segments[segments.length - 1] || path
   }
 
@@ -350,12 +366,11 @@ export function AgentWindow(): React.JSX.Element {
   }
 
   const workspaceTabLabelSignature = workspaceTabs
-    .map(tab => `${tab.key}:${getWorkspaceTabLabel(tab)}`)
+    .map((tab) => `${tab.key}:${getWorkspaceTabLabel(tab)}`)
     .join('\u0000')
 
-  const activeWorkspaceKey = activeTab === 'chat'
-    ? `session:${activeSessionId}`
-    : `page:${activeTab}`
+  const activeWorkspaceKey =
+    activeTab === 'chat' ? `session:${activeSessionId}` : `page:${activeTab}`
 
   useEffect(() => {
     if (activeTab === 'rpa') setActiveTab('workflow')
@@ -364,25 +379,29 @@ export function AgentWindow(): React.JSX.Element {
   useEffect(() => {
     if (activeTab === 'chat' && activeSessionId && sessionsById.has(activeSessionId)) {
       const key = `session:${activeSessionId}`
-      setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
-        ? prev
-        : [...prev, { key, kind: 'session', sessionId: activeSessionId }])
+      setWorkspaceTabs((prev) =>
+        prev.some((tab) => tab.key === key)
+          ? prev
+          : [...prev, { key, kind: 'session', sessionId: activeSessionId }]
+      )
     }
   }, [activeSessionId, activeTab, sessionsById])
 
   useEffect(() => {
     if (isFunctionPage(activeTab)) {
       const key = `page:${activeTab}`
-      setWorkspaceTabs(prev => prev.some(tab => tab.key === key)
-        ? prev
-        : [...prev, { key, kind: 'page', pageId: activeTab }])
+      setWorkspaceTabs((prev) =>
+        prev.some((tab) => tab.key === key)
+          ? prev
+          : [...prev, { key, kind: 'page', pageId: activeTab }]
+      )
     }
   }, [activeTab])
 
   useEffect(() => {
-    const validIds = new Set(sessions.map(s => s.id))
-    setWorkspaceTabs(prev => {
-      const next = prev.filter(tab => tab.kind === 'page' || validIds.has(tab.sessionId))
+    const validIds = new Set(sessions.map((s) => s.id))
+    setWorkspaceTabs((prev) => {
+      const next = prev.filter((tab) => tab.kind === 'page' || validIds.has(tab.sessionId))
       return next.length === prev.length ? prev : next
     })
   }, [sessions])
@@ -398,12 +417,12 @@ export function AgentWindow(): React.JSX.Element {
 
   const handleCloseTab = (keyToClose: string, e: React.MouseEvent): void => {
     e.stopPropagation()
-    const currentIndex = workspaceTabs.findIndex(tab => tab.key === keyToClose)
+    const currentIndex = workspaceTabs.findIndex((tab) => tab.key === keyToClose)
     const closingTab = workspaceTabs[currentIndex]
     if (!closingTab) return
 
     const isClosingActive = closingTab.key === activeWorkspaceKey
-    const nextTabs = workspaceTabs.filter(tab => tab.key !== keyToClose)
+    const nextTabs = workspaceTabs.filter((tab) => tab.key !== keyToClose)
     setWorkspaceTabs(nextTabs)
 
     if (isClosingActive) {
@@ -429,18 +448,19 @@ export function AgentWindow(): React.JSX.Element {
       frameId = requestAnimationFrame(() => {
         const viewportRect = viewport.getBoundingClientRect()
         const nextHiddenKeys = workspaceTabs
-          .filter(tab => {
+          .filter((tab) => {
             const element = tabElementRefs.current.get(tab.key)
             if (!element) return false
             const rect = element.getBoundingClientRect()
             return rect.left < viewportRect.left - 1 || rect.right > viewportRect.right + 1
           })
-          .map(tab => tab.key)
-        setHiddenTabKeys(prev => (
-          prev.length === nextHiddenKeys.length && prev.every((key, index) => key === nextHiddenKeys[index])
+          .map((tab) => tab.key)
+        setHiddenTabKeys((prev) =>
+          prev.length === nextHiddenKeys.length &&
+          prev.every((key, index) => key === nextHiddenKeys[index])
             ? prev
             : nextHiddenKeys
-        ))
+        )
       })
     }
 
@@ -474,7 +494,10 @@ export function AgentWindow(): React.JSX.Element {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
-      if (tabOverflowMenuRef.current && !tabOverflowMenuRef.current.contains(event.target as Node)) {
+      if (
+        tabOverflowMenuRef.current &&
+        !tabOverflowMenuRef.current.contains(event.target as Node)
+      ) {
         setShowTabOverflowMenu(false)
       }
     }
@@ -486,13 +509,14 @@ export function AgentWindow(): React.JSX.Element {
     if (hiddenTabKeys.length === 0) setShowTabOverflowMenu(false)
   }, [hiddenTabKeys])
 
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
       const target = event.target as Node
       if (
-        historyDropdownRef.current && !historyDropdownRef.current.contains(target) &&
-        historyMenuRef.current && !historyMenuRef.current.contains(target)
+        historyDropdownRef.current &&
+        !historyDropdownRef.current.contains(target) &&
+        historyMenuRef.current &&
+        !historyMenuRef.current.contains(target)
       ) {
         setShowHistoryDropdown(false)
       }
@@ -503,38 +527,62 @@ export function AgentWindow(): React.JSX.Element {
     }
   }, [])
 
-  const userMessages = activeSessMessages?.filter(m => m.sender === 'user') || []
+  const userMessages = activeSessMessages?.filter((m) => m.sender === 'user') || []
 
   const renderPage = (): React.JSX.Element => {
     let page: React.JSX.Element
     switch (activeTab) {
-      case 'chat': page = (
-        <div className="chat-mode-stack">
-          <div className={`chat-mode-panel conversation ${showTrajectory ? 'inactive' : 'active'}`}>
-            <ChatControllerProvider actions={chatActions}><ChatPage /></ChatControllerProvider>
-          </div>
-          {showTrajectory && (
-            <div className="chat-mode-panel trajectory active">
-              <TrajectoryPage />
+      case 'chat':
+        page = (
+          <div className="chat-mode-stack">
+            <div
+              className={`chat-mode-panel conversation ${showTrajectory ? 'inactive' : 'active'}`}
+            >
+              <ChatControllerProvider actions={chatActions}>
+                <ChatPage />
+                <PermissionModeControl />
+              </ChatControllerProvider>
             </div>
-          )}
-        </div>
-      ); break
-      case 'control': page = <ControlPage store={store} />; break
-      case 'agents': page = <SettingsPage store={{ ...store, settingsSubTab: 'agents' }} />; break
-      case 'agent': page = <AgentPage store={store} />; break
-      case 'skillhub': page = <SkillHubPage />; break
-      case 'knowledge': page = <KnowledgeBasePage />; break
-      case 'logs': page = <LogsPage store={store} />; break
-      case 'settings': page = <SettingsPage store={store} />; break
-      case 'workflow': page = <WorkflowPage store={store} />; break
-      default: page = <div>Overview</div>
+            {showTrajectory && (
+              <div className="chat-mode-panel trajectory active">
+                <TrajectoryPage />
+              </div>
+            )}
+          </div>
+        )
+        break
+      case 'control':
+        page = <ControlPage store={store} />
+        break
+      case 'agents':
+        page = <SettingsPage store={{ ...store, settingsSubTab: 'agents' }} />
+        break
+      case 'agent':
+        page = <AgentPage store={store} />
+        break
+      case 'skillhub':
+        page = <SkillHubPage />
+        break
+      case 'knowledge':
+        page = <KnowledgeBasePage />
+        break
+      case 'logs':
+        page = <LogsPage store={store} />
+        break
+      case 'settings':
+        page = <SettingsPage store={store} />
+        break
+      case 'workflow':
+        page = <WorkflowPage store={store} />
+        break
+      default:
+        page = <div>Overview</div>
     }
     return <Suspense fallback={<PageLoadingFallback />}>{page}</Suspense>
   }
 
   const hiddenTabKeySet = new Set(hiddenTabKeys)
-  const hiddenTabs = workspaceTabs.filter(tab => hiddenTabKeySet.has(tab.key))
+  const hiddenTabs = workspaceTabs.filter((tab) => hiddenTabKeySet.has(tab.key))
 
   return (
     <div className={`agent-window-container ${theme}`}>
@@ -542,12 +590,31 @@ export function AgentWindow(): React.JSX.Element {
       <div className={`agent-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
         <div>
           {/* 顶部无边框拖拽区 */}
-          <div style={{ height: '16px', flexShrink: 0, WebkitAppRegion: 'drag' } as React.CSSProperties & { WebkitAppRegion: string }} />
+          <div
+            style={
+              { height: '16px', flexShrink: 0, WebkitAppRegion: 'drag' } as React.CSSProperties & {
+                WebkitAppRegion: string
+              }
+            }
+          />
           {/* Brand/Avatar Info */}
           <div className="sidebar-brand">
             <div className="brand-left">
-              <div className="brand-avatar" style={{ background: 'transparent', boxShadow: 'none' }}>
-                <img src={iconFromImage} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit', transform: 'scale(1)' }} />
+              <div
+                className="brand-avatar"
+                style={{ background: 'transparent', boxShadow: 'none' }}
+              >
+                <img
+                  src={iconFromImage}
+                  alt="icon"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    borderRadius: 'inherit',
+                    transform: 'scale(1)'
+                  }}
+                />
               </div>
               {!isCollapsed && (
                 <div className="brand-info">
@@ -560,15 +627,21 @@ export function AgentWindow(): React.JSX.Element {
               )}
             </div>
             <button className="brand-collapse-btn" onClick={() => setIsCollapsed(!isCollapsed)}>
-              {isCollapsed
-                ? <PanelLeftOpen size={16} strokeWidth={2} aria-hidden="true" />
-                : <PanelLeftClose size={16} strokeWidth={2} aria-hidden="true" />}
+              {isCollapsed ? (
+                <PanelLeftOpen size={16} strokeWidth={2} aria-hidden="true" />
+              ) : (
+                <PanelLeftClose size={16} strokeWidth={2} aria-hidden="true" />
+              )}
             </button>
           </div>
 
           {/* + 新会话 */}
           <div className="new-chat-btn-wrapper">
-            <button className="new-chat-btn" onClick={() => setShowNewSessionDialog(true)} title="创建新会话">
+            <button
+              className="new-chat-btn"
+              onClick={() => setShowNewSessionDialog(true)}
+              title="创建新会话"
+            >
               <Plus size={17} strokeWidth={2} aria-hidden="true" />
               {!isCollapsed && <span>新会话</span>}
             </button>
@@ -579,7 +652,13 @@ export function AgentWindow(): React.JSX.Element {
             <div className="sidebar-recent-title">
               <span>最近会话</span>
               {activePermissionRequest && (
-                <span className="menu-sandbox-badge" title="有待审批的终端命令" onClick={() => setActiveTab('chat')}>●</span>
+                <span
+                  className="menu-sandbox-badge"
+                  title="有待审批的终端命令"
+                  onClick={() => setActiveTab('chat')}
+                >
+                  ●
+                </span>
               )}
             </div>
           )}
@@ -587,11 +666,16 @@ export function AgentWindow(): React.JSX.Element {
             <RecentSessionList
               sessions={sessions}
               activeSessionId={activeSessionId}
-              onSelect={(id) => { setActiveSessionId(id); setActiveTab('chat') }}
+              onSelect={(id) => {
+                setActiveSessionId(id)
+                setActiveTab('chat')
+              }}
               onDelete={setSessionToDeleteId}
               onTogglePin={handleTogglePinSession}
               onRename={handleRenameSession}
-              onCreateInWorkspace={(path) => { void handleCreateNewSession(path) }}
+              onCreateInWorkspace={(path) => {
+                void handleCreateNewSession(path)
+              }}
             />
           )}
 
@@ -602,45 +686,127 @@ export function AgentWindow(): React.JSX.Element {
             title={menuCollapsed ? '展开菜单' : '收起菜单'}
           >
             <span className="sidebar-menu-arrow">
-              {menuCollapsed
-                ? <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-                : <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />}
+              {menuCollapsed ? (
+                <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+              ) : (
+                <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+              )}
             </span>
             <span>菜单</span>
           </div>
           {(!menuCollapsed || isCollapsed) && (
             <div className="sidebar-menu">
-              <div className={`menu-item ${activeTab === 'control' ? 'active' : ''}`} onClick={() => setActiveTab('control')} title="订阅频道">
-                <div className="menu-item-left"><OverviewIcon /><span>订阅频道</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'control' ? 'active' : ''}`}
+                onClick={() => setActiveTab('control')}
+                title="订阅频道"
+              >
+                <div className="menu-item-left">
+                  <OverviewIcon />
+                  <span>订阅频道</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
-              <div className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')} title="代理">
-                <div className="menu-item-left"><SkillsIcon /><span>代理</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`}
+                onClick={() => setActiveTab('agent')}
+                title="代理"
+              >
+                <div className="menu-item-left">
+                  <SkillsIcon />
+                  <span>代理</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
-              <div className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`} onClick={() => setActiveTab('skillhub')} title="技能市场">
-                <div className="menu-item-left"><Store size={18} strokeWidth={2} aria-hidden="true" /><span>技能市场</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`}
+                onClick={() => setActiveTab('skillhub')}
+                title="技能市场"
+              >
+                <div className="menu-item-left">
+                  <Store size={18} strokeWidth={2} aria-hidden="true" />
+                  <span>技能市场</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
-              <div className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`} onClick={() => setActiveTab('knowledge')} title="知识库">
-                <div className="menu-item-left"><Library size={18} strokeWidth={2} aria-hidden="true" /><span>知识库</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`}
+                onClick={() => setActiveTab('knowledge')}
+                title="知识库"
+              >
+                <div className="menu-item-left">
+                  <Library size={18} strokeWidth={2} aria-hidden="true" />
+                  <span>知识库</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
               <div
                 className={`menu-item ${activeTab === 'workflow' ? 'active' : ''}`}
                 onClick={() => setActiveTab('workflow')}
                 title="工作流"
               >
-                <div className="menu-item-left"><Workflow size={18} strokeWidth={2} aria-hidden="true" /><span>工作流</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+                <div className="menu-item-left">
+                  <Workflow size={18} strokeWidth={2} aria-hidden="true" />
+                  <span>工作流</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
-              <div className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} title="日志">
-                <div className="menu-item-left"><ScrollText size={18} strokeWidth={2} aria-hidden="true" /><span>日志</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`}
+                onClick={() => setActiveTab('logs')}
+                title="日志"
+              >
+                <div className="menu-item-left">
+                  <ScrollText size={18} strokeWidth={2} aria-hidden="true" />
+                  <span>日志</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
-              <div className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')} title="设置">
-                <div className="menu-item-left"><SettingsIcon /><span>设置</span></div>
-                <ChevronRight className="menu-item-arrow" size={14} strokeWidth={2} aria-hidden="true" />
+              <div
+                className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
+                onClick={() => setActiveTab('settings')}
+                title="设置"
+              >
+                <div className="menu-item-left">
+                  <SettingsIcon />
+                  <span>设置</span>
+                </div>
+                <ChevronRight
+                  className="menu-item-arrow"
+                  size={14}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </div>
             </div>
           )}
@@ -649,9 +815,11 @@ export function AgentWindow(): React.JSX.Element {
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
           <button className="theme-toggle-icon-btn" onClick={handleThemeToggle} title="切换主题">
-            {theme === 'dark'
-              ? <Sun size={18} strokeWidth={2} aria-hidden="true" />
-              : <Moon size={18} strokeWidth={2} aria-hidden="true" />}
+            {theme === 'dark' ? (
+              <Sun size={18} strokeWidth={2} aria-hidden="true" />
+            ) : (
+              <Moon size={18} strokeWidth={2} aria-hidden="true" />
+            )}
           </button>
         </div>
       </div>
@@ -661,86 +829,90 @@ export function AgentWindow(): React.JSX.Element {
         {/* ── 自定义标题栏 (Custom Titlebar) ── */}
         <div className="window-titlebar">
           <div className="titlebar-tabs-shell">
-          <div ref={tabsViewportRef} className="titlebar-tabs" onDoubleClick={() => setShowNewSessionDialog(true)}>
-            {workspaceTabs.map(tab => {
-              const session = tab.kind === 'session'
-                ? sessionsById.get(tab.sessionId)
-                : undefined
-              if (tab.kind === 'session' && !session) return null
-              const isActive = tab.key === activeWorkspaceKey
-              const isThinking = tab.kind === 'session' && checkIsThinking(session)
-              const label = getWorkspaceTabLabel(tab)
-              return (
-                <div
-                  key={tab.key}
-                  ref={element => {
-                    if (element) tabElementRefs.current.set(tab.key, element)
-                    else tabElementRefs.current.delete(tab.key)
-                  }}
-                  className={`titlebar-tab ${tab.kind === 'page' ? 'function-tab' : ''} ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
-                  onClick={() => activateWorkspaceTab(tab)}
-                >
-                  {isThinking && <span className="tab-status-dot-pulse"></span>}
-                  <span className="titlebar-tab-name" title={label}>{label}</span>
-                  <span
-                    className="titlebar-tab-close"
-                    onClick={(e) => handleCloseTab(tab.key, e)}
-                    title="关闭标签页"
-                  >
-                    <X size={12} strokeWidth={2} aria-hidden="true" />
-                  </span>
-                </div>
-              )
-            })}
-
-            <button
-              className="titlebar-new-tab-btn"
-              onClick={() => setShowNewSessionDialog(true)}
-              title="新建会话"
+            <div
+              ref={tabsViewportRef}
+              className="titlebar-tabs"
+              onDoubleClick={() => setShowNewSessionDialog(true)}
             >
-              <Plus size={15} strokeWidth={2} aria-hidden="true" />
-            </button>
-          </div>
-          {hiddenTabs.length > 0 && (
-            <div className="titlebar-tab-overflow" ref={tabOverflowMenuRef}>
-              <button
-                className={`titlebar-tab-overflow-btn ${showTabOverflowMenu ? 'active' : ''}`}
-                onClick={() => setShowTabOverflowMenu(prev => !prev)}
-                title={`还有 ${hiddenTabs.length} 个标签`}
-                aria-label="显示更多标签"
-                aria-expanded={showTabOverflowMenu}
-              >
-                <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
-              </button>
-              {showTabOverflowMenu && (
-                <div className="titlebar-tab-overflow-menu">
-                  {hiddenTabs.map(tab => (
-                    <div
-                      key={tab.key}
-                      className={`titlebar-tab-overflow-item ${tab.key === activeWorkspaceKey ? 'active' : ''}`}
-                      onClick={() => {
-                        activateWorkspaceTab(tab)
-                        setShowTabOverflowMenu(false)
-                      }}
+              {workspaceTabs.map((tab) => {
+                const session = tab.kind === 'session' ? sessionsById.get(tab.sessionId) : undefined
+                if (tab.kind === 'session' && !session) return null
+                const isActive = tab.key === activeWorkspaceKey
+                const isThinking = tab.kind === 'session' && checkIsThinking(session)
+                const label = getWorkspaceTabLabel(tab)
+                return (
+                  <div
+                    key={tab.key}
+                    ref={(element) => {
+                      if (element) tabElementRefs.current.set(tab.key, element)
+                      else tabElementRefs.current.delete(tab.key)
+                    }}
+                    className={`titlebar-tab ${tab.kind === 'page' ? 'function-tab' : ''} ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
+                    onClick={() => activateWorkspaceTab(tab)}
+                  >
+                    {isThinking && <span className="tab-status-dot-pulse"></span>}
+                    <span className="titlebar-tab-name" title={label}>
+                      {label}
+                    </span>
+                    <span
+                      className="titlebar-tab-close"
+                      onClick={(e) => handleCloseTab(tab.key, e)}
+                      title="关闭标签页"
                     >
-                      <span title={getWorkspaceTabLabel(tab)}>{getWorkspaceTabLabel(tab)}</span>
-                      <span
-                        className="titlebar-tab-overflow-close"
-                        onClick={event => {
-                          handleCloseTab(tab.key, event)
+                      <X size={12} strokeWidth={2} aria-hidden="true" />
+                    </span>
+                  </div>
+                )
+              })}
+
+              <button
+                className="titlebar-new-tab-btn"
+                onClick={() => setShowNewSessionDialog(true)}
+                title="新建会话"
+              >
+                <Plus size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+            {hiddenTabs.length > 0 && (
+              <div className="titlebar-tab-overflow" ref={tabOverflowMenuRef}>
+                <button
+                  className={`titlebar-tab-overflow-btn ${showTabOverflowMenu ? 'active' : ''}`}
+                  onClick={() => setShowTabOverflowMenu((prev) => !prev)}
+                  title={`还有 ${hiddenTabs.length} 个标签`}
+                  aria-label="显示更多标签"
+                  aria-expanded={showTabOverflowMenu}
+                >
+                  <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+                </button>
+                {showTabOverflowMenu && (
+                  <div className="titlebar-tab-overflow-menu">
+                    {hiddenTabs.map((tab) => (
+                      <div
+                        key={tab.key}
+                        className={`titlebar-tab-overflow-item ${tab.key === activeWorkspaceKey ? 'active' : ''}`}
+                        onClick={() => {
+                          activateWorkspaceTab(tab)
                           setShowTabOverflowMenu(false)
                         }}
-                        title="关闭标签页"
                       >
-                        <X size={12} strokeWidth={2} aria-hidden="true" />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="titlebar-drag-region" aria-hidden="true" />
+                        <span title={getWorkspaceTabLabel(tab)}>{getWorkspaceTabLabel(tab)}</span>
+                        <span
+                          className="titlebar-tab-overflow-close"
+                          onClick={(event) => {
+                            handleCloseTab(tab.key, event)
+                            setShowTabOverflowMenu(false)
+                          }}
+                          title="关闭标签页"
+                        >
+                          <X size={12} strokeWidth={2} aria-hidden="true" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="titlebar-drag-region" aria-hidden="true" />
           </div>
 
           {/* 窗口控制按钮 */}
@@ -760,9 +932,11 @@ export function AgentWindow(): React.JSX.Element {
               }}
               title={isMaximized ? '向下还原' : '最大化'}
             >
-              {isMaximized
-                ? <Copy size={11} strokeWidth={1.6} aria-hidden="true" />
-                : <Square size={10} strokeWidth={1.6} aria-hidden="true" />}
+              {isMaximized ? (
+                <Copy size={11} strokeWidth={1.6} aria-hidden="true" />
+              ) : (
+                <Square size={10} strokeWidth={1.6} aria-hidden="true" />
+              )}
             </button>
             <button
               className="titlebar-control-btn close"
@@ -775,124 +949,139 @@ export function AgentWindow(): React.JSX.Element {
         </div>
 
         {activeTab !== 'workflow' && (
-        <div className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div className="content-title">
-              {activeTab === 'chat' && (sessions.find(s => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
-              {activeTab === 'control' && '订阅频道'}
-              {activeTab === 'agent' && 'Agent 智能体核心系统'}
-              {activeTab === 'skillhub' && '腾讯 SkillHub 技能市场'}
-              {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
-              {activeTab === 'settings' && '系统设置'}
-            </div>
-            {activeTab === 'chat' && activeSession.workspacePath && (
-              <div className="content-subtitle active-workspace-path" title={activeSession.workspacePath}>
-                <FolderOpen size={12} strokeWidth={1.8} aria-hidden="true" />
-                <span>{activeSession.workspacePath}</span>
+          <div
+            className="content-header"
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <div>
+              <div className="content-title">
+                {activeTab === 'chat' &&
+                  (sessions.find((s) => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
+                {activeTab === 'control' && '订阅频道'}
+                {activeTab === 'agent' && 'Agent 智能体核心系统'}
+                {activeTab === 'skillhub' && '腾讯 SkillHub 技能市场'}
+                {activeTab === 'logs' && 'Token 消耗与模型日志统计'}
+                {activeTab === 'settings' && '系统设置'}
               </div>
-            )}
-            {activeTab !== 'chat' && (
-              <div className="content-subtitle">
-                {activeTab === 'control' && '配置和管理您的订阅渠道'}
-                {activeTab === 'agent' && `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
-                {activeTab === 'skillhub' && '浏览第三方技能；安装仍由 AgentPet 进行权限确认'}
-                {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
-                {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
+              {activeTab === 'chat' && activeSession.workspacePath && (
+                <div
+                  className="content-subtitle active-workspace-path"
+                  title={activeSession.workspacePath}
+                >
+                  <FolderOpen size={12} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{activeSession.workspacePath}</span>
+                </div>
+              )}
+              {activeTab !== 'chat' && (
+                <div className="content-subtitle">
+                  {activeTab === 'control' && '配置和管理您的订阅渠道'}
+                  {activeTab === 'agent' &&
+                    `当前扩展技能数: ${skillsList.length} | 上下文轮数: ${contextRounds}`}
+                  {activeTab === 'skillhub' && '浏览第三方技能；安装仍由 AgentPet 进行权限确认'}
+                  {activeTab === 'logs' && '实时监测大语言模型调用频率及 Token 开销走势'}
+                  {activeTab === 'settings' && '大模型与虚拟体模拟配置项'}
+                </div>
+              )}
+            </div>
+
+            {/* 右侧工具栏 */}
+            {activeTab === 'chat' && (
+              <div style={{ position: 'relative' }} ref={historyDropdownRef}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <button
+                    className={`history-btn ${showFilePanel ? 'active' : ''}`}
+                    onClick={() => {
+                      if (!showFilePanel) void loadGeneratedFiles()
+                      setShowFilePanel(!showFilePanel)
+                      if (showFilePanel) {
+                        setPreviewFile(null)
+                        setOpenTabs([])
+                      }
+                    }}
+                    title={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
+                    aria-label={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
+                  >
+                    {showFilePanel ? (
+                      <PanelRightClose size={18} strokeWidth={2} aria-hidden="true" />
+                    ) : (
+                      <PanelRightOpen size={18} strokeWidth={2} aria-hidden="true" />
+                    )}
+                    {visibleFileCount > 0 && <span>{visibleFileCount}</span>}
+                  </button>
+                  <button
+                    className="history-btn"
+                    onClick={() => {
+                      const rect = historyDropdownRef.current?.getBoundingClientRect()
+                      if (rect) {
+                        setHistoryMenuPosition({
+                          top: rect.bottom + 8,
+                          right: Math.max(12, window.innerWidth - rect.right)
+                        })
+                      }
+                      setShowHistoryDropdown((current) => !current)
+                    }}
+                    title="查看历史提问"
+                  >
+                    <List size={18} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                  <button
+                    className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
+                    onClick={() => {
+                      document.documentElement.classList.remove('collab-takeover-active')
+                      setShowTrajectory((current) => !current)
+                      setShowHistoryDropdown(false)
+                    }}
+                    title={showTrajectory ? '返回会话' : '查看当前会话执行轨迹'}
+                    aria-pressed={showTrajectory}
+                  >
+                    <Route size={16} strokeWidth={2} aria-hidden="true" />
+                    <span>{showTrajectory ? '会话' : '轨迹'}</span>
+                  </button>
+                </div>
+
+                {showHistoryDropdown &&
+                  createPortal(
+                    <div
+                      ref={historyMenuRef}
+                      className="history-dropdown history-dropdown-portal"
+                      style={{ top: historyMenuPosition.top, right: historyMenuPosition.right }}
+                      onMouseDown={(event) => event.stopPropagation()}
+                    >
+                      <div className="history-dropdown-header">
+                        历史提问 ({userMessages.length})
+                      </div>
+                      <div className="history-dropdown-list">
+                        {userMessages.length > 0 ? (
+                          userMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className="history-item"
+                              onClick={() => {
+                                setShowTrajectory(false)
+                                setHighlightedMessageId(msg.id)
+                                setShowHistoryDropdown(false)
+                              }}
+                              title={normalizeSearchCitations(msg.text, 'plain')}
+                            >
+                              {normalizeSearchCitations(msg.text, 'plain')}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="history-empty">暂无提问记录</div>
+                        )}
+                      </div>
+                    </div>,
+                    document.querySelector<HTMLElement>('.agent-window-container') || document.body
+                  )}
               </div>
             )}
           </div>
-
-          {/* 右侧工具栏 */}
-          {activeTab === 'chat' && (
-            <div style={{ position: 'relative' }} ref={historyDropdownRef}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <button
-                  className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                  onClick={() => {
-                    setShowFilePanel(!showFilePanel)
-                    if (showFilePanel) {
-                      setPreviewFile(null)
-                      setOpenTabs([])
-                    }
-                  }}
-                  title={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
-                  aria-label={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
-                >
-                  {showFilePanel
-                    ? <PanelRightClose size={18} strokeWidth={2} aria-hidden="true" />
-                    : <PanelRightOpen size={18} strokeWidth={2} aria-hidden="true" />}
-                  {visibleFileCount > 0 && <span>{visibleFileCount}</span>}
-                </button>
-                <button
-                  className="history-btn"
-                  onClick={() => {
-                    const rect = historyDropdownRef.current?.getBoundingClientRect()
-                    if (rect) {
-                      setHistoryMenuPosition({
-                        top: rect.bottom + 8,
-                        right: Math.max(12, window.innerWidth - rect.right)
-                      })
-                    }
-                    setShowHistoryDropdown(current => !current)
-                  }}
-                  title="查看历史提问"
-                >
-                  <List size={18} strokeWidth={2} aria-hidden="true" />
-                </button>
-                <button
-                  className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
-                  onClick={() => {
-                    document.documentElement.classList.remove('collab-takeover-active')
-                    setShowTrajectory(current => !current)
-                    setShowHistoryDropdown(false)
-                  }}
-                  title={showTrajectory ? '返回会话' : '查看当前会话执行轨迹'}
-                  aria-pressed={showTrajectory}
-                >
-                  <Route size={16} strokeWidth={2} aria-hidden="true" />
-                  <span>{showTrajectory ? '会话' : '轨迹'}</span>
-                </button>
-              </div>
-
-              {showHistoryDropdown && createPortal(
-                <div
-                  ref={historyMenuRef}
-                  className="history-dropdown history-dropdown-portal"
-                  style={{ top: historyMenuPosition.top, right: historyMenuPosition.right }}
-                  onMouseDown={event => event.stopPropagation()}
-                >
-                  <div className="history-dropdown-header">
-                    历史提问 ({userMessages.length})
-                  </div>
-                  <div className="history-dropdown-list">
-                    {userMessages.length > 0 ? (
-                      userMessages.map(msg => (
-                        <div
-                          key={msg.id}
-                          className="history-item"
-                          onClick={() => {
-                            setShowTrajectory(false)
-                            setHighlightedMessageId(msg.id)
-                            setShowHistoryDropdown(false)
-                          }}
-                          title={normalizeSearchCitations(msg.text, 'plain')}
-                        >
-                          {normalizeSearchCitations(msg.text, 'plain')}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="history-empty">暂无提问记录</div>
-                    )}
-                  </div>
-                </div>,
-                document.querySelector<HTMLElement>('.agent-window-container') || document.body
-              )}
-            </div>
-          )}
-        </div>
         )}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div className={`content-body tab-${activeTab} ${activeTab === 'chat' ? 'chat-view-host' : ''}`} style={{ flex: 1, minWidth: 0 }}>
+          <div
+            className={`content-body tab-${activeTab} ${activeTab === 'chat' ? 'chat-view-host' : ''}`}
+            style={{ flex: 1, minWidth: 0 }}
+          >
             {renderPage()}
           </div>
 
@@ -906,7 +1095,10 @@ export function AgentWindow(): React.JSX.Element {
       </div>
 
       {showNewSessionDialog && (
-        <div className="mcp-modal-overlay new-session-overlay" onMouseDown={() => setShowNewSessionDialog(false)}>
+        <div
+          className="mcp-modal-overlay new-session-overlay"
+          onMouseDown={() => setShowNewSessionDialog(false)}
+        >
           <div
             className="new-session-dialog"
             role="dialog"
@@ -916,25 +1108,47 @@ export function AgentWindow(): React.JSX.Element {
           >
             <div className="new-session-dialog-header">
               <div>
-                <div id="new-session-title" className="new-session-dialog-title">新建会话</div>
-                <div className="new-session-dialog-subtitle">直接聊天，或让会话持续绑定一个项目文件夹。</div>
+                <div id="new-session-title" className="new-session-dialog-title">
+                  新建会话
+                </div>
+                <div className="new-session-dialog-subtitle">
+                  直接聊天，或让会话持续绑定一个项目文件夹。
+                </div>
               </div>
-              <button className="new-session-dialog-close" onClick={() => setShowNewSessionDialog(false)} title="关闭">
+              <button
+                className="new-session-dialog-close"
+                onClick={() => setShowNewSessionDialog(false)}
+                title="关闭"
+              >
                 <X size={17} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
 
             <div className="new-session-primary-actions">
-              <button className="new-session-choice" onClick={() => { void createSessionFromDialog() }}>
-                <span className="new-session-choice-icon chat"><MessageSquareText size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <button
+                className="new-session-choice"
+                onClick={() => {
+                  void createSessionFromDialog()
+                }}
+              >
+                <span className="new-session-choice-icon chat">
+                  <MessageSquareText size={19} strokeWidth={1.8} aria-hidden="true" />
+                </span>
                 <span className="new-session-choice-copy">
                   <strong>普通聊天</strong>
                   <small>不绑定文件夹，保持当前聊天方式</small>
                 </span>
                 <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
               </button>
-              <button className="new-session-choice" onClick={() => { void chooseWorkspaceForSession() }}>
-                <span className="new-session-choice-icon workspace"><FolderOpen size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <button
+                className="new-session-choice"
+                onClick={() => {
+                  void chooseWorkspaceForSession()
+                }}
+              >
+                <span className="new-session-choice-icon workspace">
+                  <FolderOpen size={19} strokeWidth={1.8} aria-hidden="true" />
+                </span>
                 <span className="new-session-choice-copy">
                   <strong>选择文件区</strong>
                   <small>选择项目目录，工具将以它作为工作区</small>
@@ -947,8 +1161,15 @@ export function AgentWindow(): React.JSX.Element {
               <div className="new-session-recent-workspaces">
                 <div className="new-session-section-label">最近文件区</div>
                 <div className="new-session-workspace-list">
-                  {workspacePaths.map(path => (
-                    <button key={path} className="new-session-workspace-row" onClick={() => { void createSessionFromDialog(path) }} title={path}>
+                  {workspacePaths.map((path) => (
+                    <button
+                      key={path}
+                      className="new-session-workspace-row"
+                      onClick={() => {
+                        void createSessionFromDialog(path)
+                      }}
+                      title={path}
+                    >
                       <FolderOpen size={14} strokeWidth={1.8} aria-hidden="true" />
                       <span className="new-session-workspace-copy">
                         <strong>{workspaceName(path)}</strong>
@@ -968,18 +1189,48 @@ export function AgentWindow(): React.JSX.Element {
       {sessionToDeleteId && (
         <div className="mcp-modal-overlay">
           <div className="mcp-modal-card" style={{ maxWidth: '380px', width: '90%' }}>
-            <div className="mcp-modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))' }}>
-              <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+            <div
+              className="mcp-modal-header"
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))'
+              }}
+            >
+              <div
+                className="mcp-modal-title"
+                style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--text-primary)' }}
+              >
                 删除
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => setSessionToDeleteId(null)} title="关闭">
+              <button
+                className="mcp-modal-close-btn"
+                onClick={() => setSessionToDeleteId(null)}
+                title="关闭"
+              >
                 <X size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
-            <div className="mcp-modal-body" style={{ padding: '24px 20px', fontSize: '13px', color: 'var(--text-secondary, #666)', lineHeight: '1.6' }}>
+            <div
+              className="mcp-modal-body"
+              style={{
+                padding: '24px 20px',
+                fontSize: '13px',
+                color: 'var(--text-secondary, #666)',
+                lineHeight: '1.6'
+              }}
+            >
               您即将删除此话题，此操作无法撤销。
             </div>
-            <div className="mcp-modal-footer" style={{ padding: '12px 20px 16px', display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: 'none' }}>
+            <div
+              className="mcp-modal-footer"
+              style={{
+                padding: '12px 20px 16px',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                borderTop: 'none'
+              }}
+            >
               <button
                 onClick={() => setSessionToDeleteId(null)}
                 style={{
@@ -993,8 +1244,10 @@ export function AgentWindow(): React.JSX.Element {
                   fontWeight: 500,
                   transition: 'background 0.2s'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card, #ffffff)'}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))')
+                }
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card, #ffffff)')}
               >
                 取消
               </button>
@@ -1017,8 +1270,8 @@ export function AgentWindow(): React.JSX.Element {
                   boxShadow: '0 2px 6px rgba(224, 83, 60, 0.15)',
                   transition: 'filter 0.2s'
                 }}
-                onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.05)'}
-                onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.05)')}
+                onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}
               >
                 删除
               </button>
@@ -1058,33 +1311,83 @@ export function AgentWindow(): React.JSX.Element {
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
               border: '1px solid var(--border-color, rgba(255, 255, 255, 0.25))',
-              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
+              boxShadow:
+                '0 20px 50px rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
               borderRadius: '16px',
               animation: 'modalSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
             }}
           >
-            <div className="mcp-modal-header" style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="mcp-modal-title" style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+            <div
+              className="mcp-modal-header"
+              style={{
+                padding: '18px 24px',
+                borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div
+                className="mcp-modal-title"
+                style={{
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: 'var(--text-primary)'
+                }}
+              >
                 <KeyRound size={18} strokeWidth={2} aria-hidden="true" />
                 <span>缺少大模型配置</span>
               </div>
               <button
                 className="mcp-modal-close-btn"
-                style={{ fontSize: '20px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                style={{
+                  fontSize: '20px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
                 onClick={() => setShowApiKeyModal(false)}
               >
                 <X size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
-            <div className="mcp-modal-body" style={{ padding: '24px', fontSize: '13.5px', color: 'var(--text-secondary, #4b5563)', lineHeight: '1.6' }}>
+            <div
+              className="mcp-modal-body"
+              style={{
+                padding: '24px',
+                fontSize: '13.5px',
+                color: 'var(--text-secondary, #4b5563)',
+                lineHeight: '1.6'
+              }}
+            >
               <p style={{ margin: 0, fontWeight: 500, color: 'var(--text-primary)' }}>
                 为了体验桌宠 {currentAvatarName} 的全部智能交互功能，建议您先配置大模型 API 密钥。
               </p>
-              <p style={{ margin: '10px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted, #6b7280)' }}>
+              <p
+                style={{
+                  margin: '10px 0 0 0',
+                  fontSize: '12.5px',
+                  color: 'var(--text-muted, #6b7280)'
+                }}
+              >
                 未配置 Key 状态下将无法开启 AI 聊天、代码编写、定时运行、系统操作等核心功能。
               </p>
             </div>
-            <div className="mcp-modal-footer" style={{ padding: '16px 24px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: 'none', background: 'transparent' }}>
+            <div
+              className="mcp-modal-footer"
+              style={{
+                padding: '16px 24px 20px',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                borderTop: 'none',
+                background: 'transparent'
+              }}
+            >
               <button
                 onClick={() => setShowApiKeyModal(false)}
                 style={{
@@ -1098,10 +1401,10 @@ export function AgentWindow(): React.JSX.Element {
                   fontWeight: 500,
                   transition: 'all 0.2s'
                 }}
-                onMouseEnter={e => {
+                onMouseEnter={(e) => {
                   e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))'
                 }}
-                onMouseLeave={e => {
+                onMouseLeave={(e) => {
                   e.currentTarget.style.background = 'transparent'
                 }}
               >
@@ -1125,11 +1428,11 @@ export function AgentWindow(): React.JSX.Element {
                   boxShadow: '0 4px 12px rgba(79, 140, 255, 0.3)',
                   transition: 'all 0.2s'
                 }}
-                onMouseEnter={e => {
+                onMouseEnter={(e) => {
                   e.currentTarget.style.filter = 'brightness(1.08)'
                   e.currentTarget.style.boxShadow = '0 6px 16px rgba(79, 140, 255, 0.4)'
                 }}
-                onMouseLeave={e => {
+                onMouseLeave={(e) => {
                   e.currentTarget.style.filter = 'none'
                   e.currentTarget.style.boxShadow = '0 4px 12px rgba(79, 140, 255, 0.3)'
                 }}
@@ -1157,7 +1460,9 @@ export function AgentWindow(): React.JSX.Element {
           }}
         >
           <span className="toast-icon">
-            {toast.type === 'success' && <CheckCircle2 size={18} strokeWidth={2} aria-hidden="true" />}
+            {toast.type === 'success' && (
+              <CheckCircle2 size={18} strokeWidth={2} aria-hidden="true" />
+            )}
             {toast.type === 'error' && <CircleX size={18} strokeWidth={2} aria-hidden="true" />}
             {toast.type === 'info' && <Lightbulb size={18} strokeWidth={2} aria-hidden="true" />}
           </span>
@@ -1171,7 +1476,6 @@ export function AgentWindow(): React.JSX.Element {
           <div className="splash-title">AgentPet</div>
         </div>
       )}
-
     </div>
   )
 }
