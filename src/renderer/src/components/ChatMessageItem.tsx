@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
 import { setInternalClipboard } from '../hooks/useAppStore'
-import iconSvg from '../assets/icon_from_image.svg'
+import { AgentPetMark } from './AgentPetMark'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
@@ -1818,7 +1818,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       <div className="message-header-row">
         {msg.sender !== 'user' && (
           <span className="msg-sender-avatar">
-            <img src={iconSvg} alt="avatar" className="msg-sender-avatar-img" />
+            <AgentPetMark active={msg.isThinking} className="msg-sender-avatar-mark" />
           </span>
         )}
         <span className="msg-sender-name">{senderName}</span>

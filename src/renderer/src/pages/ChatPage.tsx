@@ -4,6 +4,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
+import { AgentPetMark } from '../components/AgentPetMark'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
 import type { CollaborationSnapshot } from '../components/CollaborationRunCard'
@@ -1466,36 +1467,45 @@ function ChatPageImpl(): React.JSX.Element {
             </div>
           ) : messageIds.length === 0 ? (
             <div className="chat-empty-state">
-              <h1 className="chat-empty-title">{currentAvatarName}, 我帮你</h1>
+              <AgentPetMark key={activeSessionId} active drawOnce className="chat-empty-mark" />
+              <h1 className="chat-empty-title">今天想一起完成什么？</h1>
               <div className="chat-empty-suggestions">
-                <div
+                <button
+                  type="button"
+                  disabled={isSending}
                   className="suggestion-chip"
                   onClick={() => setInputValue('帮我处理一下这份文档的内容，提取关键信息')}
                 >
                   <FileText size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
-                  文档处理
-                </div>
-                <div
+                  整理一份文档
+                </button>
+                <button
+                  type="button"
+                  disabled={isSending}
                   className="suggestion-chip"
                   onClick={() => setInputValue('帮我分析这组数据并生成一份可视化报告')}
                 >
                   <BarChart3 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
-                  数据分析与可视化
-                </div>
-                <div
+                  分析表格并生成图表
+                </button>
+                <button
+                  type="button"
+                  disabled={isSending}
                   className="suggestion-chip"
                   onClick={() => setInputValue('请为我构思一个独特的UI设计方案')}
                 >
                   <Palette size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
-                  设计创意
-                </div>
-                <div
+                  构思一个设计方案
+                </button>
+                <button
+                  type="button"
+                  disabled={isSending}
                   className="suggestion-chip"
-                  onClick={() => setInputValue('用最佳实践编写这段代码功能')}
+                  onClick={() => setInputValue('请检查当前项目代码，找出潜在问题并给出改进建议')}
                 >
                   <Code2 size={20} strokeWidth={2} className="chip-icon" aria-hidden="true" />
-                  代码开发
-                </div>
+                  检查项目代码
+                </button>
               </div>
             </div>
           ) : (

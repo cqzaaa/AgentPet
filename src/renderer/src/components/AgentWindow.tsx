@@ -33,10 +33,10 @@ import {
   Workflow,
   X
 } from 'lucide-react'
-import iconFromImage from '../assets/icon.png'
 import { RecentSessionList } from './RecentSessionList'
 import { PermissionModeControl } from './PermissionModeControl'
 import { normalizeSearchCitations } from '../utils/helpers'
+import { AgentPetMark } from './AgentPetMark'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -190,7 +190,7 @@ export function AgentWindow(): React.JSX.Element {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsMinDelayPassed(true)
-    }, 1200)
+    }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1200 : 2600)
     return () => clearTimeout(timer)
   }, [])
 
@@ -600,21 +600,8 @@ export function AgentWindow(): React.JSX.Element {
           {/* Brand/Avatar Info */}
           <div className="sidebar-brand">
             <div className="brand-left">
-              <div
-                className="brand-avatar"
-                style={{ background: 'transparent', boxShadow: 'none' }}
-              >
-                <img
-                  src={iconFromImage}
-                  alt="icon"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    borderRadius: 'inherit',
-                    transform: 'scale(1)'
-                  }}
-                />
+              <div className="brand-avatar">
+                <AgentPetMark interactive className="brand-avatar-mark" />
               </div>
               {!isCollapsed && (
                 <div className="brand-info">
@@ -1473,7 +1460,9 @@ export function AgentWindow(): React.JSX.Element {
       {/* 全局初始化过渡页面 */}
       {showSplash && (
         <div className={`splash-container ${splashFadeOut ? 'fade-out' : ''}`}>
-          <div className="splash-title">AgentPet</div>
+          <div role="status" aria-label="AgentPet 正在启动">
+            <AgentPetMark active drawOnce className="splash-mark" />
+          </div>
         </div>
       )}
     </div>

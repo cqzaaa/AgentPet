@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="resources/icon.png" width="140" alt="AgentPet Logo" />
+<img src="resources/icon.png" width="140" height="140" alt="AgentPet blue ribbon app icon" />
 
 # AgentPet 2.0
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="resources/icon.png" width="140" alt="AgentPet Logo" />
+<img src="resources/icon.png" width="140" height="140" alt="AgentPet 蓝底丝带应用图标" />
 
 # AgentPet 2.0
 

@@ -188,9 +188,15 @@ body {
 
 /* ── Agent 交互窗口页面 (OpenClaw-style Layout) ────────────────────── */
 .agent-window-container.dark {
-  --bg-app: radial-gradient(circle at 50% 50%, #0c0d13 0%, #040507 100%);
-  --bg-sidebar: #111218;
-  --bg-content: #08090d;
+  --ambient-base: #11151d;
+  --ambient-blue: #223654;
+  --ambient-teal: #1b363a;
+  --ambient-center: rgba(17, 21, 29, 0.72);
+  --bg-app: radial-gradient(ellipse at 52% 44%, var(--ambient-center) 0%, transparent 65%), radial-gradient(ellipse at 100% 0%, var(--ambient-blue) 0%, transparent 68%), radial-gradient(ellipse at 0% 100%, var(--ambient-teal) 0%, transparent 66%), var(--ambient-base);
+  --bg-sidebar: rgba(20, 25, 34, 0.96);
+  --bg-content: #141923;
+  --bg-composer: rgba(24, 30, 41, 0.96);
+  --shadow-composer: 0 8px 30px rgba(4, 9, 18, 0.22);
   --bg-card: rgba(17, 18, 25, 0.5);
   --border-color: rgba(255, 255, 255, 0.06);
   --border-card: rgba(255, 255, 255, 0.04);
@@ -243,12 +249,18 @@ body {
 }
 
 .agent-window-container.light {
-  --bg-app: #f1f5f9;
-  --bg-sidebar: #ffffff;
-  --bg-content: #f8fafc;
+  --ambient-base: #f5f7fb;
+  --ambient-blue: #dce6fa;
+  --ambient-teal: #e7f0f1;
+  --ambient-center: rgba(250, 252, 254, 0.72);
+  --bg-app: radial-gradient(ellipse at 52% 44%, var(--ambient-center) 0%, transparent 65%), radial-gradient(ellipse at 100% 0%, var(--ambient-blue) 0%, transparent 68%), radial-gradient(ellipse at 0% 100%, var(--ambient-teal) 0%, transparent 66%), var(--ambient-base);
+  --bg-sidebar: rgba(248, 250, 253, 0.96);
+  --bg-content: #f5f7fb;
+  --bg-composer: rgba(255, 255, 255, 0.95);
+  --shadow-composer: 0 8px 30px rgba(58, 79, 115, 0.07);
   --bg-card: #ffffff;
-  --border-color: #e2e8f0;
-  --border-card: #e2e8f0;
+  --border-color: #e0e5ee;
+  --border-card: #e0e5ee;
   --text-primary: #000000;
   --text-secondary: #1a1a1a;
   --text-muted: #737373;
@@ -663,14 +675,90 @@ body {
 .brand-avatar {
   width: 34px;
   height: 34px;
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  box-shadow: 0 0 10px rgba(96, 165, 250, 0.2);
   flex-shrink: 0;
+}
+
+.brand-avatar-mark {
+  width: 32px;
+  height: 32px;
+}
+
+/* Shared AgentPet glyph. A path mask draws the ribbon into place without an outer effect. */
+.agentpet-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  overflow: visible;
+  isolation: isolate;
+  flex: 0 0 auto;
+}
+
+.agentpet-mark__image,
+.agentpet-mark__draw {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+}
+
+.agentpet-mark__image {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.agentpet-mark__draw {
+  display: block;
+  pointer-events: none;
+  opacity: 0;
+  overflow: visible;
+}
+
+.agentpet-mark--active .agentpet-mark__image,
+.agentpet-mark--interactive:hover .agentpet-mark__image {
+  opacity: 0;
+}
+
+.agentpet-mark--active .agentpet-mark__draw,
+.agentpet-mark--interactive:hover .agentpet-mark__draw {
+  opacity: 1;
+}
+
+.agentpet-mark__draw-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.agentpet-mark--interactive:hover .agentpet-mark__draw-path {
+  animation: agentpet-mark-draw-on 2.4s cubic-bezier(0.42, 0, 0.58, 1) both;
+}
+
+.agentpet-mark--active .agentpet-mark__draw-path {
+  animation: agentpet-mark-draw-cycle 4.6s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+.agentpet-mark--draw-once .agentpet-mark__draw-path {
+  animation: agentpet-mark-draw-on 2.4s cubic-bezier(0.42, 0, 0.58, 1) both;
+}
+
+.splash-mark {
+  width: 104px;
+  height: 104px;
+}
+
+@keyframes agentpet-mark-draw-on {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes agentpet-mark-draw-cycle {
+  0% { stroke-dashoffset: 1; opacity: 0; }
+  6% { stroke-dashoffset: 0.98; opacity: 1; }
+  70%, 86% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
 }
 
 .brand-info {
@@ -1730,7 +1818,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: radial-gradient(circle 600px at top right, rgba(77, 115, 240, 0.15), transparent 80%), var(--bg-content);
+  background: transparent;
   overflow: hidden;
   transition: background 0.3s;
 }
@@ -2119,8 +2207,8 @@ body {
   flex: 1;
   width: 100%;
   box-sizing: border-box;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -2190,61 +2278,122 @@ body {
   }
 }
 
-/* Chat Empty State */
+/* New-conversation welcome workbench; populated chat surfaces stay unchanged. */
+.chat-split-container:has(.chat-empty-state) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.chat-split-container:has(.chat-empty-state) .chat-messages-box {
+  padding-top: 0;
+}
+
 .chat-empty-state {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 24px;
-  animation: fadeIn 0.4s ease;
-  padding: 0 20px;
+  justify-content: safe center;
+  gap: 20px;
+  padding: 40px 24px 40px;
+  overflow-y: auto;
   box-sizing: border-box;
 }
 
+.chat-empty-mark {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+}
+
 .chat-empty-title {
-  font-size: 32px;
-  font-weight: 700;
+  font-size: clamp(26px, 2.2vw, 34px);
+  font-weight: 600;
+  line-height: 1.35;
   color: var(--text-primary);
-  margin: 0;
-  letter-spacing: -0.5px;
+  margin: 0 0 8px;
+  letter-spacing: -0.6px;
+  text-align: center;
 }
 
 .chat-empty-suggestions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 8px 32px;
+  width: fit-content;
+  max-width: 100%;
   justify-content: center;
-  max-width: 600px;
 }
 
 .suggestion-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  padding: 10px 18px;
-  border-radius: 100px;
-  font-size: 13.5px;
-  font-weight: 600;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 54px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
 }
 
-.suggestion-chip:hover {
+.suggestion-chip:hover:not(:disabled) {
   background: var(--bg-menu-hover);
-  border-color: var(--border-menu-active);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   color: var(--text-primary);
 }
 
-.chip-icon {
-  font-size: 16px;
+.suggestion-chip:focus-visible {
+  outline: 2px solid #3f66f2;
+  outline-offset: 2px;
+}
+
+.suggestion-chip:active:not(:disabled) {
+  background: var(--bg-menu-hover);
+  border-color: var(--border-color);
+}
+
+.suggestion-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.suggestion-chip .chip-icon {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 800px) {
+  .chat-empty-suggestions {
+    grid-template-columns: 1fr;
+    max-width: 340px;
+  }
+
+  .chat-empty-state {
+    gap: 14px;
+    padding: 24px 16px;
+  }
+}
+
+@media (max-height: 720px) {
+  .chat-empty-state {
+    padding-block: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestion-chip {
+    transition: none;
+  }
 }
 
 .message-row {
@@ -2282,21 +2431,33 @@ body {
 }
 
 .msg-sender-avatar {
-  font-size: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
   flex-shrink: 0;
 }
 
-.msg-sender-avatar-img {
+.msg-sender-avatar-mark {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agentpet-mark__draw-path {
+    animation: none !important;
+  }
+
+  .agentpet-mark__draw {
+    opacity: 0 !important;
+  }
+
+  .agentpet-mark__image {
+    opacity: 1 !important;
+  }
+
 }
 
 .msg-sender-name {
@@ -2996,13 +3157,13 @@ body {
 /* 现代卡片式输入控制面板 */
 .chat-control-card {
   margin: 0 12px 12px 12px;
-  background: var(--bg-card);
+  background: var(--bg-composer, var(--bg-card));
   border: 1px solid var(--border-card);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
   padding: 10px 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-composer);
   transition: border-color 0.25s, box-shadow 0.25s;
   position: relative;
   z-index: 20;
@@ -8444,49 +8605,6 @@ body {
   background-color: #1e1e24;
 }
 
-.splash-title {
-  font-size: 56px;
-  font-weight: 800;
-  letter-spacing: -1.5px;
-  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(90deg,
-      #ff6b6b,
-      #ff8e53,
-      #feca57,
-      #1dd1a1,
-      #2e86de,
-      #9b59b6,
-      #ff6b6b);
-  background-size: 200% auto;
-  color: transparent;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: shine 4s linear infinite, splash-scale 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-@keyframes shine {
-  0% {
-    background-position: 0% center;
-  }
-
-  100% {
-    background-position: -200% center;
-  }
-}
-
-@keyframes splash-scale {
-  0% {
-    transform: scale(0.9);
-    opacity: 0;
-    filter: blur(4px);
-  }
-
-  100% {
-    transform: scale(1);
-    opacity: 1;
-    filter: blur(0);
-  }
-}
 
 /* 覆盖文件预览面板的默认内边距 */
 .file-preview-viewer-container .ofv-panel {

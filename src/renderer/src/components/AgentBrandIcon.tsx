@@ -1,5 +1,5 @@
 import React from 'react'
-import agentPet from '../assets/icon.png'
+import agentPet from '../assets/agentpet-mark.png'
 import antigravity from '@lobehub/icons-static-svg/icons/antigravity-color.svg'
 import claudeCode from '@lobehub/icons-static-svg/icons/claudecode-color.svg'
 import codex from '@lobehub/icons-static-svg/icons/codex-color.svg'
@@ -14,7 +14,7 @@ const ICONS: Record<string, string> = {
   antigravity
 }
 
-export function getAgentIcon(agentId: string): string {
+function getAgentIcon(agentId: string): string {
   return ICONS[String(agentId || '').toLowerCase()] || lobehub
 }
 
