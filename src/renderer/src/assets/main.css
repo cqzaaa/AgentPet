@@ -222,6 +222,12 @@ body {
   --code-header-bg: #161b22;
   --code-border: #30363d;
   --code-text: #d6dee8;
+  --inline-code-text: #cbd5e1;
+  --chat-text: #cbd5e1;
+  --inline-code-bg: #1e293b;
+  --inline-code-border: #334155;
+  --chat-link: #93b8f5;
+  --chat-link-hover: #bfdbfe;
   --code-muted: #8b949e;
   --code-key: #79c0ff;
   --code-string: #7ee787;
@@ -283,6 +289,12 @@ body {
   --code-header-bg: #eef2f7;
   --code-border: #d8e0ea;
   --code-text: #1f2937;
+  --inline-code-text: #475569;
+  --chat-text: #202938;
+  --inline-code-bg: #e8edf4;
+  --inline-code-border: #d8e0ea;
+  --chat-link: #2457a7;
+  --chat-link-hover: #1d4ed8;
   --code-muted: #667085;
   --code-key: #0550ae;
   --code-string: #087f5b;
@@ -2918,16 +2930,16 @@ body {
 
 /* 高级 Markdown 内联代码 */
 .inline-code {
-  background: rgba(96, 165, 250, 0.06);
-  color: #60a5fa;
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
   padding: 2px 5px;
   border-radius: 4px;
-  font-family: 'Consolas', monospace;
+  font-family: 'Consolas', 'Cascadia Mono', 'SFMono-Regular', Menlo, Monaco, monospace;
   font-size: 12px;
 }
 
 .light .inline-code {
-  background: rgba(96, 165, 250, 0.04);
+  background: var(--inline-code-bg);
 }
 
 /* 代码卡片容器 */
@@ -6874,7 +6886,7 @@ body {
 .markdown-body {
   font-size: 12.5px;
   line-height: 1.75;
-  color: var(--text-secondary);
+  color: var(--chat-text);
   font-family: inherit;
   word-break: break-word;
   user-select: text;
@@ -6989,17 +7001,17 @@ body {
 
 /* 链接样式 */
 .markdown-link {
-  color: #06b6d4;
+  color: var(--chat-link);
   text-decoration: none;
   font-weight: 600;
-  border-bottom: 1px dashed rgba(6, 182, 212, 0.4);
+  border-bottom: 1px dashed currentColor;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .markdown-link:hover {
-  color: #60a5fa;
-  border-bottom-color: rgba(96, 165, 250, 0.6);
+  color: var(--chat-link-hover);
+  border-bottom-color: currentColor;
 }
 
 .markdown-link:focus-visible {
@@ -7299,19 +7311,31 @@ body {
 
 /* 行内代码 */
 .inline-code {
-  background: rgba(255, 255, 255, 0.05);
-  color: #bfdbfe;
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: monospace;
-  font-size: 9.5px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  font-family: 'Consolas', 'Cascadia Mono', 'SFMono-Regular', Menlo, Monaco, monospace;
+  font-size: 0.95em;
+  border: 1px solid var(--inline-code-border);
 }
 
 .agent-window-container.light .inline-code {
-  background: rgba(0, 0, 0, 0.04);
-  color: #3b82f6;
-  border-color: rgba(0, 0, 0, 0.03);
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
+  border-color: var(--inline-code-border);
+}
+
+.inline-code .markdown-link,
+.markdown-link .inline-code,
+.agent-window-container.light .markdown-link .inline-code {
+  color: var(--chat-link);
+}
+
+.inline-code .markdown-link:hover,
+.markdown-link:hover .inline-code,
+.agent-window-container.light .markdown-link:hover .inline-code {
+  color: var(--chat-link-hover);
 }
 
 /* --- 安全沙盒网页端确认模态框 --- */
@@ -7508,31 +7532,33 @@ body {
 /* --- 系统提示与分割线消息样式 --- */
 .system-message-divider {
   display: flex;
-  justify-content: center;
   align-items: center;
-  margin: 18px 0;
+  gap: 16px;
+  margin: 24px 0;
   width: 100%;
 }
 
+.system-message-divider::before,
+.system-message-divider::after {
+  content: '';
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--border-color, rgba(100, 116, 139, 0.16));
+}
+
 .system-message-badge {
-  background: var(--bg-card-sub, rgba(128, 128, 128, 0.05));
-  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.12));
-  color: var(--text-muted, #777);
-  padding: 5px 14px;
-  border-radius: 20px;
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.3px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.01);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  min-width: 0;
+  color: var(--text-muted, #64748b);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .dark .system-message-badge {
   color: #94a3b8;
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.05);
 }
 
 /* --- 消息底下的复制操作栏 --- */
@@ -11818,3 +11844,24 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
     transition: none;
   }
 }
+
+/* Historical user-message editing shares the chat surface and action styles. */
+.message-edit-panel { width: min(680px, 100%); min-width: min(400px, 100%); }
+.message-edit-panel textarea {
+  display: block; width: 100%; min-height: 110px; max-height: 45vh;
+  box-sizing: border-box; resize: vertical; padding: 12px 14px;
+  border: 1px solid var(--border-color, #dce3ed); border-radius: 10px;
+  background: var(--bg-input, #fff); color: var(--text-color);
+  font: inherit; line-height: 1.7;
+}
+.message-edit-panel textarea:focus-visible { outline: 2px solid var(--accent-color, #4f8cff); outline-offset: 2px; }
+.message-edit-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.message-edit-footer span { flex: 1 1 200px; font-size: 11px; color: var(--text-muted, #64748b); }
+.message-edit-footer button {
+  padding: 7px 12px; border: 1px solid var(--border-color, #dce3ed); border-radius: 8px;
+  background: var(--bg-input, #fff); color: var(--text-color); font: inherit; font-size: 12px; cursor: pointer;
+}
+.message-edit-footer .message-edit-save { background: var(--accent-color, #4f8cff); border-color: transparent; color: #fff; }
+.message-edit-footer button:disabled, .msg-copy-btn:disabled { opacity: .45; cursor: not-allowed; }
+.message-edit-footer button:focus-visible { outline: 2px solid var(--accent-color, #4f8cff); outline-offset: 2px; }
+.message-edit-error { margin-top: 10px; color: var(--color-danger, #dc2626); font-size: 12px; }

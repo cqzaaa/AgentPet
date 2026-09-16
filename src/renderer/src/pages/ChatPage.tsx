@@ -1381,6 +1381,10 @@ function ChatPageImpl(): React.JSX.Element {
       .catch(() => undefined)
   }, [])
 
+  const handleEditMessage = useCallback(async (messageId: number, text: string) => {
+    await handleSendChat({ messageId, text, sessionId: activeSessionId })
+  }, [handleSendChat, activeSessionId])
+
   const itemContent = useCallback(
     (_index: number, timelineId: string) => {
       const rawId = timelineId.slice('message:'.length)
@@ -1395,6 +1399,8 @@ function ChatPageImpl(): React.JSX.Element {
           highlightedMessageId={highlightedMessageId}
           onPreviewFile={handlePreviewFile}
           onQuoteSelection={handleQuoteSelection}
+          onEditMessage={handleEditMessage}
+          editDisabled={isSending}
           delegateTaskAttachments={delegatedRuns.map((snapshot) => (
             <SubtaskCapsuleGroup
               key={snapshot.run.id}
@@ -1417,6 +1423,8 @@ function ChatPageImpl(): React.JSX.Element {
       handlePreviewFile,
       handleQuoteSelection,
       handleOpenSubtask,
+      handleEditMessage,
+      isSending,
       openedSubtask
     ]
   )
@@ -1517,6 +1525,8 @@ function ChatPageImpl(): React.JSX.Element {
               computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
               followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+              // Follow height changes within an existing streaming message as well as new items.
+              totalListHeightChanged={() => virtuosoRef.current?.autoscrollToBottom()}
               initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
               atBottomThreshold={100}
               atBottomStateChange={handleAtBottomStateChange}

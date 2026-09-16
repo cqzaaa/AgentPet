@@ -5,7 +5,7 @@ import * as fs from 'fs'
 import { basename, dirname, join, resolve, sep } from 'path'
 import JSZip from 'jszip'
 import { getActiveStorageDir } from '../tools/utils/paths'
-import { skillRegistry } from './skill-registry'
+import { skillRegistry, type SkillIndexRecord } from './skill-registry'
 
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 const MAX_EXTRACTED_BYTES = 150 * 1024 * 1024
@@ -73,6 +73,8 @@ async function validateAndExtract(zipPath: string, stagingDir: string): Promise<
   let declaredSize = 0
   let hasSkillDefinition = false
   for (const entry of entries) {
+    const originalName = (entry as any).unsafeOriginalName
+    if (originalName && !safeEntryPath(originalName)) throw new Error(`ZIP 包含不安全路径：${originalName}`)
     const relativePath = safeEntryPath(entry.name)
     if (!relativePath) throw new Error(`ZIP 包含不安全路径：${entry.name}`)
     if (basename(relativePath).toLowerCase() === 'skill.md') hasSkillDefinition = true
@@ -101,7 +103,8 @@ async function validateAndExtract(zipPath: string, stagingDir: string): Promise<
   }
 }
 
-async function installArchive(downloadPath: string, archiveName: string): Promise<string> {
+export async function installSkillArchive(downloadPath: string, archiveName = basename(downloadPath), source: SkillIndexRecord['source'] = { type: 'import' }): Promise<string> {
+  archiveName = safeArchiveName(archiveName)
   const skillsDir = join(getActiveStorageDir(), 'skills')
   await fs.promises.mkdir(skillsDir, { recursive: true })
   const paths = await uniqueInstallPaths(skillsDir, archiveName)
@@ -110,7 +113,8 @@ async function installArchive(downloadPath: string, archiveName: string): Promis
     await validateAndExtract(downloadPath, stagingDir)
     await fs.promises.copyFile(downloadPath, paths.archivePath, fs.constants.COPYFILE_EXCL)
     await fs.promises.rename(stagingDir, paths.folderPath)
-    await skillRegistry.indexArchive(`${paths.skillName}.zip`, paths.folderPath, { type: 'skillhub' })
+    const record = await skillRegistry.indexArchive(`${paths.skillName}.zip`, paths.folderPath, source)
+    if (!record) throw new Error('Skill 索引失败：未找到可加载的 SKILL.md')
     return paths.skillName
   } catch (error) {
     await fs.promises.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined)
@@ -157,7 +161,7 @@ export function handleSkillHubDownload(item: DownloadItem, target: WebContents, 
       try {
         if (state !== 'completed') throw new Error(state === 'cancelled' ? '下载已取消或文件超过限制' : 'ZIP 下载失败')
         emit(target, { status: 'validating', filename: archiveName })
-        const skillName = await installArchive(downloadPath, archiveName)
+        const skillName = await installSkillArchive(downloadPath, archiveName, { type: 'skillhub' })
         emit(target, { status: 'installed', filename: archiveName, skillName })
       } catch (error: any) {
         emit(target, { status: 'failed', filename: archiveName, error: error?.message || String(error) })

@@ -310,6 +310,8 @@ const api = {
     ipcRenderer.invoke('api:save-message', message),
   saveMessages: (messages: any[]): Promise<boolean> =>
     ipcRenderer.invoke('api:save-messages', messages),
+  replaceChatTail: (sessionId: string, removedIds: string[], messages: any[]): Promise<boolean> =>
+    ipcRenderer.invoke('api:replace-chat-tail', sessionId, removedIds, messages),
   deleteMessage: (messageId: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-message', messageId),
   onSessionsUpdated: (callback: (mutation?: SessionMutation) => void): (() => void) => {

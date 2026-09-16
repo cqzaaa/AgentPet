@@ -6,7 +6,9 @@ import { join } from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
-import { getActiveStorageDir } from '../../utils/paths'
+import { getActiveStorageDir, resolveSessionPath } from '../../utils/paths'
+import { installSkillArchive } from '../../../skills/skillhub-download-installer'
+import { mcpManager } from '../../mcp/mcp-manager'
 import { permissionManager } from '../../security/permission-manager'
 import { appendMemorySummaryInternal } from '../../../api/memory'
 import { clarificationManager } from '../../interaction/clarification-manager'
@@ -31,6 +33,47 @@ export class SystemExecutor implements IToolExecutor {
     context: ToolContext
   ): Promise<ToolResult> {
     try {
+      if (api === 'list_mcp_servers') {
+        const active = new Map(mcpManager.getActiveServers().map(server => [server.id, server]))
+        const servers = mcpManager.getSanitizedSystemMcpConfig().servers.map(server => {
+          let endpoint = ''
+          try {
+            const url = new URL(String(server.url || ''))
+            // URLs may themselves carry credentials; omit query, fragment and userinfo.
+            endpoint = `${url.protocol}//${url.host}${url.pathname}`
+          } catch { /* Leave malformed addresses out of model-facing output. */ }
+          return {
+            id: server.id,
+            name: server.name,
+            endpoint,
+            enabled: server.enabled,
+            hasApiKey: Boolean(server.hasApiKey),
+            status: server.enabled ? (active.get(server.id)?.status || 'disconnected') : 'disabled'
+          }
+        })
+        return { content: JSON.stringify({ servers, supportedTransports: ['stream', 'sse', 'auto'], setupLocation: 'Agent 页面 → MCP 服务' }), success: true }
+      }
+      if (api === 'list_skills') {
+        const result = {
+          skillsDirectory: join(getActiveStorageDir(), 'skills'),
+          installed: await skillRegistry.listIndexed()
+        }
+        return { content: JSON.stringify(result), success: true }
+      }
+
+      if (api === 'install_skill') {
+        if (typeof args.archive_path !== 'string' || !args.archive_path.trim()) {
+          return { content: 'install_skill requires archive_path pointing to a local Skill ZIP.', success: false }
+        }
+        const archivePath = resolveSessionPath(args.archive_path, context.sessionId, context.workspacePath)
+        if (context.abortSignal?.aborted) throw new Error('UserAborted')
+        const id = await installSkillArchive(archivePath)
+        const { catalog } = await skillRegistry.buildCatalog()
+        return {
+          content: JSON.stringify({ status: 'installed', id, skillsDirectory: join(getActiveStorageDir(), 'skills'), catalog, next: 'Use request_skill with this exact id when the current task needs it.' }),
+          success: true
+        }
+      }
       if (api === 'update_task_plan') {
         const allowedStatuses = new Set(['pending', 'in_progress', 'completed', 'blocked'])
         const title = String(args.title || '').trim().slice(0, 120)
@@ -550,7 +593,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['list_mcp_servers', 'list_skills', 'install_skill', 'update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

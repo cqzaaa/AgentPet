@@ -4696,6 +4696,30 @@ app.whenReady().then(() => {
   })
 
   // 删除消息
+  ipcMain.handle('api:replace-chat-tail', async (event, sessionId: string, removedIds: string[], messages: any[]) => {
+    if (!sessionId || !Array.isArray(removedIds) || !removedIds.length || !Array.isArray(messages) || messages.length !== 2 || messages.some(message => message.sessionId !== sessionId)) return false
+    const database = await getDB()
+    try {
+      await database.run('BEGIN TRANSACTION')
+      for (const id of removedIds) await database.run('DELETE FROM messages WHERE session_id = ? AND id = ?', sessionId, id)
+      await database.run('UPDATE messages SET is_summarized = 0 WHERE session_id = ?', sessionId)
+      for (const message of messages) {
+        const serialized = serializeMessageForDb(message)
+        await database.run(messageUpsertSql, ...serialized.values)
+      }
+      await database.run("UPDATE sessions SET context_summary = '', time = ? WHERE id = ?", messages[0].time, sessionId)
+      await database.run('COMMIT')
+      for (const messageId of removedIds) broadcastSessionMutation(event.sender.id, { type: 'message-delete', messageId })
+      broadcastSessionMutation(event.sender.id, { type: 'session-update', sessionId, updates: { contextSummary: '', time: messages[0].time } })
+      broadcastSessionMutation(event.sender.id, { type: 'messages-upsert', messages })
+      return true
+    } catch (error) {
+      try { await database.run('ROLLBACK') } catch (_) {}
+      console.error('编辑历史消息失败', error)
+      return false
+    }
+  })
+
   ipcMain.handle('api:delete-message', async (event, messageId: string) => {
     try {
       const database = await getDB()

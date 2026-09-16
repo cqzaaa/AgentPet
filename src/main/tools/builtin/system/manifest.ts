@@ -16,6 +16,26 @@ The available skill catalog contains metadata only. Call request_skill only with
 </skill_policy>`,
   api: [
     {
+      name: 'list_mcp_servers',
+      description: 'List configured MCP servers and current connection status without connecting or exposing API keys. Use before guiding MCP setup; if the requested server is missing, ask for its service URL or official configuration link. Local stdio launch commands are not currently supported.',
+      parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'list_skills',
+      description: 'Return AgentPet managed Skill directory and exact installed Skill ids. Use before installing to check for an existing Skill; never guess another agent or user-home directory.',
+      parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'install_skill',
+      description: 'Install a downloaded local Skill ZIP into AgentPet own managed Skill directory, validate it and register it for request_skill. Download the requested archive into the session directory first. Does not execute install scripts, install dependencies or write to other agents. Returns the new exact Skill id and catalog.',
+      humanIntervention: 'required',
+      parameters: {
+        type: 'object',
+        properties: { archive_path: { type: 'string', description: 'Path to a downloaded ZIP containing SKILL.md. Relative paths use the current workspace or session directory.' } },
+        required: ['archive_path']
+      }
+    },
+    {
       name: 'update_task_plan',
       description: 'Create the visible task plan once for a substantial multi-step task. Never use for a single-file, single-mutation, low-risk task. Use update_task_step afterward.',
       parameters: {

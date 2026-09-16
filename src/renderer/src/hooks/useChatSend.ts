@@ -126,12 +126,22 @@ export function useChatSend({
   finalizeReply,
   failReply,
   triggerSessionSummary
-}: ChatSendOptions): { handleSendChat: () => Promise<void> } {
-  const handleSendChat = useCallback(async (): Promise<void> => {
-    const state = getState()
+}: ChatSendOptions): { handleSendChat: (edit?: { messageId: number; text: string; sessionId: string }) => Promise<void> } {
+  const handleSendChat = useCallback(async (edit?: { messageId: number; text: string; sessionId: string }): Promise<void> => {
+    const state = { ...getState() }
     const sessionId = state.activeSessionId
-    const attachedFiles = [...state.attachedFiles]
-    const text = state.inputValue.trim()
+    const originalSession = state.sessions.find(session => session.id === sessionId)
+    const editIndex = edit ? originalSession?.messages.findIndex((message: any) => message.id === edit.messageId && message.sender === 'user') : -1
+    if (edit && (edit.sessionId !== sessionId || state.sendingSessionIds[sessionId] || editIndex == null || editIndex < 0)) {
+      throw new Error('当前会话无法编辑，请等待生成结束后重试。')
+    }
+    const originalMessage = edit ? originalSession.messages[editIndex] : null
+    const attachedFiles = edit ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))] : [...state.attachedFiles]
+    if (edit) {
+      state.selectedKnowledgeBaseId = originalMessage.knowledgeBase?.id || ''
+      state.selectedKnowledgeBaseName = originalMessage.knowledgeBase?.name || ''
+    }
+    const text = (edit ? edit.text : state.inputValue).trim()
     if (!text && attachedFiles.length === 0) return
     // A send while the model is working is a steering instruction. The main process
     // replaces the active request for this session with one that includes this message.
@@ -140,6 +150,7 @@ export function useChatSend({
     const llmConfig = { ...state.llmConfig }
     if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey && !llmConfig.hasApiKey) {
       setShowApiKeyModal(true)
+      if (edit) throw new Error('请先配置模型 API Key。')
       return
     }
 
@@ -152,7 +163,8 @@ export function useChatSend({
       time,
       isSteering
     }
-    if (state.selectedKnowledgeBaseId) {
+    if (originalMessage?.knowledgeBase) userMessage.knowledgeBase = originalMessage.knowledgeBase
+    if (!edit && state.selectedKnowledgeBaseId) {
       userMessage.knowledgeBase = {
         id: state.selectedKnowledgeBaseId,
         name: state.selectedKnowledgeBaseName
@@ -177,6 +189,12 @@ export function useChatSend({
       time
     }
 
+    if (edit) {
+      const removedIds = originalSession.messages.slice(editIndex).map((message: any) => String(message.id))
+      const saved = await window.api.replaceChatTail(sessionId, removedIds, [{ ...userMessage, sessionId }, { ...placeholder, sessionId }])
+      if (!saved) throw new Error('保存失败，原消息未修改，请重试。')
+    }
+
     let updatedSessions: any[] = []
     setSessions((previous: any[]) => {
       updatedSessions = previous.map(session => {
@@ -187,7 +205,8 @@ export function useChatSend({
           const title = text || attachedFiles[0]?.name || '新会话'
           name = title.length > 15 ? `${title.substring(0, 15)}...` : title
         }
-        const messages = session.messages.map((message: any) => {
+        const baseMessages = edit ? session.messages.slice(0, editIndex).map((message: any) => ({ ...message, isSummarized: false })) : session.messages
+        const messages = baseMessages.map((message: any) => {
           if (!message.isThinking) return message
           const cleaned = {
             ...message,
@@ -206,13 +225,15 @@ export function useChatSend({
           window.api.saveMessage({ ...cleaned, sessionId }).catch(console.error)
           return cleaned
         })
-        return { ...session, name, messages: [...messages, userMessage, placeholder] }
+        return { ...session, ...(edit ? { contextSummary: '' } : {}), name, messages: [...messages, userMessage, placeholder] }
       })
       return updatedSessions
     })
 
-    setInputValue('')
-    setAttachedFiles([])
+    if (!edit) {
+      setInputValue('')
+      setAttachedFiles([])
+    }
     setSendingSessionIds(previous => ({ ...previous, [sessionId]: true }))
 
     const activeSession = updatedSessions.find(session => session.id === sessionId)
@@ -225,7 +246,8 @@ export function useChatSend({
     try {
       if (!activeSession) throw new Error(`SessionNotFound: ${sessionId}`)
       const taskSnapshots = await window.api.listTaskRuns(sessionId)
-      const chatMessages = mergeCollaborationHistory(activeSession.messages, taskSnapshots, sessionId, userMessage.id)
+      const eligibleSnapshots = edit ? taskSnapshots.filter((snapshot: any) => snapshot.run.createdAt < Number(originalMessage.id)) : taskSnapshots
+      const chatMessages = mergeCollaborationHistory(activeSession.messages, eligibleSnapshots, sessionId, userMessage.id)
         .slice(-state.contextRounds * 2)
         .map(toLlmMessage)
 

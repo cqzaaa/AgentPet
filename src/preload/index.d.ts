@@ -167,6 +167,7 @@ declare global {
       deleteSession: (sessionId: string) => Promise<boolean>
       saveMessage: (message: any) => Promise<boolean>
       saveMessages: (messages: any[]) => Promise<boolean>
+      replaceChatTail: (sessionId: string, removedIds: string[], messages: any[]) => Promise<boolean>
       deleteMessage: (messageId: string) => Promise<boolean>
       onSessionsUpdated: (callback: (mutation?: SessionMutation) => void) => () => void
       appendMemorySummary: (sessionId: string, text: string) => Promise<boolean>

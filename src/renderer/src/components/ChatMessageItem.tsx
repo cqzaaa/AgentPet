@@ -8,6 +8,7 @@ import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import hljs from 'highlight.js'
 import {
+  Pencil,
   ArrowDownToLine,
   ArrowUpFromLine,
   BarChart3,
@@ -1218,6 +1219,8 @@ interface MessageItemProps {
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
   onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
+  onEditMessage?: (messageId: number, text: string) => Promise<void>
+  editDisabled?: boolean
   delegateTaskAttachments?: React.ReactNode[]
 }
 
@@ -1342,7 +1345,7 @@ function QuotedSelectionPreview({ sourceName, quote }: { sourceName: string; quo
 }
 
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
+  if (previous.onEditMessage !== next.onEditMessage || previous.editDisabled !== next.editDisabled || previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1427,13 +1430,13 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, delegateTaskAttachments }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
       <div id={`msg-${msg.id}`} className="system-message-divider">
         <span className="system-message-badge">
-          {msg.text}
+          {String(msg.text || '').replace(/^[\s\p{Extended_Pictographic}\uFE0F]+/u, '').replace(/\*\*(.*?)\*\*/g, '$1')}
         </span>
       </div>
     )
@@ -1441,6 +1444,29 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   // 使用 userCollapsed 状态，绝对且强制在思考状态变化时更新折叠展示
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const editTriggerRef = useRef<HTMLButtonElement>(null)
+  const cancelEdit = () => {
+    setEditing(false)
+    setEditError('')
+    requestAnimationFrame(() => editTriggerRef.current?.focus())
+  }
+  const saveEdit = async () => {
+    if (!onEditMessage || editSaving || editDisabled || !editText.trim()) return
+    setEditSaving(true)
+    setEditError('')
+    try {
+      await onEditMessage(msg.id, editText)
+      setEditing(false)
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : '保存失败，请重试。')
+    } finally {
+      setEditSaving(false)
+    }
+  }
   const [copied, setCopied] = useState(false)
   const [traceExportState, setTraceExportState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
@@ -1763,13 +1789,22 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       .map((source: any) => [source.id, source])
   ).values()) as any[]
   const toolStepsScrollRef = useRef<HTMLDivElement>(null)
+  const followToolStepsRef = useRef(true)
 
-  // 当工具调用步骤改变时，自动将步骤框滚动到底部
+  // Follow streamed details within a step, while preserving manual history scrolling.
   useEffect(() => {
-    if (toolStepsScrollRef.current) {
-      toolStepsScrollRef.current.scrollTop = toolStepsScrollRef.current.scrollHeight
+    if (currentCollapsed) {
+      followToolStepsRef.current = true
+      return
     }
-  }, [toolSteps.length])
+    const frame = requestAnimationFrame(() => {
+      const container = toolStepsScrollRef.current
+      if (container && followToolStepsRef.current) {
+        container.scrollTop = container.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [toolSteps, currentCollapsed])
   const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
   const shouldShowToolSteps = visibleToolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || s.type === 'compaction' || (s.type === 'think' && s.detail?.trim()))
 
@@ -1979,6 +2014,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 )}
                 <div
                   ref={toolStepsScrollRef}
+                  onScroll={(event) => {
+                    const container = event.currentTarget
+                    followToolStepsRef.current = container.scrollHeight - container.clientHeight - container.scrollTop <= 40
+                  }}
                   className="tool-steps-scroll-area"
                   style={{
                     display: 'flex',
@@ -2026,8 +2065,25 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           <QuotedSelectionPreview sourceName={quotedMessage.sourceName} quote={quotedMessage.quote} />
         )}
 
+        {editing && (
+          <div className="message-edit-panel">
+            <textarea autoFocus aria-label="编辑消息内容" value={editText} disabled={editSaving}
+              onChange={(event) => setEditText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return
+                if (event.key === 'Escape' && !editSaving) { event.preventDefault(); cancelEdit() }
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void saveEdit() }
+              }} />
+            <div className="message-edit-footer">
+              <span>保存后，此消息之后的对话将重新生成</span>
+              <button type="button" disabled={editSaving} onClick={cancelEdit}>取消</button>
+              <button type="button" className="message-edit-save" disabled={editSaving || editDisabled || !editText.trim()} onClick={() => void saveEdit()}>{editSaving ? '保存中…' : '保存并重新发送'}</button>
+            </div>
+            {editError && <div className="message-edit-error" role="alert">{editError}</div>}
+          </div>
+        )}
         {/* 最终大模型回复文本渲染 */}
-        {renderedText && (
+        {!editing && renderedText && (
           <div
             className="message-text"
             onClick={(event) => void openKnowledgeCitation(event)}
@@ -2055,7 +2111,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           >
             <input
               ref={selectionPromptRef}
-              autoFocus
               value={selectionPrompt}
               onChange={(event) => setSelectionPrompt(event.target.value)}
               onKeyDown={(event) => {
@@ -2152,6 +2207,11 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
       {(msg.text || msg.fileInfo || msg.fileInfos) && !msg.isThinking && (
         <div className="message-action-row">
+          {msg.sender === 'user' && onEditMessage && !editing && (
+            <button ref={editTriggerRef} type="button" className="msg-copy-btn" disabled={editDisabled} aria-label="编辑消息" title={editDisabled ? '请等待生成结束后编辑' : '编辑消息'} onClick={() => { setEditText(msg.text || ''); setEditError(''); setEditing(true) }}>
+              <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+            </button>
+          )}
           <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
             {copied
               ? <Check size={14} strokeWidth={2.5} aria-hidden="true" />
