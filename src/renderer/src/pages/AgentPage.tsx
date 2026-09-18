@@ -13,6 +13,7 @@ import {
   ClipboardList,
   ExternalLink,
   Eye,
+  EyeOff,
   FileJson2,
   FileText,
   FolderOpen,
@@ -82,7 +83,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [mcpNewName, setMcpNewName] = React.useState('')
   const [mcpNewUrl, setMcpNewUrl] = React.useState('')
   const [mcpNewApiKey, setMcpNewApiKey] = React.useState('')
-  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+  const [mcpNewType, setMcpNewType] = React.useState<'stream' | 'stdio'>('stream')
+  const [mcpNewCommand, setMcpNewCommand] = React.useState('')
+  const [mcpNewArgs, setMcpNewArgs] = React.useState('[]')
+  const [mcpNewCwd, setMcpNewCwd] = React.useState('')
+  const [mcpNewEnv, setMcpNewEnv] = React.useState('{}')
   const [showAddMcpForm, setShowAddMcpForm] = React.useState(false)
   const [showPaddleTokenModal, setShowPaddleTokenModal] = React.useState(false)
   const [paddleToken, setPaddleToken] = React.useState('')
@@ -94,8 +99,47 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [editName, setEditName] = React.useState('')
   const [editUrl, setEditUrl] = React.useState('')
   const [editApiKey, setEditApiKey] = React.useState('')
+  const [editShowApiKey, setEditShowApiKey] = React.useState(false)
   const [editClearApiKey, setEditClearApiKey] = React.useState(false)
-  const [editType, setEditType] = React.useState<'stream' | 'sse' | 'auto'>('stream')
+  const [editType, setEditType] = React.useState<'stream' | 'stdio'>('stream')
+  const [editCommand, setEditCommand] = React.useState('')
+  const [editArgs, setEditArgs] = React.useState('[]')
+  const [editCwd, setEditCwd] = React.useState('')
+  const [editEnv, setEditEnv] = React.useState('')
+  const [editClearEnv, setEditClearEnv] = React.useState(false)
+
+  const parseStdioFields = (argsText: string, envText: string): { args: string[]; env?: Record<string, string> } | null => {
+    try {
+      const args: unknown = JSON.parse(argsText)
+      const env: unknown = envText.trim() ? JSON.parse(envText) : undefined
+      if (!Array.isArray(args) || !args.every(item => typeof item === 'string')) throw new Error('参数必须是字符串数组')
+      if (env !== undefined && (typeof env !== 'object' || env === null || Array.isArray(env) || !Object.values(env).every(value => typeof value === 'string'))) throw new Error('环境变量必须是字符串对象')
+      return { args, ...(env ? { env: env as Record<string, string> } : {}) }
+    } catch (error) {
+      showToast(`stdio 配置格式错误：${error instanceof Error ? error.message : String(error)}`, 'error')
+      return null
+    }
+  }
+
+  const resetNewMcpForm = (): void => {
+    setShowAddMcpForm(false)
+    setMcpNewName('')
+    setMcpNewUrl('')
+    setMcpNewApiKey('')
+    setMcpNewType('stream')
+    setMcpNewCommand('')
+    setMcpNewArgs('[]')
+    setMcpNewCwd('')
+    setMcpNewEnv('{}')
+  }
+
+  const closeEditMcpForm = (): void => {
+    setShowEditModal(false)
+    setEditingServer(null)
+    setEditApiKey('')
+    setEditShowApiKey(false)
+    setEditEnv('')
+  }
 
   React.useEffect(() => {
     if (agentSubTab !== 'mcp') return
@@ -974,7 +1018,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     <thead>
                       <tr>
                         <th style={{ width: '150px' }}>服务名称</th>
-                        <th>终结点地址 (Endpoint)</th>
+                        <th>地址或启动命令</th>
                         <th style={{ width: '100px', textAlign: 'center' }}>协议类型</th>
                         <th style={{ width: '100px', textAlign: 'center' }}>鉴权密钥</th>
                         <th style={{ width: '90px', textAlign: 'center' }}>启用状态</th>
@@ -988,13 +1032,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             {server.name}
                           </td>
                           <td>
-                            <span className="mcp-url-text" title={server.url}>
-                              {server.url}
+                            <span className="mcp-url-text" title={server.type === 'stdio' ? server.command : server.url}>
+                              {server.type === 'stdio' ? server.command : server.url}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <span className={`mcp-badge ${server.type === 'sse' ? 'none' : 'configured'}`}>
-                              {server.type === 'stream' ? 'Stream' : server.type === 'sse' ? 'SSE' : server.type === 'auto' ? '自动' : 'Stream'}
+                            <span className={`mcp-badge ${server.type === 'sse' || server.type === 'auto' ? 'none' : 'configured'}`}>
+                              {server.type === 'stdio' ? 'stdio' : server.type === 'sse' || server.type === 'auto' ? '需迁移' : 'HTTP'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -1028,6 +1072,9 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                     const res = await window.api.testMcpServer({
                                       id: server.id,
                                       url: server.url,
+                                      command: server.command,
+                                      args: server.args,
+                                      cwd: server.cwd,
                                       type: server.type || 'stream',
                                       preset: server.preset,
                                       model: server.model
@@ -1050,9 +1097,15 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                   setEditingServer(server)
                                   setEditName(server.name)
                                   setEditUrl(server.url)
+                                  setEditCommand(server.command || '')
+                                  setEditArgs(JSON.stringify(server.args || []))
+                                  setEditCwd(server.cwd || '')
+                                  setEditEnv('')
+                                  setEditClearEnv(false)
                                   setEditApiKey('')
+                                  setEditShowApiKey(false)
                                   setEditClearApiKey(false)
-                                  setEditType(server.type || 'stream')
+                                  setEditType(server.type === 'stdio' ? 'stdio' : 'stream')
                                   setShowEditModal(true)
                                 }}
                               >
@@ -1194,7 +1247,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 <Pencil size={17} strokeWidth={2} aria-hidden="true" />
                 <span>编辑 MCP 服务</span>
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => { setShowEditModal(false); setEditingServer(null); }} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
+              <button className="mcp-modal-close-btn" onClick={closeEditMcpForm} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
             </div>
             <div className="mcp-modal-body">
               <div>
@@ -1208,39 +1261,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              <div>
-                <label className="mcp-form-label">MCP Endpoint 地址</label>
-                <input
-                  type="text"
-                  className="mcp-input-fancy"
-                  placeholder="https://mcpmarket.cn/mcp/..."
-                  value={editUrl}
-                  onChange={e => setEditUrl(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
-                <input
-                  type="password"
-                  className="mcp-input-fancy"
-                  placeholder={editingServer.hasApiKey ? '密钥已安全保存；留空表示保持不变' : '默认留空'}
-                  value={editApiKey}
-                  onChange={e => setEditApiKey(e.target.value)}
-                />
-                {editingServer.hasApiKey && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={editClearApiKey}
-                      onChange={e => setEditClearApiKey(e.target.checked)}
-                    />
-                    删除已安全保存的密钥
-                  </label>
-                )}
-              </div>
-
-              <div>
+                            <div>
                 <label className="mcp-form-label">传输协议类型</label>
                 <select
                   className="mcp-input-fancy"
@@ -1248,17 +1269,70 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   onChange={e => setEditType(e.target.value as any)}
                   style={{ cursor: 'pointer' }}
                 >
-                  <option value="stream">Streamable HTTP (推荐)</option>
-                  <option value="sse">Server-Sent Events</option>
-                  <option value="auto">自动探测</option>
+                  <option value="stream">Streamable HTTP</option>
+                  <option value="stdio">stdio（本地进程）</option>
                 </select>
               </div>
+
+              {editType === 'stdio' ? (
+                <>
+                  <div><label className="mcp-form-label">启动命令</label><input className="mcp-input-fancy" value={editCommand} onChange={e => setEditCommand(e.target.value)} placeholder="例如：npx、node 或可执行文件完整路径" /></div>
+                  <div><label className="mcp-form-label">参数（JSON 字符串数组）</label><input className="mcp-input-fancy" value={editArgs} onChange={e => setEditArgs(e.target.value)} placeholder='["-y", "@example/mcp-server"]' /></div>
+                  <div><label className="mcp-form-label">工作目录（可选）</label><input className="mcp-input-fancy" value={editCwd} onChange={e => setEditCwd(e.target.value)} /></div>
+                  <div><label className="mcp-form-label">环境变量（JSON 对象，可选）</label><textarea className="mcp-input-fancy" rows={3} value={editEnv} onChange={e => setEditEnv(e.target.value)} placeholder={editingServer.hasEnv ? '已安全保存；留空保持原值' : '{"TOKEN":"..."}'} />{editingServer.hasEnv && <label><input type="checkbox" checked={editClearEnv} onChange={e => setEditClearEnv(e.target.checked)} />删除已保存的环境变量</label>}</div>
+                </>
+              ) : (
+                <>
+                  <div><label className="mcp-form-label">MCP Endpoint 地址</label><input className="mcp-input-fancy" value={editUrl} onChange={e => setEditUrl(e.target.value)} placeholder="https://example.com/mcp" /></div>
+                  <div>
+                    <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type={editShowApiKey ? 'text' : 'password'}
+                        className="mcp-input-fancy"
+                        placeholder={editingServer.hasApiKey ? '密钥已安全保存；留空表示保持不变' : '默认留空'}
+                        value={editApiKey}
+                        onChange={e => setEditApiKey(e.target.value)}
+                      />
+                      {editingServer.hasApiKey && (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          aria-label={editShowApiKey ? '隐藏密钥' : '显示已保存的密钥'}
+                          title={editShowApiKey ? '隐藏密钥' : '显示已保存的密钥'}
+                          onClick={async () => {
+                            if (!editShowApiKey && !editApiKey) {
+                              try {
+                                setEditApiKey(await window.api.revealMcpApiKey(editingServer.id))
+                              } catch {
+                                showToast('读取已保存的密钥失败', 'error')
+                                return
+                              }
+                            }
+                            setEditShowApiKey(previous => !previous)
+                          }}
+                        >
+                          {editShowApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      )}
+                    </div>
+                    {editingServer.hasApiKey && (
+                      <label>
+                        <input type="checkbox" checked={editClearApiKey} onChange={e => setEditClearApiKey(e.target.checked)} />
+                        删除已安全保存的密钥
+                      </label>
+                    )}
+                  </div>
+                </>
+              )}
+
+
             </div>
             <div className="mcp-modal-footer">
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => { setShowEditModal(false); setEditingServer(null); }}
+                onClick={closeEditMcpForm}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >
                 取消
@@ -1266,28 +1340,34 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => {
-                  if (!editName.trim() || !editUrl.trim()) {
-                    showToast('请完整填写服务名称和地址！', 'error')
+                onClick={async () => {
+                  if (!editName.trim() || (editType === 'stdio' ? !editCommand.trim() : !editUrl.trim())) {
+                    showToast('请填写服务名称及地址或启动命令！', 'error')
                     return
                   }
+                  const stdioFields = editType === 'stdio' ? parseStdioFields(editArgs, editEnv) : null
+                  if (editType === 'stdio' && !stdioFields) return
                   const newServers = mcpConfig.servers.map((s: any) =>
                     s.id === editingServer.id
                       ? {
                         ...s,
                         name: editName.trim(),
-                        url: editUrl.trim(),
-                        apiKey: editApiKey.trim(),
+                        url: editType === 'stdio' ? '' : editUrl.trim(),
+                        command: editType === 'stdio' ? editCommand.trim() : undefined,
+                        args: editType === 'stdio' ? stdioFields?.args : undefined,
+                        cwd: editType === 'stdio' ? editCwd.trim() : undefined,
+                        ...(editType === 'stdio' && stdioFields?.env ? { env: stdioFields.env } : {}),
+                        apiKey: editType === 'stdio' ? '' : editApiKey.trim(),
                         hasApiKey: editClearApiKey ? false : Boolean(editApiKey.trim()) || Boolean(s.hasApiKey),
-                        clearApiKey: editClearApiKey,
+                        clearApiKey: editType === 'stdio' || editClearApiKey,
+                        clearEnv: editType !== 'stdio' || editClearEnv,
                         type: editType
                       }
                       : s
                   )
-                  saveMcpConfig({ servers: newServers })
-                  setShowEditModal(false)
-                  setEditingServer(null)
-                  showToast('服务配置已更新并重新连接！', 'success')
+                  if (!(await saveMcpConfig({ servers: newServers }))) return
+                  closeEditMcpForm()
+                  showToast('服务配置已更新', 'success')
                 }}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >
@@ -1307,13 +1387,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 <Plus size={17} strokeWidth={2} aria-hidden="true" />
                 <span>新增 MCP 服务配置</span>
               </div>
-              <button className="mcp-modal-close-btn" onClick={() => {
-                setShowAddMcpForm(false)
-                setMcpNewName('')
-                setMcpNewUrl('')
-                setMcpNewApiKey('')
-                setMcpNewType('stream')
-              }} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
+              <button className="mcp-modal-close-btn" onClick={resetNewMcpForm} title="关闭"><X size={18} strokeWidth={2} aria-hidden="true" /></button>
             </div>
             <div className="mcp-modal-body">
               <div>
@@ -1327,29 +1401,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                 />
               </div>
 
-              <div>
-                <label className="mcp-form-label">MCP Endpoint 地址</label>
-                <input
-                  type="text"
-                  className="mcp-input-fancy"
-                  placeholder="https://mcpmarket.cn/mcp/..."
-                  value={mcpNewUrl}
-                  onChange={e => setMcpNewUrl(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label>
-                <input
-                  type="password"
-                  className="mcp-input-fancy"
-                  placeholder="默认留空"
-                  value={mcpNewApiKey}
-                  onChange={e => setMcpNewApiKey(e.target.value)}
-                />
-              </div>
-
-              <div>
+                            <div>
                 <label className="mcp-form-label">传输协议类型</label>
                 <select
                   className="mcp-input-fancy"
@@ -1357,23 +1409,32 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   onChange={e => setMcpNewType(e.target.value as any)}
                   style={{ cursor: 'pointer' }}
                 >
-                  <option value="stream">Streamable HTTP (推荐)</option>
-                  <option value="sse">Server-Sent Events</option>
-                  <option value="auto">自动探测</option>
+                  <option value="stream">Streamable HTTP</option>
+                  <option value="stdio">stdio（本地进程）</option>
                 </select>
               </div>
+
+              {mcpNewType === 'stdio' ? (
+                <>
+                  <div><label className="mcp-form-label">启动命令</label><input className="mcp-input-fancy" value={mcpNewCommand} onChange={e => setMcpNewCommand(e.target.value)} placeholder="例如：npx、node 或可执行文件完整路径" /></div>
+                  <div><label className="mcp-form-label">参数（JSON 字符串数组）</label><input className="mcp-input-fancy" value={mcpNewArgs} onChange={e => setMcpNewArgs(e.target.value)} placeholder='["-y", "@example/mcp-server"]' /></div>
+                  <div><label className="mcp-form-label">工作目录（可选）</label><input className="mcp-input-fancy" value={mcpNewCwd} onChange={e => setMcpNewCwd(e.target.value)} /></div>
+                  <div><label className="mcp-form-label">环境变量（JSON 对象，可选）</label><textarea className="mcp-input-fancy" rows={3} value={mcpNewEnv} onChange={e => setMcpNewEnv(e.target.value)} placeholder='{"TOKEN":"..."}' /></div>
+                </>
+              ) : (
+                <>
+                  <div><label className="mcp-form-label">MCP Endpoint 地址</label><input className="mcp-input-fancy" value={mcpNewUrl} onChange={e => setMcpNewUrl(e.target.value)} placeholder="https://example.com/mcp" /></div>
+                  <div><label className="mcp-form-label">API 鉴权密钥 (Token) - 可选</label><input type="password" className="mcp-input-fancy" value={mcpNewApiKey} onChange={e => setMcpNewApiKey(e.target.value)} placeholder="默认留空" /></div>
+                </>
+              )}
+
+
             </div>
             <div className="mcp-modal-footer">
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => {
-                  setShowAddMcpForm(false)
-                  setMcpNewName('')
-                  setMcpNewUrl('')
-                  setMcpNewApiKey('')
-                  setMcpNewType('stream')
-                }}
+                onClick={resetNewMcpForm}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >
                 取消
@@ -1381,28 +1442,29 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => {
-                  if (!mcpNewName.trim() || !mcpNewUrl.trim()) {
-                    showToast('请完整填写服务名称和地址！', 'error')
+                onClick={async () => {
+                  if (!mcpNewName.trim() || (mcpNewType === 'stdio' ? !mcpNewCommand.trim() : !mcpNewUrl.trim())) {
+                    showToast('请填写服务名称及地址或启动命令！', 'error')
                     return
                   }
+                  const stdioFields = mcpNewType === 'stdio' ? parseStdioFields(mcpNewArgs, mcpNewEnv) : null
+                  if (mcpNewType === 'stdio' && !stdioFields) return
                   const servers = mcpConfig?.servers || []
                   const newServers = [...servers, {
                     id: `mcp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
                     name: mcpNewName.trim(),
-                    url: mcpNewUrl.trim(),
-                    apiKey: mcpNewApiKey.trim(),
+                    url: mcpNewType === 'stdio' ? '' : mcpNewUrl.trim(),
+                    command: mcpNewType === 'stdio' ? mcpNewCommand.trim() : undefined,
+                    args: mcpNewType === 'stdio' ? stdioFields?.args : undefined,
+                    cwd: mcpNewType === 'stdio' ? mcpNewCwd.trim() : undefined,
+                    ...(mcpNewType === 'stdio' && stdioFields?.env ? { env: stdioFields.env } : {}),
+                    apiKey: mcpNewType === 'stdio' ? '' : mcpNewApiKey.trim(),
                     type: mcpNewType,
                     enabled: true
                   }]
-                  saveMcpConfig({ servers: newServers })
-
-                  setShowAddMcpForm(false)
-                  setMcpNewName('')
-                  setMcpNewUrl('')
-                  setMcpNewApiKey('')
-                  setMcpNewType('stream')
-                  showToast('已成功添加新 MCP 服务！', 'success')
+                  if (!(await saveMcpConfig({ servers: newServers }))) return
+                  resetNewMcpForm()
+                  showToast('已添加新 MCP 服务', 'success')
                 }}
                 style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
               >

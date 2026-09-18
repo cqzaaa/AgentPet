@@ -17,8 +17,26 @@ The available skill catalog contains metadata only. Call request_skill only with
   api: [
     {
       name: 'list_mcp_servers',
-      description: 'List configured MCP servers and current connection status without connecting or exposing API keys. Use before guiding MCP setup; if the requested server is missing, ask for its service URL or official configuration link. Local stdio launch commands are not currently supported.',
+      description: 'List configured MCP servers and current connection status without connecting or exposing API keys. Use before guiding MCP setup; ask for a Streamable HTTP endpoint or a local stdio command and arguments when the requested server is missing.',
       parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'add_mcp_server',
+      description: 'Add a new MCP server to AgentPet and test its connection. Call list_mcp_servers first. Requires an explicit user request and approval. Supports Streamable HTTP or local stdio. Do not pass API keys, tokens, secrets, or environment values through tool arguments; the user enters those in Agent → MCP 服务. Adding a stdio server may run the configured command.',
+      humanIntervention: 'required',
+      timeout: 90000,
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'User-facing service name' },
+          transport: { type: 'string', enum: ['stream', 'stdio'], description: 'stream = Streamable HTTP; stdio = local child process' },
+          url: { type: 'string', description: 'Streamable HTTP MCP endpoint URL; required for stream' },
+          command: { type: 'string', description: 'Local executable or npx/npm command; required for stdio' },
+          args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed directly to the stdio command, without shell interpolation' },
+          cwd: { type: 'string', description: 'Optional working directory for stdio' }
+        },
+        required: ['name', 'transport']
+      }
     },
     {
       name: 'list_skills',

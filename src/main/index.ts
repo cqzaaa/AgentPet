@@ -157,7 +157,6 @@ import {
 
 let wechatBotManager: WechatBotManager | null = null
 let systemLlmConfig: RuntimeLlmConfig = { ...DEFAULT_LLM_CONFIG }
-let systemMcpConfig: any = { servers: [] }
 let isRpaRecordingActive = false
 let activeRpaRecordingController: Awaited<ReturnType<typeof createRecordingController>> | null =
   null
@@ -1712,7 +1711,7 @@ app.whenReady().then(() => {
   // 恢复物理持久化的大模型配置，保证后台微信 Bot 在前端就绪前能拿到有效密钥
   registerBuiltinTools()
   loadSystemLlmConfig()
-  systemMcpConfig = mcpManager.loadSystemMcpConfig()
+  mcpManager.loadSystemMcpConfig()
 
   // Set app user model id for windows
   electronApp.setAppUserModelId(windowsAppUserModelId)
@@ -6457,57 +6456,71 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('api:sync-mcp-config', (_, config) => {
-    systemMcpConfig = mcpManager.saveSystemMcpConfig(config)
+    mcpManager.saveSystemMcpConfig(config)
     return mcpManager.getSanitizedSystemMcpConfig()
   })
 
+  ipcMain.handle('api:reveal-mcp-api-key', (_, serverId: unknown) => {
+    if (typeof serverId !== 'string') return ''
+    const server = mcpManager.systemMcpConfig.servers.find((item: any) => item.id === serverId)
+    return server?.apiKey || ''
+  })
+
   ipcMain.handle('api:test-mcp-server', async (_, config) => {
+    let testClient: import('@modelcontextprotocol/sdk/client/index.js').Client | undefined
     try {
-      const [{ Client }, { StreamableHTTPClientTransport }, { SSEClientTransport }] =
+      const [{ Client }, { StreamableHTTPClientTransport }, { StdioClientTransport, getDefaultEnvironment }] =
         await Promise.all([
           import('@modelcontextprotocol/sdk/client/index.js'),
           import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
-          import('@modelcontextprotocol/sdk/client/sse.js')
+          import('@modelcontextprotocol/sdk/client/stdio.js')
         ])
 
-      const runtimeServer = systemMcpConfig.servers.find((server: any) => server.id === config.id)
+      const runtimeServer = mcpManager.systemMcpConfig.servers.find((server: any) => server.id === config.id)
       const apiKey = config.apiKey || runtimeServer?.apiKey || ''
       const headers: Record<string, string> = {}
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
-      let client = new Client({ name: 'AgentPet-Test', version: '1.0.0' }, { capabilities: {} })
+      const client = new Client({ name: 'AgentPet-Test', version: '1.0.0' }, { capabilities: {} })
+      testClient = client
+      const connect = async (transport: import('@modelcontextprotocol/sdk/shared/transport.js').Transport): Promise<void> => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            client.connect(transport),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('MCP 连接超时')), config.type === 'stdio' ? 15000 : 5000)
+            })
+          ])
+        } finally {
+          if (timer) clearTimeout(timer)
+        }
+      }
       let usedProtocol = 'Streamable HTTP'
       const mcpType = config.type || 'stream'
 
-      if (mcpType === 'stream') {
+      if (mcpType === 'stdio') {
+        const command = config.command || runtimeServer?.command
+        if (typeof command !== 'string' || !command.trim()) throw new Error('stdio MCP 服务缺少启动命令')
+        const { resolveStdioCommand } = await import('./tools/mcp/stdio-command.js')
+        const launch = resolveStdioCommand(command, config.args || runtimeServer?.args || [])
+        const transport = new StdioClientTransport({
+          command: launch.command,
+          args: launch.args,
+          ...(config.cwd || runtimeServer?.cwd ? { cwd: config.cwd || runtimeServer?.cwd } : {}),
+          ...(runtimeServer?.env ? { env: { ...getDefaultEnvironment(), ...runtimeServer.env } } : {}),
+          stderr: 'ignore'
+        })
+        await connect(transport)
+        usedProtocol = 'stdio'
+      } else if (mcpType === 'stream') {
         const transport = new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: { headers }
         })
-        await client.connect(transport)
+        await connect(transport)
         usedProtocol = 'Streamable HTTP'
-      } else if (mcpType === 'sse') {
-        const transport = new SSEClientTransport(new URL(config.url), {
-          eventSourceInitDict: { headers }
-        } as any)
-        await client.connect(transport)
-        usedProtocol = 'SSE'
       } else {
-        // auto 模式
-        try {
-          const transport = new StreamableHTTPClientTransport(new URL(config.url), {
-            requestInit: { headers }
-          })
-          await client.connect(transport)
-          usedProtocol = 'Streamable HTTP'
-        } catch (httpErr: any) {
-          console.warn(`[MCP Test] Streamable HTTP 失败，回退到 SSE: ${httpErr.message}`)
-          client = new Client({ name: 'AgentPet-Test', version: '1.0.0' }, { capabilities: {} })
-          usedProtocol = 'SSE'
-          const transport = new SSEClientTransport(new URL(config.url), {
-            eventSourceInitDict: { headers }
-          } as any)
-          await client.connect(transport)
-        }
+        throw new Error(`不支持的 MCP 传输模式: ${mcpType}`)
       }
 
       const response = await client.listTools()
@@ -6529,6 +6542,7 @@ app.whenReady().then(() => {
         }
       }
     } catch (err: any) {
+      await testClient?.close().catch(() => {})
       console.error('MCP Test Error:', err)
       return { success: false, error: err.message || err.toString() }
     }

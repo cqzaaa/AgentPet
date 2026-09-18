@@ -1,10 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { app } from 'electron'
 import * as fs from 'fs'
 import { join } from 'path'
 import { McpNameMapper } from './mcp-name-mapper.js'
+import { resolveStdioCommand } from './stdio-command.js'
 import {
   loadSecureSystemMcpConfig,
   sanitizeSystemMcpConfig,
@@ -17,9 +18,14 @@ export interface McpServerConfig {
   id: string
   name: string
   url: string
+  command?: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  hasEnv?: boolean
   apiKey: string
   hasApiKey?: boolean
-  type?: 'sse' | 'stream' | 'auto'
+  type?: 'stream' | 'stdio'
   enabled: boolean
   description?: string
   tools?: any[] // 工具定义缓存字段
@@ -27,8 +33,8 @@ export interface McpServerConfig {
 }
 
 type McpClientTransport =
-  | SSEClientTransport
   | StreamableHTTPClientTransport
+  | StdioClientTransport
 
 interface McpTraceCapture {
   attempt: number
@@ -64,32 +70,63 @@ export class McpManager {
 
   private isLegacyPaddleMcpConfig(config: McpServerConfig): boolean {
     const legacy = config as unknown as { preset?: string; type?: string }
-    return legacy.preset === 'paddleocr-aistudio' || legacy.type === 'stdio'
+    return legacy.preset === 'paddleocr-aistudio'
   }
 
   private isRunnable(config: McpServerConfig): boolean {
-    return Boolean(config.url)
+    return config.type === 'stdio' ? Boolean(config.command?.trim()) : (!config.type || config.type === 'stream') && Boolean(config.url)
   }
 
   private displayEndpoint(config: McpServerConfig): string {
-    return config.url
+    return config.type === 'stdio' ? config.command || '' : config.url
   }
 
   private createTransport(config: McpServerConfig): McpClientTransport {
+    if (config.type === 'stdio') {
+      if (!config.command?.trim()) throw new Error('stdio MCP 服务缺少启动命令')
+      const launch = resolveStdioCommand(config.command, config.args || [])
+      return new StdioClientTransport({
+        command: launch.command,
+        args: launch.args,
+        ...(config.cwd ? { cwd: config.cwd } : {}),
+        ...(config.env ? { env: { ...getDefaultEnvironment(), ...config.env } } : {}),
+        stderr: 'ignore'
+      })
+    }
     const headers: Record<string, string> = {}
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
-    if (config.type === 'sse') {
-      return new SSEClientTransport(new URL(config.url), {
-        eventSourceInitDict: { headers }
-      } as any)
-    }
     return new StreamableHTTPClientTransport(new URL(config.url), {
       requestInit: { headers }
     })
   }
 
-  private transportName(transport: McpClientTransport): 'sse' | 'streamable-http' {
-    return transport instanceof SSEClientTransport ? 'sse' : 'streamable-http'
+  private transportName(transport: McpClientTransport): 'streamable-http' | 'stdio' {
+    return transport instanceof StdioClientTransport ? 'stdio' : 'streamable-http'
+  }
+
+  private sameSettings(a: McpServerConfig, b: McpServerConfig): boolean {
+    return a.type === b.type && a.url === b.url && a.apiKey === b.apiKey &&
+      a.command === b.command && a.cwd === b.cwd &&
+      JSON.stringify(a.args || []) === JSON.stringify(b.args || []) &&
+      JSON.stringify(a.env || {}) === JSON.stringify(b.env || {})
+  }
+
+  private async connectClient(client: Client, transport: McpClientTransport, timeoutMs: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        client.connect(transport),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`连接超时 (${timeoutMs}ms)`)), timeoutMs)
+        })
+      ])
+    } catch (error) {
+      await client.close().catch(() => {})
+      await transport.close().catch(() => {})
+      throw error
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   /**
@@ -234,9 +271,10 @@ export class McpManager {
     console.log(`[MCP] 已加载 ${this.pendingConfigs.length} 个 MCP 服务配置（懒加载模式，将在首次使用时连接）`)
 
     // 同时断开已不再启用的旧连接
-    const enabledIds = this.pendingConfigs.map(c => c.id)
+    const enabledConfigs = new Map(this.pendingConfigs.map(c => [c.id, c]))
     for (const [id, conn] of this.connections.entries()) {
-      if (!enabledIds.includes(id)) {
+      const next = enabledConfigs.get(id)
+      if (!next || !this.sameSettings(conn.config, next)) {
         console.log(`[MCP] 断开已禁用的服务: ${conn.config.name} (${id})`)
         conn.client.close().catch(() => {})
         this.connections.delete(id)
@@ -260,11 +298,11 @@ export class McpManager {
 
   public async connectAll(configs: McpServerConfig[]) {
     const configsToConnect = configs.filter(c => c.enabled && this.isRunnable(c))
-    const activeIds = configsToConnect.map(c => c.id)
+    const activeIds = new Set(this.systemMcpConfig.servers.filter(c => c.enabled && this.isRunnable(c)).map(c => c.id))
 
     // 1. 关闭不再活动或被禁用的连接
     for (const [id, conn] of this.connections.entries()) {
-      if (!activeIds.includes(id)) {
+      if (!activeIds.has(id)) {
         console.log(`[MCP] 断开并移除服务: ${conn.config.name} (${id})`)
         try {
           await conn.client.close()
@@ -280,12 +318,7 @@ export class McpManager {
       const existing = this.connections.get(config.id)
       
       // 如果已存在连接，且参数没有变化，则无需重连
-      if (
-        existing &&
-        existing.config.url === config.url &&
-        existing.config.apiKey === config.apiKey &&
-        existing.config.type === config.type
-      ) {
+      if (existing && this.sameSettings(existing.config, config)) {
         return
       }
 
@@ -299,44 +332,17 @@ export class McpManager {
       }
 
       console.log(`[MCP] 正在建立服务连接: ${config.name} -> ${this.displayEndpoint(config)}`)
+      let client: Client | undefined
       try {
         let transport: McpClientTransport
-        let client = new Client(
+        client = new Client(
           { name: 'AgentPet-Client', version: '1.0.0' },
           { capabilities: {} }
         )
 
-        const connectTimeout = (ms: number) => new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`连接超时 (${ms}ms)`)), ms)
-        )
-
-        const mcpType = config.type || 'stream'
-
-        if (mcpType === 'stream') {
-          transport = this.createTransport(config)
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-          console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
-        } else if (mcpType === 'sse') {
-          transport = this.createTransport(config)
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-          console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功`)
-        } else {
-          // auto 模式
-          try {
-            transport = this.createTransport({ ...config, type: 'stream' })
-            await Promise.race([client.connect(transport), connectTimeout(5000)])
-            console.log(`[MCP] 服务 ${config.name} 使用 Streamable HTTP 协议连接成功`)
-          } catch (httpErr: any) {
-            console.warn(`[MCP] Streamable HTTP 连接失败 (${httpErr.message})，正在回退到 SSE 协议...`)
-            client = new Client(
-              { name: 'AgentPet-Client', version: '1.0.0' },
-              { capabilities: {} }
-            )
-            transport = this.createTransport({ ...config, type: 'sse' })
-            await Promise.race([client.connect(transport), connectTimeout(5000)])
-            console.log(`[MCP] 服务 ${config.name} 使用 SSE 协议连接成功（降级）`)
-          }
-        }
+        transport = this.createTransport(config)
+        await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
+        console.log(`[MCP] 服务 ${config.name} 使用 ${this.transportName(transport)} 协议连接成功`)
 
         const response = await client.listTools()
         const tools = response.tools || []
@@ -345,6 +351,7 @@ export class McpManager {
         this.updateServerToolsCache(config.id, tools)
         console.log(`[MCP] 服务 ${config.name} 连接成功！加载了 ${tools.length} 个外部工具`)
       } catch (err) {
+        await client?.close().catch(() => {})
         console.error(`[MCP] 服务 ${config.name} 连接失败:`, err)
       }
     }))
@@ -381,55 +388,14 @@ export class McpManager {
     let connection: McpConnection | undefined
     try {
       let transport: McpClientTransport
-      let client = new Client(
+      const client = new Client(
         { name: 'AgentPet-Client', version: '1.0.0' },
         { capabilities: {} }
       )
 
-      const connectTimeout = (ms: number) => new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`连接超时 (${ms}ms)`)), ms)
-      )
-
-      const mcpType = config.type || 'stream'
-
-      if (mcpType === 'stream') {
-        transport = this.createTransport(config)
-        connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
-        await Promise.race([client.connect(transport), connectTimeout(5000)])
-      } else if (mcpType === 'sse') {
-        transport = this.createTransport(config)
-        connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
-        await Promise.race([client.connect(transport), connectTimeout(5000)])
-      } else {
-        try {
-          transport = this.createTransport({ ...config, type: 'stream' })
-          connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-        } catch (httpError) {
-          if (connection) await this.finishConnectionTrace(connection)
-          await reportConnectionTrace({
-            type: 'mcp/connection',
-            data: {
-              status: 'fallback',
-              server: {
-                id: config.id,
-                name: config.name,
-                endpoint: this.displayEndpoint(config)
-              },
-              from: 'streamable-http',
-              to: 'sse',
-              reason: httpError instanceof Error ? httpError.message : String(httpError)
-            }
-          })
-          client = new Client(
-            { name: 'AgentPet-Client', version: '1.0.0' },
-            { capabilities: {} }
-          )
-          transport = this.createTransport({ ...config, type: 'sse' })
-          connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-        }
-      }
+      transport = this.createTransport(config)
+      connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
+      await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
 
       const response = await client.listTools()
       const tools = response.tools || []
@@ -455,6 +421,7 @@ export class McpManager {
       console.log(`[MCP] 服务 ${config.name} 按需握手成功！更新了 ${tools.length} 个工具`)
       return true
     } catch (err) {
+      await connection?.client.close().catch(() => {})
       console.error(`[MCP] 握手单体服务 ${config.name} 失败:`, err)
       if (connection) await this.finishConnectionTrace(connection)
       await reportConnectionTrace({
@@ -512,6 +479,7 @@ export class McpManager {
     const config = conn.config
 
     console.log(`[MCP] 正在尝试重连服务: ${config.name} (${id})`)
+    let newClient: Client | undefined
     try {
       try {
         await conn.client.close()
@@ -519,41 +487,15 @@ export class McpManager {
       this.connections.delete(id)
 
       let transport: McpClientTransport
-      let client = new Client(
+      const client = new Client(
         { name: 'AgentPet-Client', version: '1.0.0' },
         { capabilities: {} }
       )
+      newClient = client
 
-      const connectTimeout = (ms: number) => new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`连接超时 (${ms}ms)`)), ms)
-      )
-
-      const mcpType = config.type || 'stream'
-
-      if (mcpType === 'stream') {
-        transport = this.createTransport(config)
-        await Promise.race([client.connect(transport), connectTimeout(5000)])
-        console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
-      } else if (mcpType === 'sse') {
-        transport = this.createTransport(config)
-        await Promise.race([client.connect(transport), connectTimeout(5000)])
-        console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
-      } else {
-        try {
-          transport = this.createTransport({ ...config, type: 'stream' })
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-          console.log(`[MCP] 服务 ${config.name} 重连成功 (Streamable HTTP)`)
-        } catch (httpErr: any) {
-          console.warn(`[MCP] 服务 ${config.name} 重连 Streamable HTTP 失败，回退到 SSE...`)
-          client = new Client(
-            { name: 'AgentPet-Client', version: '1.0.0' },
-            { capabilities: {} }
-          )
-          transport = this.createTransport({ ...config, type: 'sse' })
-          await Promise.race([client.connect(transport), connectTimeout(5000)])
-          console.log(`[MCP] 服务 ${config.name} 重连成功 (SSE)`)
-        }
-      }
+      transport = this.createTransport(config)
+      await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
+      console.log(`[MCP] 服务 ${config.name} 重连成功 (${this.transportName(transport)})`)
 
       const response = await client.listTools()
       const tools = response.tools || []
@@ -562,6 +504,7 @@ export class McpManager {
       this.updateServerToolsCache(config.id, tools)
       return true
     } catch (err) {
+      await newClient?.close().catch(() => {})
       console.error(`[MCP] 服务 ${config.name} 重连失败:`, err)
       return false
     }
@@ -579,7 +522,7 @@ export class McpManager {
   public getTools(): any[] {
     const allTools: any[] = []
     for (const server of this.systemMcpConfig.servers) {
-      if (!server.enabled) continue
+      if (!server.enabled || !this.isRunnable(server)) continue
       
       const conn = this.connections.get(server.id)
       let serverTools: any[] = []
@@ -632,7 +575,7 @@ export class McpManager {
   public hasTool(name: string): boolean {
     const realName = McpNameMapper.toOriginalName(name)
     for (const server of this.systemMcpConfig.servers) {
-      if (!server.enabled) continue
+      if (!server.enabled || !this.isRunnable(server)) continue
       
       const conn = this.connections.get(server.id)
       if (conn && conn.tools.some((t: any) => t.name === realName)) {
@@ -673,7 +616,7 @@ export class McpManager {
     const realName = McpNameMapper.toOriginalName(name)
     let targetServer: McpServerConfig | null = null
     for (const server of this.systemMcpConfig.servers) {
-      if (!server.enabled) continue
+      if (!server.enabled || !this.isRunnable(server)) continue
       
       const conn = this.connections.get(server.id)
       if (conn && conn.tools.some((t: any) => t.name === realName)) {
@@ -860,11 +803,34 @@ export class McpManager {
 
   public saveSystemMcpConfig(config: Record<string, unknown>): { servers: McpServerConfig[] } {
     const rawServers = Array.isArray(config.servers) ? config.servers as McpServerConfig[] : []
+    const previous = new Map(this.systemMcpConfig.servers.map(server => [server.id, server]))
     const saved = saveSecureSystemMcpConfig({
       ...config,
       servers: rawServers.filter(server => !this.isLegacyPaddleMcpConfig(server))
     })
     this.systemMcpConfig = { servers: saved.servers as McpServerConfig[] }
+    let cacheChanged = false
+    const newIds = new Set(this.systemMcpConfig.servers.map(server => server.id))
+    for (const server of this.systemMcpConfig.servers) {
+      const old = previous.get(server.id)
+      if (old && !this.sameSettings(old, server) && this.toolsCache[server.id]) {
+        delete this.toolsCache[server.id]
+        cacheChanged = true
+      }
+    }
+    for (const id of Object.keys(this.toolsCache)) {
+      if (!newIds.has(id)) {
+        delete this.toolsCache[id]
+        cacheChanged = true
+      }
+    }
+    if (cacheChanged) {
+      try {
+        fs.writeFileSync(join(app.getPath('userData'), 'mcp_tools_cache.json'), JSON.stringify(this.toolsCache, null, 2), 'utf8')
+      } catch (error) {
+        console.warn('[MCP] 更新工具缓存失败', error)
+      }
+    }
     this.setConfigs(this.systemMcpConfig.servers)
     return this.systemMcpConfig
   }

@@ -5,13 +5,15 @@ import claudeCode from '@lobehub/icons-static-svg/icons/claudecode-color.svg'
 import codex from '@lobehub/icons-static-svg/icons/codex-color.svg'
 import geminiCli from '@lobehub/icons-static-svg/icons/geminicli-color.svg'
 import lobehub from '@lobehub/icons-static-svg/icons/lobehub-color.svg'
+import openclaw from '@lobehub/icons-static-svg/icons/openclaw-color.svg'
 
 const ICONS: Record<string, string> = {
   agentpet: agentPet,
   'claude-code': claudeCode,
   'gemini-cli': geminiCli,
   codex,
-  antigravity
+  antigravity,
+  openclaw
 }
 
 function getAgentIcon(agentId: string): string {

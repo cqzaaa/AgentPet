@@ -43,5 +43,16 @@ export const BUILTIN_EXTERNAL_AGENTS: ExternalAgentDefinition[] = [
     args: [],
     executableAliases: ['agy.exe'],
     enabled: true
+  },
+  {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    description: '使用用户本机 OpenClaw CLI 的 ACP stdio Bridge 连接 Gateway',
+    source: 'builtin',
+    protocol: 'acp-v1',
+    executable: 'openclaw',
+    args: ['acp'],
+    executableAliases: ['openclaw.cmd'],
+    enabled: true
   }
 ]

@@ -213,8 +213,10 @@ declare global {
       onWechatStatusUpdated: (callback: (data: any) => void) => () => void
       onWechatSessionUpdated: (callback: (sessionId?: string) => void) => () => void
       syncMcpConfig: (config: any) => Promise<any>
+      revealMcpApiKey: (serverId: string) => Promise<string>
       testMcpServer: (config: any) => Promise<any>
       getMcpConfig: () => Promise<any>
+      onMcpConfigUpdated: (callback: (config: any) => void) => () => void
       onRequestGeolocation: (callback: (data: { requestId: number }) => void) => () => void
       respondGeolocation: (requestId: number, location: any, error?: string) => void
       copyText: (text: string) => void

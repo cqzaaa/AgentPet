@@ -66,7 +66,7 @@ Skills describe how a task should be performed, while tools provide the actual o
 
 - Load task-specific Skills before exposing their tools.
 - Manage installed Skills, catalogs, and managed Skill runtimes.
-- Connect external MCP services through SSE or Streamable HTTP.
+- Connect external MCP services through Streamable HTTP or local stdio.
 
 ### Knowledge base and memory
 

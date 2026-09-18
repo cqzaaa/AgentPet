@@ -11,6 +11,8 @@ export interface RuntimeMcpServerConfig extends JsonObject {
   apiKey: string
   hasApiKey: boolean
   enabled: boolean
+  env?: Record<string, string>
+  hasEnv?: boolean
 }
 
 export interface RuntimeMcpConfig extends JsonObject {
@@ -31,16 +33,28 @@ function secretRefForServer(serverId: string): string {
   return `secret://${secretIdForServer(serverId)}`
 }
 
+function envSecretIdForServer(serverId: string): string {
+  return `${secretIdForServer(serverId)}-env`
+}
+
+function validEnv(value: unknown): value is Record<string, string> {
+  return isJsonObject(value) && Object.entries(value).every(([key, entry]) => key.length > 0 && typeof entry === 'string')
+}
+
 function sanitizeServerForDisk(server: JsonObject): JsonObject {
   const sanitized = { ...server }
   delete sanitized.apiKey
   delete sanitized.hasApiKey
   delete sanitized.clearApiKey
   delete sanitized.tools
+  delete sanitized.env
+  delete sanitized.hasEnv
+  delete sanitized.clearEnv
+  delete sanitized.envRef
   return sanitized
 }
 
-function validateServers(value: unknown): JsonObject[] {
+function validateServers(value: unknown, strict = false): JsonObject[] {
   if (!Array.isArray(value)) throw new TypeError('MCP configuration servers must be an array')
   const ids = new Set<string>()
   return value.map((server) => {
@@ -49,6 +63,14 @@ function validateServers(value: unknown): JsonObject[] {
     }
     if (ids.has(server.id)) throw new TypeError(`Duplicate MCP server id: ${server.id}`)
     ids.add(server.id)
+    if (server.type === 'stdio' && strict) {
+      if (typeof server.command !== 'string' || !server.command.trim()) throw new TypeError('stdio MCP server requires a command')
+      if (server.args !== undefined && (!Array.isArray(server.args) || !server.args.every((arg) => typeof arg === 'string'))) throw new TypeError('stdio MCP args must be a string array')
+      if (server.cwd !== undefined && typeof server.cwd !== 'string') throw new TypeError('stdio MCP cwd must be a string')
+      if (server.env !== undefined && !validEnv(server.env)) throw new TypeError('stdio MCP env must be a string map')
+    } else if (server.type !== undefined && server.type !== 'stream' && server.type !== 'stdio' && server.type !== 'sse' && server.type !== 'auto') {
+      throw new TypeError('Unknown MCP transport type')
+    }
     return server
   })
 }
@@ -73,6 +95,30 @@ export class McpConfigStore {
       const legacyApiKey = typeof server.apiKey === 'string' ? server.apiKey : ''
       let apiKey = ''
       let apiKeyRef = server.apiKeyRef === expectedRef ? expectedRef : undefined
+      const envSecretId = envSecretIdForServer(serverId)
+      let env: Record<string, string> | undefined
+      let envRef = server.envRef === `secret://${envSecretId}` ? `secret://${envSecretId}` : undefined
+      if (validEnv(server.env)) {
+        env = server.env
+        try {
+          this.vault.setSecret(envSecretId, JSON.stringify(server.env), `MCP environment: ${String(server.name || serverId)}`)
+          envRef = `secret://${envSecretId}`
+          migrationRequired = true
+        } catch {
+          migrationPending = true
+        }
+      } else if (envRef) {
+        try {
+          const storedEnv = this.vault.getSecret(envSecretId)
+          if (storedEnv) {
+            const parsed: unknown = JSON.parse(storedEnv)
+            if (!validEnv(parsed)) throw new TypeError(`Invalid environment for MCP server ${serverId}`)
+            env = parsed
+          }
+        } catch {
+          migrationPending = true
+        }
+      }
 
       if (legacyApiKey) {
         try {
@@ -99,6 +145,7 @@ export class McpConfigStore {
       const diskServer = sanitizeServerForDisk(server)
       delete diskServer.apiKeyRef
       if (apiKeyRef) diskServer.apiKeyRef = apiKeyRef
+      if (envRef) diskServer.envRef = envRef
       migratedServers.push(diskServer)
       runtimeServers.push({
         ...diskServer,
@@ -107,7 +154,9 @@ export class McpConfigStore {
         url: typeof server.url === 'string' ? server.url : '',
         enabled: server.enabled === true,
         apiKey,
-        hasApiKey: apiKey.length > 0
+        hasApiKey: apiKey.length > 0,
+        env,
+        hasEnv: Boolean(env && Object.keys(env).length > 0)
       })
     }
 
@@ -124,7 +173,7 @@ export class McpConfigStore {
 
   save(input: JsonObject): RuntimeMcpConfig {
     if (!isJsonObject(input)) throw new TypeError('MCP configuration must be an object')
-    const incomingServers = validateServers(input.servers ?? [])
+    const incomingServers = validateServers(input.servers ?? [], true)
     const stored = this.readStoredConfig()
     const currentServers = validateServers(stored.servers ?? [])
     const currentById = new Map(currentServers.map((server) => [server.id as string, server]))
@@ -136,11 +185,22 @@ export class McpConfigStore {
       const secretId = secretIdForServer(serverId)
       const expectedRef = secretRefForServer(serverId)
       const current = currentById.get(serverId)
+      const envSecretId = envSecretIdForServer(serverId)
       const incomingApiKey =
         typeof server.apiKey === 'string' && server.apiKey.length > 0 ? server.apiKey : ''
       const legacyApiKey =
         typeof current?.apiKey === 'string' && current.apiKey.length > 0 ? current.apiKey : ''
       const shouldClear = server.clearApiKey === true
+      const shouldClearEnv = server.clearEnv === true
+      const incomingEnv = server.env
+      if (incomingEnv !== undefined && !validEnv(incomingEnv)) throw new TypeError('MCP env must be a string map')
+      let envRef = current?.envRef === `secret://${envSecretId}` ? `secret://${envSecretId}` : undefined
+      if (shouldClearEnv || server.type !== 'stdio') {
+        envRef = undefined
+      } else if (incomingEnv && Object.keys(incomingEnv).length > 0) {
+        this.vault.setSecret(envSecretId, JSON.stringify(incomingEnv), `MCP environment: ${String(server.name || serverId)}`)
+        envRef = `secret://${envSecretId}`
+      }
       let apiKeyRef = current?.apiKeyRef === expectedRef ? expectedRef : undefined
 
       if (!shouldClear) {
@@ -163,6 +223,7 @@ export class McpConfigStore {
         diskServer.apiKeyRef = apiKeyRef
         retainedSecretIds.add(secretId)
       }
+      if (envRef) diskServer.envRef = envRef
       nextServers.push(diskServer)
     }
 
@@ -173,6 +234,8 @@ export class McpConfigStore {
     for (const current of currentServers) {
       const secretId = secretIdForServer(current.id as string)
       if (!retainedSecretIds.has(secretId)) this.vault.deleteSecret(secretId)
+      const envSecretId = envSecretIdForServer(current.id as string)
+      if (!nextServers.some((server) => server.id === current.id && server.envRef === `secret://${envSecretId}`)) this.vault.deleteSecret(envSecretId)
     }
 
     return this.load()
@@ -193,7 +256,8 @@ export class McpConfigStore {
           url: server.url,
           enabled: server.enabled,
           apiKey: '',
-          hasApiKey: server.apiKey.length > 0
+          hasApiKey: server.apiKey.length > 0,
+          hasEnv: Boolean(server.env && Object.keys(server.env).length > 0)
         } as RuntimeMcpServerConfig
       })
     }

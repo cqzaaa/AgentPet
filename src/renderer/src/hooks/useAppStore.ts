@@ -271,6 +271,10 @@ function sanitizeMcpConfigForRenderer(config: any, fallbackConfig?: any): any {
       const sanitized = { ...server }
       delete sanitized.apiKeyRef
       delete sanitized.clearApiKey
+      delete sanitized.env
+      delete sanitized.envRef
+      delete sanitized.clearEnv
+      sanitized.hasEnv = Boolean(server.env && Object.keys(server.env).length > 0) || Boolean(server.hasEnv) || Boolean(fallback?.hasEnv)
       sanitized.hasApiKey = Boolean(server.apiKey) || Boolean(server.hasApiKey) || Boolean(fallback?.hasApiKey)
       sanitized.apiKey = ''
       return sanitized
@@ -1228,6 +1232,16 @@ export function useAppStore() {
       .catch(error => {
         console.error('初始化 MCP 安全配置失败', error)
       })
+  }, [])
+
+  useEffect(() => {
+    if (!window.api.onMcpConfigUpdated) return
+    return window.api.onMcpConfigUpdated(config => {
+      const sanitized = sanitizeMcpConfigForRenderer(config)
+      setMcpConfig(sanitized)
+      persistSanitizedMcpConfig(sanitized)
+      void refreshMcpServers()
+    })
   }, [])
 
   // 监听微信聊天会话更新通知

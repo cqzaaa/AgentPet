@@ -2,6 +2,7 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
   'request_skill',
   'list_skills',
   'list_mcp_servers',
+  'add_mcp_server',
   'install_skill',
   'wait_skill_ready',
   'request_user_clarification',

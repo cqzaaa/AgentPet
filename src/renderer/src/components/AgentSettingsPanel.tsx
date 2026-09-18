@@ -124,7 +124,7 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
         <div>
           <div className="settings-section-title" style={{ marginBottom: 6 }}>Agents</div>
           <div style={{ fontSize: 13, color: 'var(--text-secondary, #64748b)', lineHeight: 1.6 }}>
-            AgentPet 是默认 Agent。Claude Code、Codex 和 Antigravity CLI 会使用用户本机安装。
+            AgentPet 是默认 Agent。Claude Code、Codex、Antigravity CLI 和 OpenClaw 会使用用户本机安装。
           </div>
         </div>
         <button className="btn-primary" type="button" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

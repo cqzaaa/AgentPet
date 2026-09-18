@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
+import { randomUUID } from 'crypto'
 
 import * as os from 'os'
 import * as fs from 'fs'
@@ -45,13 +46,96 @@ export class SystemExecutor implements IToolExecutor {
           return {
             id: server.id,
             name: server.name,
+            transport: server.type || 'stream',
+            ...(server.type === 'stdio' ? { command: String(server.command || '') } : {}),
             endpoint,
             enabled: server.enabled,
             hasApiKey: Boolean(server.hasApiKey),
+            hasEnv: Boolean(server.hasEnv),
             status: server.enabled ? (active.get(server.id)?.status || 'disconnected') : 'disabled'
           }
         })
-        return { content: JSON.stringify({ servers, supportedTransports: ['stream', 'sse', 'auto'], setupLocation: 'Agent 页面 → MCP 服务' }), success: true }
+        return { content: JSON.stringify({ servers, supportedTransports: ['stream', 'stdio'], setupLocation: 'Agent 页面 → MCP 服务' }), success: true }
+      }
+      if (api === 'add_mcp_server') {
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        const transport = args.transport
+        if (['apiKey', 'token', 'env', 'headers', 'authorization'].some(key => args[key] !== undefined)) {
+          return { content: '不要通过工具参数提交密钥或环境变量；请在 Agent 页面 → MCP 服务中安全填写。', success: false }
+        }
+        if (!name || name.length > 120 || !['stream', 'stdio'].includes(transport)) {
+          return { content: '需要有效的服务名称和传输模式（stream 或 stdio）。', success: false }
+        }
+
+        let url = ''
+        let command = ''
+        let commandArgs: string[] = []
+        let cwd = ''
+        if (transport === 'stream') {
+          try {
+            const parsed = new URL(String(args.url || ''))
+            if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+              throw new Error('invalid endpoint')
+            }
+            url = parsed.toString()
+          } catch {
+            return { content: '请提供不含用户名、密码、查询参数和片段的 HTTP(S) MCP Endpoint；含认证信息的地址请在 Agent 页面 → MCP 服务中配置。', success: false }
+          }
+        } else {
+          command = typeof args.command === 'string' ? args.command.trim() : ''
+          if (!command || command.length > 1024 || !Array.isArray(args.args || []) || (args.args || []).length > 64 || !(args.args || []).every((value: unknown) => typeof value === 'string' && value.length <= 4096)) {
+            return { content: 'stdio 服务需要启动命令；args 必须是字符串数组。', success: false }
+          }
+          commandArgs = args.args || []
+          cwd = typeof args.cwd === 'string' ? args.cwd.trim() : ''
+          if (cwd.length > 1024 || commandArgs.some(value => /^(?:--?)(?:api[-_]?key|token|password|secret|authorization)(?:=|$)/i.test(value))) {
+            return { content: '命令参数中不能包含认证密钥；请在 Agent 页面 → MCP 服务中配置环境变量。', success: false }
+          }
+        }
+
+        const existingServers = mcpManager.getSanitizedSystemMcpConfig().servers
+        const duplicate = existingServers.find(server => {
+          const item = server as Record<string, unknown>
+          return transport === 'stdio'
+            ? item.type === 'stdio' && item.command === command && JSON.stringify(item.args || []) === JSON.stringify(commandArgs)
+            : item.type !== 'stdio' && item.url === url
+        })
+        if (duplicate) {
+          return { content: JSON.stringify({ status: 'already_configured', id: duplicate.id, name: duplicate.name, enabled: duplicate.enabled }), success: true }
+        }
+        if (existingServers.some(server => server.name === name)) {
+          return { content: `已有名为“${name}”的 MCP 服务，请使用不同的名称。`, success: false }
+        }
+        if (context.abortSignal?.aborted) throw new Error('UserAborted')
+
+        const server = {
+          id: `mcp-${randomUUID()}`,
+          name,
+          type: transport as 'stream' | 'stdio',
+          url,
+          apiKey: '',
+          enabled: true,
+          ...(transport === 'stdio' ? { command, args: commandArgs, ...(cwd ? { cwd } : {}) } : {})
+        }
+        mcpManager.saveSystemMcpConfig({ servers: [...existingServers, server] })
+        const connected = await mcpManager.connectSingleServer(server)
+        const config = mcpManager.getSanitizedSystemMcpConfig()
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            try { window.webContents.send('api:mcp-config-updated', config) } catch { /* The window may close during a connection test. */ }
+          }
+        }
+        return {
+          content: JSON.stringify({
+            status: connected ? 'connected' : 'configured_connection_failed',
+            id: server.id,
+            name,
+            transport,
+            toolsCount: connected ? mcpManager.getActiveServers().find(item => item.id === server.id)?.toolsCount || 0 : 0,
+            next: connected ? '服务已连接，可调用发现的工具。' : '配置已保存；请在 Agent 页面 → MCP 服务检查命令或地址，并在需要时安全填写认证信息。'
+          }),
+          success: true
+        }
       }
       if (api === 'list_skills') {
         const result = {
@@ -593,7 +677,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['list_mcp_servers', 'list_skills', 'install_skill', 'update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['list_mcp_servers', 'add_mcp_server', 'list_skills', 'install_skill', 'update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

@@ -65,6 +65,8 @@ export class UnifiedToolExecutor {
           workflow_id: args.workflow_id,
           input_keys: args.inputs && typeof args.inputs === 'object' ? Object.keys(args.inputs) : []
         })}`
+        : name === 'add_mcp_server'
+          ? `${name} ${JSON.stringify({ name: args.name, transport: args.transport, url: args.url, command: args.command, args: args.args, cwd: args.cwd })}`
         : args.command || `${name} ${JSON.stringify(args)}`
       const permission = await permissionManager.requestCommandPermission({
         command: approvalCommand,

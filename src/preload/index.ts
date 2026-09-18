@@ -441,8 +441,14 @@ const api = {
     return (): void => { ipcRenderer.removeListener('api:wechat-session-updated', handler) }
   },
   syncMcpConfig: (config: any): Promise<any> => ipcRenderer.invoke('api:sync-mcp-config', config),
+  revealMcpApiKey: (serverId: string): Promise<string> => ipcRenderer.invoke('api:reveal-mcp-api-key', serverId),
   testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
   getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config'),
+  onMcpConfigUpdated: (callback: (config: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, config: any): void => callback(config)
+    ipcRenderer.on('api:mcp-config-updated', handler)
+    return (): void => { ipcRenderer.removeListener('api:mcp-config-updated', handler) }
+  },
   onRequestGeolocation: (callback: (data: { requestId: number }) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)
     ipcRenderer.on('api:request-geolocation', subscription)

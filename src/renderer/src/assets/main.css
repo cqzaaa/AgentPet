@@ -8105,6 +8105,7 @@ body {
 
 .mcp-modal-card {
   width: 90%;
+  max-height: min(90vh, 720px);
   max-width: 460px;
   background: var(--bg-card, rgba(30, 30, 30, 0.85));
   backdrop-filter: blur(20px);
@@ -8151,6 +8152,8 @@ body {
 
 .mcp-modal-body {
   padding: 24px;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -8178,6 +8181,15 @@ body {
   outline: none;
   transition: all 0.25s ease;
 }
+
+.mcp-modal-body textarea.mcp-input-fancy {
+  height: auto;
+  min-height: 78px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.mcp-modal-body .mcp-input-fancy { min-width: 0; }
 
 .mcp-input-fancy:focus {
   border-color: #3b82f6;
@@ -11846,22 +11858,51 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 }
 
 /* Historical user-message editing shares the chat surface and action styles. */
-.message-edit-panel { width: min(680px, 100%); min-width: min(400px, 100%); }
+.message-row.user .message-bubble.message-bubble-editing {
+  width: min(760px, 100%);
+  max-width: 100%;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 22px;
+  background: #24272d;
+  color: var(--text-primary);
+}
+.light .message-row.user .message-bubble.message-bubble-editing {
+  background: #f3f3f4;
+}
+.message-row.user .message-bubble.message-bubble-editing:focus-within {
+  border-color: var(--inline-code-border);
+}
+.message-edit-panel { width: 100%; min-width: 0; }
 .message-edit-panel textarea {
-  display: block; width: 100%; min-height: 110px; max-height: 45vh;
-  box-sizing: border-box; resize: vertical; padding: 12px 14px;
-  border: 1px solid var(--border-color, #dce3ed); border-radius: 10px;
-  background: var(--bg-input, #fff); color: var(--text-color);
+  display: block; width: 100%; min-height: 64px; max-height: 45vh;
+  box-sizing: border-box; resize: none; padding: 0;
+  border: 0; border-radius: 0;
+  background: transparent; color: inherit;
   font: inherit; line-height: 1.7;
 }
-.message-edit-panel textarea:focus-visible { outline: 2px solid var(--accent-color, #4f8cff); outline-offset: 2px; }
-.message-edit-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.message-edit-footer span { flex: 1 1 200px; font-size: 11px; color: var(--text-muted, #64748b); }
-.message-edit-footer button {
-  padding: 7px 12px; border: 1px solid var(--border-color, #dce3ed); border-radius: 8px;
-  background: var(--bg-input, #fff); color: var(--text-color); font: inherit; font-size: 12px; cursor: pointer;
+.message-edit-panel textarea:focus-visible { outline: none; }
+.message-edit-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.message-edit-hint {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
-.message-edit-footer .message-edit-save { background: var(--accent-color, #4f8cff); border-color: transparent; color: #fff; }
+.message-edit-footer button {
+  flex: 0 0 auto; padding: 7px 12px; border: 1px solid var(--inline-code-border); border-radius: 12px;
+  background: var(--bg-input, #fff); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer;
+}
+.message-edit-footer button:hover:not(:disabled) { background: var(--inline-code-bg); }
+.message-edit-footer .message-edit-save { background: #1b1d20; border-color: transparent; color: #fff; font-weight: 600; }
+.message-edit-footer .message-edit-save:hover:not(:disabled) { background: #34373c; }
+.message-edit-footer .message-edit-save:active:not(:disabled) { background: #111315; }
 .message-edit-footer button:disabled, .msg-copy-btn:disabled { opacity: .45; cursor: not-allowed; }
 .message-edit-footer button:focus-visible { outline: 2px solid var(--accent-color, #4f8cff); outline-offset: 2px; }
 .message-edit-error { margin-top: 10px; color: var(--color-danger, #dc2626); font-size: 12px; }
+
+/* JSON payloads use the native bottom scrollbar instead of a second slider. */
+.payload-tree-content > .payload-horizontal-axis {
+  display: none;
+}
+.payload-tree-content.has-horizontal-axis .json-tree::-webkit-scrollbar:horizontal {
+  height: 12px !important;
+}

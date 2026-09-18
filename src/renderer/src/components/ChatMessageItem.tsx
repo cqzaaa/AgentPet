@@ -1860,7 +1860,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         <span className="msg-send-time">{msg.time}</span>
       </div>
 
-      <div className="message-bubble" style={{ maxWidth: msg.isThinking ? '100%' : undefined }}>
+      <div className={`message-bubble${editing ? ' message-bubble-editing' : ''}`} style={{ maxWidth: msg.isThinking ? '100%' : undefined }}>
         {msg.fileInfo && !msg.fileInfos && (() => {
           const f = msg.fileInfo
           const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
@@ -2067,7 +2067,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
         {editing && (
           <div className="message-edit-panel">
-            <textarea autoFocus aria-label="编辑消息内容" value={editText} disabled={editSaving}
+            <textarea autoFocus aria-label="编辑消息内容" aria-describedby={`message-edit-hint-${msg.id}`} value={editText} disabled={editSaving}
               onChange={(event) => setEditText(event.target.value)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return
@@ -2075,9 +2075,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void saveEdit() }
               }} />
             <div className="message-edit-footer">
-              <span>保存后，此消息之后的对话将重新生成</span>
+              <span id={`message-edit-hint-${msg.id}`} className="message-edit-hint">发送后，此消息之后的对话将重新生成</span>
               <button type="button" disabled={editSaving} onClick={cancelEdit}>取消</button>
-              <button type="button" className="message-edit-save" disabled={editSaving || editDisabled || !editText.trim()} onClick={() => void saveEdit()}>{editSaving ? '保存中…' : '保存并重新发送'}</button>
+              <button type="button" className="message-edit-save" title="发送修改后的消息，并重新生成后续对话" disabled={editSaving || editDisabled || !editText.trim()} onClick={() => void saveEdit()}>{editSaving ? '发送中…' : '发送'}</button>
             </div>
             {editError && <div className="message-edit-error" role="alert">{editError}</div>}
           </div>
