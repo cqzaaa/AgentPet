@@ -32,6 +32,7 @@ export class SubagentRunner {
       parentToolCallId,
       steps: normalized.map(input => ({
         id: input.id,
+        connection: input.connection,
         title: input.title,
         status: 'pending',
         goal: input.prompt,
@@ -97,6 +98,7 @@ export class SubagentRunner {
       seen.add(id)
       return {
         control: input.control,
+        connection: input.connection,
         id,
         title: String(input.title || '').trim().slice(0, 180),
         prompt: String(input.prompt || '').trim().slice(0, 8000),

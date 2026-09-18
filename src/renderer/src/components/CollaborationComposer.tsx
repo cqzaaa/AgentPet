@@ -21,6 +21,8 @@ import {
   ArrowLeft,
   Bot,
   CheckCircle2,
+  Eye,
+  EyeOff,
   FolderOpen,
   GitBranch,
   Loader2,
@@ -32,6 +34,7 @@ import {
   Route,
   ShieldAlert,
   Sparkles,
+  Server,
   TerminalSquare,
   Trash2,
   Zap
@@ -65,6 +68,14 @@ interface TaskNodeData extends Record<string, unknown> {
   agentId: string
   agentName: string
   model?: string
+  connection?: {
+    kind: 'local' | 'ssh'
+    host?: string
+    user?: string
+    port?: number
+    remoteCwd?: string
+    passwordRef?: string
+  }
 }
 
 interface RuntimeLine {
@@ -170,8 +181,13 @@ function TaskNode({ data, selected }: NodeProps<Node<TaskNodeData>>): React.JSX.
         <div className="collab-node-meta">
           <span className="collab-model-pill">
             <Zap size={11} className="collab-model-icon" />
-            {isDefaultModel ? '默认模型' : data.model}
+            <span className="collab-model-name">{isDefaultModel ? '默认模型' : data.model}</span>
           </span>
+          {data.control?.kind !== 'condition' && data.control?.kind !== 'rpa' && (
+            <span className="collab-node-location" title={data.connection?.kind === 'ssh' ? `远端 SSH · ${data.connection.host || '未配置主机'}` : '本机'}>
+              {data.connection?.kind === 'ssh' ? `SSH · ${data.connection.host || '未配置'}` : '本机'}
+            </span>
+          )}
         </div>
       </div>
       <Handle
@@ -781,6 +797,10 @@ export function CollaborationComposer({
     null
   )
   const [modelRetry, setModelRetry] = React.useState(0)
+  const [sshTesting, setSshTesting] = React.useState(false)
+  const [sshTest, setSshTest] = React.useState<{ nodeId: string; key: string; ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } } | null>(null)
+  const [sshPasswords, setSshPasswords] = React.useState<Record<string, string>>({})
+  const [sshPasswordVisible, setSshPasswordVisible] = React.useState(false)
   const [openingLogin, setOpeningLogin] = React.useState(false)
   const [planning, setPlanning] = React.useState(false)
   const [maxConcurrency, setMaxConcurrency] = React.useState(initialWorkflow?.maxConcurrency || 3)
@@ -801,6 +821,16 @@ export function CollaborationComposer({
   const flowInstanceRef = React.useRef<ReactFlowInstance<Node<TaskNodeData>, Edge> | null>(null)
   const selectedNode = nodes.find((node) => node.id === selectedNodeId)
   const selectedAgentId = selectedNode?.data.agentId
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
+  const selectedConnection = selectedNode?.data.connection
+  const selectedConnectionKind = selectedConnection?.kind || 'local'
+  const sshConnectionKey = `${selectedConnection?.host || ''}|${selectedConnection?.user || ''}|${selectedConnection?.port || ''}|${selectedAgentId || ''}`
+  const sshPassword = selectedNodeId ? sshPasswords[selectedNodeId] || '' : ''
+
+  React.useEffect(() => {
+    setSshPasswordVisible(false)
+    setSshTest(null)
+  }, [selectedNodeId])
 
   const fitGeneratedGraph = (): void => {
     window.requestAnimationFrame(() => {
@@ -823,10 +853,22 @@ export function CollaborationComposer({
       .catch(console.error)
   }, [])
 
+  const persistNodePasswords = async (sourceNodes: Node<TaskNodeData>[]): Promise<Node<TaskNodeData>[]> => {
+    const nodesToSave = await Promise.all(sourceNodes.map(async (node) => {
+        const password = sshPasswords[node.id]
+        if (node.data.connection?.kind !== 'ssh' || !password) return node
+        const passwordRef = await window.api.saveAgentSshPassword({ password, existingRef: node.data.connection.passwordRef })
+        return { ...node, data: { ...node.data, connection: { ...node.data.connection, kind: 'ssh' as const, passwordRef } } }
+    }))
+    setNodes(nodesToSave)
+    return nodesToSave
+  }
+
   const saveWorkflow = async (): Promise<void> => {
     setSavingWorkflow(true)
     setSaveError('')
     try {
+      const nodesToSave = await persistNodePasswords(nodes)
       const saved = await window.api.saveWorkflow({
         id: savedWorkflow?.id,
         updatedAt: savedWorkflow?.updatedAt,
@@ -834,7 +876,7 @@ export function CollaborationComposer({
         goal,
         workspacePath,
         maxConcurrency,
-        nodes,
+        nodes: nodesToSave,
         edges
       })
       setSavedWorkflow(saved)
@@ -981,6 +1023,11 @@ export function CollaborationComposer({
 
   React.useEffect(() => {
     if (!selectedAgentId) return
+    if (selectedConnectionKind === 'ssh') {
+      setLoadingModels(false)
+      setModelFailure(null)
+      return
+    }
     let active = true
     const agentId = selectedAgentId
     void Promise.resolve().then(async () => {
@@ -1006,7 +1053,7 @@ export function CollaborationComposer({
     return () => {
       active = false
     }
-  }, [llmConfig.model, selectedAgentId, sessionWorkspacePath, workspacePath, modelRetry])
+  }, [llmConfig.model, selectedAgentId, selectedConnectionKind, sessionWorkspacePath, workspacePath, modelRetry])
 
   const openAgentLogin = async (): Promise<void> => {
     if (!selectedAgentId || openingLogin) return
@@ -1028,6 +1075,51 @@ export function CollaborationComposer({
         node.id === selectedNodeId ? { ...node, data: { ...node.data, ...patch } } : node
       )
     )
+  }
+
+  const updateConnection = (patch: NonNullable<TaskNodeData['connection']>): void => {
+    const nextKind = patch.kind
+    const currentAgent = agents.find((agent) => agent.id === selectedAgentId)
+    const replacement = nextKind === 'ssh'
+      ? agents.find((agent) => agent.id !== 'agentpet')
+      : agents.find(canAutomate)
+    const needsReplacement = nextKind === 'ssh'
+      ? selectedAgentId === 'agentpet'
+      : !currentAgent || !canAutomate(currentAgent)
+    updateSelected({
+      connection: { ...selectedConnection, ...patch },
+      model: undefined,
+      ...(needsReplacement && replacement ? { agentId: replacement.id, agentName: replacement.name } : {})
+    })
+  }
+
+  const testSelectedSsh = async (): Promise<void> => {
+    if (!selectedNodeId || sshTesting) return
+    const nodeId = selectedNodeId
+    const key = sshConnectionKey
+    setSshTest(null)
+    setSshTesting(true)
+    try {
+      const passwordRef = sshPassword
+        ? await window.api.saveAgentSshPassword({ password: sshPassword, existingRef: selectedConnection?.passwordRef })
+        : selectedConnection?.passwordRef
+      if (!passwordRef) throw new Error('请输入 SSH 登录密码')
+      setNodes((current) => current.map((node) => node.id === nodeId
+        ? { ...node, data: { ...node.data, connection: { ...node.data.connection, kind: 'ssh' as const, passwordRef } } }
+        : node))
+      const result = await window.api.testAgentSsh({
+        host: selectedConnection?.host || '',
+        user: selectedConnection?.user || '',
+        port: selectedConnection?.port,
+        passwordRef,
+        agentId: selectedAgentId || ''
+      })
+      setSshTest({ nodeId, key, ...result })
+    } catch (error) {
+      setSshTest({ nodeId, key, ok: false, ssh: { ok: false, message: errorMessage(error, 'SSH 连接失败') } })
+    } finally {
+      setSshTesting(false)
+    }
   }
 
   const generatePlan = async (): Promise<void> => {
@@ -1168,11 +1260,19 @@ export function CollaborationComposer({
       showToast('流程中存在循环依赖，请删除形成环路的连线', 'error')
       return
     }
-    const tasks = nodes.map((node) => ({
+    let readyNodes: Node<TaskNodeData>[]
+    try {
+      readyNodes = await persistNodePasswords(nodes)
+    } catch (error) {
+      showToast(errorMessage(error, '保存 SSH 密码失败'), 'error')
+      return
+    }
+    const tasks = readyNodes.map((node) => ({
       id: node.id,
       title: node.data.title.trim(),
       prompt: node.data.prompt.trim(),
       agentId: node.data.agentId,
+      connection: node.data.connection,
       model: node.data.model && node.data.model !== 'default' ? node.data.model : undefined,
       dependencies: edges.filter((edge) => edge.target === node.id).map((edge) => edge.source),
       control: {
@@ -1196,6 +1296,7 @@ export function CollaborationComposer({
       if (!task.prompt) task.prompt = task.title
     })
     const unavailable = tasks.find((task) => {
+      if (task.connection?.kind === 'ssh') return false
       const agent = agents.find((item) => item.id === task.agentId)
       return agent && !canAutomate(agent)
     })
@@ -1258,6 +1359,9 @@ export function CollaborationComposer({
   }
 
   const automationAgents = agents.filter(canAutomate)
+  const nodeAgentChoices = selectedConnectionKind === 'ssh'
+    ? agents.filter((agent) => agent.id !== 'agentpet')
+    : automationAgents
   const toggleAllowedAgent = (agentId: string): void => {
     agentSelectionTouchedRef.current = true
     setAllowedAgentIds((current) =>
@@ -1646,9 +1750,21 @@ export function CollaborationComposer({
                   <>
                     <div className="collab-inspector-divider">
                       <span>{selectedNode ? '节点配置' : '流程设置'}</span>
+                      {selectedNode && mode === 'auto' && (
+                        <button type="button" onClick={() => setSelectedNodeId(undefined)}>
+                          返回自动编排
+                        </button>
+                      )}
                     </div>
                     {selectedNode ? (
                       <div className="collab-node-form">
+                        <label className="collab-field compact">
+                          <span>任务名称</span>
+                          <input
+                            value={selectedNode.data.title}
+                            onChange={(event) => updateSelected({ title: event.target.value })}
+                          />
+                        </label>
                         <label className="collab-field compact">
                           <span>节点类型</span>
                           <select
@@ -1701,6 +1817,15 @@ export function CollaborationComposer({
                             onChange={(control) => updateSelected({ control })}
                           />
                         )}
+                        <details className="collab-execution-rules">
+                          <summary>
+                            执行规则
+                            <small>
+                              {selectedNode.data.control?.kind === 'condition' ? '' : `循环 ${selectedNode.data.control?.repeat || 1} 次 · `}
+                              依赖 {edges.filter((edge) => edge.target === selectedNode.id).length} 个节点
+                            </small>
+                          </summary>
+                          <div className="collab-execution-rule-fields">
                         {selectedNode.data.control?.kind !== 'condition' && (
                           <label className="collab-field compact">
                             <span>
@@ -1723,11 +1848,9 @@ export function CollaborationComposer({
                             />
                           </label>
                         )}
-                        <label className="collab-field compact">
-                          <span>
-                            等待哪些节点 <small>也可通过画布连线设置</small>
-                          </span>
-                          <div className="wf-dependency-list">
+                        <fieldset className="collab-dependencies">
+                          <legend>等待哪些节点 <small>也可通过画布连线设置</small></legend>
+                          <div className="collab-dependency-list">
                             {nodes
                               .filter((node) => node.id !== selectedNode.id)
                               .map((node) => {
@@ -1736,8 +1859,9 @@ export function CollaborationComposer({
                                     item.source === node.id && item.target === selectedNode.id
                                 )
                                 return (
-                                  <label key={node.id}>
-                                    <input
+                                  <div className="collab-dependency-item" key={node.id}>
+                                    <label>
+                                      <input
                                       type="checkbox"
                                       checked={!!edge}
                                       onChange={(event) =>
@@ -1762,8 +1886,9 @@ export function CollaborationComposer({
                                               )
                                         )
                                       }
-                                    />
-                                    {node.data.title}
+                                      />
+                                      <span>{node.data.title}</span>
+                                    </label>
                                     {edge && node.data.control?.kind === 'condition' && (
                                       <select
                                         aria-label={`${node.data.title}的分支`}
@@ -1782,27 +1907,14 @@ export function CollaborationComposer({
                                         <option value="false">否</option>
                                       </select>
                                     )}
-                                  </label>
+                                  </div>
                                 )
                               })}
+                            {nodes.length === 1 && <p>当前没有其他节点，添加节点后可设置依赖。</p>}
                           </div>
-                        </label>
-                        {mode === 'auto' && (
-                          <button
-                            type="button"
-                            className="collab-model-action"
-                            onClick={() => setSelectedNodeId(undefined)}
-                          >
-                            返回自动编排
-                          </button>
-                        )}
-                        <label className="collab-field compact">
-                          <span>任务名称</span>
-                          <input
-                            value={selectedNode.data.title}
-                            onChange={(event) => updateSelected({ title: event.target.value })}
-                          />
-                        </label>
+                        </fieldset>
+                          </div>
+                        </details>
                         <label className="collab-field compact">
                           <span>执行 Agent</span>
                           <div className="collab-select-with-icon">
@@ -1813,27 +1925,67 @@ export function CollaborationComposer({
                               value={selectedNode.data.agentId}
                               onChange={(event) => changeAgent(event.target.value)}
                             >
-                              {automationAgents.map((agent) => (
+                              {nodeAgentChoices.map((agent) => (
                                 <option key={agent.id} value={agent.id}>
-                                  {agent.name} ·{' '}
-                                  {
-                                    STATUS_LABEL[
-                                      agent.id === 'agentpet'
-                                        ? 'ready'
-                                        : agent.probe?.status || 'unchecked'
-                                    ]
-                                  }
+                                  {agent.name}{selectedConnectionKind === 'local' ? ` · ${STATUS_LABEL[agent.id === 'agentpet' ? 'ready' : agent.probe?.status || 'unchecked']}` : ''}
                                 </option>
                               ))}
                             </select>
                           </div>
                         </label>
+                        {selectedNode.data.control?.kind !== 'condition' && selectedNode.data.control?.kind !== 'rpa' && (
+                          <fieldset className="collab-connection">
+                            <legend>连接方式</legend>
+                            <div className="collab-connection-options" role="group" aria-label="连接方式">
+                              <button type="button" className={selectedConnectionKind === 'local' ? 'active' : ''} aria-pressed={selectedConnectionKind === 'local'} onClick={() => updateConnection({ kind: 'local' })}>
+                                <TerminalSquare size={15} />本地 CLI
+                              </button>
+                              <button type="button" className={selectedConnectionKind === 'ssh' ? 'active' : ''} aria-pressed={selectedConnectionKind === 'ssh'} onClick={() => updateConnection({ kind: 'ssh' })}>
+                                <Server size={15} />远端 SSH
+                              </button>
+                            </div>
+                            {selectedConnectionKind === 'ssh' && (
+                              <div className="collab-ssh-fields">
+                                <p>先测试 SSH 登录，再检测远端 {selectedAgent?.name || 'Agent'} CLI{selectedAgent?.protocol === 'acp-v1' ? ' 和 ACP 握手。' : '。'}</p>
+                                {selectedAgent && selectedAgent.protocol !== 'acp-v1' && <p className="collab-ssh-warning">{selectedAgent.name} 目前仅支持远端 CLI 检测，SSH 任务执行尚未接入。</p>}
+                                <label className="collab-field compact"><span>服务器地址</span><input value={selectedConnection?.host || ''} onChange={(event) => updateConnection({ kind: 'ssh', host: event.target.value })} placeholder="例如 192.168.1.10" autoComplete="off" /></label>
+                                <div className="collab-ssh-row">
+                                  <label className="collab-field compact"><span>用户名</span><input value={selectedConnection?.user || ''} onChange={(event) => updateConnection({ kind: 'ssh', user: event.target.value })} placeholder="例如 root" autoComplete="username" /></label>
+                                  <label className="collab-field compact"><span>端口</span><input type="number" min="1" max="65535" value={selectedConnection?.port ?? ''} onChange={(event) => updateConnection({ kind: 'ssh', port: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="22" /></label>
+                                </div>
+                                <div className="collab-field compact">
+                                  <label className="collab-ssh-password-label" htmlFor={`collab-ssh-password-${selectedNode.id}`}>登录密码</label>
+                                  <div className="collab-ssh-password-input">
+                                    <input id={`collab-ssh-password-${selectedNode.id}`} type={sshPasswordVisible ? 'text' : 'password'} value={sshPassword} onChange={(event) => { setSshPasswords((current) => ({ ...current, [selectedNode.id]: event.target.value })); setSshTest(null) }} placeholder={selectedConnection?.passwordRef ? '已保存；留空表示沿用' : '输入服务器登录密码'} autoComplete="current-password" />
+                                    <button type="button" aria-label={sshPasswordVisible ? '隐藏密码' : '显示密码'} aria-pressed={sshPasswordVisible} onClick={() => setSshPasswordVisible((visible) => !visible)}>
+                                      {sshPasswordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                                    </button>
+                                  </div>
+                                </div>
+                                <p>{selectedConnection?.passwordRef ? '密码已加密保存。输入新密码可替换。' : '测试连接或保存工作流时，密码会加密保存；工作流仅记录凭据引用。'}</p>
+                                <label className="collab-field compact"><span>远端工作目录</span><input value={selectedConnection?.remoteCwd || ''} onChange={(event) => updateConnection({ kind: 'ssh', remoteCwd: event.target.value })} placeholder="/home/user/project" autoComplete="off" /></label>
+                                <div className="collab-ssh-test-line">
+                                  <button type="button" onClick={() => void testSelectedSsh()} disabled={sshTesting || !selectedConnection?.host?.trim() || !selectedConnection?.user?.trim() || (!sshPassword && !selectedConnection?.passwordRef)}>
+                                    {sshTesting ? <Loader2 size={14} className="spin" /> : <Server size={14} />}
+                                    {sshTesting ? '检测中…' : '测试 SSH 与远端 CLI'}
+                                  </button>
+                                </div>
+                                {sshTest?.nodeId === selectedNode.id && sshTest.key === sshConnectionKey && (
+                                  <div className="collab-ssh-results" role="status">
+                                    <div className={sshTest.ssh.ok ? 'success' : 'error'}><strong>SSH 登录</strong><span>{sshTest.ssh.message}</span></div>
+                                    <div className={sshTest.cli ? sshTest.cli.ok ? 'success' : 'error' : 'pending'}><strong>远端 CLI</strong><span>{sshTest.cli?.message || '等待 SSH 登录成功'}</span></div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </fieldset>
+                        )}
                         <label className="collab-field compact">
                           <span>
-                            模型 <small>{loadingModels ? '检测中…' : '来自本地 CLI'}</small>
+                            模型 <small>{selectedConnectionKind === 'ssh' ? '使用远端默认模型' : loadingModels ? '检测中…' : '来自本地 CLI'}</small>
                           </span>
                           <select
-                            disabled={loadingModels || !!modelFailure}
+                            disabled={selectedConnectionKind === 'ssh' || loadingModels || !!modelFailure}
                             aria-busy={loadingModels}
                             value={selectedNode.data.model || 'default'}
                             onChange={(event) => updateSelected({ model: event.target.value })}

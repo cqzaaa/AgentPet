@@ -240,6 +240,10 @@ const api = {
   listAgents: (): Promise<any[]> => ipcRenderer.invoke('api:list-agents'),
   probeAgent: (agentId: string, cwd?: string): Promise<any> =>
     ipcRenderer.invoke('api:probe-agent', agentId, cwd),
+  saveAgentSshPassword: (input: { password: string; existingRef?: string }): Promise<string> =>
+    ipcRenderer.invoke('api:save-agent-ssh-password', input),
+  testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }): Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } }> =>
+    ipcRenderer.invoke('api:test-agent-ssh', input),
   getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => ipcRenderer.invoke('api:agent-model-status', agentId, cwd, model),
   loginAgent: (agentId: string): Promise<void> => ipcRenderer.invoke('api:login-agent', agentId),
   listAgentModels: (agentId: string, cwd?: string, configuredModel?: string): Promise<any[]> =>

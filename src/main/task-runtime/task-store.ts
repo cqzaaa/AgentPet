@@ -64,7 +64,7 @@ export class TaskStore {
           stepStatus, item.detail || null, item.resultSummary || item.detail || null, toJson(item.artifactPaths || []), item.retryCount || previous?.retry_count || 0,
           item.agentRole || null, item.agentId || 'agentpet', item.model || null, item.prompt || null, startedAt, stepCompletedAt, now
         )
-        await database.run('UPDATE task_steps SET control_json = ? WHERE task_run_id = ? AND id = ?', toJson(item.control), id, item.id)
+        await database.run('UPDATE task_steps SET control_json = ?, connection_json = ? WHERE task_run_id = ? AND id = ?', toJson(item.control), toJson(item.connection), id, item.id)
         for (const artifactPath of item.artifactPaths || []) {
           await database.run(
             'INSERT OR IGNORE INTO task_artifacts (id, task_run_id, task_step_id, path, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -370,6 +370,7 @@ export class TaskStore {
     await this.ensureColumn(this.database, 'task_steps', 'prompt', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'model', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'control_json', 'TEXT')
+    await this.ensureColumn(this.database, 'task_steps', 'connection_json', 'TEXT')
     await this.ensureColumn(this.database, 'subagent_tasks', 'agent_id', "TEXT DEFAULT 'agentpet'")
     await this.ensureColumn(this.database, 'subagent_tasks', 'model', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'workspace_path', 'TEXT')
@@ -411,6 +412,7 @@ export class TaskStore {
 
   private mapStep(row: TaskRow): TaskStep {
     const control = parseJson<TaskStep['control']>(row.control_json, undefined)
-    return { control, id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, agentId: row.agent_id || 'agentpet', model: row.model || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
+    const connection = parseJson<TaskStep['connection']>(row.connection_json, undefined)
+    return { control, connection, id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, agentId: row.agent_id || 'agentpet', model: row.model || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
   }
 }

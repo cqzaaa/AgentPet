@@ -9,6 +9,7 @@ export type SubagentRole = typeof SUBAGENT_ROLES[number]
 
 export interface TaskPlanInputStep {
   control?: import('../../preload/workflow-types').WorkflowControl
+  connection?: import('../../preload/workflow-types').WorkflowNodeConnection
   id: string
   title: string
   status: 'pending' | 'in_progress' | 'completed' | 'blocked'
@@ -105,6 +106,7 @@ export interface SubagentTask {
 
 export interface DelegateTaskInput {
   control?: import('../../preload/workflow-types').WorkflowControl
+  connection?: import('../../preload/workflow-types').WorkflowNodeConnection
   id: string
   title: string
   prompt: string

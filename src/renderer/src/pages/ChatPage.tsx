@@ -7,7 +7,7 @@ import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessage
 import { AgentPetMark } from '../components/AgentPetMark'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
-import type { CollaborationSnapshot } from '../components/CollaborationRunCard'
+import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
 import { SubtaskCapsuleGroup, SubtaskDetailDrawer } from '../components/SubtaskCapsuleGroup'
 import { PermissionApprovalCard } from '../components/PermissionApprovalCard'
 import { getModelIcon } from '../utils/modelIcons'
@@ -241,16 +241,15 @@ function ChatPageImpl(): React.JSX.Element {
       return () => {
         active = false
       }
-    const isChatDelegatedRun = (run: any): boolean =>
-      String(run?.messageId || '').startsWith('delegate-') &&
-      !String(run?.parentToolCallId || '').startsWith('orchestration-')
+    const isCollaborationRun = (run: any): boolean =>
+      String(run?.messageId || '').startsWith('delegate-')
     const deletedRunIds = new Set<string>()
     void window.api
       .listTaskRuns(activeSessionId)
       .then((items: any[]) => {
         if (!active) return
         const snapshots = (Array.isArray(items) ? items : []).filter(
-          (item) => isChatDelegatedRun(item?.run) && !deletedRunIds.has(item.run.id)
+          (item) => isCollaborationRun(item?.run) && !deletedRunIds.has(item.run.id)
         )
         setCollaborationRuns(snapshots)
         const earliestRun = [...snapshots].sort(
@@ -260,7 +259,7 @@ function ChatPageImpl(): React.JSX.Element {
       })
       .catch(() => undefined)
     const unsubscribe = window.api.onTaskRunUpdated((update: any) => {
-      if (!active || update?.run?.sessionId !== activeSessionId || !isChatDelegatedRun(update.run))
+      if (!active || update?.run?.sessionId !== activeSessionId || !isCollaborationRun(update.run))
         return
       if (update.action === 'deleted') deletedRunIds.add(update.run.id)
       else if (deletedRunIds.has(update.run.id)) return
@@ -1283,9 +1282,19 @@ function ChatPageImpl(): React.JSX.Element {
   // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
     if (highlightedMessageId == null) return () => {}
-    const messageIndex = activeSessMessages.findIndex(
-      (message) => message.id === highlightedMessageId
-    )
+    const messageIndex = [
+      ...activeSessMessages.map((message, index) => ({
+        key: `message:${String(message.id)}`,
+        createdAt: Number(message.id) || index
+      })),
+      ...collaborationRuns
+        .filter((snapshot) => String(snapshot.run.parentToolCallId || '').startsWith('orchestration-'))
+        .map((snapshot) => ({
+          key: `orchestration:${String(snapshot.run.id)}`,
+          createdAt: Number(snapshot.run.createdAt) || 0
+        }))
+    ].sort((left, right) => left.createdAt - right.createdAt)
+      .findIndex((item) => item.key === `message:${String(highlightedMessageId)}`)
     if (messageIndex < 0) return () => {}
 
     const scrollTimer = window.setTimeout(() => {
@@ -1302,7 +1311,7 @@ function ChatPageImpl(): React.JSX.Element {
       window.clearTimeout(scrollTimer)
       window.clearTimeout(clearTimer)
     }
-  }, [activeSessMessages, highlightedMessageId, setHighlightedMessageId])
+  }, [activeSessMessages, collaborationRuns, highlightedMessageId, setHighlightedMessageId])
 
   useEffect(() => {
     // 全局阻止浏览器默认的拖拽打开文件行为，防止不小心把文件拖到页面空白处导致应用跳转
@@ -1315,16 +1324,22 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }, [])
 
-  // Keep the virtual list data stable while only a message's streaming text is
-  // changing. Delegated runs render inside their owning message instead of as
-  // separate timeline rows.
+  // Canvas runs have no parent chat message, so include them as timeline rows.
+  // Chat delegated runs still render inside their owning message.
   const messageIdsRef = useRef<string[]>([])
   const messageIds = useMemo(() => {
-    const next = activeSessMessages
-      .map((message: any, index: number) => ({
+    const next = [
+      ...activeSessMessages.map((message: any, index: number) => ({
         key: `message:${String(message.id)}`,
         createdAt: Number(message.id) || index
-      }))
+      })),
+      ...collaborationRuns
+        .filter((snapshot) => String(snapshot.run.parentToolCallId || '').startsWith('orchestration-'))
+        .map((snapshot) => ({
+          key: `orchestration:${String(snapshot.run.id)}`,
+          createdAt: Number(snapshot.run.createdAt) || 0
+        }))
+    ]
       .sort((left, right) => left.createdAt - right.createdAt)
       .map((item) => item.key)
     const previous = messageIdsRef.current
@@ -1333,7 +1348,7 @@ function ChatPageImpl(): React.JSX.Element {
     }
     messageIdsRef.current = next
     return next
-  }, [activeSessMessages])
+  }, [activeSessMessages, collaborationRuns])
 
   // Build message and request relationships once per message update. This
   // replaces the previous slice(0, index).findLast(...) work performed by
@@ -1387,6 +1402,18 @@ function ChatPageImpl(): React.JSX.Element {
 
   const itemContent = useCallback(
     (_index: number, timelineId: string) => {
+      if (timelineId.startsWith('orchestration:')) {
+        const snapshot = collaborationById.get(timelineId.slice('orchestration:'.length))
+        if (!snapshot) return null
+        return <CollaborationRunCard
+          snapshot={snapshot}
+          onOpenDetails={(runId) => {
+            setOpenedCollaborationRunId(runId)
+            setShowCollaborationComposer(true)
+          }}
+          onPreviewFile={handlePreviewFile}
+        />
+      }
       const rawId = timelineId.slice('message:'.length)
       const message = messageById.get(rawId) || messageById.get(Number(rawId))
       if (!message) return null
@@ -1415,6 +1442,7 @@ function ChatPageImpl(): React.JSX.Element {
       )
     },
     [
+      collaborationById,
       collaborationsByParentMessageId,
       messageById,
       requestMessageById,

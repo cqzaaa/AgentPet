@@ -123,7 +123,7 @@ export function WorkflowPage({ store }: { store: AppStore }): React.JSX.Element 
     if (startingId) return
     setStartingId(workflow.id)
     try {
-      const result = await window.api.runWorkflow(workflow.id)
+      const result = await window.api.runWorkflow(workflow.id, store.activeSessionId)
       setRunId(result.taskRunId)
       store.showToast('工作流已开始执行', 'success')
     } catch (cause) {
@@ -289,7 +289,7 @@ function WorkflowEditor({
       <CollaborationComposer
         key={runId || workflow?.id || 'new'}
         embedded
-        sessionId={`workflow:${workflow?.id || 'draft'}`}
+        sessionId={store.activeSessionId}
         workspacePath={workflow?.workspacePath}
         llmConfig={store.llmConfig}
         initialGoal=""

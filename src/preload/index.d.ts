@@ -129,6 +129,8 @@ declare global {
       onTokenUsage: (callback: (data: any) => void) => () => void
       listAgents: () => Promise<any[]>
       probeAgent: (agentId: string, cwd?: string) => Promise<any>
+      saveAgentSshPassword: (input: { password: string; existingRef?: string }) => Promise<string>
+      testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }) => Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } }>
       getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => Promise<{ status: string; models: any[]; error?: string }>
       loginAgent: (agentId: string) => Promise<void>
       listAgentModels: (agentId: string, cwd?: string, configuredModel?: string) => Promise<any[]>

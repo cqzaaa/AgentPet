@@ -13,6 +13,15 @@ export interface WorkflowControl {
   repeat?: number
 }
 
+export interface WorkflowNodeConnection {
+  kind: 'local' | 'ssh'
+  host?: string
+  user?: string
+  port?: number
+  remoteCwd?: string
+  passwordRef?: string
+}
+
 export interface WorkflowNode {
   id: string
   type?: string
@@ -23,6 +32,7 @@ export interface WorkflowNode {
     agentId: string
     agentName: string
     model?: string
+    connection?: WorkflowNodeConnection
     control?: WorkflowControl
     [key: string]: unknown
   }

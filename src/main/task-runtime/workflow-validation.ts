@@ -46,6 +46,13 @@ export function validateWorkflow(draft: WorkflowDraft): void {
   if (ids.size !== draft.nodes.length) throw new Error('节点 ID 不能重复')
   for (const node of draft.nodes) {
     if (!node.data.title.trim()) throw new Error('请填写节点名称')
+    if (node.data.connection?.kind === 'ssh') {
+      const connection = node.data.connection
+      if ('password' in connection) throw new Error('SSH 密码不能明文保存在工作流中')
+      if (connection.passwordRef !== undefined &&
+        (typeof connection.passwordRef !== 'string' || !/^secret:\/\/agent-ssh-[0-9a-f-]{36}$/i.test(connection.passwordRef)))
+        throw new Error('SSH 密码引用无效')
+    }
     const control = node.data.control
     if (control?.kind === 'condition') {
       const condition = control.condition

@@ -9692,21 +9692,155 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 }
 
 .collab-inspector-divider {
-  margin: 20px 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 16px 0 14px;
   color: var(--text-secondary, #64748b);
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.1em;
 }
 
+.collab-inspector-divider button {
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: #3f66f2;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.collab-inspector-divider button:focus-visible {
+  outline: 2px solid #3f66f2;
+  outline-offset: 3px;
+}
+
 .collab-node-form {
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 12px;
-  background: var(--card-bg, #ffffff);
-  border: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  gap: 16px;
+  min-width: 0;
+}
+
+.collab-execution-rules {
+  min-width: 0;
+  border-top: 1px solid var(--border-color, #dce3ed);
+  border-bottom: 1px solid var(--border-color, #dce3ed);
+}
+
+.collab-execution-rules > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 0;
+  color: var(--text-color, #0f172a);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collab-execution-rules > summary::-webkit-details-marker { display: none; }
+.collab-execution-rules > summary::after { content: '⌄'; color: var(--text-secondary, #64748b); font-size: 15px; }
+.collab-execution-rules[open] > summary::after { transform: rotate(180deg); }
+.collab-execution-rules > summary small {
+  margin-left: auto;
+  color: var(--text-secondary, #64748b);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.collab-execution-rules > summary:focus-visible {
+  outline: 2px solid #3f66f2;
+  outline-offset: 2px;
+}
+
+.collab-execution-rule-fields {
+  display: grid;
+  gap: 14px;
+  padding: 3px 0 14px;
+}
+
+.collab-dependencies {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.collab-dependencies legend {
+  margin-bottom: 8px;
+  color: var(--text-secondary, #475569);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.collab-dependencies legend small {
+  font-weight: 400;
+}
+
+.collab-dependency-list {
+  display: grid;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.collab-dependency-list > p {
+  margin: 0;
+  color: var(--text-secondary, #64748b);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.collab-dependency-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  color: var(--text-color, #0f172a);
+  font-size: 11.5px;
+}
+
+.collab-dependency-item > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.collab-dependency-item input[type='checkbox'] {
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  accent-color: #3f66f2;
+}
+
+.collab-dependency-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collab-dependency-item select {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #0f172a);
+  font-size: 11px;
 }
 
 .collab-delete-node {
@@ -9928,9 +10062,8 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   line-height: 1.3;
   color: var(--text-color, #0f172a);
   margin-bottom: 2px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
 }
 
@@ -9938,11 +10071,203 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   display: flex;
   align-items: center;
   gap: 3px;
+  min-width: 0;
 }
+
+.collab-node-location {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #64748b);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.collab-connection {
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.collab-connection legend {
+  margin-bottom: 7px;
+  color: var(--text-secondary, #475569);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.collab-connection-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-color, #0f172a) 4%, var(--card-bg, #fff));
+}
+
+.collab-connection-options button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.collab-connection-options button.active {
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #0f172a);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .1);
+}
+
+.collab-connection-options button:focus-visible,
+.collab-ssh-test-line button:focus-visible {
+  outline: 2px solid #3f66f2;
+  outline-offset: 2px;
+}
+
+.collab-ssh-fields {
+  display: grid;
+  gap: 11px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-bg, #fff) 95%, var(--bg-color, #f1f5f9));
+}
+
+.collab-ssh-fields > p {
+  margin: 0;
+  color: var(--text-secondary, #64748b);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.collab-ssh-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 9px;
+}
+
+.collab-ssh-row small {
+  font-weight: 400;
+}
+
+.collab-ssh-password-label {
+  color: var(--text-secondary, #475569);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.collab-ssh-password-input {
+  position: relative;
+}
+
+.collab-ssh-password-input input {
+  padding-right: 40px;
+}
+
+.collab-ssh-password-input button {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.collab-ssh-password-input button:hover {
+  color: var(--text-color, #0f172a);
+  background: color-mix(in srgb, var(--text-color, #0f172a) 6%, transparent);
+}
+
+.collab-ssh-password-input button:focus-visible {
+  outline: 2px solid #3f66f2;
+  outline-offset: 1px;
+}
+
+.collab-ssh-test-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  flex-wrap: wrap;
+}
+
+.collab-ssh-test-line button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 7px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #0f172a);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.collab-ssh-test-line button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.collab-ssh-test-line span {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.collab-ssh-test-line span.success { color: #15803d; }
+.collab-ssh-test-line span.error { color: #b91c1c; }
+.collab-ssh-fields > p.collab-ssh-warning { color: #b45309; overflow-wrap: anywhere; }
+
+.collab-ssh-results {
+  display: grid;
+  gap: 6px;
+}
+
+.collab-ssh-results > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 7px;
+  background: var(--card-bg, #fff);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.collab-ssh-results strong { color: var(--text-secondary, #475569); }
+.collab-ssh-results span { overflow-wrap: anywhere; }
+.collab-ssh-results .success span { color: #15803d; }
+.collab-ssh-results .error span { color: #b91c1c; }
+.collab-ssh-results .pending span { color: var(--text-secondary, #64748b); }
 
 .collab-model-pill {
   display: inline-flex;
   align-items: center;
+  flex: 0 1 auto;
   gap: 2px;
   padding: 1px 4px;
   border-radius: 3.5px;
@@ -9951,7 +10276,16 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   color: var(--text-secondary, #64748b);
   font-size: 8.5px;
   font-weight: 600;
-  max-width: 100%;
+  min-width: 0;
+  max-width: 60%;
+  white-space: nowrap;
+}
+
+.collab-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .collab-model-icon {

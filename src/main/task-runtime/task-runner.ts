@@ -397,7 +397,8 @@ export class TaskRunner {
       const message = error instanceof Error ? error.message : String(error)
       const retryCount = step.retryCount || 0
       const transientExternalFailure = TRANSIENT_EXTERNAL_AGENT_ERROR.test(message)
-      const maxRetries = step.control?.kind === 'rpa' || step.control?.kind === 'condition' ? 0 : transientExternalFailure ? 4 : 2
+      const permanentRemoteFailure = step.connection?.kind === 'ssh' && /authentication methods failed|permission denied|主机密钥|密码引用|缺少已保存的登录密码|远端文件下载失败|远端 ACP 桥接尚未接入/i.test(message)
+      const maxRetries = step.control?.kind === 'rpa' || step.control?.kind === 'condition' || permanentRemoteFailure ? 0 : transientExternalFailure ? 4 : 2
       if (retryCount < maxRetries) {
         const retryDelayMs = transientExternalFailure ? Math.min(15_000, 2_000 * (2 ** retryCount)) : 0
         await this.store.setStepStatus(run.id, step.id, 'pending', {

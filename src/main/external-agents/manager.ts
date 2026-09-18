@@ -3,6 +3,8 @@ import { openLoginTerminal } from './login-terminal'
 import path from 'node:path'
 import { BUILTIN_EXTERNAL_AGENTS } from './catalog'
 import { AcpExternalAgentClient } from './acp-client'
+import { runRemoteAcpPrompt } from './remote-acp-client'
+import type { WorkflowNodeConnection } from '../../preload/workflow-types'
 import { CodexAppServerClient } from './codex-app-server-client'
 import { LocalCliAgentClient } from './local-cli-client'
 import { AntigravityAcpBridge, createAntigravityAcpConnection } from './bridges/antigravity-bridge'
@@ -189,9 +191,28 @@ export class ExternalAgentManager {
     return this.client.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, onProtocolEvent, options)
   }
 
+  public async runRemotePrompt(
+    request: ExternalAgentRunRequest,
+    connection: WorkflowNodeConnection,
+    runId: string,
+    stepId: string,
+    onUpdate?: (update: unknown) => void | Promise<void>,
+    onProtocolEvent?: (event: ExternalAgentProtocolEvent) => void | Promise<void>,
+    options?: { signal?: AbortSignal; onProgress?: (detail: string) => Promise<void> }
+  ): Promise<ExternalAgentRunResult> {
+    if (!request.prompt?.trim()) throw new Error('prompt 不能为空')
+    const definition = await this.find(request.agentId)
+    if (!definition.enabled) throw new Error(`Agent ${definition.name} 已被禁用`)
+    return runRemoteAcpPrompt(this.client, definition, { ...request, prompt: request.prompt.trim() }, connection, runId, stepId, onUpdate, onProtocolEvent, options)
+  }
+
   public async describe(agentId: string): Promise<Pick<ExternalAgentDefinition, 'id' | 'name' | 'protocol'>> {
     const definition = await this.find(agentId)
     return { id: definition.id, name: definition.name, protocol: definition.protocol }
+  }
+
+  public async getDefinition(agentId: string): Promise<ExternalAgentDefinition> {
+    return this.find(agentId)
   }
 
   public async listModels(agentId: string, cwd?: string, configuredModel?: string): Promise<ExternalAgentModel[]> {

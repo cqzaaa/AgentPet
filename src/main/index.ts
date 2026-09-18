@@ -55,6 +55,8 @@ import { localMeetingRuntime } from './local-meeting-runtime'
 import { SessionEventStore } from './session-events/session-event-store'
 import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
 import { externalAgentManager } from './external-agents'
+import type { ExternalAgentProtocolEvent } from './external-agents/types'
+import { loadAgentSshPassword, saveAgentSshPassword } from './security/agent-ssh-password'
 import { EventBatcher } from './external-agents/event-batcher'
 import globalAssistantPageContextSkill from './tools/builtin/global-assistant-page-context/SKILL.md?raw'
 
@@ -1472,6 +1474,7 @@ app.whenReady().then(() => {
         title: node.data.title,
         prompt: node.data.prompt || node.data.title,
         agentId: node.data.agentId,
+        connection: node.data.connection,
         model: node.data.model,
         dependencies: workflow.edges
           .filter((edge) => edge.target === node.id)
@@ -1511,6 +1514,15 @@ app.whenReady().then(() => {
   ipcMain.handle('api:probe-agent', (_event, agentId: string, cwd?: string) =>
     externalAgentManager.probe(agentId, cwd)
   )
+  ipcMain.handle('api:save-agent-ssh-password', (_event, input: { password: string; existingRef?: string }) =>
+    saveAgentSshPassword(input.password, input.existingRef)
+  )
+  ipcMain.handle('api:test-agent-ssh', async (_event, input: import('./external-agents/ssh-connection').SshConnectionInput) => {
+    const { testSshConnection } = await import('./external-agents/ssh-connection')
+    const definition = await externalAgentManager.getDefinition(input.agentId)
+    if (definition.protocol === 'internal') throw new Error('请选择远端 CLI Agent')
+    return testSshConnection(input, loadAgentSshPassword(input.passwordRef), definition)
+  })
   ipcMain.handle(
     'api:list-agent-models',
     (_event, agentId: string, cwd?: string, configuredModel?: string) =>
@@ -1532,6 +1544,15 @@ app.whenReady().then(() => {
     input: any
   ): Promise<{ taskRunId: string; status: string }> {
     const tasks = Array.isArray(input?.tasks) ? input.tasks : []
+    for (const task of tasks.filter((item) => item?.connection?.kind === 'ssh')) {
+      const connection = task.connection
+      if (!connection.host || !connection.user || !connection.passwordRef)
+        throw new Error(`「${String(task.title || '未命名节点')}」需要填写 SSH 地址、用户名和密码`)
+      loadAgentSshPassword(connection.passwordRef)
+      const definition = await externalAgentManager.getDefinition(String(task.agentId || ''))
+      if (definition.protocol !== 'acp-v1')
+        throw new Error(`「${String(task.title || '未命名节点')}」的 ${definition.name} SSH 任务执行尚未接入，目前仅支持远端 CLI 检测`)
+    }
     const sessionId = String(input?.sessionId || 'default')
     const title = String(input?.title || '多 Agent 协作')
       .trim()
@@ -5451,15 +5472,14 @@ app.whenReady().then(() => {
           payload?: Record<string, unknown>
         }>((events) => taskRunner.notifyBatch(request.run.id, events))
         try {
-          const result = await externalAgentManager.runPrompt(
-            {
-              agentId: selectedAgentId,
-              prompt: request.prompt,
-              cwd,
-              model: request.step.model
-            },
-            (update) => {
-              return eventBatcher.push({
+          const agentRequest = {
+            agentId: selectedAgentId,
+            prompt: request.prompt,
+            cwd,
+            model: request.step.model
+          }
+          const onAgentUpdate = (update: unknown): Promise<void> =>
+            eventBatcher.push({
                 action: 'agent_event',
                 taskStepId: request.step.id,
                 payload: {
@@ -5469,10 +5489,9 @@ app.whenReady().then(() => {
                   update: sanitizeTraceValue(update)
                 }
               })
-            },
-            (protocolEvent) => {
-              const wirePrefix = protocolEvent.protocol === 'acp-v1' ? 'acp_wire' : 'agent_wire'
-              return eventBatcher.push({
+          const onProtocolEvent = (protocolEvent: ExternalAgentProtocolEvent): Promise<void> => {
+            const wirePrefix = protocolEvent.protocol === 'acp-v1' ? 'acp_wire' : 'agent_wire'
+            return eventBatcher.push({
                 action:
                   protocolEvent.messageType === 'request'
                     ? `${wirePrefix}_request`
@@ -5493,9 +5512,23 @@ app.whenReady().then(() => {
                   payload: sanitizeTraceValue(protocolEvent.payload)
                 }
               })
-            },
-            { signal: request.signal }
-          )
+          }
+          const result = request.step.connection?.kind === 'ssh'
+            ? await externalAgentManager.runRemotePrompt(
+                agentRequest,
+                request.step.connection,
+                request.run.id,
+                request.step.id,
+                onAgentUpdate,
+                onProtocolEvent,
+                { signal: request.signal, onProgress: request.reportProgress }
+              )
+            : await externalAgentManager.runPrompt(
+                agentRequest,
+                onAgentUpdate,
+                onProtocolEvent,
+                { signal: request.signal }
+              )
           await eventBatcher.flush()
           await taskRunner.notify(request.run.id, 'agent_response', request.step.id, {
             agentId: selectedAgentId,
@@ -5517,11 +5550,16 @@ app.whenReady().then(() => {
             stopReason: result.stopReason
           })
           const parsedResult = extractExecutionResult(result.text || '')
+          const localArtifactSummary = request.step.connection?.kind === 'ssh' && result.artifactPaths?.length
+            ? `\n\n已复制到本地的产物：\n${result.artifactPaths.map((artifact) => `- ${artifact}`).join('\n')}`
+            : ''
           return {
             resultSummary:
-              parsedResult.resultSummary || `${selectedAgentId} 已完成任务（${result.stopReason}）`,
+              (parsedResult.resultSummary || `${selectedAgentId} 已完成任务（${result.stopReason}）`) + localArtifactSummary,
             artifactPaths: [
-              ...new Set([...(result.artifactPaths || []), ...parsedResult.artifactPaths])
+              ...new Set(request.step.connection?.kind === 'ssh'
+                ? result.artifactPaths || []
+                : [...(result.artifactPaths || []), ...parsedResult.artifactPaths])
             ]
           }
         } catch (error) {
