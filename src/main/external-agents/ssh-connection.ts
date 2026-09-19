@@ -19,6 +19,14 @@ export interface SshConnectionResult {
   ok: boolean
   ssh: { ok: boolean; message: string }
   cli?: { ok: boolean; message: string }
+  needsHostTrust?: boolean
+}
+
+export class SshHostTrustRequiredError extends Error {
+  constructor() {
+    super('尚未信任此服务器，请先确认主机指纹')
+    this.name = 'SshHostTrustRequiredError'
+  }
 }
 
 export async function openVerifiedSsh(input: Pick<SshConnectionInput, 'host' | 'user' | 'port'>, password: string, signal?: AbortSignal): Promise<Client> {
@@ -74,7 +82,7 @@ export async function openVerifiedSsh(input: Pick<SshConnectionInput, 'host' | '
 
 async function trustedHostKeys(host: string, port: number): Promise<Set<string>> {
   const knownHosts = join(homedir(), '.ssh', 'known_hosts')
-  if (!existsSync(knownHosts)) throw new Error('尚未信任此服务器，请先在系统终端 SSH 登录一次并确认主机指纹')
+  if (!existsSync(knownHosts)) throw new SshHostTrustRequiredError()
   const keygen = await resolveExecutable('ssh-keygen', ['ssh-keygen.exe'])
   if (!keygen) throw new Error('本机未找到 ssh-keygen，无法验证服务器指纹')
   const lookup = port === 22 ? host : `[${host}]:${port}`
@@ -95,7 +103,7 @@ async function trustedHostKeys(host: string, port: number): Promise<Set<string>>
       keys.add(fields[2])
     }
   }
-  if (!keys.size) throw new Error('尚未信任此服务器，请先在系统终端 SSH 登录一次并确认主机指纹')
+  if (!keys.size) throw new SshHostTrustRequiredError()
   return keys
 }
 

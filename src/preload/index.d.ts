@@ -130,7 +130,8 @@ declare global {
       listAgents: () => Promise<any[]>
       probeAgent: (agentId: string, cwd?: string) => Promise<any>
       saveAgentSshPassword: (input: { password: string; existingRef?: string }) => Promise<string>
-      testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }) => Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } }>
+      testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }) => Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string }; needsHostTrust?: boolean }>
+      openAgentSshTrustTerminal: (input: { host: string; user: string; port?: number }) => Promise<void>
       getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => Promise<{ status: string; models: any[]; error?: string }>
       loginAgent: (agentId: string) => Promise<void>
       listAgentModels: (agentId: string, cwd?: string, configuredModel?: string) => Promise<any[]>
@@ -150,6 +151,7 @@ declare global {
       controlTaskRun: (taskRunId: string, action: 'pause' | 'resume' | 'cancel') => Promise<any | null>
       retryTaskStep: (taskRunId: string, taskStepId: string) => Promise<any | null>
       retryFailedTaskSteps: (taskRunId: string) => Promise<any | null>
+      rerunTaskRun: (taskRunId: string) => Promise<any | null>
       onTaskRunUpdated: (callback: (data: any) => void) => () => void
       setStoragePath: (pathStr: string) => Promise<string>
       getStoragePath: () => Promise<string>

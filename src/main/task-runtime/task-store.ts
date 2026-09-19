@@ -319,6 +319,37 @@ export class TaskStore {
     return this.getRun(taskRunId)
   }
 
+  public async rerunAllSteps(taskRunId: string): Promise<{ run: TaskRun; steps: TaskStep[] } | null> {
+    const database = await this.getDatabase()
+    const run = await database.get<TaskRow>('SELECT * FROM task_runs WHERE id = ? AND deleted_at IS NULL', taskRunId)
+    const rows = await database.all<TaskRow[]>('SELECT id FROM task_steps WHERE task_run_id = ? ORDER BY sequence', taskRunId)
+    if (!run || rows.length === 0) return null
+    const now = Date.now()
+
+    await this.withTransaction(database, async () => {
+      await database.run(
+        `UPDATE task_steps
+         SET status = ?, detail = ?, result_summary = NULL, artifact_paths_json = ?,
+             retry_count = 0, started_at = NULL, completed_at = NULL, updated_at = ?
+         WHERE task_run_id = ?`,
+        'pending', 'Full workflow rerun requested; waiting to run.', '[]', now, taskRunId
+      )
+      await database.run(
+        'UPDATE task_runs SET status = ?, updated_at = ?, completed_at = NULL WHERE id = ?',
+        'pending', now, taskRunId
+      )
+      await this.insertEvent(database, taskRunId, undefined, 'run_rerun_requested', {
+        stepIds: rows.map(row => String(row.id))
+      }, now)
+      await this.saveCheckpoint(database, taskRunId, {
+        status: 'pending',
+        rerunAllStepIds: rows.map(row => String(row.id))
+      }, now)
+    })
+
+    return this.getRun(taskRunId)
+  }
+
   private async getDatabase(): Promise<Database> {
     const filename = join(getActiveStorageDir(), 'chat', 'chat.db')
     if (this.database && this.filename === filename) return this.database

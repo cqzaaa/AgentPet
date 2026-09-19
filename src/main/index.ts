@@ -1518,10 +1518,25 @@ app.whenReady().then(() => {
     saveAgentSshPassword(input.password, input.existingRef)
   )
   ipcMain.handle('api:test-agent-ssh', async (_event, input: import('./external-agents/ssh-connection').SshConnectionInput) => {
-    const { testSshConnection } = await import('./external-agents/ssh-connection')
+    const { SshHostTrustRequiredError, testSshConnection } = await import('./external-agents/ssh-connection')
     const definition = await externalAgentManager.getDefinition(input.agentId)
     if (definition.protocol === 'internal') throw new Error('请选择远端 CLI Agent')
-    return testSshConnection(input, loadAgentSshPassword(input.passwordRef), definition)
+    try {
+      return await testSshConnection(input, loadAgentSshPassword(input.passwordRef), definition)
+    } catch (error) {
+      if (error instanceof SshHostTrustRequiredError) {
+        return {
+          ok: false,
+          ssh: { ok: false, message: error.message },
+          needsHostTrust: true
+        }
+      }
+      throw error
+    }
+  })
+  ipcMain.handle('api:open-agent-ssh-trust-terminal', async (_event, input: { host: string; user: string; port?: number }) => {
+    const { openSshTrustTerminal } = await import('./external-agents/login-terminal')
+    await openSshTrustTerminal(input)
   })
   ipcMain.handle(
     'api:list-agent-models',
@@ -1723,6 +1738,10 @@ app.whenReady().then(() => {
   ipcMain.handle('api:retry-failed-task-steps', async (_event, taskRunId: string) => {
     if (!taskRunId || typeof taskRunId !== 'string') return null
     return taskRunner.retryFailedSteps(taskRunId)
+  })
+  ipcMain.handle('api:rerun-task-run', async (_event, taskRunId: string) => {
+    if (!taskRunId || typeof taskRunId !== 'string') return null
+    return taskRunner.rerunAllSteps(taskRunId)
   })
   ipcMain.handle('api:delete-task-run', async (_event, taskRunId: string) => {
     if (!taskRunId || typeof taskRunId !== 'string') return false
@@ -5544,12 +5563,20 @@ app.whenReady().then(() => {
               artifactPaths: result.artifactPaths || []
             })
           })
+          const stopReason = String(result.stopReason || 'unknown')
+          if (/^(cancelled|canceled|error|failed)$/i.test(stopReason)) {
+            throw new Error(`${agent.name} ACP 任务${/cancel/i.test(stopReason) ? '已取消' : '失败'}（stopReason: ${stopReason}），远端未返回有效结果`)
+          }
+          const responseText = String(result.text || '').trim()
+          if (!responseText) {
+            throw new Error(`${agent.name} ACP 未返回任何正文（stopReason: ${stopReason}）`)
+          }
           await taskRunner.notify(request.run.id, 'agent_completed', request.step.id, {
             agentId: selectedAgentId,
             sessionId: result.sessionId,
             stopReason: result.stopReason
           })
-          const parsedResult = extractExecutionResult(result.text || '')
+          const parsedResult = extractExecutionResult(responseText)
           const localArtifactSummary = request.step.connection?.kind === 'ssh' && result.artifactPaths?.length
             ? `\n\n已复制到本地的产物：\n${result.artifactPaths.map((artifact) => `- ${artifact}`).join('\n')}`
             : ''

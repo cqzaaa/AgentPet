@@ -426,6 +426,7 @@ function subagentTraceLabel(type: string): string {
     'subagent/step_retrying': '准备重试',
     'subagent/retry_step': '手动重试',
     'subagent/retry_failed_steps': '手动重试失败节点',
+    'subagent/rerun_all_steps': '手动重新执行整个流程',
     'subagent/step_completed': '执行完成',
     'subagent/step_failed': '执行失败',
     'subagent/blocked': '任务阻塞',
@@ -572,7 +573,8 @@ function DelegateWorkflow({
     const persisted = persistedById.get(id) || task
     const taskEvents = related.filter(event =>
       event.data?.taskStepId === id ||
-      (event.type === 'subagent/retry_failed_steps' && Array.isArray(event.data?.activity?.retriedStepIds) && event.data.activity.retriedStepIds.includes(id)))
+      (event.type === 'subagent/retry_failed_steps' && Array.isArray(event.data?.activity?.retriedStepIds) && event.data.activity.retriedStepIds.includes(id)) ||
+      (event.type === 'subagent/rerun_all_steps' && Array.isArray(event.data?.activity?.rerunStepIds) && event.data.activity.rerunStepIds.includes(id)))
     const runningEvent = taskEvents.find(event => event.type === 'subagent/step_running')
     const terminalEvent = [...taskEvents].reverse().find(event =>
       ['subagent/step_completed', 'subagent/step_failed', 'subagent/cancelled', 'subagent/blocked'].includes(event.type))
@@ -670,6 +672,7 @@ function DelegateWorkflow({
     'subagent/step_retrying',
     'subagent/retry_step',
     'subagent/retry_failed_steps',
+    'subagent/rerun_all_steps',
     'subagent/step_completed',
     'subagent/step_failed',
     'subagent/blocked',

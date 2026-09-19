@@ -32,5 +32,5 @@ export function extractExecutionResult(response: string): { resultSummary: strin
     .map(line => line.match(/^ARTIFACT:\s*(.+)$/i)?.[1]?.trim())
     .filter((value): value is string => !!value)
   const resultSummary = response.replace(/^ARTIFACT:\s*.+$/gim, '').trim()
-  return { resultSummary: resultSummary || 'Step completed.', artifactPaths: [...new Set(artifactPaths)] }
+  return { resultSummary, artifactPaths: [...new Set(artifactPaths)] }
 }

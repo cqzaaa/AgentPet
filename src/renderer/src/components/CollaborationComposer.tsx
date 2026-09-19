@@ -603,6 +603,8 @@ function runtimeMessage(
     return { kind: 'status', text: step?.resultSummary || step?.detail || '任务完成' }
   if (update.action === 'step_retrying')
     return { kind: 'error', text: step?.detail || '执行失败，正在重试' }
+  if (update.action === 'rerun_all_steps')
+    return { kind: 'status', text: '全部节点已重置，正在重新执行整个流程' }
   if (update.action === 'step_failed' || update.action === 'blocked')
     return { kind: 'error', text: step?.detail || '任务执行失败' }
   if (update.action === 'cancelled') return { kind: 'error', text: '任务已取消' }
@@ -798,10 +800,11 @@ export function CollaborationComposer({
   )
   const [modelRetry, setModelRetry] = React.useState(0)
   const [sshTesting, setSshTesting] = React.useState(false)
-  const [sshTest, setSshTest] = React.useState<{ nodeId: string; key: string; ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } } | null>(null)
+  const [sshTest, setSshTest] = React.useState<{ nodeId: string; key: string; ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string }; needsHostTrust?: boolean } | null>(null)
   const [sshPasswords, setSshPasswords] = React.useState<Record<string, string>>({})
   const [sshPasswordVisible, setSshPasswordVisible] = React.useState(false)
   const [openingLogin, setOpeningLogin] = React.useState(false)
+  const [openingSshTrust, setOpeningSshTrust] = React.useState(false)
   const [planning, setPlanning] = React.useState(false)
   const [maxConcurrency, setMaxConcurrency] = React.useState(initialWorkflow?.maxConcurrency || 3)
   const [executionPhase, setExecutionPhase] = React.useState<
@@ -816,6 +819,11 @@ export function CollaborationComposer({
   const [controllingRun, setControllingRun] = React.useState(false)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [retryingFailed, setRetryingFailed] = React.useState(false)
+  const [confirmRerunAll, setConfirmRerunAll] = React.useState(false)
+  const [rerunningAll, setRerunningAll] = React.useState(false)
+  const rerunDialogRef = React.useRef<HTMLElement>(null)
+  const rerunCancelRef = React.useRef<HTMLButtonElement>(null)
+  const rerunReturnFocusRef = React.useRef<HTMLElement | null>(null)
   const workspaceOverriddenRef = React.useRef(false)
   const agentSelectionTouchedRef = React.useRef(false)
   const flowInstanceRef = React.useRef<ReactFlowInstance<Node<TaskNodeData>, Edge> | null>(null)
@@ -980,11 +988,28 @@ export function CollaborationComposer({
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      if (confirmRerunAll) {
+        if (!rerunningAll) setConfirmRerunAll(false)
+        return
+      }
+      onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [confirmRerunAll, onClose, rerunningAll])
+
+  React.useEffect(() => {
+    if (!confirmRerunAll) return undefined
+    rerunReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    rerunCancelRef.current?.focus()
+    return () => {
+      if (rerunReturnFocusRef.current?.isConnected) rerunReturnFocusRef.current.focus()
+      rerunReturnFocusRef.current = null
+    }
+  }, [confirmRerunAll])
 
   React.useEffect(() => {
     let active = true
@@ -1119,6 +1144,22 @@ export function CollaborationComposer({
       setSshTest({ nodeId, key, ok: false, ssh: { ok: false, message: errorMessage(error, 'SSH 连接失败') } })
     } finally {
       setSshTesting(false)
+    }
+  }
+
+  const openSelectedSshTrust = async (): Promise<void> => {
+    if (openingSshTrust) return
+    const host = selectedConnection?.host?.trim() || ''
+    const user = selectedConnection?.user?.trim() || ''
+    if (!host || !user) return
+    setOpeningSshTrust(true)
+    try {
+      await window.api.openAgentSshTrustTerminal({ host, user, port: selectedConnection?.port })
+      showToast('已打开 SSH 终端，请核对指纹并输入 yes，登录后再重新检测', 'info')
+    } catch (error) {
+      showToast(errorMessage(error, '无法打开 SSH 终端'), 'error')
+    } finally {
+      setOpeningSshTrust(false)
     }
   }
 
@@ -1468,6 +1509,43 @@ export function CollaborationComposer({
     }
   }
 
+  const rerunEntireWorkflow = async (): Promise<void> => {
+    if (!executionRunId || rerunningAll) return
+    setRerunningAll(true)
+    try {
+      const result = await window.api.rerunTaskRun(executionRunId)
+      if (!result) throw new Error('未找到该编排')
+      const snapshot = await window.api.getTaskRun(executionRunId)
+      if (snapshot?.run) setRuntimeSnapshot({ run: snapshot.run, steps: snapshot.steps || [] })
+      setSelectedReadonlyStepId(null)
+      setShowRuntimeGraph(false)
+      setExecutionPhase('running')
+      showToast(`${runtimeSteps.length} 个节点已重置，正在重新执行整个流程`, 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '重新执行整个流程失败，请稍后重试', 'error')
+    } finally {
+      setRerunningAll(false)
+      setConfirmRerunAll(false)
+    }
+  }
+
+  const keepFocusInRerunDialog = (event: React.KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'Tab') return
+    const controls = rerunDialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
+    )
+    if (!controls?.length) return
+    const first = controls[0]
+    const last = controls[controls.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   const executionGraph = (
     <div className={`collab-readonly-stage ${selectedReadonlyStep ? 'has-detail' : ''}`}>
       <div className="collab-readonly-graph">
@@ -1570,6 +1648,8 @@ export function CollaborationComposer({
         role={embedded ? 'region' : 'dialog'}
         aria-modal={embedded ? undefined : true}
         aria-labelledby="collab-title"
+        aria-hidden={confirmRerunAll ? true : undefined}
+        inert={confirmRerunAll ? true : undefined}
       >
         <header className="collab-header">
           <button
@@ -1963,7 +2043,19 @@ export function CollaborationComposer({
                                   </div>
                                 </div>
                                 <p>{selectedConnection?.passwordRef ? '密码已加密保存。输入新密码可替换。' : '测试连接或保存工作流时，密码会加密保存；工作流仅记录凭据引用。'}</p>
-                                <label className="collab-field compact"><span>远端工作目录</span><input value={selectedConnection?.remoteCwd || ''} onChange={(event) => updateConnection({ kind: 'ssh', remoteCwd: event.target.value })} placeholder="/home/user/project" autoComplete="off" /></label>
+                                <label className="collab-field compact">
+                                  <span>远端工作目录 <small>可选</small></span>
+                                  <input
+                                    value={selectedConnection?.remoteCwd || ''}
+                                    onChange={(event) => updateConnection({ kind: 'ssh', remoteCwd: event.target.value })}
+                                    placeholder="留空时自动创建专用目录"
+                                    aria-describedby={`collab-remote-cwd-help-${selectedNode.id}`}
+                                    autoComplete="off"
+                                  />
+                                  <small id={`collab-remote-cwd-help-${selectedNode.id}`} className="collab-remote-cwd-help">
+                                    留空会按本地项目生成稳定目录，重新执行仍使用同一目录；高级用户可填写 Linux 绝对路径。
+                                  </small>
+                                </label>
                                 <div className="collab-ssh-test-line">
                                   <button type="button" onClick={() => void testSelectedSsh()} disabled={sshTesting || !selectedConnection?.host?.trim() || !selectedConnection?.user?.trim() || (!sshPassword && !selectedConnection?.passwordRef)}>
                                     {sshTesting ? <Loader2 size={14} className="spin" /> : <Server size={14} />}
@@ -1974,6 +2066,15 @@ export function CollaborationComposer({
                                   <div className="collab-ssh-results" role="status">
                                     <div className={sshTest.ssh.ok ? 'success' : 'error'}><strong>SSH 登录</strong><span>{sshTest.ssh.message}</span></div>
                                     <div className={sshTest.cli ? sshTest.cli.ok ? 'success' : 'error' : 'pending'}><strong>远端 CLI</strong><span>{sshTest.cli?.message || '等待 SSH 登录成功'}</span></div>
+                                    {sshTest.needsHostTrust && (
+                                      <div className="collab-ssh-trust-help">
+                                        <span>系统终端会自动填写 SSH 命令；请核对服务器指纹后输入 yes。</span>
+                                        <button type="button" onClick={() => void openSelectedSshTrust()} disabled={openingSshTrust}>
+                                          {openingSshTrust ? <Loader2 size={13} className="spin" /> : <TerminalSquare size={13} />}
+                                          {openingSshTrust ? '正在打开…' : '打开终端并信任'}
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -2265,8 +2366,11 @@ export function CollaborationComposer({
                       <button
                         className="collab-return-flow collab-btn-danger"
                         type="button"
-                        disabled={controllingRun || retryingFailed}
-                        onClick={() => setConfirmDelete(true)}
+                        disabled={controllingRun || retryingFailed || rerunningAll}
+                        onClick={() => {
+                          setConfirmRerunAll(false)
+                          setConfirmDelete(true)
+                        }}
                       >
                         <Trash2 size={14} />
                         删除编排
@@ -2308,23 +2412,39 @@ export function CollaborationComposer({
                     )}
                   </>
                 )}
-                {executionPhase === 'finished' && failedRuntimeSteps.length > 0 && (
-                  <button
-                    className="collab-retry-failed"
-                    type="button"
-                    disabled={retryingFailed}
-                    aria-busy={retryingFailed}
-                    onClick={() => {
-                      void retryFailedSteps()
-                    }}
-                  >
-                    {retryingFailed ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : (
-                      <RotateCcw size={14} />
+                {executionPhase === 'finished' && (
+                  <>
+                    {failedRuntimeSteps.length > 0 && (
+                      <button
+                        className="collab-retry-failed"
+                        type="button"
+                        disabled={retryingFailed || rerunningAll}
+                        aria-busy={retryingFailed}
+                        onClick={() => {
+                          void retryFailedSteps()
+                        }}
+                      >
+                        {retryingFailed ? (
+                          <Loader2 size={14} className="spin" />
+                        ) : (
+                          <RotateCcw size={14} />
+                        )}
+                        重新执行失败节点
+                      </button>
                     )}
-                    重新执行失败节点
-                  </button>
+                    <button
+                      className="collab-rerun-all"
+                      type="button"
+                      disabled={retryingFailed || rerunningAll}
+                      onClick={() => {
+                        setConfirmDelete(false)
+                        setConfirmRerunAll(true)
+                      }}
+                    >
+                      <RotateCcw size={14} />
+                      重新执行整个流程
+                    </button>
+                  </>
                 )}
                 {executionPhase === 'finished' && (
                   <button
@@ -2348,6 +2468,63 @@ export function CollaborationComposer({
           )}
         </footer>
       </section>
+      {confirmRerunAll && (
+        <div
+          className="collab-rerun-dialog-backdrop"
+          role="presentation"
+        >
+          <section
+            ref={rerunDialogRef}
+            className="collab-rerun-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="collab-rerun-dialog-title"
+            aria-describedby="collab-rerun-dialog-description"
+            onKeyDown={keepFocusInRerunDialog}
+          >
+            <header>
+              <span className="collab-rerun-dialog-icon" aria-hidden="true">
+                <RotateCcw size={18} />
+              </span>
+              <span>
+                <small>完整重跑</small>
+                <h2 id="collab-rerun-dialog-title">重新执行整个流程？</h2>
+              </span>
+            </header>
+            <div className="collab-rerun-dialog-body">
+              <p id="collab-rerun-dialog-description">
+                将重置并重新执行全部 {runtimeSteps.length} 个节点，包括已经完成的节点。
+              </p>
+              <div className="collab-rerun-dialog-warning">
+                <ShieldAlert size={16} aria-hidden="true" />
+                <span>这可能再次调用远端服务、消耗额度，或重复修改工作区文件。</span>
+              </div>
+              <p className="collab-rerun-dialog-note">历史执行记录和已有文件不会被删除。</p>
+            </div>
+            <footer>
+              <button
+                ref={rerunCancelRef}
+                className="secondary"
+                type="button"
+                disabled={rerunningAll}
+                onClick={() => setConfirmRerunAll(false)}
+              >
+                取消
+              </button>
+              <button
+                className="confirm"
+                type="button"
+                disabled={rerunningAll}
+                aria-busy={rerunningAll}
+                onClick={() => void rerunEntireWorkflow()}
+              >
+                {rerunningAll ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
+                {rerunningAll ? '正在重新执行…' : '重新执行整个流程'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

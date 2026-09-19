@@ -45,3 +45,13 @@ export async function openLoginTerminal(executable: string, args: string[], env?
     })
   })
 }
+
+export async function openSshTrustTerminal(input: { host: string; user: string; port?: number }): Promise<void> {
+  const host = String(input.host || '').trim()
+  const user = String(input.user || '').trim()
+  const port = input.port === undefined ? 22 : Number(input.port)
+  if (!host || host.startsWith('-') || !/^[a-zA-Z0-9_.:-]+$/.test(host)) throw new Error('请输入有效的服务器地址')
+  if (!user || !/^[a-zA-Z_][a-zA-Z0-9_.-]*$/.test(user)) throw new Error('请输入有效的 SSH 用户名')
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SSH 端口必须在 1–65535 之间')
+  await openLoginTerminal('ssh', ['-p', String(port), '-l', user, host])
+}

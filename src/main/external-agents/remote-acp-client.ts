@@ -1,4 +1,5 @@
 import * as acp from '@agentclientprotocol/sdk'
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -26,29 +27,117 @@ function execChannel(client: Client, command: string): Promise<ClientChannel> {
   })
 }
 
-async function resolveRemoteCwd(client: Client, configured?: string): Promise<string> {
+interface RemoteWorkspace {
+  path: string
+  home: string
+  automatic: boolean
+}
+
+async function execText(client: Client, command: string, timeoutMessage: string): Promise<string> {
+  const channel = await execChannel(client, remoteCommand(command))
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let output = ''
+    let stderr = ''
+    const finish = (error?: Error, value?: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(value || '')
+    }
+    const timer = setTimeout(() => {
+      channel.destroy()
+      finish(new Error(timeoutMessage))
+    }, 10000)
+    channel.on('data', (chunk: Buffer) => { output = (output + String(chunk)).slice(-4096) })
+    channel.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + String(chunk)).slice(-2048) })
+    channel.once('error', (error) => finish(error))
+    channel.once('close', (code) => {
+      if (code === 0) finish(undefined, output.trim())
+      else finish(new Error(stderr.trim() || `远端命令退出，代码 ${code ?? '未知'}`))
+    })
+  })
+}
+
+function workspaceName(localCwd: string): string {
+  const resolved = path.resolve(localCwd)
+  const base = path.basename(resolved)
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 40) || 'workspace'
+  const identity = process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  const suffix = createHash('sha256').update(identity).digest('hex').slice(0, 8)
+  return `${base}-${suffix}`
+}
+
+async function resolveRemoteCwd(client: Client, configured: string | undefined, localCwd: string): Promise<RemoteWorkspace> {
   const requested = configured?.trim()
   if (requested && (!path.posix.isAbsolute(requested) || requested.includes('\0')))
     throw new Error('远端工作目录必须是 Linux 绝对路径')
-  const command = requested ? `cd -- ${quote(requested)} && pwd -P` : 'pwd -P'
-  const channel = await execChannel(client, remoteCommand(command))
-  return new Promise((resolve, reject) => {
-    let output = ''
-    let stderr = ''
-    const timer = setTimeout(() => {
-      channel.destroy()
-      reject(new Error('读取远端工作目录超时'))
-    }, 10000)
-    channel.on('data', (chunk: Buffer) => { output = (output + String(chunk)).slice(-4096) })
-    channel.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + String(chunk)).slice(-1024) })
-    channel.once('error', (error) => { clearTimeout(timer); reject(error) })
-    channel.once('close', (code) => {
-      clearTimeout(timer)
-      const cwd = output.trim().split(/\r?\n/).at(-1) || ''
-      if (code === 0 && path.posix.isAbsolute(cwd)) resolve(cwd)
-      else reject(new Error(stderr.trim() || '远端工作目录不存在或不可访问'))
-    })
+  const homeOutput = await execText(client, 'printf "%s\\n" "$HOME"', '读取远端用户目录超时')
+  const home = homeOutput.split(/\r?\n/).at(-1)?.trim() || ''
+  if (!path.posix.isAbsolute(home)) throw new Error('无法确定远端用户目录')
+
+  if (requested) {
+    const output = await execText(client, `cd -- ${quote(requested)} && pwd -P`, '读取远端工作目录超时')
+    const resolved = output.split(/\r?\n/).at(-1)?.trim() || ''
+    if (!path.posix.isAbsolute(resolved)) throw new Error('远端工作目录不存在或不可访问')
+    return { path: resolved, home, automatic: false }
+  }
+
+  const generated = path.posix.join(home, '.agentpet', 'workspaces', workspaceName(localCwd))
+  const output = await execText(client, `mkdir -p -- ${quote(generated)} && cd -- ${quote(generated)} && pwd -P`, '创建远端工作目录超时')
+  const resolved = output.split(/\r?\n/).at(-1)?.trim() || ''
+  if (!path.posix.isAbsolute(resolved)) throw new Error('自动创建远端工作目录失败')
+  return { path: resolved, home, automatic: true }
+}
+
+function workspacePrompt(prompt: string, remoteCwd: string): string {
+  return [
+    'REMOTE WORKSPACE CONTRACT (mandatory):',
+    `- The only workspace for this task is: ${remoteCwd}`,
+    '- The ACP host may show a different default workspace. Ignore that default.',
+    `- Before every shell or file operation, explicitly operate inside ${remoteCwd}.`,
+    '- Do not inspect or modify ~/.openclaw/workspace or any unrelated project.',
+    `- Keep every created or modified deliverable under ${remoteCwd}.`,
+    '- Do not send the completion summary before tool calls. After the last tool call finishes, send a final summary.',
+    '- In the final response, list each deliverable on its own line as: ARTIFACT: <absolute path>',
+    '',
+    prompt
+  ].join('\n')
+}
+
+function completedWorkspaceLocations(update: acp.SessionUpdate, remoteCwd: string): string[] {
+  const record = update as Record<string, unknown>
+  if (record.sessionUpdate !== 'tool_call_update' || record.status !== 'completed' || !Array.isArray(record.locations)) return []
+  return record.locations.flatMap((location) => {
+    if (!location || typeof location !== 'object') return []
+    const remotePath = (location as Record<string, unknown>).path
+    if (typeof remotePath !== 'string' || !remotePath.trim()) return []
+    const resolved = path.posix.resolve(remoteCwd, remotePath.trim())
+    const relative = path.posix.relative(remoteCwd, resolved)
+    return relative === '..' || relative.startsWith('../') || path.posix.isAbsolute(relative) ? [] : [resolved]
   })
+}
+
+function findWorkspaceViolation(update: acp.SessionUpdate, workspace: RemoteWorkspace): string | undefined {
+  if (!update || typeof update !== 'object') return undefined
+  const record = update as Record<string, unknown>
+  if (record.sessionUpdate !== 'tool_call' || typeof record.title !== 'string') return undefined
+  const title = record.title
+  const cdPattern = /\bcd\s+(?:--\s+)?(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+  for (const match of title.matchAll(cdPattern)) {
+    const candidate = (match[1] || match[2] || match[3] || '').trim()
+    if (!candidate || candidate === '.') continue
+    const expanded = candidate === '~' ? workspace.home : candidate.startsWith('~/') ? path.posix.join(workspace.home, candidate.slice(2)) : candidate
+    const resolved = path.posix.resolve(workspace.path, expanded)
+    const relative = path.posix.relative(workspace.path, resolved)
+    if (relative === '..' || relative.startsWith('../') || path.posix.isAbsolute(relative)) return candidate
+  }
+  return undefined
 }
 
 function openSftp(client: Client): Promise<SFTPWrapper> {
@@ -79,22 +168,31 @@ function safeLocalPath(root: string, remoteRoot: string, remotePath: string): st
   const relative = path.posix.relative(remoteRoot, remotePath)
   if (relative === '..' || relative.startsWith('../') || path.posix.isAbsolute(relative))
     throw new Error(`产物不在远端工作目录内：${remotePath}`)
-  const segments = relative.split('/').filter(Boolean).map(segment => segment.replace(/[<>:"\\|?*\x00-\x1f]/g, '_'))
+  const segments = relative
+    .split('/')
+    .filter(Boolean)
+    .map((segment) =>
+      [...segment].map((character) => (character.charCodeAt(0) < 32 || /[<>:"\\|?*]/.test(character) ? '_' : character)).join('')
+    )
   return path.join(root, ...segments)
 }
 
 async function downloadArtifacts(
   client: Client,
   text: string,
+  observedPaths: Iterable<string>,
   remoteCwd: string,
   localCwd: string,
   runId: string,
   stepId: string,
   onProgress?: (detail: string) => Promise<void>
 ): Promise<string[]> {
-  const declared = [...new Set(text.split(/\r?\n/)
-    .map(line => line.match(/^ARTIFACT:\s*(.+)$/i)?.[1]?.trim())
-    .filter((value): value is string => Boolean(value)))]
+  const declared = [...new Set([
+    ...text.split(/\r?\n/)
+      .map(line => line.match(/^ARTIFACT:\s*(.+)$/i)?.[1]?.trim())
+      .filter((value): value is string => Boolean(value)),
+    ...observedPaths
+  ])]
   if (!declared.length) return []
   const outputRoot = path.join(localCwd, 'remote-artifacts', runId.replace(/[^a-zA-Z0-9_-]/g, '_'), stepId.replace(/[^a-zA-Z0-9_-]/g, '_'))
   const sftp = await openSftp(client)
@@ -159,8 +257,9 @@ export async function runRemoteAcpPrompt(
   const onAbort = (): void => { ssh.end() }
   options?.signal?.addEventListener('abort', onAbort, { once: true })
   try {
-    const remoteCwd = await resolveRemoteCwd(ssh, connection.remoteCwd)
-    await options?.onProgress?.(`已连接远端工作目录 ${remoteCwd}`)
+    const workspace = await resolveRemoteCwd(ssh, connection.remoteCwd, request.cwd)
+    const remoteCwd = workspace.path
+    await options?.onProgress?.(`${workspace.automatic ? '已自动创建并连接' : '已连接'}远端工作目录 ${remoteCwd}`)
     const executable = definition.executable
     if (!executable || executable.startsWith('-') || !/^[a-zA-Z0-9._/-]+$/.test(executable))
       throw new Error('远端 ACP 命令无效')
@@ -179,18 +278,44 @@ export async function runRemoteAcpPrompt(
       Readable.toWeb(wireTaps?.inbound || channel) as ReadableStream<Uint8Array>
     )
     let result: ExternalAgentRunResult
+    let updateSequence = 0
+    let lastAgentMessageSequence = -1
+    let lastToolSequence = -1
+    let sawToolCall = false
+    const observedArtifactPaths = new Set<string>()
     try {
-      result = await client.runPrompt(definition, remoteCwd, request.prompt, onUpdate as any, onProtocolEvent, {
+      const guardedUpdate = async (update: acp.SessionUpdate): Promise<void> => {
+        updateSequence++
+        const record = update as Record<string, unknown>
+        if (record.sessionUpdate === 'agent_message_chunk') {
+          const content = record.content as Record<string, unknown> | undefined
+          if (content?.type === 'text' && typeof content.text === 'string' && content.text.trim()) {
+            lastAgentMessageSequence = updateSequence
+          }
+        }
+        if (record.sessionUpdate === 'tool_call' || record.sessionUpdate === 'tool_call_update') {
+          sawToolCall = true
+          lastToolSequence = updateSequence
+        }
+        for (const artifactPath of completedWorkspaceLocations(update, remoteCwd)) observedArtifactPaths.add(artifactPath)
+        const violation = findWorkspaceViolation(update, workspace)
+        if (violation) throw new Error(`OpenClaw 尝试离开指定远端工作目录：${violation}（要求：${remoteCwd}）`)
+        await onUpdate?.(update)
+      }
+      result = await client.runPrompt(definition, remoteCwd, workspacePrompt(request.prompt, remoteCwd), guardedUpdate, onProtocolEvent, {
         customStream: stream,
         onDispose: () => { wireTaps?.outbound.destroy(); wireTaps?.inbound.destroy(); channel.destroy() },
         signal: options?.signal,
         model: request.model
       })
+      if (sawToolCall && lastAgentMessageSequence <= lastToolSequence) {
+        throw new Error(`OpenClaw 在工具调用后未返回最终结果（stopReason: ${result.stopReason || 'unknown'}），将从远端工作区继续重试`)
+      }
     } catch (error) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}${stderr.trim() ? `\n远端 CLI: ${stderr.trim()}` : ''}`)
     }
     try {
-      result.artifactPaths = await downloadArtifacts(ssh, result.text, remoteCwd, request.cwd, runId, stepId, options?.onProgress)
+      result.artifactPaths = await downloadArtifacts(ssh, result.text, observedArtifactPaths, remoteCwd, request.cwd, runId, stepId, options?.onProgress)
     } catch (error) {
       throw new Error(`远端文件下载失败：${error instanceof Error ? error.message : String(error)}`)
     }

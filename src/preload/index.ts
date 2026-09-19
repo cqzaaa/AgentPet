@@ -242,8 +242,10 @@ const api = {
     ipcRenderer.invoke('api:probe-agent', agentId, cwd),
   saveAgentSshPassword: (input: { password: string; existingRef?: string }): Promise<string> =>
     ipcRenderer.invoke('api:save-agent-ssh-password', input),
-  testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }): Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string } }> =>
+  testAgentSsh: (input: { host: string; user: string; port?: number; passwordRef: string; agentId: string }): Promise<{ ok: boolean; ssh: { ok: boolean; message: string }; cli?: { ok: boolean; message: string }; needsHostTrust?: boolean }> =>
     ipcRenderer.invoke('api:test-agent-ssh', input),
+  openAgentSshTrustTerminal: (input: { host: string; user: string; port?: number }): Promise<void> =>
+    ipcRenderer.invoke('api:open-agent-ssh-trust-terminal', input),
   getAgentModelStatus: (agentId: string, cwd?: string, model?: string) => ipcRenderer.invoke('api:agent-model-status', agentId, cwd, model),
   loginAgent: (agentId: string): Promise<void> => ipcRenderer.invoke('api:login-agent', agentId),
   listAgentModels: (agentId: string, cwd?: string, configuredModel?: string): Promise<any[]> =>
@@ -277,6 +279,8 @@ const api = {
     ipcRenderer.invoke('api:retry-task-step', taskRunId, taskStepId),
   retryFailedTaskSteps: (taskRunId: string): Promise<any | null> =>
     ipcRenderer.invoke('api:retry-failed-task-steps', taskRunId),
+  rerunTaskRun: (taskRunId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:rerun-task-run', taskRunId),
   onTaskRunUpdated: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('api:task-run-updated', subscription)

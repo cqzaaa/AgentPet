@@ -137,6 +137,24 @@ export class TaskRunner {
     return result
   }
 
+  public rerunAllSteps(taskRunId: string): Promise<{ run: TaskRun; steps: TaskStep[] } | null> {
+    return this.serializeControl(taskRunId, async () => {
+      const snapshot = await this.store.getRun(taskRunId)
+      if (!snapshot) return null
+      if (this.active.has(taskRunId) || ['pending', 'running', 'paused'].includes(snapshot.run.status)) {
+        throw new Error('只能重新执行已经结束的流程')
+      }
+      const result = await this.store.rerunAllSteps(taskRunId)
+      if (result) {
+        await this.publish(taskRunId, 'rerun_all_steps', undefined, {
+          rerunStepIds: result.steps.map(step => step.id)
+        })
+        this.executeInBackground(taskRunId)
+      }
+      return result
+    })
+  }
+
   public getRun(taskRunId: string) {
     return this.store.getRun(taskRunId)
   }
@@ -397,7 +415,7 @@ export class TaskRunner {
       const message = error instanceof Error ? error.message : String(error)
       const retryCount = step.retryCount || 0
       const transientExternalFailure = TRANSIENT_EXTERNAL_AGENT_ERROR.test(message)
-      const permanentRemoteFailure = step.connection?.kind === 'ssh' && /authentication methods failed|permission denied|主机密钥|密码引用|缺少已保存的登录密码|远端文件下载失败|远端 ACP 桥接尚未接入/i.test(message)
+      const permanentRemoteFailure = step.connection?.kind === 'ssh' && /authentication methods failed|permission denied|主机密钥|密码引用|缺少已保存的登录密码|远端文件下载失败|远端 ACP 桥接尚未接入|ACP 任务已取消|ACP 任务失败|ACP 未返回任何正文|尝试离开指定远端工作目录/i.test(message)
       const maxRetries = step.control?.kind === 'rpa' || step.control?.kind === 'condition' || permanentRemoteFailure ? 0 : transientExternalFailure ? 4 : 2
       if (retryCount < maxRetries) {
         const retryDelayMs = transientExternalFailure ? Math.min(15_000, 2_000 * (2 ** retryCount)) : 0
