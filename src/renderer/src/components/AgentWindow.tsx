@@ -7,7 +7,6 @@ import { ChatControllerProvider } from '../hooks/useChatController'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import {
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CircleX,
   Copy,
@@ -16,6 +15,7 @@ import {
   Library,
   Lightbulb,
   List,
+  Menu,
   Minus,
   MessageSquareText,
   Moon,
@@ -53,6 +53,17 @@ const FilePreviewPanel = lazy(() =>
 
 function PageLoadingFallback(): React.JSX.Element {
   return <div className="page-loading-placeholder" aria-hidden="true" />
+}
+
+function getChatHeaderTitle(session: Session | undefined): string {
+  if (!session) return '本地安全沙箱会话'
+  const storedName = String(session.name || '')
+  if (!storedName.endsWith('...')) return storedName
+
+  const firstUserMessage = session.messages?.find((message) => message?.sender === 'user')
+  const sourceText = String(firstUserMessage?.text || '').replace(/\s+/g, ' ').trim()
+  if (!sourceText) return storedName
+  return sourceText.length > 32 ? `${sourceText.slice(0, 32)}...` : sourceText
 }
 
 type FunctionPageId =
@@ -635,18 +646,15 @@ export function AgentWindow(): React.JSX.Element {
           </div>
 
           {/* 最近会话列表（搜索 / 分组 / 置顶 / 重命名 / 虚拟滚动） */}
-          {!isCollapsed && (
+          {!isCollapsed && activePermissionRequest && (
             <div className="sidebar-recent-title">
-              <span>最近会话</span>
-              {activePermissionRequest && (
-                <span
-                  className="menu-sandbox-badge"
-                  title="有待审批的终端命令"
-                  onClick={() => setActiveTab('chat')}
-                >
-                  ●
-                </span>
-              )}
+              <span
+                className="menu-sandbox-badge"
+                title="有待审批的终端命令"
+                onClick={() => setActiveTab('chat')}
+              >
+                ●
+              </span>
             </div>
           )}
           {!isCollapsed && (
@@ -660,32 +668,13 @@ export function AgentWindow(): React.JSX.Element {
               onDelete={setSessionToDeleteId}
               onTogglePin={handleTogglePinSession}
               onRename={handleRenameSession}
-              onCreateInWorkspace={(path) => {
-                void handleCreateNewSession(path)
-              }}
             />
           )}
 
-          {/* 可折叠菜单组：控制 / 代理 / 日志 / 设置 */}
-          <div
-            className={`sidebar-menu-header ${menuCollapsed ? 'collapsed' : ''}`}
-            onClick={() => setMenuCollapsed(!menuCollapsed)}
-            title={menuCollapsed ? '展开菜单' : '收起菜单'}
-          >
-            <span className="sidebar-menu-arrow">
-              {menuCollapsed ? (
-                <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-              ) : (
-                <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-              )}
-            </span>
-            <span>菜单</span>
-          </div>
-          {(!menuCollapsed || isCollapsed) && (
-            <div className="sidebar-menu">
+          <div className={`sidebar-menu ${menuCollapsed ? '' : 'open'}`} aria-hidden={menuCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'control' ? 'active' : ''}`}
-                onClick={() => setActiveTab('control')}
+                onClick={() => { setActiveTab('control'); setMenuCollapsed(true) }}
                 title="订阅频道"
               >
                 <div className="menu-item-left">
@@ -701,7 +690,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`}
-                onClick={() => setActiveTab('agent')}
+                onClick={() => { setActiveTab('agent'); setMenuCollapsed(true) }}
                 title="代理"
               >
                 <div className="menu-item-left">
@@ -717,7 +706,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`}
-                onClick={() => setActiveTab('skillhub')}
+                onClick={() => { setActiveTab('skillhub'); setMenuCollapsed(true) }}
                 title="技能市场"
               >
                 <div className="menu-item-left">
@@ -733,7 +722,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`}
-                onClick={() => setActiveTab('knowledge')}
+                onClick={() => { setActiveTab('knowledge'); setMenuCollapsed(true) }}
                 title="知识库"
               >
                 <div className="menu-item-left">
@@ -749,7 +738,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'workflow' ? 'active' : ''}`}
-                onClick={() => setActiveTab('workflow')}
+                onClick={() => { setActiveTab('workflow'); setMenuCollapsed(true) }}
                 title="工作流"
               >
                 <div className="menu-item-left">
@@ -765,7 +754,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`}
-                onClick={() => setActiveTab('logs')}
+                onClick={() => { setActiveTab('logs'); setMenuCollapsed(true) }}
                 title="日志"
               >
                 <div className="menu-item-left">
@@ -781,7 +770,7 @@ export function AgentWindow(): React.JSX.Element {
               </div>
               <div
                 className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
-                onClick={() => setActiveTab('settings')}
+                onClick={() => { setActiveTab('settings'); setMenuCollapsed(true) }}
                 title="设置"
               >
                 <div className="menu-item-left">
@@ -795,8 +784,7 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Sidebar Footer */}
@@ -806,6 +794,19 @@ export function AgentWindow(): React.JSX.Element {
               <Sun size={18} strokeWidth={2} aria-hidden="true" />
             ) : (
               <Moon size={18} strokeWidth={2} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            className={`sidebar-menu-icon-btn ${menuCollapsed ? '' : 'active'}`}
+            onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
+            title={menuCollapsed ? '打开菜单' : '关闭菜单'}
+            aria-label={menuCollapsed ? '打开菜单' : '关闭菜单'}
+            aria-expanded={!menuCollapsed}
+          >
+            {menuCollapsed ? (
+              <Menu size={18} strokeWidth={1.8} aria-hidden="true" />
+            ) : (
+              <X size={18} strokeWidth={1.8} aria-hidden="true" />
             )}
           </button>
         </div>
@@ -943,7 +944,7 @@ export function AgentWindow(): React.JSX.Element {
             <div>
               <div className="content-title">
                 {activeTab === 'chat' &&
-                  (sessions.find((s) => s.id === activeSessionId)?.name || '本地安全沙箱会话')}
+                  getChatHeaderTitle(sessions.find((s) => s.id === activeSessionId))}
                 {activeTab === 'control' && '订阅频道'}
                 {activeTab === 'agent' && 'Agent 智能体核心系统'}
                 {activeTab === 'skillhub' && '腾讯 SkillHub 技能市场'}
