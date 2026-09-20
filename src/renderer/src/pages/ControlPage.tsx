@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type { AppStore } from '../hooks/useAppStore'
+import { requestConfirmation } from '../components/confirmService'
 import { DEFAULT_MODELS } from '../utils/helpers'
 import { getModelIcon } from '../utils/modelIcons'
 import {
@@ -279,7 +280,12 @@ export function ControlPage({ store }: ControlPageProps): React.JSX.Element {
   }
 
   const handleClearWechatApiKey = async (): Promise<void> => {
-    if (!confirm('确认删除微信助手专属大模型密钥吗？')) return
+    if (!(await requestConfirmation({
+      title: '删除微信助手专属密钥？',
+      description: '删除后微信托管通道将不再使用该专属密钥。',
+      confirmLabel: '确认删除',
+      tone: 'danger'
+    }))) return
     setIsLoading(true)
     try {
       const ok = await window.api.wechatSaveSettings({

@@ -976,7 +976,12 @@ body {
 
 .new-chat-btn:focus-visible,
 .workspace-group-add:focus-visible,
-.workspace-group-toggle:focus-visible,
+.workspace-group-toggle:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: var(--bg-menu-hover);
+}
+
 .new-session-dialog button:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 2px;
@@ -1052,8 +1057,9 @@ body {
 }
 
 .recent-search-input:focus-visible {
-  border-color: color-mix(in srgb, #3f66f2 60%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, #3f66f2 13%, transparent);
+  border-color: transparent;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .recent-search-input::-webkit-search-cancel-button {
@@ -1351,8 +1357,10 @@ body {
 }
 
 .recent-show-more:focus-visible {
-  outline: 2px solid #3f66f2;
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: none;
+  background: var(--bg-menu-hover);
+  color: var(--text-primary);
 }
 
 .recent-item {
@@ -1470,7 +1478,7 @@ body {
 }
 
 .recent-item:hover .recent-title-track {
-  animation: recent-title-reveal 2.8s ease-out 2s 1 forwards;
+  animation: recent-title-reveal 2.8s ease-out 1s 1 forwards;
 }
 
 @keyframes recent-title-reveal {
@@ -1571,8 +1579,9 @@ body {
 .recent-search-clear:focus-visible,
 .recent-delete-btn:focus-visible,
 .recent-context-item:focus-visible {
-  outline: 2px solid #3f66f2;
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: none;
+  background: var(--bg-menu-hover);
 }
 
 /* 右键菜单 */
@@ -2057,8 +2066,21 @@ body {
 }
 
 .sidebar-menu-icon-btn:focus-visible {
-  outline: 2px solid #3f66f2;
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: none;
+  color: var(--text-primary);
+  background: var(--bg-menu-hover);
+}
+
+.agent-sidebar button:focus {
+  outline: none;
+}
+
+.agent-sidebar .theme-toggle-icon-btn:focus-visible,
+.agent-sidebar .brand-collapse-btn:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: var(--bg-menu-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -11678,6 +11700,34 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   background: var(--card-bg, #fff);
 }
 
+.collab-summary-back {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-color, #d7dfeb);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, #566276);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.collab-summary-back:hover {
+  border-color: #aeb9c8;
+  background: var(--bg-card-sub, #f7f9fc);
+  color: var(--text-color, #1f2937);
+}
+
 .collab-readonly-summary > span {
   min-width: 0;
   display: flex;
@@ -11725,6 +11775,13 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 .collab-readonly-summary.is-recoverable > em {
   color: #a85b13;
   background: #fff3e3;
+}
+
+.collab-readonly-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .collab-retry-failed {
@@ -11895,30 +11952,58 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   cursor: wait;
 }
 
-.collab-footer > button.collab-retry-failed {
+:is(.collab-footer-actions, .collab-readonly-actions) > button.collab-retry-failed {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border-radius: 8px;
   color: #9a4f0f;
   border: 1px solid #e9a253;
   background: #fff8ed;
   box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.collab-footer > button.collab-retry-failed:hover:not(:disabled) {
+:is(.collab-footer-actions, .collab-readonly-actions)
+  > button.collab-retry-failed:hover:not(:disabled) {
   filter: none;
   border-color: #d98228;
   background: #fff0d9;
 }
 
-.collab-footer > button.collab-rerun-all {
+:is(.collab-footer-actions, .collab-readonly-actions) > button.collab-rerun-all {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border-radius: 8px;
   color: var(--collab-blue);
   border: 1px solid color-mix(in srgb, var(--collab-blue) 42%, var(--border-color, #d6deea));
   background: color-mix(in srgb, var(--collab-blue) 7%, var(--card-bg, #fff));
   box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.collab-footer > button.collab-rerun-all:hover:not(:disabled) {
+:is(.collab-footer-actions, .collab-readonly-actions)
+  > button.collab-rerun-all:hover:not(:disabled) {
   filter: none;
   border-color: var(--collab-blue);
   background: color-mix(in srgb, var(--collab-blue) 12%, var(--card-bg, #fff));
+}
+
+:is(.collab-footer-actions, .collab-readonly-actions) > button.collab-retry-failed:disabled,
+:is(.collab-footer-actions, .collab-readonly-actions) > button.collab-rerun-all:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .collab-readonly-node-detail dl {
@@ -12439,6 +12524,30 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   color: #fff;
 }
 
+.collab-delete-dialog {
+  border-color: color-mix(in srgb, #dc2626 28%, var(--border-color, #d6deea));
+}
+
+.collab-delete-dialog .collab-rerun-dialog-icon {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.collab-delete-dialog header small {
+  color: #b42318;
+}
+
+.collab-delete-dialog > footer button.confirm {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.collab-delete-dialog > footer button.confirm:hover:not(:disabled) {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+
 .collab-rerun-dialog > footer button:hover:not(:disabled) {
   border-color: #94a3b8;
   background: var(--bg-card-sub, #f8fafc);
@@ -12492,6 +12601,162 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   .collab-rerun-dialog-backdrop,
   .collab-rerun-dialog {
     animation: none;
+  }
+}
+
+/* 通用二次确认弹窗 */
+.confirm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border-color, #d6deea);
+  border-radius: 12px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #202938);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
+}
+
+.confirm-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 19px 14px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.confirm-dialog-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: var(--bg-card-sub, #f8fafc);
+  color: #526174;
+}
+
+.confirm-dialog header > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.confirm-dialog header small {
+  color: var(--text-secondary, #64748b);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.confirm-dialog-body {
+  display: grid;
+  gap: 9px;
+  padding: 16px 19px 18px;
+}
+
+.confirm-dialog-body p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.confirm-dialog-body .confirm-dialog-note {
+  color: var(--text-secondary, #64748b);
+  font-size: 11px;
+}
+
+.confirm-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 19px 16px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.confirm-dialog > footer button {
+  min-width: 88px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--border-color, #d6deea);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #334155);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirm-dialog > footer button.confirm {
+  border-color: #4d73e6;
+  background: #4d73e6;
+  color: #fff;
+}
+
+.confirm-dialog.is-warning .confirm-dialog-icon {
+  border-color: #f0bd7d;
+  background: #fff6e8;
+  color: #b65c10;
+}
+
+.confirm-dialog.is-warning > footer button.confirm {
+  border-color: #c76516;
+  background: #c76516;
+}
+
+.confirm-dialog.is-danger .confirm-dialog-icon {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.confirm-dialog.is-danger > footer button.confirm {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.confirm-dialog > footer button:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.confirm-dialog > footer button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+@media (max-width: 520px) {
+  .confirm-dialog-backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .confirm-dialog > footer {
+    flex-direction: column-reverse;
+  }
+
+  .confirm-dialog > footer button {
+    width: 100%;
   }
 }
 

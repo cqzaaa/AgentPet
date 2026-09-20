@@ -1,6 +1,7 @@
 import React from 'react'
 import { CheckCircle2, LoaderCircle, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
+import { requestConfirmation } from './confirmService'
 
 type AgentStatus = 'unchecked' | 'missing' | 'ready' | 'interactive' | 'auth_required' | 'error'
 type AgentProtocol = 'internal' | 'acp-v1' | 'claude-stream-json' | 'codex-app-server' | 'antigravity-json'
@@ -108,7 +109,12 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
   }
 
   const removeAgent = async (agent: AgentListItem): Promise<void> => {
-    if (!window.confirm(`确定删除 Agent“${agent.name}”吗？`)) return
+    if (!(await requestConfirmation({
+      title: '删除 Agent？',
+      description: `Agent“${agent.name}”将被删除。`,
+      confirmLabel: '删除 Agent',
+      tone: 'danger'
+    }))) return
     try {
       await window.api.deleteAgent(agent.id)
       await refresh()

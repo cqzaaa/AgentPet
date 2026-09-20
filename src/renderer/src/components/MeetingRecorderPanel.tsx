@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { requestConfirmation } from './confirmService'
 import {
   Archive,
   Check,
@@ -528,10 +529,15 @@ export function MeetingRecorderPanel({ llmConfig, onClose, onToast }: MeetingRec
     setView('detail')
   }
 
-  const closePanel = (): void => {
+  const closePanel = async (): Promise<void> => {
     void window.api.stopLocalMicrophoneTest()
     if (state === 'recording' || state === 'paused') {
-      if (!window.confirm('录音仍在进行，关闭会结束并归档本次录音。是否继续？')) return
+      if (!(await requestConfirmation({
+        title: '结束并关闭录音？',
+        description: '录音仍在进行，关闭后会结束并归档本次录音。',
+        confirmLabel: '结束并关闭',
+        tone: 'warning'
+      }))) return
       void stopRecording()
     }
     onClose()

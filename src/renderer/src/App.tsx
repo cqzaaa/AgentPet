@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { GlobalConfirmDialog } from './components/ConfirmDialog'
 
 // Each Electron window loads only the renderer code required by its hash route.
 const AgentWindow = lazy(() =>
@@ -81,7 +82,12 @@ function App(): React.JSX.Element {
       <PetWidget />
     )
 
-  return <Suspense fallback={<WindowLoadingFallback />}>{page}</Suspense>
+  return (
+    <>
+      <Suspense fallback={<WindowLoadingFallback />}>{page}</Suspense>
+      <GlobalConfirmDialog />
+    </>
+  )
 }
 
 export default App

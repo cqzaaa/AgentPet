@@ -3,6 +3,7 @@ import { ReactFlow, Background, Controls, MiniMap, Connection, addEdge, type Rea
 import '@xyflow/react/dist/style.css'
 import { useRpaStore } from './useRpaStore'
 import { useAppStoreRaw } from '../hooks/useAppStore'
+import { requestConfirmation } from '../components/confirmService'
 import {
   StartNode,
   EndNode,
@@ -1000,7 +1001,14 @@ export function RpaPage({ onExit }: { onExit?: () => void }): React.JSX.Element 
                     <div className="rpa-card-actions" onClick={e => e.stopPropagation()}>
                       <button
                         className="btn-card-action danger"
-                        onClick={() => { if (confirm('确定删除该任务吗？')) deleteTask(task.id) }}
+                        onClick={async () => {
+                          if (await requestConfirmation({
+                            title: '删除这个任务？',
+                            description: `任务“${task.name}”将被删除。`,
+                            confirmLabel: '删除任务',
+                            tone: 'danger'
+                          })) deleteTask(task.id)
+                        }}
                         title="删除任务"
                       >
                         <Trash2 size={13} strokeWidth={2} aria-hidden="true" />

@@ -3,6 +3,7 @@ import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
 import type { WorkflowDefinition } from '../../../preload/workflow-types'
 import { ChatMessageItem, MarkdownText } from '../components/ChatMessageItem'
+import { requestConfirmation } from '../components/confirmService'
 import {
   Brain,
   CheckCircle2,
@@ -366,8 +367,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               <button
                 className="delete-btn"
                 style={{ border: '1px solid rgba(248,113,113,0.3)', padding: '6px 12px', borderRadius: '6px' }}
-                onClick={() => {
-                  if (confirm('确认清空当前会话历史吗？')) {
+                onClick={async () => {
+                  if (await requestConfirmation({
+                    title: '清空当前会话历史？',
+                    description: '当前会话的历史消息将被清空，此操作不可撤销。',
+                    confirmLabel: '清空会话',
+                    tone: 'danger'
+                  })) {
                     setSessions(prev => prev.map(s => {
                       if (s.id === activeSessionId) {
                         return {
@@ -393,8 +399,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               <button
                 className="delete-btn"
                 style={{ border: '1px solid rgba(248,113,113,0.3)', padding: '6px 12px', borderRadius: '6px' }}
-                onClick={() => {
-                  if (confirm('确认清除所有会话记录吗？')) {
+                onClick={async () => {
+                  if (await requestConfirmation({
+                    title: '清除所有会话记录？',
+                    description: '所有会话将被彻底删除并还原为默认空白会话，核心记忆将被重置。',
+                    confirmLabel: '全部清空',
+                    tone: 'danger'
+                  })) {
                     const defaultSess = [{
                       id: 'agent:main:dashboard:default',
                       name: '新会话',
@@ -712,7 +723,12 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       className="delete-btn"
                       style={{ border: '1px solid rgba(248,113,113,0.3)', padding: '6px 12px', borderRadius: '6px', fontSize: '12.5px' }}
                       onClick={async () => {
-                        if (confirm('确认清空该任务的执行日志吗？')) {
+                        if (await requestConfirmation({
+                          title: '清空任务执行日志？',
+                          description: `确认清空定时任务 [${selectedTaskForLog.name || '当前任务'}] 的全部执行日志吗？清空后不可恢复。`,
+                          confirmLabel: '清空日志',
+                          tone: 'danger'
+                        })) {
                           await handleClearCronLogs(selectedTaskForLog.id)
                           setSelectedTaskForLog(prev => prev ? { ...prev, logs: [] } : null)
                           setSelectedCronLogDetails(null)
@@ -1115,8 +1131,13 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               <button
                                 type="button"
                                 className="mcp-btn-action delete"
-                                onClick={() => {
-                                  if (confirm(`确认要删除 [${server.name}] 服务吗？`)) {
+                                onClick={async () => {
+                                  if (await requestConfirmation({
+                                    title: `删除 [${server.name}] 服务？`,
+                                    description: '删除后该 MCP 服务提供的工具将不再可用。',
+                                    confirmLabel: '确认删除',
+                                    tone: 'danger'
+                                  })) {
                                     const newServers = mcpConfig.servers.filter((s: any) => s.id !== server.id)
                                     saveMcpConfig({ servers: newServers })
                                     showToast(`已删除 [${server.name}] 服务。`, 'success')

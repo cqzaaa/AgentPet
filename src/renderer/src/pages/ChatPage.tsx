@@ -10,6 +10,7 @@ import { CollaborationComposer } from '../components/CollaborationComposer'
 import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
 import { SubtaskCapsuleGroup, SubtaskDetailDrawer } from '../components/SubtaskCapsuleGroup'
 import { PermissionApprovalCard } from '../components/PermissionApprovalCard'
+import { requestConfirmation } from '../components/confirmService'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
 import {
@@ -2333,10 +2334,15 @@ function ChatPageImpl(): React.JSX.Element {
                         <div
                           className="device-menu-item disconnect"
                           onClick={async () => {
-                            if (confirm('确认断开当前 SSH 连接并切换回本机执行吗？')) {
+                            setShowDeviceMenu(false)
+                            if (await requestConfirmation({
+                              title: '断开 SSH 连接？',
+                              description: '确认断开当前 SSH 连接并切换回本机执行吗？',
+                              confirmLabel: '断开连接',
+                              tone: 'warning'
+                            })) {
                               await handleDisconnectSsh()
                             }
-                            setShowDeviceMenu(false)
                           }}
                           style={{
                             padding: '8px 12px',

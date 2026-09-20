@@ -40,6 +40,7 @@ import {
   Zap
 } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
+import { ConfirmDialog } from './ConfirmDialog'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { cleanResultSummary, CollaborationArtifactCards } from './CollaborationRunCard'
 import { TaskDagGraph, type TaskPlan } from './TaskPlanCard'
@@ -821,9 +822,6 @@ export function CollaborationComposer({
   const [retryingFailed, setRetryingFailed] = React.useState(false)
   const [confirmRerunAll, setConfirmRerunAll] = React.useState(false)
   const [rerunningAll, setRerunningAll] = React.useState(false)
-  const rerunDialogRef = React.useRef<HTMLElement>(null)
-  const rerunCancelRef = React.useRef<HTMLButtonElement>(null)
-  const rerunReturnFocusRef = React.useRef<HTMLElement | null>(null)
   const workspaceOverriddenRef = React.useRef(false)
   const agentSelectionTouchedRef = React.useRef(false)
   const flowInstanceRef = React.useRef<ReactFlowInstance<Node<TaskNodeData>, Edge> | null>(null)
@@ -989,6 +987,10 @@ export function CollaborationComposer({
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      if (confirmDelete) {
+        if (!controllingRun) setConfirmDelete(false)
+        return
+      }
       if (confirmRerunAll) {
         if (!rerunningAll) setConfirmRerunAll(false)
         return
@@ -997,19 +999,7 @@ export function CollaborationComposer({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [confirmRerunAll, onClose, rerunningAll])
-
-  React.useEffect(() => {
-    if (!confirmRerunAll) return undefined
-    rerunReturnFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    rerunCancelRef.current?.focus()
-    return () => {
-      if (rerunReturnFocusRef.current?.isConnected) rerunReturnFocusRef.current.focus()
-      rerunReturnFocusRef.current = null
-    }
-  }, [confirmRerunAll])
+  }, [confirmDelete, confirmRerunAll, controllingRun, onClose, rerunningAll])
 
   React.useEffect(() => {
     let active = true
@@ -1529,23 +1519,6 @@ export function CollaborationComposer({
     }
   }
 
-  const keepFocusInRerunDialog = (event: React.KeyboardEvent<HTMLElement>): void => {
-    if (event.key !== 'Tab') return
-    const controls = rerunDialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
-    )
-    if (!controls?.length) return
-    const first = controls[0]
-    const last = controls[controls.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
-
   const executionGraph = (
     <div className={`collab-readonly-stage ${selectedReadonlyStep ? 'has-detail' : ''}`}>
       <div className="collab-readonly-graph">
@@ -1647,21 +1620,26 @@ export function CollaborationComposer({
         className="collab-drawer collab-workbench"
         role={embedded ? 'region' : 'dialog'}
         aria-modal={embedded ? undefined : true}
-        aria-labelledby="collab-title"
-        aria-hidden={confirmRerunAll ? true : undefined}
-        inert={confirmRerunAll ? true : undefined}
+        aria-labelledby={isReadonlyDetails ? undefined : 'collab-title'}
+        aria-label={isReadonlyDetails ? '协作运行详情' : undefined}
+        aria-hidden={confirmRerunAll || confirmDelete ? true : undefined}
+        inert={confirmRerunAll || confirmDelete ? true : undefined}
       >
         <header className="collab-header">
-          <button
-            className="collab-back-button"
-            type="button"
-            onClick={onClose}
-            aria-label={embedded ? '返回工作流' : '返回聊天'}
-          >
-            <ArrowLeft size={17} />
-            <span>返回</span>
-          </button>
-          <h2 id="collab-title">{isReadonlyDetails ? '运行详情' : '工作流编排'}</h2>
+          {!isReadonlyDetails && (
+            <>
+              <button
+                className="collab-back-button"
+                type="button"
+                onClick={onClose}
+                aria-label={embedded ? '返回工作流' : '返回聊天'}
+              >
+                <ArrowLeft size={17} />
+                <span>返回</span>
+              </button>
+              <h2 id="collab-title">工作流编排</h2>
+            </>
+          )}
           <div className="collab-header-actions">
             <button
               className="collab-trajectory-button"
@@ -1696,6 +1674,15 @@ export function CollaborationComposer({
               <header
                 className={`collab-readonly-summary ${isCompletedDetails ? 'is-completed' : 'is-recoverable'}`}
               >
+                <button
+                  className="collab-summary-back"
+                  type="button"
+                  onClick={onClose}
+                  aria-label={embedded ? '返回工作流' : '返回聊天'}
+                >
+                  <ArrowLeft size={16} />
+                  <span>返回</span>
+                </button>
                 <span>
                   {isCompletedDetails ? <CheckCircle2 size={17} /> : <ShieldAlert size={17} />}
                   <span>
@@ -1709,23 +1696,39 @@ export function CollaborationComposer({
                   {runtimeSteps.filter((step) => step.status === 'completed').length}/
                   {runtimeSteps.length} 节点完成
                 </em>
-                {failedRuntimeSteps.length > 0 && (
-                  <button
-                    className="collab-retry-failed"
-                    type="button"
-                    disabled={retryingFailed}
-                    aria-busy={retryingFailed}
-                    onClick={() => {
-                      void retryFailedSteps()
-                    }}
-                  >
-                    {retryingFailed ? (
-                      <Loader2 size={13} className="spin" />
-                    ) : (
-                      <RotateCcw size={13} />
+                {executionPhase === 'finished' && (
+                  <div className="collab-readonly-actions">
+                    {failedRuntimeSteps.length > 0 && (
+                      <button
+                        className="collab-retry-failed"
+                        type="button"
+                        disabled={retryingFailed || rerunningAll}
+                        aria-busy={retryingFailed}
+                        onClick={() => {
+                          void retryFailedSteps()
+                        }}
+                      >
+                        {retryingFailed ? (
+                          <Loader2 size={14} className="spin" />
+                        ) : (
+                          <RotateCcw size={14} />
+                        )}
+                        重新执行失败节点
+                      </button>
                     )}
-                    <span>重试失败节点 ({failedRuntimeSteps.length})</span>
-                  </button>
+                    <button
+                      className="collab-rerun-all"
+                      type="button"
+                      disabled={retryingFailed || rerunningAll}
+                      onClick={() => {
+                        setConfirmDelete(false)
+                        setConfirmRerunAll(true)
+                      }}
+                    >
+                      <RotateCcw size={14} />
+                      重新执行整个流程
+                    </button>
+                  </div>
                 )}
               </header>
               {executionGraph}
@@ -2342,40 +2345,18 @@ export function CollaborationComposer({
               <div className="collab-footer-actions">
                 {executionRunId && (
                   <>
-                    {confirmDelete ? (
-                      <div className="collab-delete-confirm" role="group" aria-label="确认删除编排">
-                        <span>删除编排并停止执行？工作区文件会保留。</span>
-                        <button
-                          type="button"
-                          disabled={controllingRun}
-                          onClick={() => setConfirmDelete(false)}
-                        >
-                          保留
-                        </button>
-                        <button
-                          type="button"
-                          disabled={controllingRun}
-                          onClick={() => {
-                            void controlRun('delete')
-                          }}
-                        >
-                          确认删除
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        className="collab-return-flow collab-btn-danger"
-                        type="button"
-                        disabled={controllingRun || retryingFailed || rerunningAll}
-                        onClick={() => {
-                          setConfirmRerunAll(false)
-                          setConfirmDelete(true)
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        删除编排
-                      </button>
-                    )}
+                    <button
+                      className="collab-return-flow collab-btn-danger"
+                      type="button"
+                      disabled={controllingRun || retryingFailed || rerunningAll}
+                      onClick={() => {
+                        setConfirmRerunAll(false)
+                        setConfirmDelete(true)
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      删除编排
+                    </button>
                     {['running', 'starting'].includes(executionPhase) && (
                       <button
                         className="collab-return-flow"
@@ -2412,119 +2393,40 @@ export function CollaborationComposer({
                     )}
                   </>
                 )}
-                {executionPhase === 'finished' && (
-                  <>
-                    {failedRuntimeSteps.length > 0 && (
-                      <button
-                        className="collab-retry-failed"
-                        type="button"
-                        disabled={retryingFailed || rerunningAll}
-                        aria-busy={retryingFailed}
-                        onClick={() => {
-                          void retryFailedSteps()
-                        }}
-                      >
-                        {retryingFailed ? (
-                          <Loader2 size={14} className="spin" />
-                        ) : (
-                          <RotateCcw size={14} />
-                        )}
-                        重新执行失败节点
-                      </button>
-                    )}
-                    <button
-                      className="collab-rerun-all"
-                      type="button"
-                      disabled={retryingFailed || rerunningAll}
-                      onClick={() => {
-                        setConfirmDelete(false)
-                        setConfirmRerunAll(true)
-                      }}
-                    >
-                      <RotateCcw size={14} />
-                      重新执行整个流程
-                    </button>
-                  </>
-                )}
-                {executionPhase === 'finished' && (
-                  <button
-                    className="collab-return-flow"
-                    type="button"
-                    onClick={() => setExecutionPhase('editing')}
-                  >
-                    <GitBranch size={14} />
-                    返回流程图
+                {executionPhase !== 'finished' && (
+                  <button className="collab-start" type="button" onClick={onClose}>
+                    {executionPhase === 'paused' ? '关闭' : '在后台运行'}
                   </button>
                 )}
-                <button className="collab-start" type="button" onClick={onClose}>
-                  {executionPhase === 'paused'
-                    ? '关闭'
-                    : executionPhase === 'finished'
-                      ? '完成'
-                      : '在后台运行'}
-                </button>
               </div>
             </>
           )}
         </footer>
       </section>
-      {confirmRerunAll && (
-        <div
-          className="collab-rerun-dialog-backdrop"
-          role="presentation"
-        >
-          <section
-            ref={rerunDialogRef}
-            className="collab-rerun-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="collab-rerun-dialog-title"
-            aria-describedby="collab-rerun-dialog-description"
-            onKeyDown={keepFocusInRerunDialog}
-          >
-            <header>
-              <span className="collab-rerun-dialog-icon" aria-hidden="true">
-                <RotateCcw size={18} />
-              </span>
-              <span>
-                <small>完整重跑</small>
-                <h2 id="collab-rerun-dialog-title">重新执行整个流程？</h2>
-              </span>
-            </header>
-            <div className="collab-rerun-dialog-body">
-              <p id="collab-rerun-dialog-description">
-                将重置并重新执行全部 {runtimeSteps.length} 个节点，包括已经完成的节点。
-              </p>
-              <div className="collab-rerun-dialog-warning">
-                <ShieldAlert size={16} aria-hidden="true" />
-                <span>这可能再次调用远端服务、消耗额度，或重复修改工作区文件。</span>
-              </div>
-              <p className="collab-rerun-dialog-note">历史执行记录和已有文件不会被删除。</p>
-            </div>
-            <footer>
-              <button
-                ref={rerunCancelRef}
-                className="secondary"
-                type="button"
-                disabled={rerunningAll}
-                onClick={() => setConfirmRerunAll(false)}
-              >
-                取消
-              </button>
-              <button
-                className="confirm"
-                type="button"
-                disabled={rerunningAll}
-                aria-busy={rerunningAll}
-                onClick={() => void rerunEntireWorkflow()}
-              >
-                {rerunningAll ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
-                {rerunningAll ? '正在重新执行…' : '重新执行整个流程'}
-              </button>
-            </footer>
-          </section>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmDelete}
+        busy={controllingRun}
+        tone="danger"
+        eyebrow="删除编排"
+        title="确定删除这个编排？"
+        description="删除后将停止当前执行，工作区文件会保留。"
+        note="此操作不会删除已生成的文件。"
+        confirmLabel="确认删除"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => void controlRun('delete')}
+      />
+      <ConfirmDialog
+        open={confirmRerunAll}
+        busy={rerunningAll}
+        tone="warning"
+        eyebrow="完整重跑"
+        title="重新执行整个流程？"
+        description={`将重置并重新执行全部 ${runtimeSteps.length} 个节点，包括已经完成的节点。`}
+        note="这可能再次调用远端服务、消耗额度或重复修改工作区文件；历史记录和已有文件不会被删除。"
+        confirmLabel="重新执行整个流程"
+        onCancel={() => setConfirmRerunAll(false)}
+        onConfirm={() => void rerunEntireWorkflow()}
+      />
     </div>
   )
 }

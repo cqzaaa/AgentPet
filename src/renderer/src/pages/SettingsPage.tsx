@@ -2,6 +2,7 @@ import React from 'react'
 import type { AppStore } from '../hooks/useAppStore'
 import { ModelConfigPanel } from '../components/ModelConfigPanel'
 import { AgentSettingsPanel } from '../components/AgentSettingsPanel'
+import { requestConfirmation } from '../components/confirmService'
 import {
   AudioLines,
   Cat,
@@ -78,7 +79,12 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
 
   const handleClearToolCache = async (): Promise<void> => {
     if (toolCacheStats.fileCount === 0) return
-    const confirmed = window.confirm('确认清理全部工具调用缓存？\n\n缓存可以安全删除，但旧记忆或经验 Markdown 中指向这些缓存文件的链接将无法继续读取。')
+    const confirmed = await requestConfirmation({
+      title: '清理全部工具调用缓存？',
+      description: '缓存可以安全删除，但旧记忆或经验 Markdown 中指向这些缓存文件的链接将无法继续读取。',
+      confirmLabel: '确认清理',
+      tone: 'warning'
+    })
     if (!confirmed) return
     setIsLoadingToolCache(true)
     try {
@@ -283,7 +289,12 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                   type="button"
                   className="btn-secondary"
                   onClick={async () => {
-                    if (confirm('确认恢复为默认形象吗？')) {
+                    if (await requestConfirmation({
+                      title: '恢复为默认形象？',
+                      description: '将清除当前自定义形象配置，并还原为系统内置默认形象。',
+                      confirmLabel: '确认恢复',
+                      tone: 'warning'
+                    })) {
                       await window.api.clearCustomModel()
                       setCustomModelDir('')
                       setCustomModelFile('')
@@ -460,7 +471,13 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-app)'}
                                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                   onClick={async () => {
-                                    if (confirm(`确认要彻底删除形象 [${avatar.name}] 吗？这会物理清空对应的本地模型文件夹。`)) {
+                                    setOpenAvatarDropdownId(null)
+                                    if (await requestConfirmation({
+                                      title: `彻底删除形象 [${avatar.name}]？`,
+                                      description: '这会物理清空对应的本地模型文件夹，此操作不可撤销。',
+                                      confirmLabel: '彻底删除',
+                                      tone: 'danger'
+                                    })) {
                                       try {
                                         await window.api.deleteAvatar(avatar.dir)
                                         await refreshAvatarsList()
@@ -469,7 +486,6 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
                                         showToast(err.message || err, 'error')
                                       }
                                     }
-                                    setOpenAvatarDropdownId(null)
                                   }}
                                 >
                                   <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
