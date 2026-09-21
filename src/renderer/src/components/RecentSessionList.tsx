@@ -472,14 +472,10 @@ export function RecentSessionList(props: Props): React.JSX.Element {
               maxLength={50}
             />
           ) : (
-            <>
-              <span className="recent-title" title={displayTitle}>
-                <span className="recent-title-track">
-                  {s.id.startsWith('wechat:') && <span className="recent-source-badge">微信</span>}
-                  {displayTitle}
-                </span>
-              </span>
-            </>
+            <span className="recent-title" title={displayTitle}>
+              {s.id.startsWith('wechat:') && <span className="recent-source-badge">微信</span>}
+              {displayTitle}
+            </span>
           )}
         </div>
       </>

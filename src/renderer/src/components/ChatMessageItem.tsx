@@ -7,6 +7,8 @@ import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import hljs from 'highlight.js'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import {
   Pencil,
   ArrowDownToLine,
@@ -318,6 +320,60 @@ function LocalFileButton({
   )
 }
 
+function renderMathSafely(math: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(math.trim(), {
+      displayMode,
+      throwOnError: false,
+      output: 'htmlAndMathml'
+    })
+  } catch (err) {
+    console.warn('KaTeX render error:', err)
+    return escapeHtml(math)
+  }
+}
+
+interface ExtractedMath {
+  text: string
+  blockMap: Map<string, string>
+  inlineMap: Map<string, string>
+}
+
+function extractMathFromMarkdown(raw: string): ExtractedMath {
+  const blockMap = new Map<string, string>()
+  const inlineMap = new Map<string, string>()
+
+  // 1. 保护反斜杠转义的纯美元符 \$
+  let text = raw.replace(/\\\$/g, 'KATEXESCAPEDDOLLARSIGN')
+
+  // 2. 提取块级公式：$$...$$
+  let blockIdx = 0
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_match, math) => {
+    const key = `KATEXBLOCKTOKEN${blockIdx++}KATEXEND`
+    const rendered = renderMathSafely(math, true)
+    blockMap.set(key, `<div class="katex-display-wrapper">${rendered}</div>`)
+    return `\n\n${key}\n\n`
+  })
+
+  // 3. 提取行内公式：$...$
+  let inlineIdx = 0
+  text = text.replace(/\$([^\s\$](?:[^\$\n]*?[^\s\$])?)\$(?!\d)/g, (fullMatch, math) => {
+    // 排除纯货币金额（如 $50, $1,000, $3.14）
+    if (/^\d+(?:,\d{3})*(?:\.\d+)?$/.test(math.trim())) {
+      return fullMatch
+    }
+    const key = `KATEXINLINETOKEN${inlineIdx++}KATEXEND`
+    const rendered = renderMathSafely(math, false)
+    inlineMap.set(key, rendered)
+    return key
+  })
+
+  // 4. 恢复反斜杠转义的纯美元符
+  text = text.replace(/KATEXESCAPEDDOLLARSIGN/g, '$')
+
+  return { text, blockMap, inlineMap }
+}
+
 function parseMarkdownToHtml(markdown: string): string {
   if (!markdown) return ''
   // 移除 HTML 注释（包括多行），防止被 escapeHtml 转义后作为纯文本显示
@@ -325,7 +381,9 @@ function parseMarkdownToHtml(markdown: string): string {
   // Citations use a compact [S12] form; their link targets are shown in the source card.
   // This also normalizes malformed provider output such as [S12]()(newsDetail_forward_*).
   markdown = normalizeSearchCitations(markdown)
-  const lines = markdown.split('\n')
+  // 预先提取数学公式，避免被 escapeHtml 与 Markdown 格式符号误伤
+  const { text: cleanMarkdown, blockMap, inlineMap } = extractMathFromMarkdown(markdown)
+  const lines = cleanMarkdown.split('\n')
   let html = ''
 
   let inUl = false
@@ -369,6 +427,17 @@ function parseMarkdownToHtml(markdown: string): string {
     if (trimmed === '') {
       closePending()
       continue
+    }
+
+    // 1.1 独立块级公式
+    if (trimmed.startsWith('KATEXBLOCKTOKEN') && trimmed.endsWith('KATEXEND')) {
+      const blockHtml = blockMap.get(trimmed)
+      if (blockHtml) {
+        closePending()
+        html += blockHtml
+        blockMap.delete(trimmed)
+        continue
+      }
     }
 
     // 2. 分割线
@@ -463,6 +532,21 @@ function parseMarkdownToHtml(markdown: string): string {
   }
 
   closePending()
+
+  // 还原行内公式
+  if (inlineMap.size > 0) {
+    inlineMap.forEach((rendered, key) => {
+      html = html.replaceAll(key, rendered)
+    })
+  }
+
+  // 还原未作为独立行处理的块级公式
+  if (blockMap.size > 0) {
+    blockMap.forEach((rendered, key) => {
+      html = html.replaceAll(key, rendered)
+    })
+  }
+
   return html
 }
 
@@ -1424,6 +1508,11 @@ function buildToolTrace(msg: any, requestMessage: any): any {
       systemPrompt: requestMessage?.promptInfo?.systemPrompt || '',
       chatMessages: requestMessage?.promptInfo?.chatMessages || [],
       toolsDefinition: requestMessage?.promptInfo?.toolsDefinition || []
+    },
+    response: {
+      content: typeof msg?.text === 'string' ? msg.text : '',
+      isThinking: Boolean(msg?.isThinking),
+      error: msg?.error || null
     },
     toolCalls: calls,
     timeline

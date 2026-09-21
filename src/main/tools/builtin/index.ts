@@ -11,6 +11,9 @@ import { fileExecutor } from './file/executor'
 import { searchManifest } from './search/manifest'
 import { searchExecutor } from './search/executor'
 
+import { webManifest } from './web/manifest'
+import { webExecutor } from './web/executor'
+
 import { officeSkillManifest } from './office/skills/manifest'
 import { officeSkillExecutor } from './office/skills/executor'
 
@@ -27,6 +30,7 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(terminalManifest, terminalExecutor)
   toolRegistry.register(fileManifest, fileExecutor)
   toolRegistry.register(searchManifest, searchExecutor)
+  toolRegistry.register(webManifest, webExecutor)
   toolRegistry.register(officeSkillManifest, officeSkillExecutor)
   toolRegistry.register(systemManifest, systemExecutor)
   toolRegistry.register(computerManifest, computerExecutor)
@@ -40,5 +44,16 @@ export function registerBuiltinTools(): void {
     .filter(toolName => !classifiedToolNames.has(toolName))
   if (unclassified.length > 0) {
     throw new Error(`Built-in tools missing a Skill classification: ${unclassified.join(', ')}`)
+  }
+
+  // Include hidden compatibility APIs here: a Skill may activate one even
+  // though it is intentionally omitted from the ordinary model prompt.
+  const registeredToolNames = new Set(
+    toolRegistry.getAllManifests().flatMap(manifest => manifest.api.map(api => api.name))
+  )
+  const unavailableSkillTools = [...classifiedToolNames]
+    .filter(toolName => !registeredToolNames.has(toolName))
+  if (unavailableSkillTools.length > 0) {
+    throw new Error(`Skills reference unavailable built-in tools: ${unavailableSkillTools.join(', ')}`)
   }
 }

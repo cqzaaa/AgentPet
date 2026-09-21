@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import { basename, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions } from '../model-runtime'
 import { ModelStreamInterruptedError } from '../model-runtime/providers'
+import { mergeStreamContinuation } from './stream-recovery'
 import { AgentStepEvent } from './types'
 import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
 import { toolRegistry } from '../tools/core/tool-registry'
@@ -1154,8 +1155,11 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         // A successful response closes the retry budget for this request. A later
         // model request may independently recover from one new stream interruption.
         streamRecoveryUsed = false
-        if (resumedTextPrefix && effectiveTools.length === 0 && !responseMsg.tool_calls?.length) {
-          responseMsg.content = resumedTextPrefix + (typeof responseMsg.content === 'string' ? responseMsg.content : '')
+        if (resumedTextPrefix && !responseMsg.tool_calls?.length) {
+          responseMsg.content = mergeStreamContinuation(
+            resumedTextPrefix,
+            typeof responseMsg.content === 'string' ? responseMsg.content : ''
+          )
           resumedTextPrefix = ''
         }
         const { raw_request: _rawRequest, raw_response: _rawResponse, ...normalizedMessage } = responseMsg
@@ -1165,7 +1169,13 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         if (err instanceof ModelStreamInterruptedError && !streamRecoveryUsed && !abortSignal?.aborted) {
           streamRecoveryUsed = true
           const partialContent = String(err.partialContent || '')
-          if (effectiveTools.length === 0) resumedTextPrefix += partialContent
+          // Tool availability does not imply that the interrupted response was
+          // a tool call. Preserve ordinary text whenever no partial tool call
+          // was being assembled, otherwise the recovered final answer loses
+          // everything produced before the disconnect.
+          if (partialContent && !err.partialToolCalls?.length) {
+            resumedTextPrefix = mergeStreamContinuation(resumedTextPrefix, partialContent)
+          }
           if (partialContent) {
             chatHistory.push({ role: 'assistant', content: partialContent })
           }
@@ -1182,7 +1192,10 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
           })
           yield {
             type: 'think',
-            detail: `模型输出流中断（${err.code}），正在自动重连并从断点续接（1/1）。`
+            detail: [
+              `模型输出流中断（${err.code}），正在自动重连并从断点续接（1/1）。`,
+              String(err.message || '').trim().slice(0, 500)
+            ].filter(Boolean).join('\n原因：')
           }
           continue
         }
