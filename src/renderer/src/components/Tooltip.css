@@ -1,0 +1,126 @@
+/* ── 统一 Tooltip / Tips 卡片控件样式 (对齐图片视觉规范) ── */
+.agent-tooltip-portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.agent-tooltip-portal.is-interactive {
+  pointer-events: auto;
+}
+
+.agent-tooltip-card {
+  position: fixed;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  box-shadow:
+    0 12px 32px -4px rgba(0, 0, 0, 0.12),
+    0 4px 12px -2px rgba(0, 0, 0, 0.05);
+  padding: 10px 14px;
+  font-family:
+    'Segoe UI Variable Text',
+    'Segoe UI Variable',
+    'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    -apple-system,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  user-select: none;
+  animation: agent-tooltip-enter 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+/* 暗色模式自适应适配 */
+@media (prefers-color-scheme: dark) {
+  .agent-tooltip-card {
+    background: #1c212a;
+    color: #f3f4f6;
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 14px 36px -4px rgba(0, 0, 0, 0.5),
+      0 4px 14px -2px rgba(0, 0, 0, 0.3);
+  }
+}
+:root.dark .agent-tooltip-card,
+body.dark .agent-tooltip-card,
+.dark .agent-tooltip-card {
+  background: #1c212a;
+  color: #f3f4f6;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 14px 36px -4px rgba(0, 0, 0, 0.5),
+    0 4px 14px -2px rgba(0, 0, 0, 0.3);
+}
+
+/* 第一层：标题（深色粗体，与截图中"PDF转Word总结..."一致） */
+.agent-tooltip-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.4;
+  word-break: break-word;
+}
+:root.dark .agent-tooltip-title,
+body.dark .agent-tooltip-title,
+.dark .agent-tooltip-title {
+  color: #f9fafb;
+}
+
+/* 第二层：说明/路径/描述（浅灰次级文字，路径折行防溢出，与截图中路径一致） */
+.agent-tooltip-description {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.45;
+  word-break: break-all;
+  white-space: normal;
+}
+:root.dark .agent-tooltip-description,
+body.dark .agent-tooltip-description,
+.dark .agent-tooltip-description {
+  color: #9ca3af;
+}
+
+/* 第三层：底部元信息/更新时间（辅助弱灰小字，与截图中"更新于..."一致） */
+.agent-tooltip-footer {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+:root.dark .agent-tooltip-footer,
+body.dark .agent-tooltip-footer,
+.dark .agent-tooltip-footer {
+  color: #6b7280;
+}
+
+/* 精简单行模式（当作为普通小 tips 时自动紧凑小巧） */
+.agent-tooltip-card.is-compact {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 0;
+}
+
+/* 入场微动画 */
+@keyframes agent-tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

@@ -4,6 +4,7 @@ import { ReactFlow, Background, Controls, Handle, Position, MarkerType, type Nod
 import '@xyflow/react/dist/style.css'
 import './TaskPlanCard.css'
 import { AgentBrandIcon } from './AgentBrandIcon'
+import { Tooltip } from './Tooltip'
 
 export type TaskStepStatus = 'pending' | 'in_progress' | 'completed' | 'blocked'
 
@@ -474,15 +475,25 @@ export const TaskPlanPanel = React.memo(function TaskPlanPanel({ plan, messageId
           <small>{panelStatus}</small>
           <strong title={plan.title}>{plan.title}</strong>
         </span>
-        <button type="button" onClick={onLocate} title="定位到聊天中的计划"><LocateFixed size={15} /></button>
-        <button type="button" onClick={onClose} title="关闭任务面板"><X size={16} /></button>
+        <Tooltip content="定位到聊天中的计划" placement="bottom">
+          <button type="button" onClick={onLocate}><LocateFixed size={15} /></button>
+        </Tooltip>
+        <Tooltip content="关闭任务面板" placement="bottom">
+          <button type="button" onClick={onClose}><X size={16} /></button>
+        </Tooltip>
       </header>
 
       {runtimeRunId && !allCompleted && (
         <div className="task-plan-panel-controls" aria-label="Task controls">
-          <button type="button" disabled={isControlling} onClick={() => control('pause')} title="Pause and save checkpoint"><Pause size={14} />暂停</button>
-          <button type="button" disabled={isControlling} onClick={() => control('resume')} title="Request resume"><Play size={14} />继续</button>
-          <button type="button" disabled={isControlling} onClick={() => control('cancel')} title="Stop task"><Square size={13} />停止</button>
+          <Tooltip content="暂停执行并保存检查点" placement="top">
+            <button type="button" disabled={isControlling} onClick={() => control('pause')}><Pause size={14} />暂停</button>
+          </Tooltip>
+          <Tooltip content="继续执行任务" placement="top">
+            <button type="button" disabled={isControlling} onClick={() => control('resume')}><Play size={14} />继续</button>
+          </Tooltip>
+          <Tooltip content="终止任务执行" placement="top">
+            <button type="button" disabled={isControlling} onClick={() => control('cancel')}><Square size={13} />停止</button>
+          </Tooltip>
         </div>
       )}
 

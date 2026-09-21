@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Download, ExternalLink, Home, LoaderCircle, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { useAppStoreRaw } from '../hooks/useAppStore'
 import './SkillHubPage.css'
+import { Tooltip } from '../components/Tooltip'
 
 const SKILLHUB_HOME = 'https://www.skillhub.cn/'
 
@@ -89,10 +90,18 @@ export function SkillHubPage(): React.JSX.Element {
         </div>
 
         <nav className="skillhub-nav" aria-label="网页导航">
-          <button type="button" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title="后退"><ArrowLeft size={15} /></button>
-          <button type="button" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title="前进"><ArrowRight size={15} /></button>
-          <button type="button" onClick={() => webviewRef.current?.reload()} title="刷新"><RefreshCw className={loading ? 'is-spinning' : ''} size={14} /></button>
-          <button type="button" onClick={goHome} title="返回市场首页"><Home size={14} /></button>
+          <Tooltip content="后退" placement="bottom">
+            <button type="button" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()}><ArrowLeft size={15} /></button>
+          </Tooltip>
+          <Tooltip content="前进" placement="bottom">
+            <button type="button" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()}><ArrowRight size={15} /></button>
+          </Tooltip>
+          <Tooltip content="刷新" placement="bottom">
+            <button type="button" onClick={() => webviewRef.current?.reload()}><RefreshCw className={loading ? 'is-spinning' : ''} size={14} /></button>
+          </Tooltip>
+          <Tooltip content="返回市场首页" placement="bottom">
+            <button type="button" onClick={goHome}><Home size={14} /></button>
+          </Tooltip>
         </nav>
 
         <div className="skillhub-location" title={currentUrl}>
@@ -100,9 +109,11 @@ export function SkillHubPage(): React.JSX.Element {
           <span>{currentUrl.replace(/^https:\/\//, '')}</span>
         </div>
 
-        <button className="skillhub-external" type="button" onClick={() => window.api.openExternalUrl(currentUrl)} title="在默认浏览器中打开">
-          <ExternalLink size={14} /><span>浏览器打开</span>
-        </button>
+        <Tooltip content="在系统默认浏览器中打开该页面" placement="bottom">
+          <button className="skillhub-external" type="button" onClick={() => window.api.openExternalUrl(currentUrl)}>
+            <ExternalLink size={14} /><span>浏览器打开</span>
+          </button>
+        </Tooltip>
       </header>
 
       <div className={`skillhub-loading-line ${loading ? 'is-visible' : ''}`} aria-hidden="true"><span /></div>
@@ -148,7 +159,7 @@ export function SkillHubPage(): React.JSX.Element {
               ) : null}
             </div>
             {(installState.status === 'installed' || installState.status === 'failed') && (
-              <button type="button" onClick={() => setInstallState(null)} title="关闭提示"><X size={14} /></button>
+              <Tooltip content="关闭提示" placement="bottom"><button type="button" onClick={() => setInstallState(null)}><X size={14} /></button></Tooltip>
             )}
           </aside>
         )}

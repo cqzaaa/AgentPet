@@ -37,6 +37,7 @@ import { RecentSessionList } from './RecentSessionList'
 import { PermissionModeControl } from './PermissionModeControl'
 import { normalizeSearchCitations } from '../utils/helpers'
 import { AgentPetMark } from './AgentPetMark'
+import { Tooltip } from './Tooltip'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -635,26 +636,28 @@ export function AgentWindow(): React.JSX.Element {
 
           {/* + 新会话 */}
           <div className="new-chat-btn-wrapper">
-            <button
-              className="new-chat-btn"
-              onClick={() => setShowNewSessionDialog(true)}
-              title="创建新会话"
-            >
-              <Plus size={17} strokeWidth={2} aria-hidden="true" />
-              {!isCollapsed && <span>新会话</span>}
-            </button>
+            <Tooltip content="创建新会话" placement="right">
+              <button
+                className="new-chat-btn"
+                onClick={() => setShowNewSessionDialog(true)}
+              >
+                <Plus size={17} strokeWidth={2} aria-hidden="true" />
+                {!isCollapsed && <span>新会话</span>}
+              </button>
+            </Tooltip>
           </div>
 
           {/* 最近会话列表（搜索 / 分组 / 置顶 / 重命名 / 虚拟滚动） */}
           {!isCollapsed && activePermissionRequest && (
             <div className="sidebar-recent-title">
-              <span
-                className="menu-sandbox-badge"
-                title="有待审批的终端命令"
-                onClick={() => setActiveTab('chat')}
-              >
-                ●
-              </span>
+              <Tooltip content="有待审批的终端命令" placement="right">
+                <span
+                  className="menu-sandbox-badge"
+                  onClick={() => setActiveTab('chat')}
+                >
+                  ●
+                </span>
+              </Tooltip>
             </div>
           )}
           {!isCollapsed && (
@@ -675,7 +678,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'control' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('control'); setMenuCollapsed(true) }}
-                title="订阅频道"
               >
                 <div className="menu-item-left">
                   <OverviewIcon />
@@ -691,7 +693,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('agent'); setMenuCollapsed(true) }}
-                title="代理"
               >
                 <div className="menu-item-left">
                   <SkillsIcon />
@@ -707,7 +708,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('skillhub'); setMenuCollapsed(true) }}
-                title="技能市场"
               >
                 <div className="menu-item-left">
                   <Store size={18} strokeWidth={2} aria-hidden="true" />
@@ -723,7 +723,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('knowledge'); setMenuCollapsed(true) }}
-                title="知识库"
               >
                 <div className="menu-item-left">
                   <Library size={18} strokeWidth={2} aria-hidden="true" />
@@ -739,7 +738,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'workflow' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('workflow'); setMenuCollapsed(true) }}
-                title="工作流"
               >
                 <div className="menu-item-left">
                   <Workflow size={18} strokeWidth={2} aria-hidden="true" />
@@ -755,7 +753,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('logs'); setMenuCollapsed(true) }}
-                title="日志"
               >
                 <div className="menu-item-left">
                   <ScrollText size={18} strokeWidth={2} aria-hidden="true" />
@@ -771,7 +768,6 @@ export function AgentWindow(): React.JSX.Element {
               <div
                 className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('settings'); setMenuCollapsed(true) }}
-                title="设置"
               >
                 <div className="menu-item-left">
                   <SettingsIcon />
@@ -789,26 +785,29 @@ export function AgentWindow(): React.JSX.Element {
 
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
-          <button className="theme-toggle-icon-btn" onClick={handleThemeToggle} title="切换主题">
-            {theme === 'dark' ? (
-              <Sun size={18} strokeWidth={2} aria-hidden="true" />
-            ) : (
-              <Moon size={18} strokeWidth={2} aria-hidden="true" />
-            )}
-          </button>
-          <button
-            className={`sidebar-menu-icon-btn ${menuCollapsed ? '' : 'active'}`}
-            onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
-            title={menuCollapsed ? '打开菜单' : '关闭菜单'}
-            aria-label={menuCollapsed ? '打开菜单' : '关闭菜单'}
-            aria-expanded={!menuCollapsed}
-          >
-            {menuCollapsed ? (
-              <Menu size={18} strokeWidth={1.8} aria-hidden="true" />
-            ) : (
-              <X size={18} strokeWidth={1.8} aria-hidden="true" />
-            )}
-          </button>
+          <Tooltip content={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'} placement="right">
+            <button className="theme-toggle-icon-btn" onClick={handleThemeToggle}>
+              {theme === 'dark' ? (
+                <Sun size={18} strokeWidth={2} aria-hidden="true" />
+              ) : (
+                <Moon size={18} strokeWidth={2} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip content={menuCollapsed ? '打开菜单' : '关闭菜单'} placement="right">
+            <button
+              className={`sidebar-menu-icon-btn ${menuCollapsed ? '' : 'active'}`}
+              onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
+              aria-label={menuCollapsed ? '打开菜单' : '关闭菜单'}
+              aria-expanded={!menuCollapsed}
+            >
+              {menuCollapsed ? (
+                <Menu size={18} strokeWidth={1.8} aria-hidden="true" />
+              ) : (
+                <X size={18} strokeWidth={1.8} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -839,39 +838,42 @@ export function AgentWindow(): React.JSX.Element {
                     onClick={() => activateWorkspaceTab(tab)}
                   >
                     {isThinking && <span className="tab-status-dot-pulse"></span>}
-                    <span className="titlebar-tab-name" title={label}>
+                    <span className="titlebar-tab-name">
                       {label}
                     </span>
-                    <span
-                      className="titlebar-tab-close"
-                      onClick={(e) => handleCloseTab(tab.key, e)}
-                      title="关闭标签页"
-                    >
-                      <X size={12} strokeWidth={2} aria-hidden="true" />
-                    </span>
+                    <Tooltip content="关闭标签页" placement="bottom">
+                      <span
+                        className="titlebar-tab-close"
+                        onClick={(e) => handleCloseTab(tab.key, e)}
+                      >
+                        <X size={12} strokeWidth={2} aria-hidden="true" />
+                      </span>
+                    </Tooltip>
                   </div>
                 )
               })}
 
-              <button
-                className="titlebar-new-tab-btn"
-                onClick={() => setShowNewSessionDialog(true)}
-                title="新建会话"
-              >
-                <Plus size={15} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="新建会话" placement="bottom">
+                <button
+                  className="titlebar-new-tab-btn"
+                  onClick={() => setShowNewSessionDialog(true)}
+                >
+                  <Plus size={15} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
             {hiddenTabs.length > 0 && (
               <div className="titlebar-tab-overflow" ref={tabOverflowMenuRef}>
-                <button
-                  className={`titlebar-tab-overflow-btn ${showTabOverflowMenu ? 'active' : ''}`}
-                  onClick={() => setShowTabOverflowMenu((prev) => !prev)}
-                  title={`还有 ${hiddenTabs.length} 个标签`}
-                  aria-label="显示更多标签"
-                  aria-expanded={showTabOverflowMenu}
-                >
-                  <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
-                </button>
+                <Tooltip content={`还有 ${hiddenTabs.length} 个标签`} placement="bottom">
+                  <button
+                    className={`titlebar-tab-overflow-btn ${showTabOverflowMenu ? 'active' : ''}`}
+                    onClick={() => setShowTabOverflowMenu((prev) => !prev)}
+                    aria-label="显示更多标签"
+                    aria-expanded={showTabOverflowMenu}
+                  >
+                    <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </Tooltip>
                 {showTabOverflowMenu && (
                   <div className="titlebar-tab-overflow-menu">
                     {hiddenTabs.map((tab) => (
@@ -883,17 +885,18 @@ export function AgentWindow(): React.JSX.Element {
                           setShowTabOverflowMenu(false)
                         }}
                       >
-                        <span title={getWorkspaceTabLabel(tab)}>{getWorkspaceTabLabel(tab)}</span>
-                        <span
-                          className="titlebar-tab-overflow-close"
-                          onClick={(event) => {
-                            handleCloseTab(tab.key, event)
-                            setShowTabOverflowMenu(false)
-                          }}
-                          title="关闭标签页"
-                        >
-                          <X size={12} strokeWidth={2} aria-hidden="true" />
-                        </span>
+                        <span>{getWorkspaceTabLabel(tab)}</span>
+                        <Tooltip content="关闭标签页" placement="left">
+                          <span
+                            className="titlebar-tab-overflow-close"
+                            onClick={(event) => {
+                              handleCloseTab(tab.key, event)
+                              setShowTabOverflowMenu(false)
+                            }}
+                          >
+                            <X size={12} strokeWidth={2} aria-hidden="true" />
+                          </span>
+                        </Tooltip>
                       </div>
                     ))}
                   </div>
@@ -905,34 +908,37 @@ export function AgentWindow(): React.JSX.Element {
 
           {/* 窗口控制按钮 */}
           <div className="titlebar-controls">
-            <button
-              className="titlebar-control-btn"
-              onClick={() => window.api?.minimizeAgentWindow()}
-              title="最小化"
-            >
-              <Minus size={12} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <button
-              className="titlebar-control-btn"
-              onClick={() => {
-                window.api?.maximizeAgentWindow()
-                setTimeout(checkMaximized, 100)
-              }}
-              title={isMaximized ? '向下还原' : '最大化'}
-            >
-              {isMaximized ? (
-                <Copy size={11} strokeWidth={1.6} aria-hidden="true" />
-              ) : (
-                <Square size={10} strokeWidth={1.6} aria-hidden="true" />
-              )}
-            </button>
-            <button
-              className="titlebar-control-btn close"
-              onClick={() => window.api?.closeAgentWindow()}
-              title="关闭"
-            >
-              <X size={12} strokeWidth={1.6} aria-hidden="true" />
-            </button>
+            <Tooltip content="最小化" placement="bottom">
+              <button
+                className="titlebar-control-btn"
+                onClick={() => window.api?.minimizeAgentWindow()}
+              >
+                <Minus size={12} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            <Tooltip content={isMaximized ? '向下还原' : '最大化'} placement="bottom">
+              <button
+                className="titlebar-control-btn"
+                onClick={() => {
+                  window.api?.maximizeAgentWindow()
+                  setTimeout(checkMaximized, 100)
+                }}
+              >
+                {isMaximized ? (
+                  <Copy size={11} strokeWidth={1.6} aria-hidden="true" />
+                ) : (
+                  <Square size={10} strokeWidth={1.6} aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip content="关闭" placement="bottom">
+              <button
+                className="titlebar-control-btn close"
+                onClick={() => window.api?.closeAgentWindow()}
+              >
+                <X size={12} strokeWidth={1.6} aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
         </div>
 
@@ -952,13 +958,14 @@ export function AgentWindow(): React.JSX.Element {
                 {activeTab === 'settings' && '系统设置'}
               </div>
               {activeTab === 'chat' && activeSession.workspacePath && (
-                <div
-                  className="content-subtitle active-workspace-path"
-                  title={activeSession.workspacePath}
-                >
-                  <FolderOpen size={12} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{activeSession.workspacePath}</span>
-                </div>
+                <Tooltip title="当前工作区路径" description={activeSession.workspacePath} placement="bottom">
+                  <div
+                    className="content-subtitle active-workspace-path"
+                  >
+                    <FolderOpen size={12} strokeWidth={1.8} aria-hidden="true" />
+                    <span>{activeSession.workspacePath}</span>
+                  </div>
+                </Tooltip>
               )}
               {activeTab !== 'chat' && (
                 <div className="content-subtitle">
@@ -976,55 +983,58 @@ export function AgentWindow(): React.JSX.Element {
             {activeTab === 'chat' && (
               <div style={{ position: 'relative' }} ref={historyDropdownRef}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <button
-                    className={`history-btn ${showFilePanel ? 'active' : ''}`}
-                    onClick={() => {
-                      if (!showFilePanel) void loadGeneratedFiles()
-                      setShowFilePanel(!showFilePanel)
-                      if (showFilePanel) {
-                        setPreviewFile(null)
-                        setOpenTabs([])
-                      }
-                    }}
-                    title={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
-                    aria-label={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
-                  >
-                    {showFilePanel ? (
-                      <PanelRightClose size={18} strokeWidth={2} aria-hidden="true" />
-                    ) : (
-                      <PanelRightOpen size={18} strokeWidth={2} aria-hidden="true" />
-                    )}
-                    {visibleFileCount > 0 && <span>{visibleFileCount}</span>}
-                  </button>
-                  <button
-                    className="history-btn"
-                    onClick={() => {
-                      const rect = historyDropdownRef.current?.getBoundingClientRect()
-                      if (rect) {
-                        setHistoryMenuPosition({
-                          top: rect.bottom + 8,
-                          right: Math.max(12, window.innerWidth - rect.right)
-                        })
-                      }
-                      setShowHistoryDropdown((current) => !current)
-                    }}
-                    title="查看历史提问"
-                  >
-                    <List size={18} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                  <button
-                    className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
-                    onClick={() => {
-                      document.documentElement.classList.remove('collab-takeover-active')
-                      setShowTrajectory((current) => !current)
-                      setShowHistoryDropdown(false)
-                    }}
-                    title={showTrajectory ? '返回会话' : '查看当前会话执行轨迹'}
-                    aria-pressed={showTrajectory}
-                  >
-                    <Route size={16} strokeWidth={2} aria-hidden="true" />
-                    <span>{showTrajectory ? '会话' : '轨迹'}</span>
-                  </button>
+                  <Tooltip content={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'} placement="bottom">
+                    <button
+                      className={`history-btn ${showFilePanel ? 'active' : ''}`}
+                      onClick={() => {
+                        if (!showFilePanel) void loadGeneratedFiles()
+                        setShowFilePanel(!showFilePanel)
+                        if (showFilePanel) {
+                          setPreviewFile(null)
+                          setOpenTabs([])
+                        }
+                      }}
+                      aria-label={showFilePanel ? '关闭文件预览区域' : '打开文件预览区域'}
+                    >
+                      {showFilePanel ? (
+                        <PanelRightClose size={18} strokeWidth={2} aria-hidden="true" />
+                      ) : (
+                        <PanelRightOpen size={18} strokeWidth={2} aria-hidden="true" />
+                      )}
+                      {visibleFileCount > 0 && <span>{visibleFileCount}</span>}
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="查看历史提问" placement="bottom">
+                    <button
+                      className="history-btn"
+                      onClick={() => {
+                        const rect = historyDropdownRef.current?.getBoundingClientRect()
+                        if (rect) {
+                          setHistoryMenuPosition({
+                            top: rect.bottom + 8,
+                            right: Math.max(12, window.innerWidth - rect.right)
+                          })
+                        }
+                        setShowHistoryDropdown((current) => !current)
+                      }}
+                    >
+                      <List size={18} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={showTrajectory ? '返回会话' : '查看当前会话执行轨迹'} placement="bottom">
+                    <button
+                      className={`history-btn trajectory-toggle-btn ${showTrajectory ? 'active' : ''}`}
+                      onClick={() => {
+                        document.documentElement.classList.remove('collab-takeover-active')
+                        setShowTrajectory((current) => !current)
+                        setShowHistoryDropdown(false)
+                      }}
+                      aria-pressed={showTrajectory}
+                    >
+                      <Route size={16} strokeWidth={2} aria-hidden="true" />
+                      <span>{showTrajectory ? '会话' : '轨迹'}</span>
+                    </button>
+                  </Tooltip>
                 </div>
 
                 {showHistoryDropdown &&
@@ -1103,13 +1113,14 @@ export function AgentWindow(): React.JSX.Element {
                   直接聊天，或让会话持续绑定一个项目文件夹。
                 </div>
               </div>
-              <button
-                className="new-session-dialog-close"
-                onClick={() => setShowNewSessionDialog(false)}
-                title="关闭"
-              >
-                <X size={17} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="关闭" placement="bottom">
+                <button
+                  className="new-session-dialog-close"
+                  onClick={() => setShowNewSessionDialog(false)}
+                >
+                  <X size={17} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
 
             <div className="new-session-primary-actions">
@@ -1150,21 +1161,21 @@ export function AgentWindow(): React.JSX.Element {
                 <div className="new-session-section-label">最近文件区</div>
                 <div className="new-session-workspace-list">
                   {workspacePaths.map((path) => (
-                    <button
-                      key={path}
-                      className="new-session-workspace-row"
-                      onClick={() => {
-                        void createSessionFromDialog(path)
-                      }}
-                      title={path}
-                    >
-                      <FolderOpen size={14} strokeWidth={1.8} aria-hidden="true" />
-                      <span className="new-session-workspace-copy">
-                        <strong>{workspaceName(path)}</strong>
-                        <small>{path}</small>
-                      </span>
-                      <Plus size={13} strokeWidth={2} aria-hidden="true" />
-                    </button>
+                    <Tooltip key={path} title={workspaceName(path)} description={path} placement="right">
+                      <button
+                        className="new-session-workspace-row"
+                        onClick={() => {
+                          void createSessionFromDialog(path)
+                        }}
+                      >
+                        <FolderOpen size={14} strokeWidth={1.8} aria-hidden="true" />
+                        <span className="new-session-workspace-copy">
+                          <strong>{workspaceName(path)}</strong>
+                          <small>{path}</small>
+                        </span>
+                        <Plus size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                   ))}
                 </div>
               </div>
@@ -1190,13 +1201,14 @@ export function AgentWindow(): React.JSX.Element {
               >
                 删除
               </div>
-              <button
-                className="mcp-modal-close-btn"
-                onClick={() => setSessionToDeleteId(null)}
-                title="关闭"
-              >
-                <X size={18} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="关闭" placement="bottom">
+                <button
+                  className="mcp-modal-close-btn"
+                  onClick={() => setSessionToDeleteId(null)}
+                >
+                  <X size={18} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
             <div
               className="mcp-modal-body"

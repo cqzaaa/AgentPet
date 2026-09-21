@@ -3,6 +3,7 @@ import { createViewer, imagePlugin, pdfPlugin, officePlugin, textPlugin } from '
 import '@open-file-viewer/core/style.css'
 import JSZip from 'jszip'
 import { AppStore } from '../hooks/useAppStore'
+import { Tooltip } from './Tooltip'
 import {
   ChevronDown,
   ChevronRight,
@@ -917,32 +918,33 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
                         <FileTypeIcon fileName={f.name} size={17} />
                       </span>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          // 从 Tab 列表移除
-                          const remaining = openTabs.filter(t => t.path !== f.path)
-                          setOpenTabs(remaining)
-                          if (remaining.length === 0) {
-                            setPreviewFile(null)
-                          } else if (previewFile?.path === f.path) {
-                            const next = remaining[remaining.length - 1]
-                            handlePreviewFileLocal(next)
-                          }
-                        }}
-                        title="关闭 Tab"
-                        style={{
-                          fontSize: '10px',
-                          flexShrink: 0,
-                          opacity: 0.5,
-                          cursor: 'pointer',
-                          padding: '0 2px',
-                          borderRadius: '3px',
-                          lineHeight: 1
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
-                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
-                      ><X size={11} strokeWidth={2} aria-hidden="true" /></span>
+                      <Tooltip content="关闭 Tab" placement="bottom">
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // 从 Tab 列表移除
+                            const remaining = openTabs.filter(t => t.path !== f.path)
+                            setOpenTabs(remaining)
+                            if (remaining.length === 0) {
+                              setPreviewFile(null)
+                            } else if (previewFile?.path === f.path) {
+                              const next = remaining[remaining.length - 1]
+                              handlePreviewFileLocal(next)
+                            }
+                          }}
+                          style={{
+                            fontSize: '10px',
+                            flexShrink: 0,
+                            opacity: 0.5,
+                            cursor: 'pointer',
+                            padding: '0 2px',
+                            borderRadius: '3px',
+                            lineHeight: 1
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
+                        ><X size={11} strokeWidth={2} aria-hidden="true" /></span>
+                      </Tooltip>
                     </div>
                   )
                 })}
@@ -996,30 +998,31 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
                       borderRadius: '6px',
                       flexShrink: 0
                     }}>
-                      <button
-                        onClick={() => {
-                          toolbarContextRef.current?.command('zoom-out')
-                          setTimeout(syncZoomStatus, 50)
-                        }}
-                        disabled={!canZoomOut}
-                        title="缩小"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: canZoomOut ? 'pointer' : 'not-allowed',
-                          opacity: canZoomOut ? 0.8 : 0.3,
-                          padding: '2px 6px',
-                          fontSize: '10px',
-                          color: 'var(--text-primary)',
-                          borderRadius: '4px',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }}
-                        onMouseEnter={e => { if (canZoomOut) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
-                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      >
-                        <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
-                      </button>
+                      <Tooltip content="缩小" placement="bottom">
+                        <button
+                          onClick={() => {
+                            toolbarContextRef.current?.command('zoom-out')
+                            setTimeout(syncZoomStatus, 50)
+                          }}
+                          disabled={!canZoomOut}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: canZoomOut ? 'pointer' : 'not-allowed',
+                            opacity: canZoomOut ? 0.8 : 0.3,
+                            padding: '2px 6px',
+                            fontSize: '10px',
+                            color: 'var(--text-primary)',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          onMouseEnter={e => { if (canZoomOut) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                        >
+                          <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
                       <span style={{
                         fontSize: '9px',
                         fontWeight: 600,
@@ -1030,62 +1033,37 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
                       }}>
                         {zoomLabel}
                       </span>
-                      <button
-                        onClick={() => {
-                          toolbarContextRef.current?.command('zoom-in')
-                          setTimeout(syncZoomStatus, 50)
-                        }}
-                        disabled={!canZoomIn}
-                        title="放大"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: canZoomIn ? 'pointer' : 'not-allowed',
-                          opacity: canZoomIn ? 0.8 : 0.3,
-                          padding: '2px 6px',
-                          fontSize: '10px',
-                          color: 'var(--text-primary)',
-                          borderRadius: '4px',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }}
-                        onMouseEnter={e => { if (canZoomIn) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
-                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      >
-                        <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
-                      </button>
-                      <div style={{ width: '1px', height: '10px', background: 'var(--border-color)', margin: '0 2px' }} />
-                      <button
-                        onClick={() => {
-                          setIsFakeFullscreen(!isFakeFullscreen)
-                        }}
-                        title={isFakeFullscreen ? "退出全屏" : "全屏"}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          opacity: 0.8,
-                          padding: '2px 6px',
-                          fontSize: '10px',
-                          color: 'var(--text-primary)',
-                          borderRadius: '4px',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      >
-                        {isFakeFullscreen
-                          ? <Minimize2 size={14} strokeWidth={2} aria-hidden="true" />
-                          : <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />}
-                      </button>
-                      {canRotate && (
+                      <Tooltip content="放大" placement="bottom">
                         <button
                           onClick={() => {
-                            toolbarContextRef.current?.command('rotate-right')
+                            toolbarContextRef.current?.command('zoom-in')
                             setTimeout(syncZoomStatus, 50)
                           }}
-                          title="顺时针旋转"
+                          disabled={!canZoomIn}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: canZoomIn ? 'pointer' : 'not-allowed',
+                            opacity: canZoomIn ? 0.8 : 0.3,
+                            padding: '2px 6px',
+                            fontSize: '10px',
+                            color: 'var(--text-primary)',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          onMouseEnter={e => { if (canZoomIn) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                        >
+                          <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                      <div style={{ width: '1px', height: '10px', background: 'var(--border-color)', margin: '0 2px' }} />
+                      <Tooltip content={isFakeFullscreen ? "退出全屏" : "全屏"} placement="bottom">
+                        <button
+                          onClick={() => {
+                            setIsFakeFullscreen(!isFakeFullscreen)
+                          }}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -1101,15 +1079,47 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
                           onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
                           onMouseLeave={e => e.currentTarget.style.background = 'none'}
                         >
-                          <RotateCw size={14} strokeWidth={2} aria-hidden="true" />
+                          {isFakeFullscreen
+                            ? <Minimize2 size={14} strokeWidth={2} aria-hidden="true" />
+                            : <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />}
                         </button>
+                      </Tooltip>
+                      {canRotate && (
+                        <Tooltip content="顺时针旋转" placement="bottom">
+                          <button
+                            onClick={() => {
+                              toolbarContextRef.current?.command('rotate-right')
+                              setTimeout(syncZoomStatus, 50)
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              opacity: 0.8,
+                              padding: '2px 6px',
+                              fontSize: '10px',
+                              color: 'var(--text-primary)',
+                              borderRadius: '4px',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          >
+                            <RotateCw size={14} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   )}
 
                   <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} title="另存为" style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}><Save size={14} strokeWidth={2} aria-hidden="true" /></button>
-                    <button onClick={() => handleDeleteFileLocal(previewFile!)} title="删除" style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    <Tooltip content="另存为" placement="bottom">
+                      <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}><Save size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    </Tooltip>
+                    <Tooltip content="删除" placement="bottom">
+                      <button onClick={() => handleDeleteFileLocal(previewFile!)} style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    </Tooltip>
                     <button onClick={() => {
                       const remaining = openTabs.filter(t => t.path !== previewFile!.path)
                       setOpenTabs(remaining)

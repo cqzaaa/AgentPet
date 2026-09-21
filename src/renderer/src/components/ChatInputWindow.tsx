@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { createSessionId, normalizeSearchCitations } from '../utils/helpers'
+import { Tooltip } from './Tooltip'
 import {
   Bot,
   Camera,
@@ -804,16 +805,17 @@ export function ChatInputWindow(): React.JSX.Element {
             <div key={`ss-${index}`} className="screenshot-preview-item">
               <img src={img.base64} className="screenshot-preview-thumb" />
               <span className="screenshot-preview-meta">{img.width} × {img.height}</span>
-              <button
-                className="screenshot-preview-remove"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setScreenshotImages(prev => prev.filter((_, i) => i !== index))
-                }}
-                title="移除图片"
-              >
-                <X size={13} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="移除图片" placement="top">
+                <button
+                  className="screenshot-preview-remove"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setScreenshotImages(prev => prev.filter((_, i) => i !== index))
+                  }}
+                >
+                  <X size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
           ))}
           {/* 粘贴文件预览 */}
@@ -827,30 +829,32 @@ export function ChatInputWindow(): React.JSX.Element {
               <span className="screenshot-preview-meta pasted-file-name" title={file.name}>
                 {file.name.length > 12 ? file.name.substring(0, 10) + '…' + file.name.split('.').pop() : file.name}
               </span>
-              <button
-                className="screenshot-preview-remove"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setPastedFiles(prev => prev.filter((_, i) => i !== index))
-                }}
-                title="移除文件"
-              >
-                <X size={13} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="移除文件" placement="top">
+                <button
+                  className="screenshot-preview-remove"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPastedFiles(prev => prev.filter((_, i) => i !== index))
+                  }}
+                >
+                  <X size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
           ))}
           {(screenshotImages.length > 0 || pastedFiles.length > 0) && (
-            <button
-              className="screenshot-preview-add-more"
-              onClick={() => {
-                setShowDropdown(false)
-                window.api.startScreenshot()
-              }}
-              title="继续截图"
-            >
-              <Plus size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-              继续截图
-            </button>
+            <Tooltip content="继续截图" placement="top">
+              <button
+                className="screenshot-preview-add-more"
+                onClick={() => {
+                  setShowDropdown(false)
+                  window.api.startScreenshot()
+                }}
+              >
+                <Plus size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                继续截图
+              </button>
+            </Tooltip>
           )}
         </div>
       )}
@@ -1589,18 +1593,19 @@ export function ChatInputWindow(): React.JSX.Element {
         </div>
 
         {/* 历史下拉菜单触发按钮 */}
-        <button
-          className={`history-dropdown-trigger ${showDropdown ? 'active' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            const nextOpen = !showDropdown
-            setShowDropdown(nextOpen)
-          }}
-          title="历史会话"
-        >
-          <History size={14} strokeWidth={2} aria-hidden="true" />
-          <span className="dropdown-arrow"><ChevronDown size={11} strokeWidth={2} aria-hidden="true" /></span>
-        </button>
+        <Tooltip content="历史会话" placement="bottom">
+          <button
+            className={`history-dropdown-trigger ${showDropdown ? 'active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              const nextOpen = !showDropdown
+              setShowDropdown(nextOpen)
+            }}
+          >
+            <History size={14} strokeWidth={2} aria-hidden="true" />
+            <span className="dropdown-arrow"><ChevronDown size={11} strokeWidth={2} aria-hidden="true" /></span>
+          </button>
+        </Tooltip>
 
         {/* 输入框 */}
         <input
@@ -1615,24 +1620,26 @@ export function ChatInputWindow(): React.JSX.Element {
         />
 
         {/* 截图按钮 */}
-        <button
-          className="attachment-btn"
-          onClick={() => { void handleSelectAttachments() }}
-          title="添加图片、文档、表格、代码或媒体文件"
-        >
-          <Paperclip size={16} strokeWidth={2} aria-hidden="true" />
-        </button>
+        <Tooltip content="添加图片、文档、表格或代码文件" placement="bottom">
+          <button
+            className="attachment-btn"
+            onClick={() => { void handleSelectAttachments() }}
+          >
+            <Paperclip size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </Tooltip>
 
-        <button
-          className="screenshot-btn"
-          onClick={() => {
-            setShowDropdown(false)
-            window.api.startScreenshot()
-          }}
-          title="屏幕截图区域提问"
-        >
-          <Camera size={16} strokeWidth={2} aria-hidden="true" />
-        </button>
+        <Tooltip content="屏幕截图区域提问" placement="bottom">
+          <button
+            className="screenshot-btn"
+            onClick={() => {
+              setShowDropdown(false)
+              window.api.startScreenshot()
+            }}
+          >
+            <Camera size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </Tooltip>
 
         {/* 发送按钮 */}
         <button
@@ -1644,9 +1651,11 @@ export function ChatInputWindow(): React.JSX.Element {
         </button>
 
         {/* 关闭窗口按钮 */}
-        <button className="close-window-btn" onClick={() => window.api.closeInputWindow()} title="关闭">
-          <X size={15} strokeWidth={2} aria-hidden="true" />
-        </button>
+        <Tooltip content="关闭" placement="bottom">
+          <button className="close-window-btn" onClick={() => window.api.closeInputWindow()}>
+            <X size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
 
       {/* 历史会话下拉菜单 */}
@@ -1688,27 +1697,30 @@ export function ChatInputWindow(): React.JSX.Element {
           <div className="mini-panel-header">
             <span className="mini-panel-title"><Lightbulb size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />快捷会话</span>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                className="action-btn chat-link-btn"
-                onClick={() => {
-                  // 广播会话更新，确保 Agent 窗口加载最新数据
-                  const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
-                  if (window.electron && window.electron.ipcRenderer) {
-                    window.electron.ipcRenderer.send('api:wechat-session-updated', activeId)
-                  }
-                  window.api.openAgentWindow()
-                  window.api.closeInputWindow()
-                }}
-                title="在主窗口中打开该对话"
-              >
-                <ExternalLink size={13} strokeWidth={2} aria-hidden="true" />
-                完整对话
-              </button>
+              <Tooltip content="在主窗口中打开该对话" placement="bottom">
+                <button
+                  className="action-btn chat-link-btn"
+                  onClick={() => {
+                    // 广播会话更新，确保 Agent 窗口加载最新数据
+                    const activeId = localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || ''
+                    if (window.electron && window.electron.ipcRenderer) {
+                      window.electron.ipcRenderer.send('api:wechat-session-updated', activeId)
+                    }
+                    window.api.openAgentWindow()
+                    window.api.closeInputWindow()
+                  }}
+                >
+                  <ExternalLink size={13} strokeWidth={2} aria-hidden="true" />
+                  完整对话
+                </button>
+              </Tooltip>
 
-              <button className="clear-chat-btn" onClick={handleClearAll} title="清空当前对话并收起">
-                <Trash2 size={12} strokeWidth={2} aria-hidden="true" />
-                收起
-              </button>
+              <Tooltip content="清空当前对话并收起" placement="bottom">
+                <button className="clear-chat-btn" onClick={handleClearAll}>
+                  <Trash2 size={12} strokeWidth={2} aria-hidden="true" />
+                  收起
+                </button>
+              </Tooltip>
             </div>
           </div>
 

@@ -12,6 +12,7 @@ import {
   Trash2,
   X
 } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 // ── 分组定义 ──────────────────────────────────────────────────
 type TimeGroupKey = 'today' | 'yesterday' | 'thisWeek' | 'earlier'
@@ -43,6 +44,16 @@ function parseSessionTime(rawTime: string): Date | null {
   if (!Number.isNaN(direct.getTime())) return direct
   const local = new Date(rawTime.replace(/-/g, '/'))
   return Number.isNaN(local.getTime()) ? null : local
+}
+
+function formatSessionTooltipTime(rawTime: string): string {
+  const date = parseSessionTime(rawTime)
+  if (!date) return ''
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `更新于 ${month}月${day}日 ${hours}:${minutes}`
 }
 
 function getTimeGroup(session: Session): TimeGroupKey {
@@ -395,34 +406,35 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     if (row.type === 'workspace') {
       const isCollapsed = Boolean(collapsedWorkspaces[row.path])
       return (
-        <button
-          type="button"
-          className="workspace-group-header"
-          title={row.path}
-          onClick={() =>
-            {
-              if (!isCollapsed) {
-                setExpandedSessionGroups((previous) => ({
+        <Tooltip title={getWorkspaceName(row.path)} description={row.path} placement="right">
+          <button
+            type="button"
+            className="workspace-group-header"
+            onClick={() =>
+              {
+                if (!isCollapsed) {
+                  setExpandedSessionGroups((previous) => ({
+                    ...previous,
+                    [`workspace:${row.path}`]: false
+                  }))
+                }
+                setCollapsedWorkspaces((previous) => ({
                   ...previous,
-                  [`workspace:${row.path}`]: false
+                  [row.path]: !previous[row.path]
                 }))
               }
-              setCollapsedWorkspaces((previous) => ({
-                ...previous,
-                [row.path]: !previous[row.path]
-              }))
             }
-          }
-          aria-expanded={!isCollapsed}
-        >
-          <FolderOpen
-            className="workspace-group-icon"
-            size={16}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <span className="workspace-group-name">{getWorkspaceName(row.path)}</span>
-        </button>
+            aria-expanded={!isCollapsed}
+          >
+            <FolderOpen
+              className="workspace-group-icon"
+              size={16}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className="workspace-group-name">{getWorkspaceName(row.path)}</span>
+          </button>
+        </Tooltip>
       )
     }
     if (row.type === 'header') {
@@ -450,11 +462,17 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     const isThinking = checkIsThinking(s)
     const sessionCopy = (
       <>
-        {isThinking && <span className="recent-dot" title="正在处理" aria-label="正在处理" />}
+        {isThinking && (
+          <Tooltip content="正在处理" placement="top">
+            <span className="recent-dot" aria-label="正在处理" />
+          </Tooltip>
+        )}
         {s.pinned && (
-          <span className="recent-pin-icon" title="已置顶">
-            <Pin size={11} strokeWidth={1.8} aria-hidden="true" />
-          </span>
+          <Tooltip content="已置顶" placement="top">
+            <span className="recent-pin-icon">
+              <Pin size={11} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+          </Tooltip>
         )}
         <div className="recent-meta">
           {isRenaming ? (
@@ -472,7 +490,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
               maxLength={50}
             />
           ) : (
-            <span className="recent-title" title={displayTitle}>
+            <span className="recent-title">
               {s.id.startsWith('wechat:') && <span className="recent-source-badge">微信</span>}
               {displayTitle}
             </span>
@@ -483,35 +501,44 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     return (
       <div
         className={`recent-item ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${s.workspacePath && !s.pinned ? 'workspace-session' : ''} ${isThinking ? 'thinking' : ''}`}
-        title={s.workspacePath ? `${displayTitle}\n${s.workspacePath}` : displayTitle}
       >
         {isRenaming ? (
           <div className="recent-item-main is-renaming">{sessionCopy}</div>
         ) : (
-          <button
-            type="button"
-            className="recent-item-main"
-            onClick={() => onSelect(s.id)}
-            onContextMenu={(e) => handleContextMenu(e, s.id)}
-            onDoubleClick={() => startRename(s)}
-            aria-current={isActive ? 'page' : undefined}
+          <Tooltip
+            title={displayTitle}
+            description={s.workspacePath || getPreview(s)}
+            footer={formatSessionTooltipTime(getSessionUpdatedTime(s))}
+            placement="right"
+            offset={12}
+            enterDelay={300}
           >
-            {sessionCopy}
-          </button>
+            <button
+              type="button"
+              className="recent-item-main"
+              onClick={() => onSelect(s.id)}
+              onContextMenu={(e) => handleContextMenu(e, s.id)}
+              onDoubleClick={() => startRename(s)}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              {sessionCopy}
+            </button>
+          </Tooltip>
         )}
         {!isRenaming && (
-          <button
-            type="button"
-            className="recent-delete-btn"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete(s.id)
-            }}
-            title="删除会话"
-            aria-label={`删除会话：${s.name}`}
-          >
-            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-          </button>
+          <Tooltip content="删除会话" placement="top">
+            <button
+              type="button"
+              className="recent-delete-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(s.id)
+              }}
+              aria-label={`删除会话：${s.name}`}
+            >
+              <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </Tooltip>
         )}
       </div>
     )
@@ -531,18 +558,19 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           onChange={(e) => setSearchQuery(e.target.value)}
         />
         {searchQuery && (
-          <button
-            type="button"
-            className="recent-search-clear"
-            onClick={() => {
-              setSearchQuery('')
-              searchInputRef.current?.focus()
-            }}
-            title="清除搜索"
-            aria-label="清除搜索"
-          >
-            <X size={13} strokeWidth={2} aria-hidden="true" />
-          </button>
+          <Tooltip content="清除搜索" placement="top">
+            <button
+              type="button"
+              className="recent-search-clear"
+              onClick={() => {
+                setSearchQuery('')
+                searchInputRef.current?.focus()
+              }}
+              aria-label="清除搜索"
+            >
+              <X size={13} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </Tooltip>
         )}
       </div>
       <div className="sidebar-recent-container">

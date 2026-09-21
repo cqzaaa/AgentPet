@@ -5,6 +5,7 @@ import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../h
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
 import { AgentPetMark } from '../components/AgentPetMark'
+import { Tooltip } from '../components/Tooltip'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
 import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
@@ -1620,34 +1621,36 @@ function ChatPageImpl(): React.JSX.Element {
                     aria-hidden="true"
                   />
                 )}
-                <span
-                  className="preview-name"
-                  title={file.name}
-                  style={{
-                    maxWidth: '120px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: '13px'
-                  }}
-                >
-                  {file.name}
-                </span>
-                <button
-                  className="preview-remove-btn"
-                  onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                  title="移除文件"
-                  style={{
-                    marginLeft: '8px',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--color-text-secondary)',
-                    padding: '2px'
-                  }}
-                >
-                  <X size={14} strokeWidth={2} aria-hidden="true" />
-                </button>
+                <Tooltip content={file.name} placement="top">
+                  <span
+                    className="preview-name"
+                    style={{
+                      maxWidth: '120px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: '13px'
+                    }}
+                  >
+                    {file.name}
+                  </span>
+                </Tooltip>
+                <Tooltip content="移除文件" placement="top">
+                  <button
+                    className="preview-remove-btn"
+                    onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                    style={{
+                      marginLeft: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--color-text-secondary)',
+                      padding: '2px'
+                    }}
+                  >
+                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </Tooltip>
               </div>
             ))}
           </div>
@@ -2195,6 +2198,7 @@ function ChatPageImpl(): React.JSX.Element {
                 style={{ position: 'relative' }}
                 ref={deviceMenuRef}
               >
+              <Tooltip content={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`} placement="top">
                 <div
                   className={`toolbar-icon-btn custom-device-trigger ${showDeviceMenu ? 'active' : ''}`}
                   onClick={() => {
@@ -2208,7 +2212,6 @@ function ChatPageImpl(): React.JSX.Element {
                     userSelect: 'none',
                     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
                   }}
-                  title={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
                 >
                   {executionDevice === 'ssh' ? (
                     <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
@@ -2216,6 +2219,7 @@ function ChatPageImpl(): React.JSX.Element {
                     <Monitor size={17} strokeWidth={2} aria-hidden="true" />
                   )}
                 </div>
+              </Tooltip>
 
                 {showDeviceMenu && (
                   <div
@@ -2382,19 +2386,20 @@ function ChatPageImpl(): React.JSX.Element {
               className="toolbar-group-right"
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             >
-              <button
-                className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
-                type="button"
-                onClick={() => {
-                  setOpenedSubtask(null)
-                  setOpenedCollaborationRunId('')
-                  setShowCollaborationComposer(true)
-                }}
-                title="新建多 Agent 协作任务"
-                aria-label="新建多 Agent 协作任务"
-              >
-                <Network size={17} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content="新建多 Agent 协作任务" placement="top">
+                <button
+                  className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => {
+                    setOpenedSubtask(null)
+                    setOpenedCollaborationRunId('')
+                    setShowCollaborationComposer(true)
+                  }}
+                  aria-label="新建多 Agent 协作任务"
+                >
+                  <Network size={17} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
               {/* SVG 额度环 */}
               <div
                 style={{
@@ -2469,97 +2474,114 @@ function ChatPageImpl(): React.JSX.Element {
 
               {/* 技能快捷开关按钮与 Popover */}
               <div style={{ position: 'relative' }}>
-                <div
-                  className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
-                  onClick={() => {
-                    const next = !showSkillsPopover
-                    setShowSkillsPopover(next)
-                    setShowMcpPopover(false)
-                    setShowFeaturePopover(false)
-                    if (next) {
-                      refreshSkillsAndStorage()
-                    }
-                  }}
-                  title={`管理与启用技能扩展包 (当前启用: ${skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`}
-                >
-                  <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
-                </div>
+                <Tooltip content={`管理与启用技能扩展包 (当前启用: ${skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`} placement="top">
+                  <div
+                    className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
+                    onClick={() => {
+                      const next = !showSkillsPopover
+                      setShowSkillsPopover(next)
+                      setShowMcpPopover(false)
+                      setShowFeaturePopover(false)
+                      if (next) {
+                        refreshSkillsAndStorage()
+                      }
+                    }}
+                  >
+                    <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
+                  </div>
+                </Tooltip>
                 {showSkillsPopover && renderSkillsPopover()}
               </div>
 
               {/* MCP 快捷查看按钮与 Popover */}
               <div style={{ position: 'relative' }}>
-                <div
-                  className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
-                  onClick={() => {
-                    const next = !showMcpPopover
-                    setShowMcpPopover(next)
-                    setShowSkillsPopover(false)
-                    setShowFeaturePopover(false)
-                    if (next) {
-                      refreshMcpServers()
-                    }
-                  }}
-                  title={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`}
-                >
-                  <Link size={17} strokeWidth={2} aria-hidden="true" />
-                </div>
+                <Tooltip content={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`} placement="top">
+                  <div
+                    className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
+                    onClick={() => {
+                      const next = !showMcpPopover
+                      setShowMcpPopover(next)
+                      setShowSkillsPopover(false)
+                      setShowFeaturePopover(false)
+                      if (next) {
+                        refreshMcpServers()
+                      }
+                    }}
+                  >
+                    <Link size={17} strokeWidth={2} aria-hidden="true" />
+                  </div>
+                </Tooltip>
                 {showMcpPopover && renderMcpPopover()}
               </div>
 
               {/* 独立功能入口：会议录音与全局悬浮助手 */}
               <div style={{ position: 'relative' }}>
-                <div
-                  className={`toolbar-icon-btn toolbar-action-btn-features ${showFeaturePopover ? 'active' : ''}`}
-                  onClick={() => {
-                    const next = !showFeaturePopover
-                    setShowFeaturePopover(next)
-                    setShowSkillsPopover(false)
-                    setShowMcpPopover(false)
-                  }}
-                  title="功能"
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
+                <Tooltip content="功能菜单" placement="top">
+                  <div
+                    className={`toolbar-icon-btn toolbar-action-btn-features ${showFeaturePopover ? 'active' : ''}`}
+                    onClick={() => {
                       const next = !showFeaturePopover
                       setShowFeaturePopover(next)
                       setShowSkillsPopover(false)
                       setShowMcpPopover(false)
-                    }
-                  }}
-                >
-                  <Radar size={17} strokeWidth={2} aria-hidden="true" />
-                </div>
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        const next = !showFeaturePopover
+                        setShowFeaturePopover(next)
+                        setShowSkillsPopover(false)
+                        setShowMcpPopover(false)
+                      }
+                    }}
+                  >
+                    <Radar size={17} strokeWidth={2} aria-hidden="true" />
+                  </div>
+                </Tooltip>
                 {showFeaturePopover && renderFeaturePopover()}
               </div>
 
               {/* 上传文件按钮 */}
-              <button
-                className="toolbar-icon-btn toolbar-action-btn upload"
-                onClick={handleUploadFile}
-                disabled={estimatedContextTokens >= contextLimit}
-                title={
-                  estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'
-                }
-              >
-                <Plus size={18} strokeWidth={2} aria-hidden="true" />
-              </button>
+              <Tooltip content={estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'} placement="top">
+                <button
+                  className="toolbar-icon-btn toolbar-action-btn upload"
+                  onClick={handleUploadFile}
+                  disabled={estimatedContextTokens >= contextLimit}
+                >
+                  <Plus size={18} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
 
               {isSending ? (
                 <>
-                  <button
-                    className="toolbar-send-btn stop"
-                    onClick={handleAbortLlm}
-                    title="停止生成"
-                  >
-                    <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
-                  </button>
+                  <Tooltip content="停止生成" placement="top">
+                    <button
+                      className="toolbar-send-btn stop"
+                      onClick={handleAbortLlm}
+                    >
+                      <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="发送追加指引并调整当前任务" placement="top">
+                    <button
+                      className="toolbar-send-btn"
+                      onClick={handleSendIntercept}
+                      disabled={
+                        (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
+                        estimatedContextTokens >= contextLimit
+                      }
+                    >
+                      <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                </>
+              ) : (
+                <Tooltip content="发送消息" placement="top">
                   <button
                     className="toolbar-send-btn"
                     onClick={handleSendIntercept}
-                    title="发送追加指引并调整当前任务"
                     disabled={
                       (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
                       estimatedContextTokens >= contextLimit
@@ -2567,19 +2589,7 @@ function ChatPageImpl(): React.JSX.Element {
                   >
                     <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
                   </button>
-                </>
-              ) : (
-                <button
-                  className="toolbar-send-btn"
-                  onClick={handleSendIntercept}
-                  title="发送消息"
-                  disabled={
-                    (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
-                    estimatedContextTokens >= contextLimit
-                  }
-                >
-                  <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
-                </button>
+                </Tooltip>
               )}
             </div>
           </div>

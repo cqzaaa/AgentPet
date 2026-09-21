@@ -116,7 +116,7 @@ export function RpaPage({ onExit }: { onExit?: () => void }): React.JSX.Element 
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const flowRef = useRef<ReactFlowInstance | null>(null)
+  const flowRef = useRef<ReactFlowInstance<any, any> | null>(null)
 
   const fitCanvas = useCallback(() => {
     requestAnimationFrame(() => {

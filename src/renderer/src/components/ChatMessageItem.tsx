@@ -6,6 +6,7 @@ import { AgentPetMark } from './AgentPetMark'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
+import { Tooltip } from './Tooltip'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -169,40 +170,41 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
 
           <div style={{ width: '1px', height: '12px', backgroundColor: 'var(--code-border, rgba(128,128,128,0.18))' }} />
 
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--code-muted, #64748b)',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s'
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--text-primary, #0f172a)'
-              e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--code-muted, #64748b)'
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }}
-            title={isCollapsed ? '展开代码' : '折叠代码'}
-          >
-            <ChevronDown
-              size={13}
-              strokeWidth={2}
-              aria-hidden="true"
+          <Tooltip content={isCollapsed ? '展开代码' : '折叠代码'} placement="top">
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
               style={{
-                transition: 'transform 0.2s ease',
-                transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)'
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--code-muted, #64748b)',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s'
               }}
-            />
-          </button>
+              onMouseEnter={e => {
+                e.currentTarget.style.color = 'var(--text-primary, #0f172a)'
+                e.currentTarget.style.backgroundColor = 'var(--bg-menu-hover, rgba(128,128,128,0.06))'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = 'var(--code-muted, #64748b)'
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              <ChevronDown
+                size={13}
+                strokeWidth={2}
+                aria-hidden="true"
+                style={{
+                  transition: 'transform 0.2s ease',
+                  transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)'
+                }}
+              />
+            </button>
+          </Tooltip>
         </div>
       </div>
       <pre
@@ -304,19 +306,25 @@ function LocalFileButton({
   }
 
   return (
-    <button
-      type="button"
-      className="chat-local-file-button"
-      title={path.trim()}
-      onClick={() => void handleOpen()}
-      onContextMenu={handleContextMenu}
+    <Tooltip
+      title={fileName}
+      description={path.trim()}
+      footer={onPreviewFile && isPreviewableLocalFile(normalizedPath) ? '点击预览文件 · 右键打开菜单' : '点击打开文件 · 右键打开菜单'}
+      placement="top"
     >
-      <FileText size={18} strokeWidth={2} aria-hidden="true" />
-      <span>{fileName}</span>
-      <span className="chat-local-file-action">
-        {opening ? '打开中…' : onPreviewFile && isPreviewableLocalFile(normalizedPath) ? '点击预览' : '点击打开'}
-      </span>
-    </button>
+      <button
+        type="button"
+        className="chat-local-file-button"
+        onClick={() => void handleOpen()}
+        onContextMenu={handleContextMenu}
+      >
+        <FileText size={18} strokeWidth={2} aria-hidden="true" />
+        <span>{fileName}</span>
+        <span className="chat-local-file-action">
+          {opening ? '打开中…' : onPreviewFile && isPreviewableLocalFile(normalizedPath) ? '点击预览' : '点击打开'}
+        </span>
+      </button>
+    </Tooltip>
   )
 }
 
@@ -825,11 +833,11 @@ export function ToolCallItem({ step, isThinking, isWaiting }: { step: any; isThi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
-        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起详情"
-      >
+      <Tooltip content="点击展开/收起详情" placement="top">
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+          onClick={() => setIsItemCollapsed(!isItemCollapsed)}
+        >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
           {isWaiting ? (
             <LoaderCircle size={12} strokeWidth={2.5} className="icon-spin" aria-hidden="true" />
@@ -837,7 +845,8 @@ export function ToolCallItem({ step, isThinking, isWaiting }: { step: any; isThi
         </span>
         <span>调用系统工具: {step.name}</span>
         <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
-      </div>
+        </div>
+      </Tooltip>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
           <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
@@ -859,17 +868,18 @@ export function ToolThinkItem({ step, isThinking }: { step: any; isThinking: boo
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
-        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起思考详情"
-      >
+      <Tooltip content="点击展开/收起思考详情" placement="top">
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+          onClick={() => setIsItemCollapsed(!isItemCollapsed)}
+        >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: 'var(--text-muted)', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
           <Brain size={13} strokeWidth={2} aria-hidden="true" />
         </span>
         <span>已深度思考</span>
         <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
-      </div>
+        </div>
+      </Tooltip>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
           <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.04)', borderLeft: '3px solid rgba(128,128,128,0.3)', fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
@@ -918,15 +928,16 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
-        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起详情"
-      >
+      <Tooltip content="点击展开/收起详情" placement="top">
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+          onClick={() => setIsItemCollapsed(!isItemCollapsed)}
+        >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
         <span>工具返回结果: {step.name}</span>
         <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
-      </div>
+        </div>
+      </Tooltip>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
           <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
@@ -2297,35 +2308,41 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       {(msg.text || msg.fileInfo || msg.fileInfos) && !msg.isThinking && (
         <div className="message-action-row">
           {msg.sender === 'user' && onEditMessage && !editing && (
-            <button ref={editTriggerRef} type="button" className="msg-copy-btn" disabled={editDisabled} aria-label="编辑消息" title={editDisabled ? '请等待生成结束后编辑' : '编辑消息'} onClick={() => { setEditText(msg.text || ''); setEditError(''); setEditing(true) }}>
-              <Pencil size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
+            <Tooltip content={editDisabled ? '请等待生成结束后编辑' : '编辑消息'} placement="top">
+              <button ref={editTriggerRef} type="button" className="msg-copy-btn" disabled={editDisabled} aria-label="编辑消息" onClick={() => { setEditText(msg.text || ''); setEditError(''); setEditing(true) }}>
+                <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </Tooltip>
           )}
-          <button className="msg-copy-btn" onClick={handleCopy} title="复制消息内容">
-            {copied
-              ? <Check size={14} strokeWidth={2.5} aria-hidden="true" />
-              : <Clipboard size={14} strokeWidth={2} aria-hidden="true" />}
-          </button>
-          {msg.sender === 'agent' && !msg.isThinking && toolSteps.some((step: any) => step.type === 'call' || step.type === 'result') && (
-            <button
-              className="msg-export-trace-btn"
-              onClick={handleExportToolTrace}
-              disabled={traceExportState === 'saving'}
-              title="原样导出本轮模型回复的全部工具调用参数和返回结果"
-            >
-              {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : <><Download size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />导出调用过程</>}
+          <Tooltip content={copied ? '已复制' : '复制消息内容'} placement="top">
+            <button className="msg-copy-btn" onClick={handleCopy} aria-label="复制消息内容">
+              {copied
+                ? <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+                : <Clipboard size={14} strokeWidth={2} aria-hidden="true" />}
             </button>
+          </Tooltip>
+          {msg.sender === 'agent' && !msg.isThinking && toolSteps.some((step: any) => step.type === 'call' || step.type === 'result') && (
+            <Tooltip content="原样导出本轮模型回复的全部工具调用参数和返回结果" placement="top">
+              <button
+                className="msg-export-trace-btn"
+                onClick={handleExportToolTrace}
+                disabled={traceExportState === 'saving'}
+              >
+                {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : <><Download size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />导出调用过程</>}
+              </button>
+            </Tooltip>
           )}
           {msg.sender === 'user' && (msg.promptInfo || msg.hasPromptInfo) && (
-            <button
-              ref={promptModalTriggerRef}
-              className="msg-prompt-btn"
-              onClick={handleOpenPromptInfo}
-              disabled={promptInfoLoading}
-              title="查看传给 Agent 的完整内容"
-            >
-              <Search size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
+            <Tooltip content="查看传给 Agent 的完整内容" placement="top">
+              <button
+                ref={promptModalTriggerRef}
+                className="msg-prompt-btn"
+                onClick={handleOpenPromptInfo}
+                disabled={promptInfoLoading}
+              >
+                <Search size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </Tooltip>
           )}
         </div>
       )}

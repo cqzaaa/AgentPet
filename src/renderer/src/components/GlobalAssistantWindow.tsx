@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Tooltip } from './Tooltip'
 import {
   Activity,
   Blend,
@@ -262,20 +263,28 @@ export function GlobalAssistantWindow(): React.JSX.Element {
             aria-label="悬浮助手输入框"
           />
           {running ? (
-            <button className="primary" onClick={() => void stopTask()} title="停止">
-              <CircleStop size={15} />
-            </button>
+            <Tooltip content="停止" placement="bottom">
+              <button className="primary" onClick={() => void stopTask()}>
+                <CircleStop size={15} />
+              </button>
+            </Tooltip>
           ) : (
-            <button className="primary" disabled={!prompt.trim()} onClick={() => void startTask()} title="开始">
-              <Play size={14} fill="currentColor" />
-            </button>
+            <Tooltip content="开始" placement="bottom">
+              <button className="primary" disabled={!prompt.trim()} onClick={() => void startTask()}>
+                <Play size={14} fill="currentColor" />
+              </button>
+            </Tooltip>
           )}
-          <button onClick={() => void setCompactMode(false)} title="恢复完整窗口">
-            <Maximize2 size={15} />
-          </button>
-          <button className="danger" onClick={() => void window.api.closeGlobalAssistant()} title="隐藏窗口（任务继续）">
-            <X size={15} />
-          </button>
+          <Tooltip content="恢复完整窗口" placement="bottom">
+            <button onClick={() => void setCompactMode(false)}>
+              <Maximize2 size={15} />
+            </button>
+          </Tooltip>
+          <Tooltip content="隐藏窗口（任务继续）" placement="bottom">
+            <button className="danger" onClick={() => void window.api.closeGlobalAssistant()}>
+              <X size={15} />
+            </button>
+          </Tooltip>
         </section>
       </main>
     )
@@ -384,30 +393,33 @@ export function GlobalAssistantWindow(): React.JSX.Element {
             <span>{status}</span>
           </span>
           <span className="ga-head-actions">
-            <button
-              className={`ga-head-button ${showOpacityControl ? 'active' : ''}`}
-              onClick={() => setShowOpacityControl((value) => !value)}
-              aria-label="设置透明度"
-              title="设置透明度"
-            >
-              <Blend size={15} />
-            </button>
-            <button
-              className="ga-head-button"
-              onClick={() => void setCompactMode(true)}
-              aria-label="最小化为快捷提问栏"
-              title="最小化"
-            >
-              <Minimize2 size={15} />
-            </button>
-            <button
-              className="ga-head-button close"
-              onClick={() => void window.api.closeGlobalAssistant()}
-              aria-label="隐藏悬浮助手，任务继续运行"
-              title="隐藏窗口（任务继续）"
-            >
-              <X size={16} />
-            </button>
+            <Tooltip content="设置透明度" placement="bottom">
+              <button
+                className={`ga-head-button ${showOpacityControl ? 'active' : ''}`}
+                onClick={() => setShowOpacityControl((value) => !value)}
+                aria-label="设置透明度"
+              >
+                <Blend size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip content="最小化为快捷提问栏" placement="bottom">
+              <button
+                className="ga-head-button"
+                onClick={() => void setCompactMode(true)}
+                aria-label="最小化为快捷提问栏"
+              >
+                <Minimize2 size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip content="隐藏窗口（任务继续）" placement="bottom">
+              <button
+                className="ga-head-button close"
+                onClick={() => void window.api.closeGlobalAssistant()}
+                aria-label="隐藏悬浮助手，任务继续运行"
+              >
+                <X size={16} />
+              </button>
+            </Tooltip>
             {showOpacityControl && (
               <span className="ga-opacity-panel">
                 <span className="ga-opacity-label">
@@ -514,15 +526,16 @@ export function GlobalAssistantWindow(): React.JSX.Element {
                         })}
                       </time>
                       {index === results.length - 1 && !running && toolTrace.length > 0 && (
-                        <button
-                          className="ga-result-export"
-                          onClick={() => void exportCurrentTrace()}
-                          disabled={traceExportState === 'saving'}
-                          aria-label="导出调用过程 JSON"
-                          title={traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : '导出调用过程 JSON'}
-                        >
-                          <Download size={11} />
-                        </button>
+                        <Tooltip content={traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : '导出调用过程 JSON'} placement="top">
+                          <button
+                            className="ga-result-export"
+                            onClick={() => void exportCurrentTrace()}
+                            disabled={traceExportState === 'saving'}
+                            aria-label="导出调用过程 JSON"
+                          >
+                            <Download size={11} />
+                          </button>
+                        </Tooltip>
                       )}
                     </span>
                   </div>

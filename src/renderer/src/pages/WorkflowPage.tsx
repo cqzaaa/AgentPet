@@ -207,7 +207,6 @@ export function WorkflowPage({ store }: { store: AppStore }): React.JSX.Element 
             </button>
           ))}
         </div>
-        {view !== 'rpa' && (
           <div className="workflow-search">
             <Search size={15} />
             <input
@@ -230,7 +229,6 @@ export function WorkflowPage({ store }: { store: AppStore }): React.JSX.Element 
               </button>
             )}
           </div>
-        )}
       </nav>
       </>}
 
