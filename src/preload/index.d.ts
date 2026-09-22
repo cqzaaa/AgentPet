@@ -71,6 +71,7 @@ declare global {
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
+      revertFileChanges: (changes: any[]) => Promise<{ success: boolean; revertedCount: number; error?: string }>
       exportToolTrace: (payload: { defaultFileName?: string; trace: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void

@@ -1,8 +1,9 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
-import { join, basename, dirname, extname, resolve, sep } from 'path'
+import { join, basename, dirname, extname, isAbsolute, resolve, sep } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { registerKnowledgeBaseAPIs } from './api/knowledgeBase'
 import { pathToFileURL } from 'url'
+import { isImageAttachment } from '../preload/attachment-types'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import * as fs from 'fs'
@@ -62,6 +63,7 @@ import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
 import { SessionEventStore } from './session-events/session-event-store'
 import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
+import { countTokens } from './tools/context/token-counter'
 import { externalAgentManager } from './external-agents'
 import type { ExternalAgentProtocolEvent } from './external-agents/types'
 import { loadAgentSshPassword, saveAgentSshPassword } from './security/agent-ssh-password'
@@ -247,6 +249,109 @@ const windowsAppUserModelId = 'com.electron.app'
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
 const sessionEventStore = new SessionEventStore()
+
+const SESSION_TOOL_EVIDENCE_TOKEN_LIMIT = 48_000
+const SESSION_TOOL_EVIDENCE_ITEM_TOKEN_LIMIT = 12_000
+
+function truncateEvidenceToTokens(value: string, tokenLimit: number): string {
+  if (countTokens(value) <= tokenLimit) return value
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (countTokens(value.slice(0, middle)) <= tokenLimit) low = middle
+    else high = middle - 1
+  }
+  return `${value.slice(0, low)}\n[历史工具证据已按上下文预算截断]`
+}
+
+function isHistoricalEvidenceTool(name: string, args: Record<string, unknown>): boolean {
+  if (['read_file', 'grep_content', 'find_files', 'get_file_metadata'].includes(name)) return true
+  if (name !== 'run_terminal_command') return false
+  const command = String(args.command || '')
+  return /(?:\brg\b|Get-Content|Get-ChildItem|Select-String|git\s+(?:status|diff|log|show|grep)\b)/i.test(command) &&
+    !/(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|git\s+(?:apply|commit|merge|rebase)|(?:^|[^>])>{1,2}(?:[^>]|$))/i.test(command)
+}
+
+function isHistoricalMutation(name: string, args: Record<string, unknown>): boolean {
+  if (/^(?:write|edit|move|copy|delete)_files?$/.test(name)) return true
+  if (name !== 'run_terminal_command' && name !== 'run_command') return false
+  return /(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|git\s+(?:apply|commit|merge|rebase)|(?:^|[^>])>{1,2}(?:[^>]|$))/i.test(String(args.command || ''))
+}
+
+async function buildSessionToolEvidence(sessionId: string, workspacePath?: string): Promise<string> {
+  if (!sessionId || sessionId === 'default') return ''
+  const page = await sessionEventStore.readPage(sessionId, {
+    limit: 500,
+    types: ['tool/call', 'tool/result']
+  })
+  const calls = new Map<string, { name: string; args: Record<string, unknown>; time: number }>()
+  const evidenceByKey = new Map<string, { time: number; text: string }>()
+  let lastMutationTime = 0
+
+  for (const event of page.events) {
+    const callId = String(event.data.callId || event.correlationId || '')
+    if (!callId || event.type !== 'tool/call') continue
+    const name = String(event.data.name || '')
+    const args = event.data.arguments && typeof event.data.arguments === 'object'
+      ? event.data.arguments as Record<string, unknown>
+      : {}
+    calls.set(callId, { name, args, time: event.time })
+    if (isHistoricalMutation(name, args)) lastMutationTime = Math.max(lastMutationTime, event.time)
+  }
+
+  for (const event of page.events) {
+    if (event.type !== 'tool/result') continue
+    let resultEvent = event
+    if (event.compressed) resultEvent = await sessionEventStore.readEvent(sessionId, event.seq) || event
+    const callId = String(resultEvent.data.callId || resultEvent.correlationId || '')
+    if (!callId) continue
+    const call = calls.get(callId)
+    if (!call || !isHistoricalEvidenceTool(call.name, call.args)) continue
+    const result = String(resultEvent.data.modelResult || resultEvent.data.displayResult || '')
+    if (!result.trim() || /^(?:错误|终端执行异常|文件操作异常|\[工具参数校验失败\])/i.test(result.trim())) continue
+
+    if (call.name === 'read_file') {
+      const rawPath = String(call.args.file_path || '')
+      if (!rawPath) continue
+      const filePath = isAbsolute(rawPath) ? rawPath : resolve(workspacePath || '', rawPath)
+      try {
+        const stat = await fs.promises.stat(filePath)
+        if (!stat.isFile() || stat.mtimeMs > event.time + 1000) continue
+      } catch {
+        continue
+      }
+    } else if (event.time < lastMutationTime) {
+      continue
+    }
+
+    const key = `${call.name}:${JSON.stringify(call.args)}`
+    const item = [
+      `工具: ${call.name}`,
+      `参数: ${JSON.stringify(call.args)}`,
+      '结果:',
+      truncateEvidenceToTokens(result, SESSION_TOOL_EVIDENCE_ITEM_TOKEN_LIMIT)
+    ].join('\n')
+    evidenceByKey.set(key, { time: event.time, text: item })
+  }
+
+  const selected: string[] = []
+  let usedTokens = 0
+  const candidates = [...evidenceByKey.values()].sort((a, b) => b.time - a.time)
+  for (const candidate of candidates) {
+    const tokens = countTokens(candidate.text)
+    if (usedTokens + tokens > SESSION_TOOL_EVIDENCE_TOKEN_LIMIT) continue
+    selected.push(candidate.text)
+    usedTokens += tokens
+  }
+  if (selected.length === 0) return ''
+  selected.reverse()
+  return `<session_tool_evidence>
+以下是同一会话此前成功取得、且仍然有效的工具证据。它们已从持久化事件记录恢复；直接复用其中内容，不要再次读取相同文件区间或重复相同搜索。只有文件已变化、证据缺少修改所需范围，或用户明确要求刷新时才重新调用工具。
+
+${selected.map((item, index) => `## 证据 ${index + 1}\n${item}`).join('\n\n')}
+</session_tool_evidence>`
+}
 let automationOverlayWindow: BrowserWindow | null = null
 let globalAssistantWindow: BrowserWindow | null = null
 let globalAssistantOpacity = 1
@@ -2744,9 +2849,7 @@ app.whenReady().then(() => {
       const targetPath = join(sessionDir, uniqueFileName)
       await fs.promises.writeFile(targetPath, buffer)
 
-      const ext = fileName.split('.').pop()?.toLowerCase() || ''
-      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
-      const isImage = imageExts.includes(ext)
+      const isImage = isImageAttachment(fileName)
 
       // 图片不设 content —— 发送给 LLM 时走 image_url 通道（真正的视觉理解）
       // 非图片文件也不设 content（由前端解析文档内容）
@@ -5190,6 +5293,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('api:parse-file-content', async (_, filePath: string) => {
+    if (isImageAttachment(filePath)) return ''
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
     try {
       if (ext === 'pdf') {
@@ -5372,6 +5476,17 @@ app.whenReady().then(() => {
     } catch (e) {
       console.error('获取生成文件列表失败', e)
       return []
+    }
+  })
+
+  // 撤销大模型对文件的修改
+  ipcMain.handle('api:revert-file-changes', async (_, changes: any[]) => {
+    try {
+      const { FileChangeTracker } = await import('./agent-runtime/file-change-tracker')
+      return await FileChangeTracker.revertChanges(changes)
+    } catch (err: any) {
+      console.error('[api:revert-file-changes] 撤销失败:', err)
+      return { success: false, revertedCount: 0, error: err.message || String(err) }
     }
   })
 
@@ -5829,6 +5944,8 @@ app.whenReady().then(() => {
       activeToolContextTokens?: number
       archivePath?: string
       removedMessages?: number
+      changes?: any
+      files?: any[]
     }) => void
   ): Promise<string> {
     config = {
@@ -5937,6 +6054,12 @@ app.whenReady().then(() => {
       const latestUserMessage = [...messages]
         .reverse()
         .find((message: any) => message?.role === 'user')
+      let sessionToolEvidence = ''
+      try {
+        sessionToolEvidence = await buildSessionToolEvidence(sessionId, workspacePath)
+      } catch (evidenceError) {
+        console.warn('[SessionEvidence] Failed to restore prior tool evidence:', evidenceError)
+      }
       try {
         traceTurn = await sessionEventStore.beginTurn(
           sessionId,
@@ -5958,6 +6081,7 @@ app.whenReady().then(() => {
         {
           ...config,
           traceTurn,
+          sessionToolEvidence,
           sandboxMode: sandboxMode,
           event,
           onTraceEvent: async (traceEvent: {
@@ -6239,6 +6363,24 @@ app.whenReady().then(() => {
               timestamp: Date.now(),
               messageId: config.messageId,
               sessionId: config.sessionId
+            })
+          }
+        } else if (step.type === 'file_changes') {
+          if (event) {
+            event.sender.send('api:llm-tool-event', {
+              type: 'file_changes',
+              changes: step.changes,
+              timestamp: Date.now(),
+              messageId: config.messageId,
+              sessionId: config.sessionId
+            })
+          }
+          if (onToolEvent) {
+            onToolEvent({
+              type: 'file_changes',
+              name: 'file_changes',
+              changes: step.changes,
+              detail: `${step.changes.length} files changed`
             })
           }
         } else if (step.type === 'web_sources') {

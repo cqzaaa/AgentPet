@@ -3,6 +3,7 @@ import { useCallback } from 'react'
 import type { MutableRefObject } from 'react'
 import { formatDateTime } from '../utils/helpers'
 import { mergeCollaborationHistory } from '../utils/collaborationContext'
+import { isImageAttachment } from '../../../preload/attachment-types'
 
 interface ChatSendState {
   sessions: any[]
@@ -52,28 +53,23 @@ function toLlmMessage(message: any): { role: string; content: any } {
   }
   const imageBlocks: any[] = []
 
-  if (message.fileInfo) {
-    const pathNote = message.fileInfo.path ? `\n[源文件路径: ${message.fileInfo.path}]` : ''
-    const previewNotice = /\.pdf$/i.test(message.fileInfo.name || '') && message.fileInfo.content
-      ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
-      : ''
-    textContent = `${textContent}\n\n--- [附带文件: ${message.fileInfo.name}]${pathNote}${previewNotice}\n${message.fileInfo.content}`
-  } else if (message.fileInfos?.length) {
-    const attachmentsText = message.fileInfos
+  const files = message.fileInfo ? [message.fileInfo] : message.fileInfos || []
+  if (files.length) {
+    const attachmentsText = files
       .filter((file: any) => file.content || file.path)
       .map((file: any) => {
         const pathNote = file.path ? `\n[源文件路径: ${file.path}]` : ''
         const previewNotice = /\.pdf$/i.test(file.name || '') && file.content
           ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
           : ''
-        const content = file.content ? `\n${file.content}` : ''
+        const content = !isImageAttachment(file.name || file.path || '') && file.content ? `\n${file.content}` : ''
         return `--- [附带文件: ${file.name}]${pathNote}${previewNotice}${content}`
       })
       .join('\n\n')
     if (attachmentsText) textContent = `${textContent}\n\n${attachmentsText}`
 
-    for (const file of message.fileInfos) {
-      if (!file.content && file.path && (/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name) || file.objectUrl)) {
+    for (const file of files) {
+      if (file.path && isImageAttachment(file.name || file.path)) {
         imageBlocks.push({
           type: 'image_url',
           image_url: { url: `local-file:///${file.path.replace(/\\/g, '/')}` }
@@ -247,9 +243,11 @@ export function useChatSend({
       if (!activeSession) throw new Error(`SessionNotFound: ${sessionId}`)
       const taskSnapshots = await window.api.listTaskRuns(sessionId)
       const eligibleSnapshots = edit ? taskSnapshots.filter((snapshot: any) => snapshot.run.createdAt < Number(originalMessage.id)) : taskSnapshots
-      const chatMessages = mergeCollaborationHistory(activeSession.messages, eligibleSnapshots, sessionId, userMessage.id)
-        .slice(-state.contextRounds * 2)
-        .map(toLlmMessage)
+      const mergedHistory = mergeCollaborationHistory(activeSession.messages, eligibleSnapshots, sessionId, userMessage.id)
+      const selectedHistory = state.contextRounds > 0
+        ? mergedHistory.slice(-state.contextRounds * 2)
+        : mergedHistory
+      const chatMessages = selectedHistory.map(toLlmMessage)
 
       const retrievalQuery = [text, fileNames].filter(Boolean).join('\n')
       const [profileContent, recallResponse, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([

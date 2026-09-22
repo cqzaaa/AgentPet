@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -138,6 +138,29 @@ export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus
   messageId?: string | number
 }) {
   const [runtimePlan, setRuntimePlan] = useState<TaskPlan | null>(null)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isDetailsOpen) return
+    const handleClickOutside = (event: MouseEvent): void => {
+      const target = event.target as globalThis.Node | null
+      if (containerRef.current && target && !containerRef.current.contains(target)) {
+        setIsDetailsOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setIsDetailsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isDetailsOpen])
 
   useEffect(() => {
     let active = true
@@ -182,11 +205,21 @@ export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus
 
   return (
     <div
-      className="task-plan-floating-status"
-      role="status"
+      ref={containerRef}
+      className={`task-plan-floating-status ${isDetailsOpen ? 'is-expanded' : ''}`}
+      role="button"
       tabIndex={0}
+      aria-expanded={isDetailsOpen}
+      aria-haspopup="dialog"
       aria-live="polite"
-      aria-label={`正在执行第 ${currentStepIndex + 1} / ${displayPlan.steps.length} 步：${currentStep.title}`}
+      aria-label={`正在执行第 ${currentStepIndex + 1} / ${displayPlan.steps.length} 步：${currentStep.title}，点击${isDetailsOpen ? '收起' : '展开'}任务详情`}
+      onClick={() => setIsDetailsOpen((prev) => !prev)}
+      onKeyDown={(e) => {
+        if (e.target === containerRef.current && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          setIsDetailsOpen((prev) => !prev)
+        }
+      }}
     >
       <svg className="task-plan-floating-progress" viewBox="0 0 36 36" aria-hidden="true">
         <circle cx="18" cy="18" r="15.9155" fill="none" strokeWidth="4" />
@@ -210,12 +243,31 @@ export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus
       </span>
       <span className="task-plan-floating-title">{currentStep.title}</span>
 
-      <section className="task-plan-floating-details" aria-label={`任务步骤：${displayPlan.title}`}>
+      <section
+        className={`task-plan-floating-details ${isDetailsOpen ? 'is-open' : ''}`}
+        aria-label={`任务步骤：${displayPlan.title}`}
+        aria-hidden={!isDetailsOpen}
+        onClick={(e) => e.stopPropagation()}
+      >
         <header>
           <strong>{displayPlan.title}</strong>
-          <span>
-            {completed} / {displayPlan.steps.length}
-          </span>
+          <div className="task-plan-floating-header-actions">
+            <span>
+              {completed} / {displayPlan.steps.length}
+            </span>
+            <button
+              type="button"
+              className="task-plan-floating-close"
+              aria-label="关闭任务详情"
+              title="关闭任务详情"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsDetailsOpen(false)
+              }}
+            >
+              <X size={14} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          </div>
         </header>
         {displayPlan.explanation && <p>{displayPlan.explanation}</p>}
         <ol>

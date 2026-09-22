@@ -30,7 +30,7 @@ export const searchManifest: ToolManifest = {
           output_mode: {
             type: 'string',
             enum: ['content', 'files_with_matches', 'count'],
-            description: '输出模式（可选，默认为 files_with_matches）'
+            description: '输出模式。省略时：搜索单个文件默认 content，直接返回匹配行及行号；搜索目录默认 files_with_matches。'
           },
           case_insensitive: {
             type: 'boolean',

@@ -409,7 +409,7 @@ export function PetWidget(): React.JSX.Element {
         isNew = true
       }
 
-      const contextRoundsStr = localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'
+      const contextRoundsStr = localStorage.getItem('agentpet_context_rounds') || '0'
       const contextRounds = Number(contextRoundsStr)
       const currentMessages = activeSession.messages || []
       const filtered = currentMessages.filter((m: any) => (m.sender === 'user' || m.sender === 'agent') && !m.isThinking && !m.isError)
@@ -429,7 +429,8 @@ export function PetWidget(): React.JSX.Element {
         return msgText
       }
 
-      const chatMessages = filtered.slice(-contextRounds * 2).map((m: any) => {
+      const selectedMessages = contextRounds > 0 ? filtered.slice(-contextRounds * 2) : filtered
+      const chatMessages = selectedMessages.map((m: any) => {
         return {
           role: m.sender === 'user' ? 'user' : 'assistant',
           content: parseMessageToBlocks(m.text || '')

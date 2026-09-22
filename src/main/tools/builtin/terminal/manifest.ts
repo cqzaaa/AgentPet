@@ -17,7 +17,7 @@ export const terminalManifest: ToolManifest = {
         properties: {
           command: {
             type: 'string',
-            description: '要执行的终端命令'
+            description: '要执行的终端命令。支持与所选 shell 一致的复合命令、分号和管道；PowerShell 可在一次调用中组合多段 Get-Content/Get-ChildItem/Select-String。'
           },
           description: {
             type: 'string',
@@ -70,14 +70,14 @@ export const terminalManifest: ToolManifest = {
     },
     {
       name: 'run_terminal_command',
-      description: '同步执行终端命令并返回结果。适用于快速命令（≤2分钟），超时自动终止。',
+      description: '同步执行终端命令并返回结果。适用于快速命令（≤2分钟），超时自动终止。支持使用分号和管道把相关只读检索合并为一次调用；代码调查时优先这样做，避免连续调用许多 read_file/grep_content。',
       timeout: 120000,
       parameters: {
         type: 'object',
         properties: {
           command: {
             type: 'string',
-            description: '要执行的终端命令'
+            description: '要执行的终端命令。支持与所选 shell 一致的复合命令、分号和管道；PowerShell 示例：Get-Content src/a.ts | Select-Object -Skip 100 -First 200; Get-ChildItem src -Recurse -File -Include *.ts | Select-String -Pattern "symbol"。'
           },
           shell: {
             type: 'string',
@@ -144,6 +144,7 @@ export const terminalManifest: ToolManifest = {
 - 异步命令执行后，使用 get_command_output 跟踪最新的输出进度
 - 使用 kill_command 终止不再需要的挂起或超时进程
 - 本机 Windows 默认使用 shell=powershell。PowerShell 命令示例：Get-Date、Get-ChildItem、Get-Process。
+- PowerShell 支持在一次 run_terminal_command 中使用分号和管道组合多个相关只读操作，例如批量执行 Get-Content、Get-ChildItem、Select-String、rg 和 git status。代码调查应优先合并调用并限制输出，而不是逐个读取许多小片段。
 - PowerShell 中调用传统系统程序时使用完整可执行名，例如 sc.exe、where.exe，避免 sc、where 等别名冲突
 - 命令返回非零 exit_code 不一定代表执行器异常：findstr/Select-String/grep 没有匹配、状态检查发现目标未运行时都可能返回非零。应结合 stdout、stderr 和命令语义判断
 - 遇到 Access is denied、拒绝访问、System error 5、UnauthorizedAccess 等权限错误后，立即停止使用等价命令重复尝试；明确告知用户需要管理员权限或提升应用权限

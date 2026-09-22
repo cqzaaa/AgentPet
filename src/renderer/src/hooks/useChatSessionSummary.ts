@@ -21,6 +21,7 @@ export function useChatSessionSummary({ getState, setSessions }: ChatSessionSumm
     if (!session) return
 
     const { contextRounds, llmConfig } = getState()
+    if (contextRounds <= 0) return
     const triggerCount = contextRounds * 2
     const completed = (session.messages || []).filter((message: any) =>
       (message.sender === 'user' || message.sender === 'agent') && !message.isThinking && !message.isError

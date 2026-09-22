@@ -70,6 +70,7 @@ export interface ToolContext {
   traceEvent?: (event: ToolTraceEvent) => void | Promise<void>
   /** Internal Office workflows use this while producing non-user-facing intermediates. */
   suppressOfficePreview?: boolean
+  fileChangeTracker?: import('../../agent-runtime/file-change-tracker').FileChangeTracker
 }
 
 export interface IToolExecutor {

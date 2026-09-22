@@ -11,7 +11,7 @@ export const fileManifest: ToolManifest = {
   api: [
     {
       name: 'read_file',
-      description: '读取文件的语义文本。支持 PDF、Word、Excel、CSV 及文本文件，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。支持使用 start_line 和 end_line 分页读取，默认最多返回 30000 字符。',
+      description: '读取文件的语义文本。代码调查时通常一次读取约 150–300 行上下文；同一文件有多个离散命中时优先用 line_ranges 一次读取，避免连续调用许多十几行的小片段。支持 PDF、Word、Excel、CSV 及文本文件，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。默认最多返回 30000 字符。',
       parameters: {
         type: 'object',
         properties: {
@@ -26,6 +26,19 @@ export const fileManifest: ToolManifest = {
           end_line: {
             type: 'number',
             description: '结束行号 (1-indexed)，可选'
+          },
+          line_ranges: {
+            type: 'array',
+            maxItems: 12,
+            description: '可选。同一文本文件中需要一次读取的多个离散行区间（最多 12 段、合计最多 1600 行）；提供后优先于 start_line/end_line。',
+            items: {
+              type: 'object',
+              properties: {
+                start_line: { type: 'number', description: '区间起始行号 (1-indexed)' },
+                end_line: { type: 'number', description: '区间结束行号 (1-indexed)' }
+              },
+              required: ['start_line', 'end_line']
+            }
           },
           sheet_name: {
             type: 'string',
@@ -140,6 +153,33 @@ export const fileManifest: ToolManifest = {
           }
         },
         required: ['file_path', 'old_string', 'new_string']
+      }
+    },
+    {
+      name: 'edit_files',
+      description: '批量执行多个精确文本替换。适合已经检查完上下文后一次提交多个文件或多个位置的修改；所有 old_string 会先验证，任一不匹配时不会写入任何文件。',
+      humanIntervention: 'required',
+      parameters: {
+        type: 'object',
+        properties: {
+          edits: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 50,
+            description: '按顺序执行的替换列表；同一文件可出现多次，后续替换基于前面的内存结果。',
+            items: {
+              type: 'object',
+              properties: {
+                file_path: { type: 'string', description: '文件路径；可使用相对于当前工作区的路径' },
+                old_string: { type: 'string', description: '需要替换的原文' },
+                new_string: { type: 'string', description: '替换后的新文本' },
+                replace_all: { type: 'boolean', description: '是否替换所有匹配项（默认为 false）' }
+              },
+              required: ['file_path', 'old_string', 'new_string']
+            }
+          }
+        },
+        required: ['edits']
       }
     },
     {

@@ -6,6 +6,7 @@ import { AgentPetMark } from './AgentPetMark'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
+import { FileChangesCard } from './FileChangesCard'
 import { Tooltip } from './Tooltip'
 import hljs from 'highlight.js'
 import katex from 'katex'
@@ -2016,6 +2017,15 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     [msg.sender, textForRender]
   )
 
+  // 提取本轮大模型对工作区文件的修改与生成记录
+  const fileChanges = useMemo(() => {
+    if (Array.isArray(msg.fileChanges) && msg.fileChanges.length > 0) {
+      return msg.fileChanges
+    }
+    const step = (msg.toolSteps || []).find((s: any) => s.type === 'fileChanges' && Array.isArray(s.changes))
+    return step ? step.changes : []
+  }, [msg.fileChanges, msg.toolSteps])
+
   // 方案二：结构化提取交付成果物，同时彻底清洗正文末尾/独立成段的重复文件链接
   const { deliverables, cleanedText } = useMemo(() => {
     return extractDeliverables(msg.toolSteps, textForRender || '')
@@ -2487,6 +2497,11 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               ))}
             </div>
           </div>
+        )}
+
+        {/* 📝 代码/文件 Diff 修改记录卡片（已编辑文件列表、逐行 Diff 审核与一键撤销） */}
+        {!editing && fileChanges.length > 0 && (
+          <FileChangesCard changes={fileChanges} />
         )}
 
         {selectionPopover && createPortal(

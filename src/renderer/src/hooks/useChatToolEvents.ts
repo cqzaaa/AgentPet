@@ -13,7 +13,7 @@ interface UseChatToolEventsOptions {
 
 function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
   const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, contextTokens, detail, progress, sources, files, requestId, questions, request, status, beforeTokens, afterTokens, activeToolContextTokens, archivePath, removedMessages, timestamp: eventTimestamp } of events) {
+  for (const { type, name, args, result, contextTokens, detail, progress, sources, files, changes, requestId, questions, request, status, beforeTokens, afterTokens, activeToolContextTokens, archivePath, removedMessages, timestamp: eventTimestamp } of events) {
     const timestamp = Number(eventTimestamp) || Date.now()
     const id = `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
@@ -70,6 +70,14 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
       const newFiles = files.filter((file: any) => file?.path && !existingPaths.has(file.path))
       if (newFiles.length > 0) {
         toolSteps.push({ id, sequence, timestamp, type: 'generatedFiles', files: newFiles })
+      }
+    }
+    else if (type === 'file_changes' && Array.isArray(changes)) {
+      const existing = toolSteps.findIndex(step => step.type === 'fileChanges')
+      if (existing >= 0) {
+        toolSteps[existing] = { id, sequence: toolSteps[existing].sequence, timestamp, type: 'fileChanges', changes }
+      } else {
+        toolSteps.push({ id, sequence, timestamp, type: 'fileChanges', changes })
       }
     }
     else if (type === 'office_runtime_request' && request) {
@@ -184,6 +192,10 @@ export function useChatToolEvents({
             const messages = [...previous]
             const message = { ...messages[index] }
             message.toolSteps = appendToolSteps(message.toolSteps, sessionEvents)
+            const latestFileChanges = sessionEvents.findLast((e: any) => e.type === 'file_changes' && Array.isArray(e.changes))?.changes
+            if (latestFileChanges) {
+              message.fileChanges = latestFileChanges
+            }
             messages[index] = message
             savedMessage = { ...message, sessionId }
             return messages

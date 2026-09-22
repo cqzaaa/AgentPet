@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import { dirname, basename, join, extname, relative } from 'path'
 import { app, shell } from 'electron'
+import { replaceExactText } from './text-edit'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getDefaultWorkingDirectory, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 
@@ -142,29 +143,61 @@ export class FileExecutor implements IToolExecutor {
 
         const DEFAULT_LIMIT_LINES = 800
         const lines = content.split(/\r?\n/)
-        let s = Number.isInteger(start_line) ? start_line : undefined
-        let e = Number.isInteger(end_line) ? end_line : undefined
-
-        // 如果是 md 文件，且未指定行范围，默认全量读取；其它类型文件依然保持 800 行安全保护
-        if (s === undefined && e === undefined) {
-          s = 1
-          e = ext === 'md' ? lines.length : Math.min(lines.length, DEFAULT_LIMIT_LINES)
+        const requestedRanges = Array.isArray(args.line_ranges) ? args.line_ranges : []
+        if (requestedRanges.length > 0) {
+          if (requestedRanges.length > 12) {
+            return { content: '错误：line_ranges 最多支持 12 个区间', success: false }
+          }
+          const normalizedRanges: Array<{ start: number; end: number }> = []
+          let requestedLineCount = 0
+          for (const [index, range] of requestedRanges.entries()) {
+            const start = Number(range?.start_line)
+            const end = Number(range?.end_line)
+            if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+              return { content: `错误：line_ranges[${index}] 必须包含有效的 start_line/end_line，且结束行不小于起始行`, success: false }
+            }
+            const boundedEnd = Math.min(lines.length, end)
+            if (start > lines.length) {
+              return { content: `错误：line_ranges[${index}] 起始行号 ${start} 超出文件总行数 ${lines.length}`, success: false }
+            }
+            requestedLineCount += boundedEnd - start + 1
+            normalizedRanges.push({ start, end: boundedEnd })
+          }
+          if (requestedLineCount > 1600) {
+            return { content: `错误：line_ranges 合计请求 ${requestedLineCount} 行，超过 1600 行上限；请缩小到与当前任务相关的上下文`, success: false }
+          }
+          finalContent = `[读取文件 ${basename(file_path)}，共 ${normalizedRanges.length} 个区间，总行数: ${lines.length}]\n` +
+            normalizedRanges.map(({ start, end }) => {
+              const body = lines.slice(start - 1, end)
+                .map((line, index) => `${start + index}: ${line}`)
+                .join('\n')
+              return `\n[第 ${start} 行 到 第 ${end} 行]\n${body}`
+            }).join('\n')
         } else {
-          s = s ? Math.max(1, s) : 1
-          e = e ? Math.min(lines.length, e) : lines.length
-        }
+          let s = Number.isInteger(start_line) ? start_line : undefined
+          let e = Number.isInteger(end_line) ? end_line : undefined
 
-        if (s > lines.length) {
-          finalContent = `[提示] 起始行号 ${s} 超出文件总行数 ${lines.length}`
-        } else if (e < s) {
-          finalContent = '[错误] end_line 必须大于或等于 start_line'
-        } else {
-          const sliced = lines.slice(s - 1, e)
-          finalContent = `[读取文件 ${basename(file_path)}，第 ${s} 行 到 第 ${e} 行，总行数: ${lines.length}]\n` +
-            sliced.map((line, idx) => `${s + idx}: ${line}`).join('\n')
-          
-          if (lines.length > e && end_line === undefined) {
-            finalContent += `\n\n... [系统提示：文件较长，已默认截取展示前 ${DEFAULT_LIMIT_LINES} 行。如果需要阅读剩余内容，请在下一次工具参数中指定 start_line（例如 ${e + 1}）和 end_line 范围进行精确的分页读取]`
+          // 如果是 md 文件，且未指定行范围，默认全量读取；其它类型文件依然保持 800 行安全保护
+          if (s === undefined && e === undefined) {
+            s = 1
+            e = ext === 'md' ? lines.length : Math.min(lines.length, DEFAULT_LIMIT_LINES)
+          } else {
+            s = s ? Math.max(1, s) : 1
+            e = e ? Math.min(lines.length, e) : lines.length
+          }
+
+          if (s > lines.length) {
+            finalContent = `[提示] 起始行号 ${s} 超出文件总行数 ${lines.length}`
+          } else if (e < s) {
+            finalContent = '[错误] end_line 必须大于或等于 start_line'
+          } else {
+            const sliced = lines.slice(s - 1, e)
+            finalContent = `[读取文件 ${basename(file_path)}，第 ${s} 行 到 第 ${e} 行，总行数: ${lines.length}]\n` +
+              sliced.map((line, idx) => `${s + idx}: ${line}`).join('\n')
+
+            if (lines.length > e && end_line === undefined) {
+              finalContent += `\n\n... [系统提示：文件较长，已默认截取展示前 ${DEFAULT_LIMIT_LINES} 行。如果需要阅读剩余内容，请使用 line_ranges 合并相关区间，或指定 start_line/end_line 精确分页；避免连续读取许多十几行的小片段。]`
+            }
           }
         }
 
@@ -282,11 +315,17 @@ export class FileExecutor implements IToolExecutor {
         if (!fs.existsSync(parentDir)) {
           await fs.promises.mkdir(parentDir, { recursive: true })
         }
+        const fileExists = fs.existsSync(file_path)
+        const beforeContent = fileExists
+          ? await fs.promises.readFile(file_path, 'utf-8').catch(() => '')
+          : ''
         if (append) {
           await fs.promises.appendFile(file_path, content, 'utf-8')
         } else {
           await fs.promises.writeFile(file_path, content, 'utf-8')
         }
+        const afterContent = append ? beforeContent + content : content
+        context.fileChangeTracker?.recordChange(file_path, beforeContent, afterContent, !fileExists)
         return { content: `成功：已${append ? '追加' : '写入'}到文件 ${file_path}`, success: true }
       }
 
@@ -299,19 +338,56 @@ export class FileExecutor implements IToolExecutor {
         file_path = await assertAllowedPath(file_path, context)
         if (!fs.existsSync(file_path)) return { content: `错误：文件不存在：${file_path}`, success: false }
         
-        let fileContent = await fs.promises.readFile(file_path, 'utf-8')
-        if (!fileContent.includes(old_string)) {
-          return { content: `错误：文件中未找到指定的 old_string`, success: false }
-        }
+        const beforeContent = await fs.promises.readFile(file_path, 'utf-8')
+        const afterContent = replaceExactText(beforeContent, String(old_string), String(new_string), replace_all)
 
-        if (replace_all) {
-          fileContent = fileContent.split(old_string).join(new_string)
-        } else {
-          fileContent = fileContent.replace(old_string, new_string)
-        }
-
-        await fs.promises.writeFile(file_path, fileContent, 'utf-8')
+        await fs.promises.writeFile(file_path, afterContent, 'utf-8')
+        context.fileChangeTracker?.recordChange(file_path, beforeContent, afterContent, false)
         return { content: `成功：已修改文件 ${file_path}`, success: true }
+      }
+
+      if (api === 'edit_files') {
+        const edits = Array.isArray(args.edits) ? args.edits : []
+        if (edits.length === 0) return { content: '错误：edits 必须至少包含一项修改', success: false }
+        if (edits.length > 50) return { content: '错误：edits 最多支持 50 项修改', success: false }
+
+        const plannedFiles = new Map<string, string>()
+        const originalFiles = new Map<string, string>()
+        for (const [index, edit] of edits.entries()) {
+          if (!edit?.file_path || edit.old_string === undefined || edit.new_string === undefined) {
+            return { content: `错误：edits[${index}] 缺少 file_path、old_string 或 new_string`, success: false }
+          }
+          const filePath = await assertAllowedPath(String(edit.file_path), context)
+          if (!fs.existsSync(filePath)) return { content: `错误：edits[${index}] 文件不存在：${filePath}`, success: false }
+          const stat = await fs.promises.stat(filePath)
+          if (!stat.isFile()) return { content: `错误：edits[${index}] 路径不是文件：${filePath}`, success: false }
+          const currentContent = plannedFiles.has(filePath)
+            ? plannedFiles.get(filePath)!
+            : await fs.promises.readFile(filePath, 'utf-8')
+          if (!originalFiles.has(filePath)) {
+            originalFiles.set(filePath, currentContent)
+          }
+          const oldString = String(edit.old_string)
+          const newString = String(edit.new_string)
+          try {
+            plannedFiles.set(filePath, replaceExactText(currentContent, oldString, newString, edit.replace_all))
+          } catch (error) {
+            return {
+              content: `错误：edits[${index}] ${filePath}：${error instanceof Error ? error.message : String(error)}；批量修改尚未写入任何文件`,
+              success: false
+            }
+          }
+        }
+
+        for (const [filePath, content] of plannedFiles) {
+          await fs.promises.writeFile(filePath, content, 'utf-8')
+          const before = originalFiles.get(filePath) ?? ''
+          context.fileChangeTracker?.recordChange(filePath, before, content, false)
+        }
+        return {
+          content: `成功：已批量执行 ${edits.length} 项修改，更新 ${plannedFiles.size} 个文件\n${Array.from(plannedFiles.keys()).join('\n')}`,
+          success: true
+        }
       }
 
       // 4. move_file
@@ -356,7 +432,7 @@ export class FileExecutor implements IToolExecutor {
   }
 
   public getApiNames(): string[] {
-    return ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'write_file', 'edit_file', 'move_file', 'delete_file']
+    return ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'write_file', 'edit_file', 'edit_files', 'move_file', 'delete_file']
   }
 }
 

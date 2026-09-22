@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
+import { StringDecoder } from 'string_decoder'
 import * as iconv from 'iconv-lite'
 
 const execAsync = promisify(exec)
@@ -19,6 +20,26 @@ function decodeOutputBuffer(data: Buffer | string): string {
     }
   }
   return utf8Str
+}
+
+function powershellUtf8Preamble(command: string): string {
+  if (process.platform !== 'win32') return command
+  return [
+    "$PSDefaultParameterValues['Get-Content:Encoding'] = 'utf8'",
+    "$PSDefaultParameterValues['Select-String:Encoding'] = 'utf8'",
+    '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    command
+  ].join('; ')
+}
+
+/** Preserve UTF-8 code points split across child-process data events. */
+function createUtf8StreamDecoder(): { write: (data: Buffer | string) => string; end: () => string } {
+  const decoder = new StringDecoder('utf8')
+  return {
+    write: data => typeof data === 'string' ? data : decoder.write(data),
+    end: () => decoder.end()
+  }
 }
 
 export interface ShellSession {
@@ -140,9 +161,10 @@ export class ShellManager {
             }
             reject(error)
           })
-          const forward = (data: Buffer | string) => options.onOutput?.(decodeOutputBuffer(data))
-          child.stdout?.on('data', forward)
-          child.stderr?.on('data', forward)
+          const stdoutDecoder = createUtf8StreamDecoder()
+          const stderrDecoder = createUtf8StreamDecoder()
+          child.stdout?.on('data', (data: Buffer | string) => options.onOutput?.(stdoutDecoder.write(data)))
+          child.stderr?.on('data', (data: Buffer | string) => options.onOutput?.(stderrDecoder.write(data)))
         })
       } catch (err: any) {
         const stdout = err.stdout !== undefined ? decodeOutputBuffer(err.stdout) : ''
@@ -164,9 +186,7 @@ export class ShellManager {
 
     switch (shell) {
       case 'powershell':
-        const psCmd = process.platform === 'win32'
-          ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${cmd}`
-          : cmd
+        const psCmd = powershellUtf8Preamble(cmd)
         return runExec(psCmd, {
           ...options,
           shell: process.platform === 'win32' ? 'powershell.exe' : 'pwsh',
@@ -217,6 +237,8 @@ export class ShellManager {
       })
       let stdout = ''
       let stderr = ''
+      const stdoutDecoder = createUtf8StreamDecoder()
+      const stderrDecoder = createUtf8StreamDecoder()
       let settled = false
       const finish = (callback: () => void): void => {
         if (settled) return
@@ -238,17 +260,21 @@ export class ShellManager {
 
       options.signal?.addEventListener('abort', abort, { once: true })
       child.stdout.on('data', data => {
-        const chunk = decodeOutputBuffer(data)
+        const chunk = stdoutDecoder.write(data)
         stdout += chunk
         options.onOutput?.(chunk)
       })
       child.stderr.on('data', data => {
-        const chunk = decodeOutputBuffer(data)
+        const chunk = stderrDecoder.write(data)
         stderr += chunk
         options.onOutput?.(chunk)
       })
       child.on('error', error => finish(() => reject(error)))
-      child.on('close', code => finish(() => resolvePromise({ stdout, stderr, exitCode: code ?? -1 })))
+      child.on('close', code => {
+        stdout += stdoutDecoder.end()
+        stderr += stderrDecoder.end()
+        finish(() => resolvePromise({ stdout, stderr, exitCode: code ?? -1 }))
+      })
     })
   }
 
@@ -269,9 +295,7 @@ export class ShellManager {
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } else if (shell === 'powershell') {
-      const psCommand = process.platform === 'win32'
-        ? `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
-        : command
+      const psCommand = powershellUtf8Preamble(command)
       proc = spawn(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
         cwd,
         env,
@@ -298,16 +322,20 @@ export class ShellManager {
       command,
     }
 
-    const appendOutput = (data: Buffer | string) => {
-      const chunk = decodeOutputBuffer(data)
+    const stdoutDecoder = createUtf8StreamDecoder()
+    const stderrDecoder = createUtf8StreamDecoder()
+    const appendOutput = (decoder: ReturnType<typeof createUtf8StreamDecoder>, data: Buffer | string) => {
+      const chunk = decoder.write(data)
       session.output += chunk
       onOutput?.(chunk)
     }
-    proc.stdout.on('data', appendOutput)
+    proc.stdout.on('data', (data: Buffer | string) => appendOutput(stdoutDecoder, data))
 
-    proc.stderr.on('data', appendOutput)
+    proc.stderr.on('data', (data: Buffer | string) => appendOutput(stderrDecoder, data))
 
     proc.on('close', (code: number) => {
+      session.output += stdoutDecoder.end()
+      session.output += stderrDecoder.end()
       session.isRunning = false
       session.output += `\n[进程退出，退出码: ${code}]`
     })

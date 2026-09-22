@@ -1,4 +1,5 @@
 import * as fs from 'fs'
+import { delimiter, dirname } from 'path'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { ShellKind, shellManager } from './shell-manager'
 import { sshManager } from './ssh-manager'
@@ -7,6 +8,21 @@ import { pythonRuntimeManager } from '../../interaction/python-runtime-manager'
 import { nodeRuntimeManager } from '../../interaction/node-runtime-manager'
 import { invokesNodeExecutable, invokesPythonExecutable } from '../../security/safety-checker'
 import { getManagedSkillRoot } from '../../../skills/managed-skill-runtime'
+
+const { rgPath } = require('vscode-ripgrep')
+
+/** Expose executables bundled with AgentPet without depending on the user's PATH. */
+function buildTerminalEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {}
+  let inheritedPath = ''
+  for (const [key, value] of Object.entries(source)) {
+    if (key.toLocaleLowerCase() === 'path') inheritedPath = value || ''
+    else environment[key] = value
+  }
+
+  environment.PATH = [dirname(rgPath), inheritedPath].filter(Boolean).join(delimiter)
+  return environment
+}
 
 /** Render terminal-style output for the chat card: remove ANSI controls and let CR replace a line. */
 function renderTerminalOutput(previous: string, chunk: string): string {
@@ -129,7 +145,9 @@ export class TerminalExecutor implements IToolExecutor {
         const nodeRuntime = invokesNodeExecutable(command)
           ? await nodeRuntimeManager.ensure(context)
           : null
-        const commandEnvironment = nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : undefined
+        const commandEnvironment = buildTerminalEnvironment(
+          nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : process.env
+        )
         // run_terminal_command 同步执行，传入动态超时与中止信号
         const reportLiveOutput = this.createLiveOutputReporter(context, api)
         const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
@@ -260,7 +278,9 @@ export class TerminalExecutor implements IToolExecutor {
         const nodeRuntime = invokesNodeExecutable(command)
           ? await nodeRuntimeManager.ensure(context)
           : null
-        const commandEnvironment = nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : undefined
+        const commandEnvironment = buildTerminalEnvironment(
+          nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : process.env
+        )
         const session = shellManager.startSession(
           command,
           shell,

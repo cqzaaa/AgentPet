@@ -138,6 +138,8 @@ const api = {
     ipcRenderer.invoke('api:get-generated-files', sessionId),
   saveGeneratedFileAs: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('api:save-generated-file-as', filePath),
+  revertFileChanges: (changes: any[]): Promise<{ success: boolean; revertedCount: number; error?: string }> =>
+    ipcRenderer.invoke('api:revert-file-changes', changes),
   exportToolTrace: (payload: { defaultFileName?: string; trace: any }): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('api:export-tool-trace', payload),
   deleteGeneratedFile: (filePath: string, sessionId?: string): Promise<boolean> =>

@@ -339,7 +339,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
             <div className="settings-row">
               <div className="settings-row-info">
                 <span className="settings-row-title">单次会话记忆上下文轮数</span>
-                <span className="settings-row-desc">发送给大模型的前置聊天深度，当前轮数：{contextRounds} 轮对答。</span>
+                <span className="settings-row-desc">发送给大模型的历史深度：{contextRounds <= 0 ? '完整会话（最多 258K tokens）' : `${contextRounds} 轮对答`}。</span>
               </div>
               <select
                 className="form-select"
@@ -350,6 +350,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   localStorage.setItem('agentpet_context_rounds', String(val))
                 }}
               >
+                <option value="0">完整会话（258K 上限）</option>
                 <option value="5">5 轮</option>
                 <option value="10">10 轮</option>
                 <option value="20">20 轮</option>

@@ -419,7 +419,19 @@ export const useAppStoreRaw = create<any>((set) => ({
     const val = localStorage.getItem('agentself_autosave') || localStorage.getItem('agentpet_autosave')
     return val === null ? true : val === 'true'
   })(),
-  contextRounds: Number(localStorage.getItem('agentself_context_rounds') || localStorage.getItem('agentpet_context_rounds') || '10'),
+  contextRounds: (() => {
+    const migrationKey = 'agentpet_context_mode_version'
+    const fullSessionVersion = '258k-full-session-v1'
+    if (localStorage.getItem(migrationKey) !== fullSessionVersion) {
+      localStorage.setItem(migrationKey, fullSessionVersion)
+      localStorage.setItem('agentpet_context_rounds', '0')
+      localStorage.removeItem('agentself_context_rounds')
+      return 0
+    }
+    const stored = localStorage.getItem('agentpet_context_rounds')
+    const parsed = stored === null ? 0 : Number(stored)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  })(),
   testStatus: 'idle',
   isSessionSwitching: false,
   isSessionsInitialized: false,
@@ -550,7 +562,8 @@ export const useAppStoreRaw = create<any>((set) => ({
   setTtsEnabled: (val: any) => set({ ttsEnabled: val }),
   setAutoSaveHistory: (val: any) => set({ autoSaveHistory: val }),
   setContextRounds: (val: any) => set((state: any) => {
-    const contextRounds = Number(typeof val === 'function' ? val(state.contextRounds) : val) || 10
+    const parsed = Number(typeof val === 'function' ? val(state.contextRounds) : val)
+    const contextRounds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
     return {
       contextRounds,
       contextTokenUsageBySession: syncContextTokenUsage([], state.sessions, {}, contextRounds)

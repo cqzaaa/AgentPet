@@ -147,7 +147,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     triggers: ['code', 'coding', 'repository', 'repo', 'implement', 'debug', 'bug', 'fix', 'refactor', 'test', 'lint', 'typecheck', 'build', 'diff', 'source', 'app', 'website', 'game', 'script', '代码', '编码', '源码', '仓库', '项目', '实现', '开发', '调试', '修复', '重构', '测试', '构建', '应用', '网站', '网页', '游戏', '程序', '脚本'],
     allowedTools: [
       'read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content',
-      'write_file', 'edit_file', 'move_file', 'delete_file',
+      'write_file', 'edit_file', 'edit_files', 'move_file', 'delete_file',
       'run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'
     ],
     instructions: agentPetCodingSkill
@@ -165,7 +165,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     name: 'Local files',
     description: 'Find, list, inspect, search, read, create, edit, move, or delete local files and folders in authorized locations. Use for filesystem content and organization; use office instead for PDF/DOCX/XLSX/PPTX formatting or conversion.',
     triggers: ['file', 'folder', 'read', 'find', 'grep', 'write', 'edit', 'move', 'delete', '文件', '目录', '读取', '查找', '写入', '编辑', '移动', '删除'],
-    allowedTools: ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content', 'write_file', 'edit_file', 'move_file', 'delete_file'],
+    allowedTools: ['read_file', 'list_directory', 'get_file_metadata', 'find_files', 'grep_content', 'write_file', 'edit_file', 'edit_files', 'move_file', 'delete_file'],
     instructions: `# Local files\nStay inside authorized workspace and session paths. Use find_files for names, grep_content for text, get_file_metadata before expensive reads when useful, and read_file in bounded ranges for large files. When the user says desktop, documents, or downloads, pass the matching find_files location directly; never ask for a Windows username or use terminal commands to discover a standard system folder. find_files auto matching accepts a filename without its extension. Inspect relevant existing content before editing, preserve unrelated user changes, and prefer targeted edits over full rewrites. Treat move and delete as destructive operations and follow approval and workspace boundary checks. Use office, not generic text writes, for Office/PDF formatting or conversion.`
   }),
   staticSkill({

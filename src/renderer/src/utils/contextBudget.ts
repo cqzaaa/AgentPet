@@ -69,14 +69,16 @@ export function estimatePromptEnvelopeTokens(session: any): number {
 }
 
 export function selectContextMessages(session: any, contextRounds: number): any[] {
-  const limit = Math.max(1, Number(contextRounds) || 10) * 2
-  return (session?.messages || [])
+  const messages = (session?.messages || [])
     .filter((message: any) => {
       if (message.sender !== 'user' && message.sender !== 'agent') return false
       if (!message.isThinking) return true
       return Boolean(message.text) || getActiveToolTrace(message).length > 0
     })
-    .slice(-limit)
+  const rounds = Number(contextRounds)
+  return Number.isFinite(rounds) && rounds > 0
+    ? messages.slice(-Math.max(1, rounds) * 2)
+    : messages
 }
 
 export function estimateDraftTokens(inputValue: string, attachedFiles: any[]): number {

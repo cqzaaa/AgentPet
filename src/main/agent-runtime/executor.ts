@@ -16,6 +16,7 @@ import { startManagedPptMasterPreparation } from '../skills/managed-skill-runtim
 import { isSimpleSingleFileMutationRequest } from './tool-routing'
 import { taskRunner } from '../task-runtime/task-runner'
 import { ArtifactTracker } from './artifact-tracker'
+import { FileChangeTracker } from './file-change-tracker'
 import { loadProjectGuidance } from './project-guidance'
 import {
   BOOTSTRAP_TOOL_NAMES,
@@ -87,9 +88,22 @@ function summarizeReusableToolCall(
     kind = 'search'
     summary = { pattern: args.pattern, path: args.path || args.scope }
   } else if (toolName === 'read_file') {
-    summary = { file_path: args.file_path, start_line: args.start_line, end_line: args.end_line }
+    summary = {
+      file_path: args.file_path,
+      start_line: args.start_line,
+      end_line: args.end_line,
+      line_ranges: args.line_ranges
+    }
   } else if (toolName === 'get_file_metadata') summary = { file_path: args.file_path }
-  else if (/^(?:write|edit|move|copy|delete)_file$/.test(toolName)) {
+  else if (toolName === 'edit_files') {
+    if (!success) return null
+    kind = 'change'
+    const edits = Array.isArray(args.edits) ? args.edits : []
+    summary = {
+      edit_count: edits.length,
+      files: Array.from(new Set(edits.map((edit: any) => edit?.file_path).filter(Boolean))).slice(0, 20)
+    }
+  } else if (/^(?:write|edit|move|copy|delete)_file$/.test(toolName)) {
     if (!success) return null
     kind = 'change'
     summary = {
@@ -180,7 +194,7 @@ function normalizeSearchCitations(text: string): string {
 const TOOL_CONTEXT_SOFT_LIMIT = 16000
 const CONTEXT_COMPACT_RATIO = 0.9
 const TOOL_COMPACTION_GUARD_RATIO = 0.8
-const DEFAULT_CONTEXT_WINDOW = 168000
+const DEFAULT_CONTEXT_WINDOW = 258000
 const MIN_CURRENT_ATTACHMENT_TOKENS = 2000
 const MAX_CURRENT_ATTACHMENT_TOKENS = 8000
 const HISTORICAL_ATTACHMENT_FALLBACK_TOKENS = 256
@@ -188,6 +202,7 @@ const HISTORICAL_ATTACHMENT_FALLBACK_TOKENS = 256
 const MUTATING_TOOL_NAMES = new Set([
   'write_file',
   'edit_file',
+  'edit_files',
   'move_file',
   'delete_file',
   'generate_file',
@@ -331,6 +346,22 @@ function isMutatingToolCall(toolName: string, args: unknown): boolean {
   if (!args || typeof args !== 'object') return false
   const command = String((args as { command?: unknown }).command || '')
   return /(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|npm\s+(?:install|uninstall)|git\s+(?:apply|commit|merge|rebase)|(?:^|\s)(?:rm|mv|cp|mkdir|touch|sed\s+-i)\b|(?:^|[^>])>{1,2}(?:[^>]|$))/i.test(command)
+}
+
+const READ_ONLY_INSPECTION_TOOL_NAMES = new Set([
+  'read_file',
+  'grep_content',
+  'find_files',
+  'list_directory',
+  'get_file_metadata'
+])
+
+function isReadOnlyInspectionToolCall(toolName: string, args: unknown): boolean {
+  if (READ_ONLY_INSPECTION_TOOL_NAMES.has(toolName)) return true
+  if (toolName !== 'run_terminal_command' && toolName !== 'run_command') return false
+  if (isMutatingToolCall(toolName, args)) return false
+  const command = String((args as { command?: unknown } | null)?.command || '')
+  return /(?:\brg\b|Get-Content|Get-ChildItem|Select-String|git\s+(?:status|diff|log|show|grep)\b|(?:^|[;&|]\s*)(?:ls|find|grep|sed|head|tail)\b)/i.test(command)
 }
 
 function getActiveChatDir(): string {
@@ -998,6 +1029,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
       temperature: number
       maxTokens?: number
       contextWindow?: number
+      sessionToolEvidence?: string
       sessionId?: string
       messageId?: number
       traceTurn?: number
@@ -1074,6 +1106,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
         .filter(Boolean)
         .join('\n')
       chatHistory[0].content += `\n\n<session_coding_checkpoint>\nThis is structured state from successful work in the same session. Reuse known paths and search scopes, preserve recorded changes, and do not repeat completed verification unless relevant files changed afterward. Do not restart with broad directory scans unless this checkpoint does not cover the current request.\n${activitySections}\n</session_coding_checkpoint>`
+    }
+    if (config.sessionToolEvidence?.trim() && typeof chatHistory[0].content === 'string') {
+      chatHistory[0].content += `\n\n${config.sessionToolEvidence.trim()}`
     }
 
     const workspaceAlreadyDeclared = chatHistory.some(message =>
@@ -1237,10 +1272,16 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     let imageCompatibilityFallbackUsed = false
     let streamRecoveryUsed = false
     let resumedTextPrefix = ''
+    let inspectionCallsSinceMutation = 0
+    let nextInspectionNudgeAt = 6
+    let singleEditCalls = 0
+    let nextEditNudgeAt = 3
     const successfulInputFingerprints = new Set<string>()
     let currentInputTarget = 'current-focus'
     const artifactTracker = new ArtifactTracker()
     const getDeliverableFiles = () => artifactTracker.getFinalFiles()
+    const fileChangeTracker = new FileChangeTracker(workspacePath)
+    const getFileChanges = () => fileChangeTracker.getChanges()
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
     const allowedToolNames = Array.isArray(config.allowedToolNames)
@@ -1328,6 +1369,34 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
     if (simpleSingleFileMutation && typeof chatHistory[0]?.content === 'string') {
       chatHistory[0].content += '\n\n<simple_task_mode>This is a single-file, single-mutation, low-risk task. Execute it directly. Do not create or mention a task plan.</simple_task_mode>'
+    }
+
+    // Full-session mode can already be near the model limit before the first
+    // request. Compact once up front so the provider never receives an
+    // oversized initial payload; later tool cycles keep using the same guard.
+    const initialCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow)
+    if (initialCompactionPlan) {
+      yield { type: 'context_compaction', status: 'started', beforeTokens: initialCompactionPlan.beforeTokens }
+      try {
+        const compacted = await this.compactContext(chatHistory, initialCompactionPlan, sessionId)
+        yield {
+          type: 'context_compaction',
+          status: 'completed',
+          beforeTokens: initialCompactionPlan.beforeTokens,
+          afterTokens: compacted.afterTokens,
+          archivePath: compacted.archivePath,
+          removedMessages: compacted.removedMessages,
+          activeToolContextTokens: compacted.activeToolContextTokens
+        }
+      } catch (compactionError) {
+        console.error('[AgentExecutor] 首次请求前自动压缩上下文失败:', compactionError)
+        yield {
+          type: 'context_compaction',
+          status: 'failed',
+          beforeTokens: initialCompactionPlan.beforeTokens,
+          detail: compactionError instanceof Error ? compactionError.message : String(compactionError)
+        }
+      }
     }
 
     while (loopCount < maxLoops) {
@@ -1739,6 +1808,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
                     sandboxMode: effectiveSandboxMode,
                     event,
                     abortSignal,
+                    fileChangeTracker,
                     traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
                       config.onTraceEvent?.({ ...traceEvent, correlationId: toolCall.id, step: loopCount })
                   }
@@ -1765,6 +1835,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
                 sandboxMode: effectiveSandboxMode,
                 event,
                 abortSignal,
+                fileChangeTracker,
                 traceEvent: (traceEvent: { type: string; data: Record<string, unknown>; correlationId?: string }) =>
                   config.onTraceEvent?.({ ...traceEvent, correlationId: toolCall.id, step: loopCount })
               }
@@ -1839,6 +1910,30 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史
         for (const res of results) {
+          if (res.toolName === 'edit_file') {
+            singleEditCalls++
+            if (singleEditCalls >= nextEditNudgeAt) {
+              const nudge = `\n\n[调用链优化提示] 本轮已单独调用 edit_file ${singleEditCalls} 次。若还有两个以上已确定的精确替换，请改用一次 edit_files 批量提交；它会先验证全部 old_string，任一不匹配时不会写入。`
+              res.contextToolResult += nudge
+              res.displayResult += nudge
+              nextEditNudgeAt += 3
+            }
+          } else if (res.toolName === 'edit_files') {
+            singleEditCalls = 0
+            nextEditNudgeAt = 3
+          }
+          if (isReadOnlyInspectionToolCall(res.toolName, res.toolArgs)) {
+            inspectionCallsSinceMutation++
+            if (inspectionCallsSinceMutation >= nextInspectionNudgeAt) {
+              const nudge = `\n\n[调用链优化提示] 自上次修改以来已执行 ${inspectionCallsSinceMutation} 次只读检索/读取。下一轮请停止逐个读取小片段：优先用一次 run_terminal_command 批量搜索并输出相关上下文，或用 read_file.line_ranges 合并同一文件的多个区间。代码初查通常一次读取 150–300 行；仅在最终精确替换前使用 10–30 行窄范围。`
+              res.contextToolResult += nudge
+              res.displayResult += nudge
+              nextInspectionNudgeAt += 6
+            }
+          } else if (isMutatingToolCall(res.toolName, res.toolArgs)) {
+            inspectionCallsSinceMutation = 0
+            nextInspectionNudgeAt = 6
+          }
           const transfersArtifact = /^(?:move|copy)_file$/i.test(res.toolName)
           const generatedArtifacts = [...(res.generatedFiles || [])]
           if (res.toolSuccess && transfersArtifact) {
@@ -2008,6 +2103,11 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
           yield { type: 'generated_files', files: deliverableFiles, autoPreview: true }
         }
 
+        const fileChanges = getFileChanges()
+        if (fileChanges.length > 0) {
+          yield { type: 'file_changes', changes: fileChanges }
+        }
+
         yield {
           type: 'text',
           content: finalResponse
@@ -2054,6 +2154,11 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     const recoverableArtifacts = getDeliverableFiles()
     if (recoverableArtifacts.length > 0) {
       yield { type: 'generated_files', files: recoverableArtifacts, autoPreview: true }
+    }
+
+    const unfinalizedChanges = getFileChanges()
+    if (unfinalizedChanges.length > 0) {
+      yield { type: 'file_changes', changes: unfinalizedChanges }
     }
 
     yield {

@@ -27,6 +27,7 @@ export class SearchExecutor implements IToolExecutor {
           return { content: '错误：搜索范围经真实路径解析后不在已授权文件夹内。', success: false }
         }
 
+        const outputMode = output_mode || ((await fs.promises.stat(realSearchDir)).isFile() ? 'content' : 'files_with_matches')
         const execArgs: string[] = []
         execArgs.push('-n') // Line numbers
         execArgs.push('-H') // Always print filename
@@ -45,7 +46,7 @@ export class SearchExecutor implements IToolExecutor {
         return new Promise<ToolResult>((resolve) => {
           execFile(rgPath, execArgs, { maxBuffer: 10 * 1024 * 1024, timeout, signal: context.abortSignal }, (error, stdout, stderr) => {
             // ripgrep exits with 1 if no matches found, 2 if error
-            if (error && error.code === 2) {
+            if (error && error.code !== 1) {
               resolve({
                 content: `搜索出错: ${stderr || error.message}`,
                 success: false
@@ -63,9 +64,9 @@ export class SearchExecutor implements IToolExecutor {
             const truncatedLines = lines.slice(0, MAX_TOTAL_MATCHES)
             const wasTruncated = lines.length > MAX_TOTAL_MATCHES
 
-            if (output_mode === 'count') {
+            if (outputMode === 'count') {
               resolve({ content: `[搜索结果] 找到 ${lines.length} 处匹配`, success: true })
-            } else if ((output_mode || 'files_with_matches') === 'files_with_matches') {
+            } else if (outputMode === 'files_with_matches') {
               const files = new Set<string>()
               lines.forEach(line => {
                 // ripgrep outputs FilePath:LineNumber:Content

@@ -1108,7 +1108,7 @@ function ChatPageImpl(): React.JSX.Element {
 
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
-  const contextLimit = Number((llmConfig as any).contextWindow) || 168000
+  const contextLimit = Number((llmConfig as any).contextWindow) || 258000
   const estimatedContextTokens = useMemo(
     () =>
       currentContextTokens +
