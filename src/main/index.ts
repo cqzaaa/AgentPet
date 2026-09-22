@@ -18,7 +18,10 @@ import * as Papa from 'papaparse'
 import ExcelJS from 'exceljs'
 import { randomUUID } from 'crypto'
 
-const ATTACHMENT_TEXT_PREVIEW_LIMIT = 30000
+// Upload previews are only a navigation aid. The original file path remains
+// available to file/Office tools, so storing a large inline copy wastes the
+// context budget and causes the same payload to be replayed on later turns.
+const ATTACHMENT_TEXT_PREVIEW_LIMIT = 8000
 
 function limitAttachmentTextPreview(content: string): string {
   if (content.length <= ATTACHMENT_TEXT_PREVIEW_LIMIT) return content
@@ -34,8 +37,13 @@ import { credentialManager } from './tools/interaction/credential-manager'
 import { officeRuntimeManager } from './tools/interaction/office-runtime-manager'
 import { nodeRuntimeManager } from './tools/interaction/node-runtime-manager'
 import { sshManager } from './tools/builtin/terminal/ssh-manager'
-import { AgentExecutor } from './agent-runtime'
+import {
+  AgentExecutor,
+  clearAgentRuntimeSessionCache,
+  restoreAgentRuntimeSessionActivity
+} from './agent-runtime'
 import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
+import { clearProjectGuidanceCache } from './agent-runtime/project-guidance'
 import { ModelRuntimeFactory } from './model-runtime'
 import { taskRunner } from './task-runtime/task-runner'
 import { workflowStore } from './task-runtime/workflow-store'
@@ -4328,7 +4336,12 @@ app.whenReady().then(() => {
             try {
               const fi = JSON.parse(m.file_info)
               const { objectUrl: _o, ...restFi } = fi
-              fileInfo = restFi
+              fileInfo = {
+                ...restFi,
+                content: typeof restFi.content === 'string'
+                  ? limitAttachmentTextPreview(restFi.content)
+                  : restFi.content
+              }
             } catch (e) {
               console.error(e)
             }
@@ -4339,7 +4352,12 @@ app.whenReady().then(() => {
               const arr = JSON.parse(m.file_infos)
               fileInfos = arr.map((f: any) => {
                 const { objectUrl: _o, ...rest } = f
-                return rest
+                return {
+                  ...rest,
+                  content: typeof rest.content === 'string'
+                    ? limitAttachmentTextPreview(rest.content)
+                    : rest.content
+                }
               })
             } catch (e) {
               console.error(e)
@@ -4567,6 +4585,9 @@ app.whenReady().then(() => {
       const database = await getDB()
       await database.run('DELETE FROM sessions WHERE id = ?', sessionId)
       await sessionEventStore.deleteSession(sessionId)
+      skillRegistry.clearSession(sessionId)
+      clearAgentRuntimeSessionCache(sessionId)
+      clearProjectGuidanceCache(sessionId)
 
       // 如果删除的是微信会话，同步从微信活跃好友列表中清除该记录
       if (sessionId.startsWith('wechat:') && wechatBotManager) {
@@ -5094,7 +5115,7 @@ app.whenReady().then(() => {
         content = await fs.promises.readFile(filePath, 'utf-8')
       }
 
-      return { name, path: filePath, content }
+      return { name, path: filePath, content: limitAttachmentTextPreview(content) }
     } catch (e: any) {
       throw new Error(`读取文件失败: ${e.message}`)
     }
@@ -5179,7 +5200,7 @@ app.whenReady().then(() => {
       } else if (ext === 'docx') {
         const buffer = await fs.promises.readFile(filePath)
         const result = await mammoth.extractRawText({ buffer })
-        return result.value || '[Word 文档内容为空]'
+        return limitAttachmentTextPreview(result.value || '[Word 文档内容为空]')
       } else if (ext === 'xlsx' || ext === 'xls') {
         const workbook = XLSX.readFile(filePath)
         const sheets: string[] = []
@@ -5188,7 +5209,7 @@ app.whenReady().then(() => {
           const csv = XLSX.utils.sheet_to_csv(sheet)
           if (csv.trim()) sheets.push(`[工作表: ${sheetName}]\n${csv}`)
         }
-        return sheets.join('\n\n') || '[Excel 文件内容为空]'
+        return limitAttachmentTextPreview(sheets.join('\n\n') || '[Excel 文件内容为空]')
       } else if (ext === 'csv') {
         const csvContent = await fs.promises.readFile(filePath, 'utf-8')
         const parsed = Papa.parse(csvContent, { header: true })
@@ -5200,11 +5221,11 @@ app.whenReady().then(() => {
             .map(
               (row, i) => `第${i + 1}行: ${headers.map(h => `${h}=${row[h] ?? ''}`).join(', ')}`).join('\n')
           if ((parsed.data as any[]).length > 500) text += `\n\n... 共 ${parsed.data.length} 行，已截取前 500 行`
-          return text
+          return limitAttachmentTextPreview(text)
         }
         return '[CSV 文件内容为空]'
       } else {
-        return await fs.promises.readFile(filePath, 'utf-8')
+        return limitAttachmentTextPreview(await fs.promises.readFile(filePath, 'utf-8'))
       }
     } catch (e: any) {
       return `[文件解析失败: ${e.message}]`
@@ -5822,6 +5843,52 @@ app.whenReady().then(() => {
     let traceRequestId = ''
     let tracePreviousMessageFingerprints: string[] | undefined
     let liveReasoning = ''
+
+    // Rehydrate sticky Skill state after an app restart. Only exact Skill ids
+    // previously requested in this session are considered; requestSkills still
+    // validates existence, enabled state, sections, and the normal three-Skill cap.
+    if (sessionId !== 'default' && skillRegistry.getSessionSkills(sessionId).length === 0) {
+      try {
+        const database = await getDB()
+        const rows = await database.all<Array<{ tool_steps?: string }>>(
+          'SELECT tool_steps FROM messages WHERE session_id = ? AND tool_steps IS NOT NULL ORDER BY time ASC',
+          sessionId
+        )
+        const restored = new Map<string, { id: string; sections?: string[] }>()
+        for (const row of rows) {
+          let steps: any[] = []
+          try { steps = JSON.parse(String(row.tool_steps || '[]')) } catch { continue }
+          for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+            const step = steps[stepIndex]
+            if (step?.type === 'call') {
+              const completed = steps.slice(stepIndex + 1).some((candidate: any) =>
+                candidate?.type === 'result' && candidate?.name === step.name
+              )
+              if (completed) {
+                restoreAgentRuntimeSessionActivity(sessionId, String(step.name || ''), step.detail || {})
+              }
+            }
+            if (step?.type !== 'call' || step?.name !== 'request_skill') continue
+            for (const raw of Array.isArray(step.detail?.skills) ? step.detail.skills : []) {
+              const id = String(raw?.id || '').trim()
+              if (!id) continue
+              const sections: string[] | undefined = Array.isArray(raw?.sections)
+                ? [...new Set<string>(raw.sections.map((section: unknown) => String(section || '').trim()).filter(Boolean))].sort()
+                : undefined
+              const key = `${id}:${sections?.join(',') || 'overview'}`
+              restored.delete(key)
+              restored.set(key, { id, sections: sections?.length ? sections : undefined })
+            }
+          }
+        }
+        const requests = [...restored.values()].slice(-3)
+        if (requests.length > 0) {
+          await skillRegistry.requestSkills(requests, sessionId, config.messageId)
+        }
+      } catch (error) {
+        console.warn('[SkillRegistry] Failed to restore session Skills:', error)
+      }
+    }
 
     const appendTrace = async (
       type: string,

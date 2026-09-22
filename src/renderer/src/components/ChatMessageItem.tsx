@@ -2123,8 +2123,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
-                    maxHeight: '60vh',
+                    maxHeight: '360px',
                     overflowY: 'auto',
+                    overscrollBehavior: 'contain',
+                    scrollbarGutter: 'stable',
                     paddingLeft: '12px',
                     paddingRight: '6px'
                   }}

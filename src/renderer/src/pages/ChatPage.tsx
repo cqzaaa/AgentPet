@@ -6,6 +6,7 @@ import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
 import { AgentPetMark } from '../components/AgentPetMark'
 import { Tooltip } from '../components/Tooltip'
+import { latestTaskPlan, TaskPlanFloatingStatus } from '../components/TaskPlanCard'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
 import { CollaborationComposer } from '../components/CollaborationComposer'
 import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
@@ -136,6 +137,20 @@ function ChatPageImpl(): React.JSX.Element {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null)
   const composerSelectionContextRef = useRef<HTMLDivElement>(null)
+
+  const latestOrdinaryTaskPlanInfo = useMemo(() => {
+    for (let index = activeSessMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeSessMessages[index]
+      if (message?.sender === 'user') break
+      if (message?.sender !== 'agent' || !Array.isArray(message.toolSteps)) continue
+      const ordinaryPlanSteps = message.toolSteps.filter(
+        (step: any) => step?.name !== 'delegate_tasks'
+      )
+      const plan = latestTaskPlan(ordinaryPlanSteps)
+      if (plan) return { plan, messageId: message.id as string | number }
+    }
+    return null
+  }, [activeSessMessages])
 
   useEffect(() => {
     setQuotedSelection(null)
@@ -1899,6 +1914,14 @@ function ChatPageImpl(): React.JSX.Element {
 
         {/* 现代卡片式输入控制面板 */}
         <div className="chat-control-card">
+          {isSending && latestOrdinaryTaskPlanInfo && !showMeetingRecorder && !openedSubtask && (
+            <TaskPlanFloatingStatus
+              key={latestOrdinaryTaskPlanInfo.messageId}
+              plan={latestOrdinaryTaskPlanInfo.plan}
+              messageId={latestOrdinaryTaskPlanInfo.messageId}
+            />
+          )}
+
           {/* 人机协作安全核对面板：锚定在输入框上方 */}
           {activePermissionRequest &&
             activePermissionRequest.interactionOrigin !== 'orchestration' && (

@@ -8,6 +8,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Plus,
   Search,
   Trash2,
   X
@@ -130,6 +131,33 @@ interface Props {
   onDelete: (id: string) => void
   onTogglePin: (id: string) => void
   onRename: (id: string, name: string) => void
+  onCreateWorkspaceSession: (path: string) => void
+  onDeleteWorkspace: (path: string) => void
+}
+
+function SidebarIconAction({
+  label,
+  className,
+  onClick,
+  children
+}: {
+  label: string
+  className: string
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <Tooltip content={label} placement="top">
+      <button
+        type="button"
+        className={className}
+        onClick={onClick}
+        aria-label={label}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  )
 }
 
 function getWorkspaceName(path: string): string {
@@ -147,7 +175,9 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     onSelect,
     onDelete,
     onTogglePin,
-    onRename
+    onRename,
+    onCreateWorkspaceSession,
+    onDeleteWorkspace
   } = props
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -405,36 +435,61 @@ export function RecentSessionList(props: Props): React.JSX.Element {
     }
     if (row.type === 'workspace') {
       const isCollapsed = Boolean(collapsedWorkspaces[row.path])
+      const workspaceName = getWorkspaceName(row.path)
       return (
-        <Tooltip title={getWorkspaceName(row.path)} description={row.path} placement="right">
-          <button
-            type="button"
-            className="workspace-group-header"
-            onClick={() =>
-              {
-                if (!isCollapsed) {
-                  setExpandedSessionGroups((previous) => ({
+        <div className="workspace-group-row">
+          <Tooltip title={workspaceName} description={row.path} placement="right">
+            <button
+              type="button"
+              className="workspace-group-header"
+              onClick={() =>
+                {
+                  if (!isCollapsed) {
+                    setExpandedSessionGroups((previous) => ({
+                      ...previous,
+                      [`workspace:${row.path}`]: false
+                    }))
+                  }
+                  setCollapsedWorkspaces((previous) => ({
                     ...previous,
-                    [`workspace:${row.path}`]: false
+                    [row.path]: !previous[row.path]
                   }))
                 }
-                setCollapsedWorkspaces((previous) => ({
-                  ...previous,
-                  [row.path]: !previous[row.path]
-                }))
               }
-            }
-            aria-expanded={!isCollapsed}
-          >
-            <FolderOpen
-              className="workspace-group-icon"
-              size={16}
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            <span className="workspace-group-name">{getWorkspaceName(row.path)}</span>
-          </button>
-        </Tooltip>
+              aria-expanded={!isCollapsed}
+            >
+              <FolderOpen
+                className="workspace-group-icon"
+                size={16}
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <span className="workspace-group-name">{workspaceName}</span>
+            </button>
+          </Tooltip>
+          <div className="workspace-group-actions">
+            <SidebarIconAction
+              label={`在 ${workspaceName} 中新建会话`}
+              className="workspace-group-action"
+              onClick={(event) => {
+                event.stopPropagation()
+                onCreateWorkspaceSession(row.path)
+              }}
+            >
+              <Plus size={14} strokeWidth={2} aria-hidden="true" />
+            </SidebarIconAction>
+            <SidebarIconAction
+              label={`删除项目：${workspaceName}`}
+              className="workspace-group-action danger"
+              onClick={(event) => {
+                event.stopPropagation()
+                onDeleteWorkspace(row.path)
+              }}
+            >
+              <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+            </SidebarIconAction>
+          </div>
+        </div>
       )
     }
     if (row.type === 'header') {
@@ -526,19 +581,16 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           </Tooltip>
         )}
         {!isRenaming && (
-          <Tooltip content="删除会话" placement="top">
-            <button
-              type="button"
-              className="recent-delete-btn"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete(s.id)
-              }}
-              aria-label={`删除会话：${s.name}`}
-            >
-              <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-            </button>
-          </Tooltip>
+          <SidebarIconAction
+            label={`删除会话：${s.name}`}
+            className="recent-delete-btn"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete(s.id)
+            }}
+          >
+            <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+          </SidebarIconAction>
         )}
       </div>
     )

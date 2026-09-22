@@ -38,6 +38,7 @@ import { PermissionModeControl } from './PermissionModeControl'
 import { normalizeSearchCitations } from '../utils/helpers'
 import { AgentPetMark } from './AgentPetMark'
 import { Tooltip } from './Tooltip'
+import { ConfirmDialog } from './ConfirmDialog'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -331,6 +332,8 @@ export function AgentWindow(): React.JSX.Element {
 
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([])
   const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null)
+  const [workspaceToDeletePath, setWorkspaceToDeletePath] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [hiddenTabKeys, setHiddenTabKeys] = useState<string[]>([])
   const [showTabOverflowMenu, setShowTabOverflowMenu] = useState(false)
@@ -375,6 +378,34 @@ export function AgentWindow(): React.JSX.Element {
   const chooseWorkspaceForSession = async (): Promise<void> => {
     const path = await window.api.selectDirectory({ title: '选择文件区/项目目录' })
     if (path) await createSessionFromDialog(path)
+  }
+
+  const confirmDeleteSession = async (): Promise<void> => {
+    if (!sessionToDeleteId || deleteBusy) return
+    setDeleteBusy(true)
+    try {
+      await handleDeleteSession(sessionToDeleteId)
+      setSessionToDeleteId(null)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
+  const confirmDeleteWorkspace = async (): Promise<void> => {
+    if (!workspaceToDeletePath || deleteBusy) return
+    const targetPath = workspaceToDeletePath
+    const sessionIds = (useAppStoreRaw.getState().sessions as Session[])
+      .filter((session) => session.workspacePath === targetPath)
+      .map((session) => session.id)
+    setDeleteBusy(true)
+    try {
+      for (const sessionId of sessionIds) {
+        await handleDeleteSession(sessionId)
+      }
+      setWorkspaceToDeletePath(null)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const workspaceTabLabelSignature = workspaceTabs
@@ -671,6 +702,10 @@ export function AgentWindow(): React.JSX.Element {
               onDelete={setSessionToDeleteId}
               onTogglePin={handleTogglePinSession}
               onRename={handleRenameSession}
+              onCreateWorkspaceSession={(path) => {
+                void handleCreateNewSession(path)
+              }}
+              onDeleteWorkspace={setWorkspaceToDeletePath}
             />
           )}
 
@@ -1184,101 +1219,28 @@ export function AgentWindow(): React.JSX.Element {
         </div>
       )}
 
-      {/* 删除会话二次确认弹框 */}
-      {sessionToDeleteId && (
-        <div className="mcp-modal-overlay">
-          <div className="mcp-modal-card" style={{ maxWidth: '380px', width: '90%' }}>
-            <div
-              className="mcp-modal-header"
-              style={{
-                padding: '16px 20px',
-                borderBottom: '1px solid var(--border-color, rgba(128,128,128,0.15))'
-              }}
-            >
-              <div
-                className="mcp-modal-title"
-                style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--text-primary)' }}
-              >
-                删除
-              </div>
-              <Tooltip content="关闭" placement="bottom">
-                <button
-                  className="mcp-modal-close-btn"
-                  onClick={() => setSessionToDeleteId(null)}
-                >
-                  <X size={18} strokeWidth={2} aria-hidden="true" />
-                </button>
-              </Tooltip>
-            </div>
-            <div
-              className="mcp-modal-body"
-              style={{
-                padding: '24px 20px',
-                fontSize: '13px',
-                color: 'var(--text-secondary, #666)',
-                lineHeight: '1.6'
-              }}
-            >
-              您即将删除此话题，此操作无法撤销。
-            </div>
-            <div
-              className="mcp-modal-footer"
-              style={{
-                padding: '12px 20px 16px',
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '12px',
-                borderTop: 'none'
-              }}
-            >
-              <button
-                onClick={() => setSessionToDeleteId(null)}
-                style={{
-                  padding: '6px 18px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-color, rgba(128, 128, 128, 0.2))',
-                  background: 'var(--bg-card, #ffffff)',
-                  color: 'var(--text-primary, #333)',
-                  cursor: 'pointer',
-                  fontSize: '12.5px',
-                  fontWeight: 500,
-                  transition: 'background 0.2s'
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = 'var(--bg-hover, rgba(128, 128, 128, 0.08))')
-                }
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card, #ffffff)')}
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  if (sessionToDeleteId) {
-                    handleDeleteSession(sessionToDeleteId)
-                    setSessionToDeleteId(null)
-                  }
-                }}
-                style={{
-                  padding: '6px 18px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#e0533c', // 珊瑚红/橙红色
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  fontSize: '12.5px',
-                  fontWeight: 'bold',
-                  boxShadow: '0 2px 6px rgba(224, 83, 60, 0.15)',
-                  transition: 'filter 0.2s'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.05)')}
-                onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={Boolean(sessionToDeleteId)}
+        busy={deleteBusy}
+        tone="danger"
+        title="删除此会话？"
+        description="该会话及其消息记录将被永久删除。"
+        confirmLabel="删除会话"
+        onCancel={() => setSessionToDeleteId(null)}
+        onConfirm={() => { void confirmDeleteSession() }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(workspaceToDeletePath)}
+        busy={deleteBusy}
+        tone="danger"
+        title={`删除项目“${workspaceToDeletePath ? workspaceName(workspaceToDeletePath) : ''}”？`}
+        description={`该项目下的 ${sessions.filter((session) => session.workspacePath === workspaceToDeletePath).length} 个会话及其消息记录将被永久删除。`}
+        note="磁盘上的项目文件夹和代码文件不会被删除。"
+        confirmLabel="删除项目"
+        onCancel={() => setWorkspaceToDeletePath(null)}
+        onConfirm={() => { void confirmDeleteWorkspace() }}
+      />
 
       {/* API Key 引导配置弹窗 */}
       {showApiKeyModal && (
