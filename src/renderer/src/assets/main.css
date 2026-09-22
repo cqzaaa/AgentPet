@@ -3285,7 +3285,7 @@ body {
   color: var(--inline-code-text);
   padding: 2px 5px;
   border-radius: 4px;
-  font-family: 'Consolas', 'Cascadia Mono', 'SFMono-Regular', Menlo, Monaco, monospace;
+  font-family: var(--font-mono, 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, Monaco, monospace);
   font-size: 12px;
 }
 
@@ -3343,7 +3343,7 @@ body {
   margin: 0;
   padding: 12px 14px;
   overflow-x: auto;
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: var(--font-mono, 'Cascadia Code', 'Cascadia Mono', Consolas, Monaco, monospace);
   font-size: 10.5px;
   background: var(--code-bg);
   color: var(--code-text);
@@ -7672,32 +7672,55 @@ body {
 }
 
 /* 消息内的高级 Markdown 表格 */
+.markdown-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 480px;
+  margin: 14px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: rgba(15, 23, 42, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
 .markdown-table {
   width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  background: rgba(255, 255, 255, 0.01);
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .markdown-table th {
-  background: var(--bg-table-header);
+  position: sticky;
+  top: 0;
+  background: #181f2a;
   color: var(--text-primary);
-  font-weight: 700;
-  padding: 6px 10px;
-  border-bottom: 1.5px solid var(--border-color);
+  font-weight: 600;
+  padding: 9px 14px;
+  text-align: left;
+  white-space: nowrap; /* 杜绝表头文字纵向竖排折行 */
+  border-bottom: 2px solid var(--border-color);
   border-right: 1px solid var(--border-color);
+  z-index: 2;
+  user-select: text;
 }
 
 .markdown-table td {
-  padding: 6px 10px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   color: var(--text-secondary);
+  vertical-align: top; /* 多行文本顶部平齐 */
+  word-break: break-word;
+}
+
+.markdown-table th:first-child,
+.markdown-table td:first-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .markdown-table th:last-child,
@@ -7705,16 +7728,113 @@ body {
   border-right: none;
 }
 
+.markdown-table tr:last-child td {
+  border-bottom: none;
+}
+
 .markdown-table tr:nth-child(even) td {
   background: rgba(255, 255, 255, 0.015);
 }
 
-.agent-window-container.light .markdown-table tr:nth-child(even) td {
-  background: rgba(0, 0, 0, 0.01);
+.markdown-table tr:hover td {
+  background: rgba(6, 182, 212, 0.04);
 }
 
-.markdown-table tr:hover td {
-  background: rgba(6, 182, 212, 0.03);
+.agent-window-container.light .markdown-table-wrapper {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.agent-window-container.light .markdown-table th {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.agent-window-container.light .markdown-table td {
+  border-color: #e2e8f0;
+}
+
+.agent-window-container.light .markdown-table tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.agent-window-container.light .markdown-table tr:hover td {
+  background: #eff6ff;
+}
+
+/* 本地生成文件胶囊卡片链接 */
+.markdown-link.local-file-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin: 3px 0;
+  border-radius: 6px;
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: #60a5fa;
+  font-weight: 500;
+  font-size: 12px;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+  max-width: 100%;
+}
+
+.markdown-link.local-file-pill:hover {
+  background: rgba(96, 165, 250, 0.22);
+  border-color: #60a5fa;
+  color: #93c5fd;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
+}
+
+.markdown-link.local-file-pill:active {
+  transform: translateY(0);
+}
+
+.markdown-link.local-file-pill .file-pill-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex: none;
+}
+
+.markdown-link.local-file-pill .file-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-link.local-file-pill .file-pill-action {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, 0.2);
+  color: #93c5fd;
+  flex: none;
+  margin-left: 2px;
+  opacity: 0.95;
+}
+
+.agent-window-container.light .markdown-link.local-file-pill {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.agent-window-container.light .markdown-link.local-file-pill:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+}
+
+.agent-window-container.light .markdown-link.local-file-pill .file-pill-action {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
 }
 
 /* 行内代码 */
@@ -9140,6 +9260,235 @@ body {
   color: var(--accent-color, #4f8cff);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* 消息底部的成果交付区（Deliverables） */
+.chat-deliverables-container {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.chat-deliverables-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.chat-deliverables-header-icon {
+  color: #60a5fa;
+  flex: none;
+}
+
+.chat-deliverables-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-deliverable-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-deliverable-card:hover {
+  background: rgba(30, 41, 59, 0.75);
+  border-color: rgba(96, 165, 250, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.chat-deliverable-card:active {
+  transform: translateY(0);
+}
+
+.chat-deliverable-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat-deliverable-icon-wrap .deliverable-type-icon.excel {
+  color: #10b981;
+}
+
+.chat-deliverable-icon-wrap .deliverable-type-icon.word {
+  color: #3b82f6;
+}
+
+.chat-deliverable-icon-wrap .deliverable-type-icon.pdf {
+  color: #ef4444;
+}
+
+.chat-deliverable-icon-wrap .deliverable-type-icon.generic {
+  color: #94a3b8;
+}
+
+.chat-deliverable-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-deliverable-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-deliverable-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.chat-deliverable-ext {
+  padding: 0.5px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--text-secondary, #cbd5e1);
+  letter-spacing: 0.04em;
+}
+
+.chat-deliverable-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-deliverable-hint {
+  opacity: 0.6;
+}
+
+.chat-deliverable-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.chat-deliverable-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #cbd5e1);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.chat-deliverable-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-primary, #f8fafc);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.chat-deliverable-btn.primary {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.chat-deliverable-btn.primary:hover {
+  background: rgba(37, 99, 235, 0.3);
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+
+.chat-deliverable-btn.copied {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.15);
+}
+
+/* 亮色模式适配 */
+.agent-window-container.light .chat-deliverables-container {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.agent-window-container.light .chat-deliverable-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.agent-window-container.light .chat-deliverable-card:hover {
+  background: #f1f5f9;
+  border-color: #93c5fd;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.08);
+}
+
+.agent-window-container.light .chat-deliverable-icon-wrap {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.agent-window-container.light .chat-deliverable-title {
+  color: #0f172a;
+}
+
+.agent-window-container.light .chat-deliverable-meta {
+  color: #64748b;
+}
+
+.agent-window-container.light .chat-deliverable-ext {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.agent-window-container.light .chat-deliverable-btn {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+}
+
+.agent-window-container.light .chat-deliverable-btn:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.agent-window-container.light .chat-deliverable-btn.primary {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+
+.agent-window-container.light .chat-deliverable-btn.primary:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .chat-skeleton-container {

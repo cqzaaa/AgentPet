@@ -399,11 +399,27 @@ export class AgentExecutor {
     return files
   }
 
-  private getArtifactInputPaths(args: unknown): string[] {
+  private getArtifactInputPaths(args: unknown, candidatePaths: string[] = []): string[] {
     const paths: string[] = []
+    const candidatePathSet = new Set(candidatePaths.map(p => resolve(p).toLowerCase()))
+    const candidateNameMap = new Map(candidatePaths.map(p => [basename(p).toLowerCase(), p]))
+
     const visit = (value: unknown, key = ''): void => {
       if (typeof value === 'string') {
-        if (/^(?:source|input|file)_path$/i.test(key) && isAbsolute(value)) paths.push(value)
+        if (/^(?:source|input|file)_path$/i.test(key) && isAbsolute(value)) {
+          paths.push(value)
+        } else {
+          const lower = value.trim().toLowerCase()
+          if (candidatePathSet.has(lower)) {
+            paths.push(value.trim())
+          } else {
+            for (const [candidateName, fullPath] of candidateNameMap) {
+              if (candidateName && (lower.includes(candidateName) || lower.includes(fullPath.toLowerCase()))) {
+                paths.push(fullPath)
+              }
+            }
+          }
+        }
         return
       }
       if (!value || typeof value !== 'object') return
@@ -1833,7 +1849,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
           }
           if (res.toolSuccess) {
             artifactTracker.noteSuccessfulTool(
-              this.getArtifactInputPaths(res.toolArgs),
+              this.getArtifactInputPaths(res.toolArgs, artifactTracker.getCandidatePaths()),
               generatedArtifacts
             )
             rememberSessionActivity(sessionId, res.toolName, res.toolArgs || {})

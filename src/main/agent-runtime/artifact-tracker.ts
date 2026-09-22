@@ -30,6 +30,10 @@ export class ArtifactTracker {
     return resolve(filePath).toLocaleLowerCase()
   }
 
+  getCandidatePaths(): string[] {
+    return [...this.candidates.values()].map((file) => file.path)
+  }
+
   noteSuccessfulTool(inputPaths: string[], generatedFiles: GeneratedArtifact[]): void {
     for (const inputPath of inputPaths) {
       const key = this.key(inputPath)
@@ -70,14 +74,23 @@ export class ArtifactTracker {
 
   getFinalFiles(): GeneratedArtifact[] {
     this.persistClassification()
-    return [...this.candidates.entries()]
+    const valid = [...this.candidates.entries()]
       .filter(
         ([key, file]) =>
           this.createdThisRun.has(key) &&
           !this.intermediatePaths.has(key) &&
           fs.existsSync(file.path)
       )
-      .map(([, file]) => ({ ...file, role: 'final' }))
+      .map(([, file]) => ({ ...file, role: 'final' as const }))
+
+    // 如果生成物中既有成品文件，又有以 source_/raw_/intermediate_/temp_/tmp_ 开头的过渡文件，将过渡文件排除
+    const hasProperDeliverable = valid.some(
+      (f) => !/^(?:source|raw|intermediate|temp|tmp)[_\-\.]/i.test(f.name)
+    )
+    if (hasProperDeliverable) {
+      return valid.filter((f) => !/^(?:source|raw|intermediate|temp|tmp)[_\-\.]/i.test(f.name))
+    }
+    return valid
   }
 
   private persistClassification(): void {

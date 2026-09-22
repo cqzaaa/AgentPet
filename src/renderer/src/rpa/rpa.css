@@ -762,7 +762,7 @@
 .rpa-log-box {
   background: #1e1e1e; /* 保持黑底绿/白字以维持极客感 */
   color: #d4d4d4;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--font-mono, "Cascadia Code", Consolas, monospace);
   font-size: 12px;
   padding: 12px;
   border-radius: var(--rpa-radius-sm);

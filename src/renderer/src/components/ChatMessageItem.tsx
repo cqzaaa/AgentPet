@@ -22,11 +22,16 @@ import {
   Clipboard,
   Copy,
   Download,
+  ExternalLink,
+  Eye,
+  FileSpreadsheet,
   FileText,
+  FolderOpen,
   Hourglass,
   Lightbulb,
   LoaderCircle,
   MessageSquare,
+  Package,
   Quote,
   ArrowUp,
   Monitor,
@@ -123,7 +128,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
             fontSize: '12px',
             fontWeight: 600,
             color: 'var(--code-muted, #64748b)',
-            fontFamily: 'monospace',
+            fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)",
             textTransform: 'lowercase'
           }}
         >
@@ -221,7 +226,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
         <code
           className="hljs"
           style={{
-            fontFamily: "Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace",
+            fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, Monaco, monospace)",
             fontSize: '13px',
             lineHeight: '1.6',
             display: 'block',
@@ -258,7 +263,17 @@ function parseInlineMarkdown(text: string): string {
   html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
   // 5. 链接 [text](url)
   html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
-  html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link">$1</a>')
+  html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, (_match, label, rawHref) => {
+    const cleanHref = rawHref.replace(/^&lt;/, '').replace(/&gt;$/, '').trim()
+    const isLocal = isLocalFileReference(cleanHref)
+    if (!isLocal) {
+      return `<a href="${cleanHref}" target="_blank" class="markdown-link local-link">${label}</a>`
+    }
+    const hasEmojiPrefix = /^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(label.trim())
+    const displayIcon = hasEmojiPrefix ? '' : '<span class="file-pill-icon">📄</span>'
+    const tooltipText = '点击打开 / 预览文件 · 右键打开所在目录'
+    return `<a href="${cleanHref}" target="_blank" class="markdown-link local-link local-file-pill" title="${tooltipText}">${displayIcon}<span class="file-pill-name">${label}</span><span class="file-pill-action">打开</span></a>`
+  })
   // 6. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
   html = html.replace(/(?:\[KB(\d+)\]|【KB(\d+)】)/gi, (_match, squareId, bracketId) => {
     const id = squareId || bracketId
@@ -326,6 +341,256 @@ function LocalFileButton({
       </button>
     </Tooltip>
   )
+}
+
+interface DeliverableItem {
+  name: string
+  path: string
+  size?: number
+}
+
+function formatDeliverableSize(bytes?: number): string {
+  if (typeof bytes !== 'number' || isNaN(bytes) || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function DeliverableFileCard({
+  file,
+  onPreviewFile
+}: {
+  file: DeliverableItem
+  onPreviewFile?: PreviewFileHandler
+}): React.JSX.Element {
+  const [opening, setOpening] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const normalizedPath = localFileSystemPath(file.path)
+  const fileName = file.name || localFileDisplayName(file.path)
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  const sizeText = formatDeliverableSize(file.size)
+
+  const handleOpenOrPreview = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    if (onPreviewFile && isPreviewableLocalFile(normalizedPath)) {
+      onPreviewFile({
+        name: fileName,
+        path: normalizedPath,
+        size: file.size || 0
+      })
+      return
+    }
+    if (!window.api?.openLocalFile) return
+    setOpening(true)
+    try {
+      await window.api.openLocalFile(normalizeLocalFileUrl(normalizedPath))
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  const handleOpenFolder = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    if (window.api?.showItemInFolder) {
+      await window.api.showItemInFolder(normalizedPath)
+    }
+  }
+
+  const handleCopyPath = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(normalizedPath)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent): void => {
+    if (!window.api?.showFileContextMenu) return
+    e.preventDefault()
+    e.stopPropagation()
+    window.api.showFileContextMenu(normalizedPath)
+  }
+
+  const isExcel = ['xlsx', 'xls', 'csv'].includes(ext)
+  const isWord = ['docx', 'doc'].includes(ext)
+  const isPdf = ext === 'pdf'
+
+  let iconElem = <FileText size={18} className="deliverable-type-icon generic" aria-hidden="true" />
+  if (isExcel) {
+    iconElem = <FileSpreadsheet size={18} className="deliverable-type-icon excel" aria-hidden="true" />
+  } else if (isWord) {
+    iconElem = <FileText size={18} className="deliverable-type-icon word" aria-hidden="true" />
+  } else if (isPdf) {
+    iconElem = <FileText size={18} className="deliverable-type-icon pdf" aria-hidden="true" />
+  }
+
+  const canPreview = Boolean(onPreviewFile && isPreviewableLocalFile(normalizedPath))
+
+  return (
+    <div
+      className="chat-deliverable-card"
+      onClick={(e) => void handleOpenOrPreview(e)}
+      onContextMenu={handleContextMenu}
+    >
+      <div className="chat-deliverable-icon-wrap">
+        {iconElem}
+      </div>
+      <div className="chat-deliverable-info">
+        <div className="chat-deliverable-title" title={fileName}>
+          {fileName}
+        </div>
+        <div className="chat-deliverable-meta">
+          {ext && <span className="chat-deliverable-ext">{ext.toUpperCase()}</span>}
+          {sizeText && <span className="chat-deliverable-size">{sizeText}</span>}
+          <span className="chat-deliverable-hint">右键打开系统菜单</span>
+        </div>
+      </div>
+      <div className="chat-deliverable-actions" onClick={(e) => e.stopPropagation()}>
+        <Tooltip content={canPreview ? '在应用内预览此文件' : '使用系统默认程序打开'} placement="top">
+          <button
+            type="button"
+            className="chat-deliverable-btn primary"
+            onClick={(e) => void handleOpenOrPreview(e)}
+            disabled={opening}
+            aria-label={canPreview ? '预览文件' : '打开文件'}
+          >
+            {canPreview ? (
+              <>
+                <Eye size={13} strokeWidth={2} aria-hidden="true" />
+                <span>{opening ? '打开中…' : '预览'}</span>
+              </>
+            ) : (
+              <>
+                <ExternalLink size={13} strokeWidth={2} aria-hidden="true" />
+                <span>{opening ? '打开中…' : '打开'}</span>
+              </>
+            )}
+          </button>
+        </Tooltip>
+
+        <Tooltip content="在本地文件夹中定位并高亮显示" placement="top">
+          <button
+            type="button"
+            className="chat-deliverable-btn"
+            onClick={(e) => void handleOpenFolder(e)}
+            aria-label="打开所在文件夹"
+          >
+            <FolderOpen size={13} strokeWidth={2} aria-hidden="true" />
+            <span>所在目录</span>
+          </button>
+        </Tooltip>
+
+        <Tooltip content={copied ? '已复制物理路径' : '复制文件绝对路径到剪贴板'} placement="top">
+          <button
+            type="button"
+            className={`chat-deliverable-btn ${copied ? 'copied' : ''}`}
+            onClick={(e) => void handleCopyPath(e)}
+            aria-label="复制路径"
+          >
+            {copied ? (
+              <>
+                <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+                <span>已复制</span>
+              </>
+            ) : (
+              <>
+                <Copy size={13} strokeWidth={2} aria-hidden="true" />
+                <span>复制路径</span>
+              </>
+            )}
+          </button>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
+
+function extractDeliverables(
+  toolSteps: any[] = [],
+  rawText: string = ''
+): { deliverables: DeliverableItem[]; cleanedText: string } {
+  const deliverableMap = new Map<string, DeliverableItem>()
+
+  // 1. 从 toolSteps 收集 generatedFiles（排除明确标为 intermediate 的）
+  const rawGeneratedFiles = (toolSteps || [])
+    .filter((step: any) => step.type === 'generatedFiles' && Array.isArray(step.files))
+    .flatMap((step: any) => step.files)
+    .filter((file: any) => file?.role !== 'intermediate')
+
+  for (const f of rawGeneratedFiles) {
+    if (!f?.path) continue
+    const norm = localFileSystemPath(f.path).toLowerCase()
+    if (!deliverableMap.has(norm)) {
+      deliverableMap.set(norm, {
+        name: f.name || localFileDisplayName(f.path),
+        path: f.path,
+        size: f.size
+      })
+    }
+  }
+
+  // 2. 从正文中提取 Markdown 格式的本地生成文件超链接
+  const linkRegex = /\[([^\]\n]+)\]\(((?:<[^>]+>|[^()\n])+)\)/g
+  let match: RegExpExecArray | null
+  while ((match = linkRegex.exec(rawText)) !== null) {
+    const label = match[1]
+    const rawHref = match[2].replace(/^<|>$/g, '').trim()
+    if (isLocalFileReference(rawHref) || /^[A-Za-z]:[/\\]/.test(rawHref)) {
+      const fsPath = localFileSystemPath(rawHref)
+      const norm = fsPath.toLowerCase()
+      if (!deliverableMap.has(norm)) {
+        deliverableMap.set(norm, {
+          name: label.trim() || localFileDisplayName(fsPath),
+          path: fsPath
+        })
+      }
+    }
+  }
+
+  let deliverables = Array.from(deliverableMap.values())
+
+  // 3. 过程文件过滤：如果存在最终成品，排除 source_/raw_/intermediate_/temp_ 前缀文件
+  const hasFinishedProduct = deliverables.some(
+    (f) => !/^(?:source|raw|intermediate|temp|tmp)[_\-\.]/i.test(f.name)
+  )
+  if (hasFinishedProduct) {
+    deliverables = deliverables.filter(
+      (f) => !/^(?:source|raw|intermediate|temp|tmp)[_\-\.]/i.test(f.name)
+    )
+  }
+
+  // 4. 正文解耦清洗：当下方渲染专属交付卡片时，剥离正文末尾/独立成段的重复交付文件行
+  let cleanedText = rawText
+  if (deliverables.length > 0) {
+    const deliverableKeys = new Set(deliverables.map((d) => localFileSystemPath(d.path).toLowerCase()))
+    const deliverableNames = new Set(deliverables.map((d) => d.name.toLowerCase()))
+
+    cleanedText = cleanedText.replace(
+      /(?:^|\n)[ \t]*(?:(?:[📄📁📊📝📦])?\s*(?:\*\*)?(?:生成的?|导出(?:的)?|输出(?:的)?|相关(?:的)?|最终(?:的)?|交付(?:的)?)?\s*(?:Excel|Word|PDF|数据|分析)?\s*(?:文件|表格|文档|报告|产物|结果|清单)?[：:]?\s*(?:\*\*)?\s*(?:\r?\n[ \t]*)?)?(?:[📄📁📊📝📦])?\s*(?:[-*•]\s*)?\[([^\]\n]+)\]\(((?:<[^>]+>|[^()\n])+)\)[ \t]*(?:<!--[\s\S]*?-->)?[ \t]*(?=\r?\n|$)/gi,
+      (fullMatch, label, href) => {
+        const cleanHref = href.replace(/^<|>$/g, '').trim()
+        const fsPath = localFileSystemPath(cleanHref).toLowerCase()
+        const labelName = label.trim().toLowerCase()
+        if (deliverableKeys.has(fsPath) || deliverableNames.has(labelName)) {
+          return ''
+        }
+        return fullMatch
+      }
+    )
+
+    // 清理剥离后遗留在段末的孤立标题提示
+    cleanedText = cleanedText.replace(
+      /(?:^|\n)[ \t]*(?:[📄📁📊📝📦])?\s*(?:\*\*)?(?:生成的?|导出(?:的)?|输出(?:的)?|相关(?:的)?|最终(?:的)?|交付(?:的)?)?\s*(?:Excel|Word|PDF|数据|分析)?\s*(?:文件|表格|文档|报告|产物|结果|清单)?[：:]?\s*(?:\*\*)?[ \t]*(?=\r?\n|$)/gi,
+      ''
+    )
+
+    cleanedText = cleanedText.replace(/\n{3,}/g, '\n\n').trimEnd()
+  }
+
+  return { deliverables, cleanedText }
 }
 
 function renderMathSafely(math: string, displayMode: boolean): string {
@@ -412,7 +677,7 @@ function parseMarkdownToHtml(markdown: string): string {
       inOl = false
     }
     if (inTable) {
-      html += '</tbody></table>'
+      html += '</tbody></table></div>'
       inTable = false
     }
     if (inP) {
@@ -491,7 +756,7 @@ function parseMarkdownToHtml(markdown: string): string {
       if (!inTable) {
         closePending()
         inTable = true
-        html += '<table class="markdown-table"><thead><tr>'
+        html += '<div class="markdown-table-wrapper"><table class="markdown-table"><thead><tr>'
         html += cells.map(c => `<th>${parseInlineMarkdown(c)}</th>`).join('')
         html += '</tr></thead><tbody>'
       } else {
@@ -627,6 +892,8 @@ export function renderPlainOrImageText(
   keyIdxStart: { val: number },
   onPreviewFile?: PreviewFileHandler
 ): React.ReactNode[] {
+  // 关键：在匹配链接与裸路径前先行剥离 HTML 注释（如 <!-- 关联文件: ... -->），防止注释标记被破坏泄露
+  const cleanText = (text || '').replace(/<!--[\s\S]*?-->/g, '')
   const linkOrImgRegex = createMessageLinkRegex()
   let match
   let lastIndex = 0
@@ -651,8 +918,8 @@ export function renderPlainOrImageText(
   }
 
   let processedText = ''
-  while ((match = linkOrImgRegex.exec(text)) !== null) {
-    processedText += text.substring(lastIndex, match.index)
+  while ((match = linkOrImgRegex.exec(cleanText)) !== null) {
+    processedText += cleanText.substring(lastIndex, match.index)
 
     if (match[1]) {
       const mdMatch = match[1].match(/^(!?)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)$/)
@@ -685,7 +952,7 @@ export function renderPlainOrImageText(
     lastIndex = linkOrImgRegex.lastIndex
   }
 
-  processedText += text.substring(lastIndex)
+  processedText += cleanText.substring(lastIndex)
 
   if (processedText.trim()) {
     return [
@@ -849,7 +1116,7 @@ export function ToolCallItem({ step, isThinking, isWaiting }: { step: any; isThi
       </Tooltip>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
-          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
             {displayCmd}
           </div>
         </div>
@@ -940,7 +1207,7 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
       </Tooltip>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px' }}>
-          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
             {displayResult}
           </div>
         </div>
@@ -1273,7 +1540,7 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
                 <span style={{ fontSize: '9px', opacity: 0.7 }}>{isReqCollapsed ? <ChevronRight size={12} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />}</span>
               </div>
               {!isReqCollapsed && (
-                <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
+                <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
                   {displayCmd}
                 </div>
               )}
@@ -1282,7 +1549,7 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
           {step.resultDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><ArrowUpFromLine size={13} strokeWidth={2} aria-hidden="true" />返回结果:</div>
-              <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
+              <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', border: '1px solid rgba(128,128,128,0.1)' }}>
                 {displayResult}
               </div>
             </div>
@@ -1290,7 +1557,7 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
           {step.liveDetail && !step.resultDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ fontSize: '10.5px', color: '#60a5fa', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><LoaderCircle size={13} strokeWidth={2} className="icon-spin" aria-hidden="true" />实时输出:</div>
-              <div style={{ padding: '8px 12px', background: 'rgba(59,130,246,0.07)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: '220px', overflowY: 'auto', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <div style={{ padding: '8px 12px', background: 'rgba(59,130,246,0.07)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', maxHeight: '220px', overflowY: 'auto', border: '1px solid rgba(59,130,246,0.2)' }}>
                 {step.liveDetail}
               </div>
             </div>
@@ -1749,9 +2016,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     [msg.sender, textForRender]
   )
 
+  // 方案二：结构化提取交付成果物，同时彻底清洗正文末尾/独立成段的重复文件链接
+  const { deliverables, cleanedText } = useMemo(() => {
+    return extractDeliverables(msg.toolSteps, textForRender || '')
+  }, [msg.toolSteps, textForRender])
+
   const renderedText = useMemo(() => {
-    const sourceText = quotedMessage?.prompt || textForRender
-    if (!sourceText) return null
+    const sourceText = quotedMessage?.prompt || cleanedText
+    if (!sourceText || !sourceText.trim()) return null
     let displayText = sourceText === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
       : sourceText === '__SYSTEM_INIT_MSG__'
@@ -1773,7 +2045,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       return source ? `[${sourceId}](${source.url})` : citation
     })
     return renderAdvancedMessage(displayText, onPreviewFile)
-  }, [textForRender, quotedMessage, currentAvatarName, msg.toolSteps, onPreviewFile])
+  }, [cleanedText, quotedMessage, currentAvatarName, msg.toolSteps, onPreviewFile])
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1783,12 +2055,12 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   }
 
   const handleCopy = async () => {
-    if (!msg.text && !msg.fileInfo && !msg.fileInfos) return
+    if (!msg.text && !msg.fileInfo && !msg.fileInfos && deliverables.length === 0) return
     const textToCopy = msg.text === '__WELCOME_MSG__'
       ? `欢迎来到 agentself 终端！我是您的智能助理 ${currentAvatarName}。有什么我可以帮您的吗？`
       : msg.text === '__SYSTEM_INIT_MSG__'
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
-        : (msg.text || '')
+        : (cleanedText || msg.text || '')
     // 收集文件信息
     const files: { name: string; path: string; content?: string }[] = []
     if (msg.fileInfos && Array.isArray(msg.fileInfos)) {
@@ -1797,6 +2069,12 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       }
     } else if (msg.fileInfo?.path) {
       files.push({ name: msg.fileInfo.name, path: msg.fileInfo.path, content: msg.fileInfo.content })
+    }
+    // 将成果交付物一并纳入可复制文件列表
+    for (const d of deliverables) {
+      if (d.path && !files.some((f) => f.path.toLowerCase() === d.path.toLowerCase())) {
+        files.push({ name: d.name, path: d.path })
+      }
     }
     if (files.length > 0) {
       // 存入内部剪贴板（粘贴到输入框时可作为附件 + 文本）
@@ -1876,10 +2154,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
   const credentialSteps = toolSteps.filter((step: any) => step.type === 'credential')
   const officeRuntimeSteps = toolSteps.filter((step: any) => step.type === 'officeRuntime')
-  const generatedToolFiles = toolSteps
-    .filter((step: any) => step.type === 'generatedFiles' && Array.isArray(step.files))
-    .flatMap((step: any) => step.files)
-    .filter((file: any) => file?.role !== 'intermediate')
   const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
   const webSources = Array.from(new Map(
     toolSteps
@@ -2054,13 +2328,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         {officeRuntimeSteps.map((step: any) => (
           <OfficeRuntimeInstallCard key={step.id} step={step} />
         ))}
-        {generatedToolFiles.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-            {generatedToolFiles.map((file: any) => (
-              <LocalFileButton key={file.path} path={file.path} onPreviewFile={onPreviewFile} />
-            ))}
-          </div>
-        )}
 
         {shouldShowToolSteps && (
           <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
@@ -2200,6 +2467,25 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             }}
           >
             {renderedText}
+          </div>
+        )}
+
+        {/* 📦 结构化成果交付区（方案二：正文与交付物解耦，统一收纳在消息底部） */}
+        {!editing && deliverables.length > 0 && (
+          <div className="chat-deliverables-container">
+            <div className="chat-deliverables-header">
+              <Package size={14} className="chat-deliverables-header-icon" aria-hidden="true" />
+              <span>成果交付（{deliverables.length}）</span>
+            </div>
+            <div className="chat-deliverables-list">
+              {deliverables.map((item) => (
+                <DeliverableFileCard
+                  key={item.path}
+                  file={item}
+                  onPreviewFile={onPreviewFile}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -2631,7 +2917,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         overflow: 'auto',
                         backgroundColor: 'var(--color-bg-tertiary, #fafafa)',
                         lineHeight: '1.6',
-                        fontFamily: 'Courier New, Courier, monospace',
+                        fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)",
                         color: 'var(--color-text-primary, #333)'
                       }}
                     >
@@ -2701,7 +2987,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                           return (
                             <div key={idx} style={{ padding: '12px', border: '1px solid var(--color-border, #e0e0e0)', borderRadius: '8px', backgroundColor: 'var(--color-bg-secondary, #fafafa)' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                <span style={{ fontWeight: 'bold', color: '#8b5cf6', fontFamily: 'monospace', fontSize: '12px' }}>
+                                <span style={{ fontWeight: 'bold', color: '#8b5cf6', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", fontSize: '12px' }}>
                                   {func.name}
                                 </span>
                                 <span style={{ fontSize: '10px', color: '#999', backgroundColor: 'rgba(0,0,0,0.05)', padding: '1px 6px', borderRadius: '4px' }}>

@@ -29,6 +29,7 @@
   --color-background-mute: var(--ev-c-black-mute);
 
   --color-text: var(--ev-c-text-1);
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, Monaco, monospace;
 }
 
 *,
@@ -37,6 +38,13 @@
   box-sizing: border-box;
   margin: 0;
   font-weight: normal;
+}
+
+pre,
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
 }
 
 ul {

@@ -1785,7 +1785,7 @@ function ChatPageImpl(): React.JSX.Element {
                   >
                     <FolderOpen size={14} strokeWidth={2} aria-hidden="true" />
                     <span>执行路径:</span>
-                    <span style={{ fontFamily: 'monospace' }}>
+                    <span style={{ fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)" }}>
                       {activePermissionRequest.execCwd}
                     </span>
                   </div>
@@ -2964,7 +2964,7 @@ function ChatPageImpl(): React.JSX.Element {
                     style={{
                       width: '100%',
                       boxSizing: 'border-box',
-                      fontFamily: 'monospace',
+                      fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)",
                       fontSize: '11px'
                     }}
                     placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
@@ -3178,7 +3178,7 @@ function ChatPageImpl(): React.JSX.Element {
           overflow: auto;
           white-space: pre-wrap;
           word-break: break-word;
-          font-family: Consolas, Monaco, 'Courier New', monospace;
+          font-family: var(--font-mono, 'Cascadia Code', Consolas, monospace);
           font-size: 12px;
           line-height: 1.45;
           color: var(--text-color, #111827);
@@ -3208,7 +3208,7 @@ function ChatPageImpl(): React.JSX.Element {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          font-family: Consolas, Monaco, 'Courier New', monospace;
+          font-family: var(--font-mono, 'Cascadia Code', Consolas, monospace);
           color: var(--text-color, #111827);
         }
         .approval-actions {

@@ -179,7 +179,7 @@ export function AgentSettingsPanel({ showToast }: { showToast: (message: string,
                   value={argsText}
                   onChange={event => setArgsText(event.target.value)}
                   placeholder={'--acp\n--profile\ndefault'}
-                  style={{ fontFamily: 'monospace', fontSize: 13 }}
+                  style={{ fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", fontSize: 13 }}
                 />
               </div>
             </div>
