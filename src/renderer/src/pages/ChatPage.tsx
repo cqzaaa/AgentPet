@@ -2138,6 +2138,11 @@ function ChatPageImpl(): React.JSX.Element {
                     setShowModelPopover(false)
                     if (next) void refreshKnowledgeBases()
                   }}
+                  aria-label={
+                    selectedKnowledgeBaseId
+                      ? `当前知识库：${selectedKnowledgeBaseName}`
+                      : '知识库'
+                  }
                   title={
                     selectedKnowledgeBaseId
                       ? `当前知识库：${selectedKnowledgeBaseName}`
@@ -2145,7 +2150,6 @@ function ChatPageImpl(): React.JSX.Element {
                   }
                 >
                   <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
-                  <span>{selectedKnowledgeBaseName || '知识库'}</span>
                   <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
                 </button>
 

@@ -98,14 +98,14 @@ export function PermissionModeControl(): React.JSX.Element | null {
         className={`permission-mode-trigger ${open ? 'is-open' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={selected.description}
+        aria-label={selected.label}
+        title={`${selected.label}：${selected.description}`}
         onClick={() => {
           setError('')
           setOpen((value) => !value)
         }}
       >
         <SelectedIcon size={17} strokeWidth={1.9} aria-hidden="true" />
-        <span>{selected.label}</span>
         <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
       </button>
       {open && (
