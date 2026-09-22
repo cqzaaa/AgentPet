@@ -12,7 +12,7 @@ export const systemManifest: ToolManifest = {
 Never create a plan for a single-file, single-mutation, low-risk task without delegation. For substantial work, call update_task_plan exactly once before starting. Plan step ids and step count are immutable after creation. Copy step ids exactly from the update_task_plan result for every update_task_step call; never rename or expand an id. If update_task_step reports unknown_task_step, retry it with an exact id from validSteps and never call update_task_plan again. Keep one step in_progress at a time, then use update_task_step for status, result, artifact, or blocker updates; never resend the complete plan. The runtime advances the next step and closes a successfully finished plan automatically. Never send an empty plan update. Continue doing the work after every plan or step update.
 </task_plan_policy>
 <skill_policy>
-The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. If a Skill advertises sections, do not request its overview: wait until the relevant file type or operation is known, then request all sections needed for the workflow in one call. Loading a skill activates only its declared tools for the current turn; it never bypasses approvals, sandboxing, or higher-priority safety rules. Load no more than three skills per turn. If request_skill reports that ppt-master is preparing, call wait_skill_ready exactly once with the returned id; do not repeatedly poll request_skill.
+The available skill catalog contains metadata only. Call request_skill only with exact ids from that catalog and only when the current request needs the full instructions. If a Skill advertises sections, request the sections needed for the known file type or operation together. Skill admission uses available model context, not a fixed skill count. Loaded instructions are retained in system context; reuse them without requesting them again. If space is insufficient, follow the returned recovery advice instead of retrying unchanged. Loading a skill activates only its declared tools; it never bypasses approvals, sandboxing, or higher-priority rules. If ppt-master is preparing, call wait_skill_ready exactly once with the returned id.
 </skill_policy>`,
   api: [
     {
@@ -165,7 +165,6 @@ The available skill catalog contains metadata only. Call request_skill only with
           skills: {
             type: 'array',
             minItems: 1,
-            maxItems: 3,
             items: {
               type: 'object',
               properties: {

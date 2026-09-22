@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'r
 import { createPortal } from 'react-dom'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
+import { ChatActivityGroup } from './ChatActivityGroup'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
@@ -1445,7 +1446,7 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
         name: step.name,
         detail: step.detail
       })
-    } else if (step.type === 'compaction') {
+    } else if (step.type === 'compaction' || step.type === 'commentary') {
       combined.push(step)
     } else if (step.type === 'call') {
       combined.push({
@@ -1498,9 +1499,6 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
     }
   }, [isThinking])
 
-  useEffect(() => {
-    if (isThinking && step.liveDetail) setIsItemCollapsed(false)
-  }, [isThinking, step.liveDetail])
 
   const toolDisplayName = translateToolName(step.name || '')
 
@@ -1514,19 +1512,19 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12.5px', userSelect: 'none' }}
+      <button type="button" className="chat-tool-summary"
         onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        title="点击展开/收起详情"
+        aria-expanded={!isItemCollapsed}
+        title={typeof step.callDetail?.command === 'string' ? step.callDetail.command : toolDisplayName}
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: step.isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
           {step.isWaiting ? (
             <LoaderCircle size={12} strokeWidth={2.5} className="icon-spin" aria-hidden="true" />
           ) : <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
         </span>
-        <span>调用 {toolDisplayName} 工具</span>
+        <span className="chat-tool-label">{step.isWaiting ? '正在运行' : '已运行'} {typeof step.callDetail?.command === 'string' ? step.callDetail.command : toolDisplayName}</span>
         <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
-      </div>
+      </button>
       {!isItemCollapsed && (
         <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {step.callDetail && (
@@ -1578,6 +1576,7 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
 interface MessageItemProps {
   msg: any
   currentAvatarName: string
+  sessionId?: string
   requestMessage?: any
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
@@ -1708,7 +1707,7 @@ function QuotedSelectionPreview({ sourceName, quote }: { sourceName: string; quo
 }
 
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.onEditMessage !== next.onEditMessage || previous.editDisabled !== next.editDisabled || previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
+  if (previous.onEditMessage !== next.onEditMessage || previous.editDisabled !== next.editDisabled || previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.sessionId !== next.sessionId || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1798,7 +1797,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1810,8 +1809,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     )
   }
 
-  // 使用 userCollapsed 状态，绝对且强制在思考状态变化时更新折叠展示
-  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
   const [editSaving, setEditSaving] = useState(false)
@@ -2119,6 +2116,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     try {
       const result = await window.api.exportToolTrace({
         defaultFileName: `agentpet-tool-trace-${datePart}.json`,
+        sessionId,
+        messageId: msg.id,
         trace: buildToolTrace(msg, requestMessage)
       })
       setTraceExportState(result.success ? 'success' : result.error ? 'error' : 'idle')
@@ -2149,16 +2148,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     }
   }
 
-  useEffect(() => {
-    if (!msg.isThinking) {
-      setUserCollapsed(true) // 思考结束，强制收拢
-    } else {
-      setUserCollapsed(false) // 正在思考，强制展开
-    }
-  }, [msg.isThinking])
-
-  const currentCollapsed = userCollapsed !== null ? userCollapsed : !msg.isThinking
-
   const toolSteps = msg.toolSteps || []
   const visibleToolSteps = toolSteps.filter((step: any) => step.name !== 'update_task_plan')
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
@@ -2172,64 +2161,15 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       .filter((source: any) => source?.id && source?.url && citedSourceIds.has(source.id))
       .map((source: any) => [source.id, source])
   ).values()) as any[]
-  const toolStepsScrollRef = useRef<HTMLDivElement>(null)
-  const followToolStepsRef = useRef(true)
-
-  // Follow streamed details within a step, while preserving manual history scrolling.
-  useEffect(() => {
-    if (currentCollapsed) {
-      followToolStepsRef.current = true
-      return
-    }
-    const frame = requestAnimationFrame(() => {
-      const container = toolStepsScrollRef.current
-      if (container && followToolStepsRef.current) {
-        container.scrollTop = container.scrollHeight
-      }
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [toolSteps, currentCollapsed])
-  const hasThink = toolSteps.some((s: any) => s.type === 'think' && s.detail?.trim())
-  const shouldShowToolSteps = visibleToolSteps.some((s: any) => s.type === 'call' || s.type === 'result' || s.type === 'compaction' || (s.type === 'think' && s.detail?.trim()))
-
-  const callSteps = visibleToolSteps.filter((s: any) => s.type === 'call')
-  let summaryText = ''
-  if (callSteps.length > 0) {
-    const names = Array.from(new Set(callSteps.map((s: any) => translateToolName(s.name))))
-    summaryText = names.join(', ')
-  } else if (hasThink) {
-    summaryText = '已深度思考'
-  } else {
-    summaryText = '运行过程'
-  }
-
-  let timeSuffix = ''
-  if (!msg.isThinking) {
-    const timestamps = toolSteps
-      .map((s: any) => {
-        const match = String(s.id || '').match(/step-(\d+)-/)
-        return match ? parseInt(match[1], 10) : null
-      })
-      .filter((t: any) => t !== null) as number[]
-    const lastTime = timestamps.length > 0 ? Math.max(...timestamps) : msg.id
-    const durationMs = lastTime - msg.id
-    const durationSec = Math.max(1, Math.round(durationMs / 1000))
-    if (durationSec > 0) {
-      if (durationSec >= 60) {
-        const mins = Math.floor(durationSec / 60)
-        const secs = durationSec % 60
-        timeSuffix = secs > 0 ? ` ${mins}m ${secs}s` : ` ${mins}m`
-      } else {
-        timeSuffix = ` ${durationSec}s`
-      }
-    }
-  }
-
-  const headerText = `${summaryText}${timeSuffix}`
-  const collapseText = `${summaryText}`
-
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
-  const combinedVisibleToolSteps = combineToolSteps(visibleToolSteps, msg.isThinking)
+  const combinedVisibleToolSteps = combineToolSteps([...visibleToolSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0)), msg.isThinking)
+  const activityBlocks: Array<{ id: string; type: 'commentary' | 'group'; steps: any[] }> = []
+  for (const step of combinedVisibleToolSteps) {
+    const previous = activityBlocks[activityBlocks.length - 1]
+    if (step.type === 'commentary') activityBlocks.push({ id: step.id, type: 'commentary', steps: [step] })
+    else if (previous?.type === 'group') previous.steps.push(step)
+    else activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
+  }
   let delegateAttachmentIndex = 0
 
   return (
@@ -2237,7 +2177,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       <div className="message-header-row">
         {msg.sender !== 'user' && (
           <span className="msg-sender-avatar">
-            <AgentPetMark active={msg.isThinking} className="msg-sender-avatar-mark" />
+            <AgentPetMark className="msg-sender-avatar-mark" />
           </span>
         )}
         <span className="msg-sender-name">{senderName}</span>
@@ -2249,23 +2189,37 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           const f = msg.fileInfo
           const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
           return isImage ? (
-            <div className="message-file-badges" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-              <img
-                src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
-                alt={f.name}
-                style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
-                onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
-                onContextMenu={(e) => handleImageContextMenu(e, (e.target as HTMLImageElement).src)}
-                onError={(e) => {
-                  // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话天生效）
-                  if (f.objectUrl) {
-                    const target = e.target as HTMLImageElement
-                    if (target.src !== f.objectUrl) {
-                      target.src = f.objectUrl
-                    }
-                  }
+            <div className="message-file-badges message-image-badges">
+              <div
+                className="message-image-thumb-wrap"
+                title={`${f.name || '图片'} · 点击查看大图`}
+                onClick={(e) => {
+                  const img = e.currentTarget.querySelector('img') as HTMLImageElement
+                  if (img?.src) setPreviewImageSrc(img.src)
                 }}
-              />
+                onContextMenu={(e) => {
+                  const img = e.currentTarget.querySelector('img') as HTMLImageElement
+                  if (img?.src) handleImageContextMenu(e, img.src)
+                }}
+              >
+                <img
+                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
+                  alt={f.name}
+                  className="message-image-thumb"
+                  onError={(e) => {
+                    // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
+                    if (f.objectUrl) {
+                      const target = e.target as HTMLImageElement
+                      if (target.src !== f.objectUrl) {
+                        target.src = f.objectUrl
+                      }
+                    }
+                  }}
+                />
+                <div className="message-image-thumb-overlay" aria-hidden="true">
+                  <Eye size={14} />
+                </div>
+              </div>
             </div>
           ) : (
             <div
@@ -2286,27 +2240,41 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         })()}
 
         {msg.fileInfos && msg.fileInfos.length > 0 && (
-          <div className="message-file-badges" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          <div className="message-file-badges message-image-badges">
             {msg.fileInfos.map((f: any, i: number) => {
               const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
               return isImage ? (
-                <img
+                <div
                   key={i}
-                  src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
-                  alt={f.name}
-                  style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '8px', cursor: 'zoom-in', border: '1px solid var(--color-border)' }}
-                  onClick={(e) => setPreviewImageSrc((e.target as HTMLImageElement).src)}
-                  onContextMenu={(e) => handleImageContextMenu(e, (e.target as HTMLImageElement).src)}
-                  onError={(e) => {
-                    // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
-                    if (f.objectUrl) {
-                      const target = e.target as HTMLImageElement
-                      if (target.src !== f.objectUrl) {
-                        target.src = f.objectUrl
-                      }
-                    }
+                  className="message-image-thumb-wrap"
+                  title={`${f.name || '图片'} · 点击查看大图`}
+                  onClick={(e) => {
+                    const img = e.currentTarget.querySelector('img') as HTMLImageElement
+                    if (img?.src) setPreviewImageSrc(img.src)
                   }}
-                />
+                  onContextMenu={(e) => {
+                    const img = e.currentTarget.querySelector('img') as HTMLImageElement
+                    if (img?.src) handleImageContextMenu(e, img.src)
+                  }}
+                >
+                  <img
+                    src={f.path ? `local-file:///${f.path.replace(/\\/g, '/')}` : (f.objectUrl || '')}
+                    alt={f.name}
+                    className="message-image-thumb"
+                    onError={(e) => {
+                      // 最终底座：如果 local-file 协议失败，尝试 objectUrl（当环会话生效）
+                      if (f.objectUrl) {
+                        const target = e.target as HTMLImageElement
+                        if (target.src !== f.objectUrl) {
+                          target.src = f.objectUrl
+                        }
+                      }
+                    }}
+                  />
+                  <div className="message-image-thumb-overlay" aria-hidden="true">
+                    <Eye size={14} />
+                  </div>
+                </div>
               ) : (
                 <div
                   key={i}
@@ -2339,106 +2307,29 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           <OfficeRuntimeInstallCard key={step.id} step={step} />
         ))}
 
-        {shouldShowToolSteps && (
-          <div className="modern-tool-steps-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-            {currentCollapsed ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  cursor: 'pointer',
-                  color: 'var(--text-muted)',
-                  fontSize: '12.5px',
-                  userSelect: 'none',
-                  backgroundColor: 'rgba(128, 128, 128, 0.05)',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  width: '100%',
-                  boxSizing: 'border-box'
-                }}
-                onClick={() => setUserCollapsed(false)}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
-                <span style={{ flex: 1 }}>{headerText}</span>
-                <span style={{ fontSize: '10px', opacity: 0.7 }}><ChevronRight size={13} strokeWidth={2} aria-hidden="true" /></span>
-              </div>
-            ) : (
-              <>
-                {!msg.isThinking && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      cursor: 'pointer',
-                      color: 'var(--text-muted)',
-                      fontSize: '12.5px',
-                      userSelect: 'none',
-                      backgroundColor: 'rgba(128, 128, 128, 0.05)',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      marginBottom: '4px'
-                    }}
-                    onClick={() => setUserCollapsed(true)}
-                  >
-                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}><Check size={13} strokeWidth={2.5} aria-hidden="true" /></span>
-                    <span style={{ flex: 1 }}>{collapseText}</span>
-                    <span style={{ fontSize: '10px', opacity: 0.7 }}><ChevronDown size={13} strokeWidth={2} aria-hidden="true" /></span>
-                  </div>
-                )}
-                <div
-                  ref={toolStepsScrollRef}
-                  onScroll={(event) => {
-                    const container = event.currentTarget
-                    followToolStepsRef.current = container.scrollHeight - container.clientHeight - container.scrollTop <= 40
-                  }}
-                  className="tool-steps-scroll-area"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    maxHeight: '360px',
-                    overflowY: 'auto',
-                    overscrollBehavior: 'contain',
-                    scrollbarGutter: 'stable',
-                    paddingLeft: '12px',
-                    paddingRight: '6px'
-                  }}
-                >
-                  {combinedVisibleToolSteps.map((step: any) => {
-                    if (step.type === 'tool') {
-                      const attachment = step.name === 'delegate_tasks'
-                        ? delegateTaskAttachments?.[delegateAttachmentIndex++]
-                        : null
-                      return <React.Fragment key={step.id}>
-                        <ToolStepItem step={step} isThinking={msg.isThinking} />
-                        {attachment}
-                      </React.Fragment>
-                    } else if (step.type === 'compaction') {
-                      return <ContextCompactionItem key={step.id} step={step} />
-                    } else {
-                      return (
-                        <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
-                      )
-                    }
-                  })}
-                </div>
-              </>
-            )}
+        {activityBlocks.map(block => block.type === 'commentary' ? (
+          <div key={block.id} className="message-text chat-commentary">
+            {renderAdvancedMessage(block.steps[0].detail, onPreviewFile)}
           </div>
-        )}
-
-        {/* 思考中 Loading 跳起小点动画 */}
-        {msg.isThinking && msg.text === '' && (
-          <div className="thinking-loading-wave">
-            <span className="loading-dot"></span>
-            <span className="loading-dot"></span>
-            <span className="loading-dot"></span>
-          </div>
-        )}
+        ) : (
+          <ChatActivityGroup key={block.id}
+            count={block.steps.filter(step => step.type === 'tool').length}
+            running={msg.isThinking && (block.steps.some(step => step.isWaiting) ||
+              (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}>
+            {block.steps.map((step: any) => {
+              if (step.type === 'tool') {
+                const attachment = step.name === 'delegate_tasks'
+                  ? delegateTaskAttachments?.[delegateAttachmentIndex++] : null
+                return <React.Fragment key={step.id}>
+                  <ToolStepItem step={step} isThinking={msg.isThinking} />
+                  {attachment}
+                </React.Fragment>
+              }
+              if (step.type === 'compaction') return <ContextCompactionItem key={step.id} step={step} />
+              return <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
+            })}
+          </ChatActivityGroup>
+        ))}
 
         {quotedMessage && (
           <QuotedSelectionPreview sourceName={quotedMessage.sourceName} quote={quotedMessage.quote} />

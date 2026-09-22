@@ -5513,10 +5513,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'api:export-tool-trace',
-    async (_, payload: { defaultFileName?: string; trace?: any }) => {
+    async (_, payload: { defaultFileName?: string; sessionId?: string; messageId?: string | number; trace?: any }) => {
       const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
       if (!win) return { success: false, error: '没有可用窗口' }
-      if (!payload?.trace || typeof payload.trace !== 'object') {
+      if ((!payload?.trace || typeof payload.trace !== 'object') && (!payload?.sessionId || payload.messageId === undefined)) {
         return { success: false, error: '调用过程数据无效' }
       }
 
@@ -5535,7 +5535,80 @@ app.whenReady().then(() => {
       if (result.canceled || !result.filePath) return { success: false }
 
       try {
-        await fs.promises.writeFile(result.filePath, JSON.stringify(payload.trace, null, 2), 'utf8')
+        let exportedTrace = payload.trace
+        if (payload.sessionId && payload.messageId !== undefined) {
+          const storedTurn = await sessionEventStore.readTurnByMessageId(payload.sessionId, payload.messageId)
+          if (storedTurn) {
+            const calls = new Map<string, any>()
+            const unmatchedResults: any[] = []
+            const reasoningChunks: Array<{ seq: number; time: number; step?: number; text: string }> = []
+            for (const event of storedTurn.events) {
+              if (event.type === 'tool/call') {
+                const callId = String(event.data.callId || event.correlationId || `seq:${event.seq}`)
+                calls.set(callId, {
+                  sequence: event.seq,
+                  callId,
+                  tool: event.data.name || 'unknown',
+                  startedAt: new Date(event.time).toISOString(),
+                  arguments: event.data.arguments ?? null,
+                  result: null,
+                  finishedAt: null,
+                  durationMs: null
+                })
+              } else if (event.type === 'tool/result') {
+                const callId = String(event.data.callId || event.correlationId || '')
+                const call = calls.get(callId)
+                if (call) {
+                  call.result = event.data.modelResult ?? event.data.displayResult ?? event.data
+                  call.finishedAt = new Date(event.time).toISOString()
+                  call.durationMs = Math.max(0, event.time - Date.parse(call.startedAt))
+                } else {
+                  unmatchedResults.push({
+                    sequence: event.seq,
+                    callId: callId || null,
+                    tool: event.data.name || 'unknown',
+                    result: event.data.modelResult ?? event.data.displayResult ?? event.data,
+                    finishedAt: new Date(event.time).toISOString()
+                  })
+                }
+              } else if (event.type === 'assistant/reasoning_chunk') {
+                reasoningChunks.push({
+                  seq: event.seq,
+                  time: event.time,
+                  step: event.step,
+                  text: String(event.data.detail || event.data.content || '')
+                })
+              }
+            }
+            const toolCalls = [...calls.values(), ...unmatchedResults].sort((a, b) => a.sequence - b.sequence)
+            exportedTrace = {
+              schemaVersion: 2,
+              source: 'session-event-store',
+              sessionId: payload.sessionId,
+              messageId: String(payload.messageId),
+              turn: storedTurn.turn,
+              summary: {
+                eventCount: storedTurn.events.length,
+                toolCallCount: toolCalls.length,
+                reasoningChunkCount: reasoningChunks.length,
+                reasoningCharacters: reasoningChunks.reduce((total, chunk) => total + chunk.text.length, 0),
+                firstSeq: storedTurn.events[0]?.seq ?? null,
+                lastSeq: storedTurn.events[storedTurn.events.length - 1]?.seq ?? null,
+                startedAt: storedTurn.events[0] ? new Date(storedTurn.events[0].time).toISOString() : null,
+                finishedAt: storedTurn.events.length > 0 ? new Date(storedTurn.events[storedTurn.events.length - 1].time).toISOString() : null
+              },
+              request: payload.trace?.request || null,
+              response: payload.trace?.response || null,
+              reasoning: {
+                text: reasoningChunks.map(chunk => chunk.text).join(''),
+                chunks: reasoningChunks
+              },
+              toolCalls,
+              timeline: storedTurn.events
+            }
+          }
+        }
+        await fs.promises.writeFile(result.filePath, JSON.stringify(exportedTrace, null, 2), 'utf8')
         return { success: true, filePath: result.filePath }
       } catch (error: any) {
         console.error('导出调用过程失败', error)
@@ -5958,6 +6031,8 @@ app.whenReady().then(() => {
     let traceTurn: number | undefined
     let traceStep = 0
     let traceRequestId = ''
+    let streamItemId = ''
+    let streamItemTimestamp: number | undefined
     let tracePreviousMessageFingerprints: string[] | undefined
     let liveReasoning = ''
 
@@ -6134,6 +6209,12 @@ app.whenReady().then(() => {
           const fingerprint = traceFingerprint(header)
           const requestId = `${sessionId}:${traceTurn ?? 0}:${step.step}:${config.messageId ?? 'background'}`
           traceRequestId = requestId
+          streamItemId = `${requestId}:${Date.now()}`
+          streamItemTimestamp = undefined
+          if (event) event.sender.send('api:llm-text-delta', {
+            content: '', phase: 'start', itemId: streamItemId,
+            sessionId: config.sessionId, messageId: config.messageId
+          })
           let keepMessages = 0
           if (tracePreviousMessageFingerprints) {
             const sharedLength = Math.min(
@@ -6228,6 +6309,14 @@ app.whenReady().then(() => {
             { step: step.step, correlationId: traceRequestId }
           )
         } else if (step.type === 'assistant_message') {
+          // The full message also covers providers that fall back to JSON.
+          if (event) event.sender.send('api:llm-text-delta', {
+            content: typeof step.message.content === 'string' ? step.message.content : '',
+            phase: step.message.tool_calls?.length ? 'commentary' : 'final',
+            itemId: streamItemId,
+            timestamp: streamItemTimestamp ?? Date.now(),
+            sessionId: config.sessionId, messageId: config.messageId
+          })
           await appendTrace(
             'assistant/message',
             'assistant',
@@ -6425,8 +6514,10 @@ app.whenReady().then(() => {
           finalResponse = step.content
         } else if (step.type === 'text_delta') {
           if (event) {
+            streamItemTimestamp ??= Date.now()
             event.sender.send('api:llm-text-delta', {
               content: step.content,
+              phase: 'delta', itemId: streamItemId, timestamp: streamItemTimestamp,
               sessionId: config.sessionId,
               messageId: config.messageId
             })

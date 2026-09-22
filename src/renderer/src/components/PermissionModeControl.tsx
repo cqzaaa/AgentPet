@@ -21,7 +21,7 @@ const MODE_OPTIONS: Array<{
   {
     value: 'assist',
     label: '帮我审批',
-    description: '普通操作自动允许，删除和高敏感操作仍询问',
+    description: '自动允许已确认的低风险操作，未知、删除和高风险操作仍询问',
     icon: PenLine
   },
   {

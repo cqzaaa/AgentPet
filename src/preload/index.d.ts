@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { ChatStreamUpdate } from './chat-stream'
 
 type SessionMutation =
   | { type: 'session-upsert'; session: any }
@@ -72,7 +73,7 @@ declare global {
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
       revertFileChanges: (changes: any[]) => Promise<{ success: boolean; revertedCount: number; error?: string }>
-      exportToolTrace: (payload: { defaultFileName?: string; trace: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      exportToolTrace: (payload: { defaultFileName?: string; sessionId?: string; messageId?: string | number; trace?: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       deleteGeneratedFile: (filePath: string, sessionId?: string) => Promise<boolean>
       onGeneratedFileUpdated: (callback: () => void) => () => void
       onOfficePreviewRequest: (callback: (request: {
@@ -126,7 +127,7 @@ declare global {
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
       onToolEvent: (callback: (data: any) => void) => () => void
       onAutomationProgress: (callback: (data: any) => void) => () => void
-      onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void) => () => void
+      onLlmTextDelta: (callback: (data: ChatStreamUpdate) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       listAgents: () => Promise<any[]>
       probeAgent: (agentId: string, cwd?: string) => Promise<any>

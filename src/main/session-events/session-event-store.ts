@@ -5,7 +5,7 @@ import { gzip, gunzip } from 'zlib'
 import { promisify } from 'util'
 import { getActiveStorageDir } from '../tools/utils/paths'
 import { TransactionQueue } from '../task-runtime/transaction-queue'
-import type { SessionEventInput, SessionEventPage, SessionEventRecord } from './types'
+import type { SessionEventInput, SessionEventPage, SessionEventRecord, SessionEventTurn } from './types'
 
 const gzipAsync = promisify(gzip)
 const gunzipAsync = promisify(gunzip)
@@ -245,6 +245,41 @@ export class SessionEventStore {
     let data: Record<string, unknown> = {}
     try { data = JSON.parse(payloadJson) } catch { data = { raw: payloadJson } }
     return this.mapRow(row, data)
+  }
+
+  /** Read the complete durable turn associated with one assistant message. */
+  public async readTurnByMessageId(sessionId: string, messageId: string | number): Promise<SessionEventTurn | null> {
+    await this.flush(sessionId)
+    const database = await this.getDatabase()
+    const boundary = await database.get<any>(
+      `SELECT turn_no FROM session_events
+       WHERE session_id = ? AND message_id = ? AND turn_no IS NOT NULL
+       ORDER BY CASE WHEN type = 'turn/start' THEN 0 ELSE 1 END, seq ASC
+       LIMIT 1`,
+      sessionId,
+      String(messageId)
+    )
+    const turn = Number(boundary?.turn_no)
+    if (!Number.isSafeInteger(turn)) return null
+
+    const rows = await database.all<any[]>(
+      `SELECT session_id, seq, time, type, source, turn_no, step_no, correlation_id, message_id,
+              payload_json, payload_blob, payload_bytes, payload_codec
+       FROM session_events WHERE session_id = ? AND turn_no = ? ORDER BY seq ASC`,
+      sessionId,
+      turn
+    )
+    const events: SessionEventRecord[] = []
+    for (const row of rows) {
+      let payloadJson = String(row.payload_json || '{}')
+      if (row.payload_codec === 'gzip' && row.payload_blob) {
+        payloadJson = (await gunzipAsync(row.payload_blob as Buffer)).toString('utf8')
+      }
+      let data: Record<string, unknown> = {}
+      try { data = JSON.parse(payloadJson) as Record<string, unknown> } catch { data = { raw: payloadJson } }
+      events.push(this.mapRow(row, data))
+    }
+    return { turn, events }
   }
 
   public async deleteSession(sessionId: string): Promise<void> {

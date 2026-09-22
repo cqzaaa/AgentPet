@@ -51,6 +51,7 @@ export interface ToolTraceEvent {
 }
 
 export interface ToolContext {
+  skillBudget?: import('../../skills/skill-budget').SkillLoadBudget
   workspacePath: string
   sessionId?: string
   messageId?: number

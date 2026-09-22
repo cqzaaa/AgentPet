@@ -130,7 +130,7 @@ export const fileManifest: ToolManifest = {
     },
     {
       name: 'edit_file',
-      description: '编辑替换文件中的字符串（old_string -> new_string）。',
+      description: '编辑替换文件中的字符串（old_string -> new_string）。匹配兼容 LF/CRLF 差异；失败时会返回可定位的候选上下文。',
       humanIntervention: 'required',
       parameters: {
         type: 'object',
@@ -157,7 +157,7 @@ export const fileManifest: ToolManifest = {
     },
     {
       name: 'edit_files',
-      description: '批量执行多个精确文本替换。适合已经检查完上下文后一次提交多个文件或多个位置的修改；所有 old_string 会先验证，任一不匹配时不会写入任何文件。',
+      description: '批量执行多个精确文本替换。适合已经检查完上下文后一次提交多个文件或多个位置的修改；匹配兼容 LF/CRLF 差异，所有 old_string 会先验证，任一不匹配时不会写入任何文件。',
       humanIntervention: 'required',
       parameters: {
         type: 'object',

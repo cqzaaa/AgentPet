@@ -21,6 +21,35 @@ export interface DiffLine {
   content: string
 }
 
+type ReviewLine = DiffLine | { type: 'gap'; count: number }
+
+/** 只保留变更附近的上下文，避免把未修改的整份文件挂到 DOM。 */
+export function compactDiffLines(lines: DiffLine[], context = 3): ReviewLine[] {
+  const changed: number[] = []
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index].type !== 'normal') changed.push(index)
+  }
+  if (changed.length === 0) return []
+
+  const result: ReviewLine[] = []
+  let omitted = 0
+  let changedIndex = 0
+  for (let index = 0; index < lines.length; index++) {
+    while (changedIndex < changed.length && changed[changedIndex] < index) changedIndex++
+    const previous = changed[changedIndex - 1] ?? -Infinity
+    const next = changed[changedIndex] ?? Infinity
+    if (index - previous > context && next - index > context) {
+      omitted++
+      continue
+    }
+    if (omitted > 0) result.push({ type: 'gap', count: omitted })
+    omitted = 0
+    result.push(lines[index])
+  }
+  if (omitted > 0) result.push({ type: 'gap', count: omitted })
+  return result
+}
+
 /**
  * 基于 LCS 算法生成精确的逐行 Diff
  */
@@ -46,39 +75,60 @@ export function computeDiffLines(originalText: string, currentText: string): Dif
     }))
   }
 
+  // 先剥离相同的首尾行，避免小修改触发整文件的二次方计算。
+  let prefix = 0
+  while (prefix < m && prefix < n && oldLines[prefix] === newLines[prefix]) prefix++
+  let oldEnd = m
+  let newEnd = n
+  while (oldEnd > prefix && newEnd > prefix && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
+    oldEnd--
+    newEnd--
+  }
+  const leading: DiffLine[] = oldLines.slice(0, prefix).map((content, index) => ({
+    type: 'normal', oldLine: index + 1, newLine: index + 1, content
+  }))
+  const trailing: DiffLine[] = oldLines.slice(oldEnd).map((content, index) => ({
+    type: 'normal', oldLine: oldEnd + index + 1, newLine: newEnd + index + 1, content
+  }))
+  if (prefix === m && prefix === n) return leading
+  const middleOld = oldLines.slice(prefix, oldEnd)
+  const middleNew = newLines.slice(prefix, newEnd)
+  const oldCount = middleOld.length
+  const newCount = middleNew.length
+
   // 二维 DP 计算 LCS 矩阵（如果行数过大截断避免卡顿）
-  if (m * n > 1200000) {
+  if (oldCount * newCount > 1200000) {
     // 大文件简单对齐
     const lines: DiffLine[] = []
     let i = 0
     let j = 0
-    while (i < m && j < n) {
-      if (oldLines[i] === newLines[j]) {
-        lines.push({ type: 'normal', oldLine: i + 1, newLine: j + 1, content: oldLines[i] })
+    while (i < oldCount && j < newCount) {
+      if (middleOld[i] === middleNew[j]) {
+        lines.push({ type: 'normal', oldLine: prefix + i + 1, newLine: prefix + j + 1, content: middleOld[i] })
         i++
         j++
       } else {
-        lines.push({ type: 'del', oldLine: i + 1, content: oldLines[i] })
-        lines.push({ type: 'add', newLine: j + 1, content: newLines[j] })
+        lines.push({ type: 'del', oldLine: prefix + i + 1, content: middleOld[i] })
+        lines.push({ type: 'add', newLine: prefix + j + 1, content: middleNew[j] })
         i++
         j++
       }
     }
-    while (i < m) {
-      lines.push({ type: 'del', oldLine: i + 1, content: oldLines[i] })
+    while (i < oldCount) {
+      lines.push({ type: 'del', oldLine: prefix + i + 1, content: middleOld[i] })
       i++
     }
-    while (j < n) {
-      lines.push({ type: 'add', newLine: j + 1, content: newLines[j] })
+    while (j < newCount) {
+      lines.push({ type: 'add', newLine: prefix + j + 1, content: middleNew[j] })
       j++
     }
-    return lines
+    return [...leading, ...lines, ...trailing]
   }
 
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) {
-      if (oldLines[i] === newLines[j]) {
+  const dp: number[][] = Array.from({ length: oldCount + 1 }, () => new Array(newCount + 1).fill(0))
+  for (let i = 0; i < oldCount; i++) {
+    for (let j = 0; j < newCount; j++) {
+      if (middleOld[i] === middleNew[j]) {
         dp[i + 1][j + 1] = dp[i][j] + 1
       } else {
         dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1])
@@ -88,36 +138,36 @@ export function computeDiffLines(originalText: string, currentText: string): Dif
 
   // 回溯还原 diff 序列
   const result: DiffLine[] = []
-  let i = m
-  let j = n
+  let i = oldCount
+  let j = newCount
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+    if (i > 0 && j > 0 && middleOld[i - 1] === middleNew[j - 1]) {
       result.push({
         type: 'normal',
-        oldLine: i,
-        newLine: j,
-        content: oldLines[i - 1]
+        oldLine: prefix + i,
+        newLine: prefix + j,
+        content: middleOld[i - 1]
       })
       i--
       j--
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
       result.push({
         type: 'add',
-        newLine: j,
-        content: newLines[j - 1]
+        newLine: prefix + j,
+        content: middleNew[j - 1]
       })
       j--
     } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
       result.push({
         type: 'del',
-        oldLine: i,
-        content: oldLines[i - 1]
+        oldLine: prefix + i,
+        content: middleOld[i - 1]
       })
       i--
     }
   }
 
-  return result.reverse()
+  return [...leading, ...result.reverse(), ...trailing]
 }
 
 export interface FileDiffDrawerProps {
@@ -262,7 +312,7 @@ export function FileDiffDrawer({
 
   const diffLines = useMemo(() => {
     if (!currentFile) return []
-    return computeDiffLines(currentFile.originalContent, currentFile.currentContent)
+    return compactDiffLines(computeDiffLines(currentFile.originalContent, currentFile.currentContent))
   }, [currentFile])
 
   const handleSingleRevert = async (): Promise<void> => {
@@ -399,7 +449,11 @@ export function FileDiffDrawer({
             {diffLines.length === 0 ? (
               <div className="file-diff-empty">无内容变更</div>
             ) : (
-              diffLines.map((line, idx) => (
+              diffLines.map((line, idx) => line.type === 'gap' ? (
+                <div key={`gap-${idx}`} className="file-diff-gap" aria-label={`省略 ${line.count} 行未修改内容`}>
+                  ··· 省略 {line.count} 行未修改内容 ···
+                </div>
+              ) : (
                 <div
                   key={idx}
                   className={`file-diff-row diff-type-${line.type}`}

@@ -1044,3 +1044,186 @@
 .task-dag-flow-viewport:focus-visible { outline: 2px solid var(--collab-blue, #3157d5); outline-offset: -2px; }
 .collab-readonly-graph > .task-dag-react-flow { height: 100%; }
 .task-dag-react-flow .react-flow__node:focus-visible { outline: 2px solid var(--collab-blue, #3157d5); outline-offset: 3px; border-radius: 8px; }
+
+/* ==========================================================================
+   深色模式适配 (TaskPlanCard & React Flow 协作画布)
+   ========================================================================== */
+.agent-window-container.dark .react-flow,
+.dark .react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-color: rgba(255, 255, 255, 0.12);
+  --xy-controls-button-background-color: #181d28;
+  --xy-controls-button-background-color-hover: #273142;
+  --xy-controls-button-color: #94a3b8;
+  --xy-controls-button-color-hover: #f8fafc;
+  --xy-controls-button-border-color: rgba(255, 255, 255, 0.08);
+  --xy-controls-box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --xy-attribution-background-color: rgba(17, 21, 29, 0.7);
+}
+
+.agent-window-container.dark .task-dag,
+.dark .task-dag {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #11151e;
+}
+
+.agent-window-container.dark .task-dag.is-bare,
+.dark .task-dag.is-bare {
+  border: none;
+  background: transparent;
+}
+
+.agent-window-container.dark .task-dag-header,
+.dark .task-dag-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .task-dag-header strong,
+.dark .task-dag-header strong {
+  color: #f8fafc;
+}
+
+/* React Flow 画布点阵背景 */
+.agent-window-container.dark .react-flow__background pattern circle,
+.agent-window-container.dark .react-flow__background-pattern circle,
+.dark .react-flow__background pattern circle,
+.dark .react-flow__background-pattern circle {
+  fill: rgba(255, 255, 255, 0.12) !important;
+}
+
+.agent-window-container.dark .react-flow__background pattern path,
+.agent-window-container.dark .react-flow__background-pattern path,
+.dark .react-flow__background pattern path,
+.dark .react-flow__background-pattern path {
+  stroke: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* React Flow 控件 (缩放、自适应) */
+.agent-window-container.dark .react-flow__controls,
+.dark .react-flow__controls {
+  background: #1e2430;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.agent-window-container.dark .react-flow__controls-button,
+.dark .react-flow__controls-button {
+  background: #181d28;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  fill: #94a3b8;
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .react-flow__controls-button:hover,
+.dark .react-flow__controls-button:hover {
+  background: #273142;
+  fill: #f8fafc;
+  color: #f8fafc;
+}
+
+/* React Flow 水印 */
+.agent-window-container.dark .react-flow__attribution,
+.dark .react-flow__attribution {
+  background: rgba(17, 21, 29, 0.7) !important;
+}
+
+.agent-window-container.dark .react-flow__attribution a,
+.dark .react-flow__attribution a {
+  color: #64748b !important;
+}
+
+/* 画布节点样式 */
+.agent-window-container.dark .task-dag-node,
+.dark .task-dag-node {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #1c2230;
+  color: #f1f5f9;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+
+.agent-window-container.dark .task-dag-node:hover,
+.dark .task-dag-node:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.agent-window-container.dark .task-dag-node.is-selected,
+.dark .task-dag-node.is-selected {
+  border-color: #5b73dc;
+  box-shadow: 0 0 0 3px rgba(91, 115, 220, 0.25), 0 7px 18px rgba(0, 0, 0, 0.4);
+}
+
+.agent-window-container.dark .task-dag-node.is-in_progress,
+.dark .task-dag-node.is-in_progress {
+  border-color: rgba(112, 103, 217, 0.7);
+  background: #202236;
+  box-shadow: 0 0 0 3px rgba(112, 103, 217, 0.2), 0 5px 14px rgba(0, 0, 0, 0.4);
+}
+
+.agent-window-container.dark .task-dag-node.is-completed,
+.dark .task-dag-node.is-completed {
+  border-color: rgba(42, 161, 120, 0.5);
+  background: #14221c;
+}
+
+.agent-window-container.dark .task-dag-node.is-blocked,
+.dark .task-dag-node.is-blocked {
+  border-color: rgba(217, 119, 50, 0.6);
+  background: #281a14;
+}
+
+.agent-window-container.dark .task-dag-node > strong,
+.dark .task-dag-node > strong {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .task-dag-node-top,
+.dark .task-dag-node-top {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .task-dag-node-state,
+.dark .task-dag-node-state {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .task-dag-node-marker,
+.dark .task-dag-node-marker {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 连线与 Marker */
+.agent-window-container.dark .task-dag-canvas > svg path,
+.dark .task-dag-canvas > svg path {
+  stroke: rgba(148, 163, 184, 0.4);
+}
+
+.agent-window-container.dark .task-dag-canvas > svg marker path,
+.dark .task-dag-canvas > svg marker path {
+  fill: #94a3b8;
+}
+
+/* 悬浮状态与详情弹窗 */
+.agent-window-container.dark .task-plan-floating-status,
+.dark .task-plan-floating-status {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  background: #181d28;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35);
+}
+
+.agent-window-container.dark .task-plan-floating-title,
+.dark .task-plan-floating-title {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .task-plan-floating-details,
+.dark .task-plan-floating-details {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+  background: #141923;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.5);
+}

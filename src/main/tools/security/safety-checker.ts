@@ -174,6 +174,50 @@ function isReadOnlySegment(segment: CommandSegment): boolean {
   return isVersionCheck(segment.command, segment.args)
 }
 
+const ROUTINE_PACKAGE_SCRIPTS = /^(?:check|lint|test|typecheck)(?::[a-z0-9._-]+)*$/i
+
+function unwrapCmdCommand(segment: CommandSegment): string | null {
+  const executable = executableBasename(segment.command)
+  if (executable !== 'cmd' && executable !== 'cmd.exe') return null
+  const match = segment.args.match(/^(?:(?:\/d|\/s)\s+)*\/c\s+([\s\S]+)$/i)
+  if (!match) return null
+  const inner = match[1].trim()
+  if ((inner.startsWith('"') && inner.endsWith('"')) || (inner.startsWith("'") && inner.endsWith("'"))) {
+    return inner.slice(1, -1).trim()
+  }
+  return inner
+}
+
+function isRoutineWorkspaceSegment(segment: CommandSegment, depth: number): boolean {
+  if (isReadOnlySegment(segment)) return true
+
+  const wrappedCommand = unwrapCmdCommand(segment)
+  if (wrappedCommand) return depth < 3 && isRoutineWorkspaceCommandInternal(wrappedCommand, depth + 1)
+
+  const executable = executableBasename(segment.command)
+  if (executable === 'tsc' || executable === 'tsc.cmd' || executable === 'tsc.exe') {
+    return /(?:^|\s)--noemit(?:\s|$)/i.test(segment.args)
+  }
+
+  if (/^(?:npm|npm\.cmd|npm\.exe|pnpm|pnpm\.cmd|pnpm\.exe)$/.test(executable)) {
+    const match = segment.args.match(/^(?:run|run-script)\s+([^\s]+)/i)
+    return Boolean(match && ROUTINE_PACKAGE_SCRIPTS.test(match[1]))
+  }
+  if (/^(?:yarn|yarn\.cmd|yarn\.exe)$/.test(executable)) {
+    const match = segment.args.match(/^(?:run\s+)?([^\s]+)/i)
+    return Boolean(match && ROUTINE_PACKAGE_SCRIPTS.test(match[1]))
+  }
+
+  return false
+}
+
+function isRoutineWorkspaceCommandInternal(command: string, depth: number): boolean {
+  const trimmed = command.trim()
+  if (!trimmed || hasShellRedirection(trimmed)) return false
+  const segments = getCommandSegments(trimmed)
+  return segments.length > 0 && segments.every(segment => isRoutineWorkspaceSegment(segment, depth))
+}
+
 export function getCommandSegments(command: string): CommandSegment[] {
   return splitCommandSegments(command).map(parseSegment)
 }
@@ -202,7 +246,9 @@ export function invokesPythonExecutable(command: string): boolean {
 export function invokesNodeExecutable(command: string): boolean {
   return getCommandSegments(command).some(segment => {
     const executable = executableBasename(segment.command)
-    return /^(?:node|npm|npx|corepack)(?:\.cmd|\.exe)?$/.test(executable)
+    if (/^(?:node|npm|npx|corepack)(?:\.cmd|\.exe)?$/.test(executable)) return true
+    const wrappedCommand = unwrapCmdCommand(segment)
+    return wrappedCommand ? invokesNodeExecutable(wrappedCommand) : false
   })
 }
 
@@ -218,6 +264,15 @@ export function isReadOnlyCommand(command: string): boolean {
 
   const segments = getCommandSegments(trimmed)
   return segments.length > 0 && segments.every(segment => isReadOnlySegment(segment))
+}
+
+/**
+ * Commands suitable for automatic review inside an authorized workspace.
+ * This is deliberately narrower than "not currently known to be dangerous":
+ * every segment must be read-only or a conventional verification script.
+ */
+export function isRoutineWorkspaceCommand(command: string): boolean {
+  return isRoutineWorkspaceCommandInternal(command, 0)
 }
 
 export function checkCommandSafety(command: string): { safe: boolean; warning?: string } {

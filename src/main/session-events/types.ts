@@ -35,3 +35,8 @@ export interface SessionEventPage {
   lastSeq?: number
 }
 
+export interface SessionEventTurn {
+  turn: number
+  events: SessionEventRecord[]
+}
+

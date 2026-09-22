@@ -204,6 +204,17 @@ body {
   --text-secondary: #cbd5e1;
   --text-muted: #64748b;
   --text-menu: #94a3b8;
+  --text-color: var(--text-primary);
+  --text-color-strong: #ffffff;
+  --color-text: var(--text-primary);
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --bg-surface: #1e2430;
+  --bg-surface-secondary: #161b24;
+  --bg-editor: #0d1117;
+  --card-bg: #141923;
+  --card-bg-sub: #1a202c;
 
   --bg-menu-hover: rgba(255, 255, 255, 0.03);
   --bg-menu-active: rgba(96, 165, 250, 0.08);
@@ -275,6 +286,17 @@ body {
   --text-secondary: #1a1a1a;
   --text-muted: #737373;
   --text-menu: #262626;
+  --text-color: var(--text-primary);
+  --text-color-strong: #000000;
+  --color-text: var(--text-primary);
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94a3b8;
+  --bg-surface: #fafafa;
+  --bg-surface-secondary: #f1f5f9;
+  --bg-editor: #ffffff;
+  --card-bg: #ffffff;
+  --card-bg-sub: #f8fafc;
 
   --bg-menu-hover: rgba(0, 0, 0, 0.02);
   --bg-menu-active: rgba(96, 165, 250, 0.04);
@@ -3441,6 +3463,83 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
+/* Taste-Skill 精致图片附件缩略卡片 (Anti-Slop Compact Thumbnail) */
+.message-image-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.message-image-thumb-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.light .message-image-thumb-wrap {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.message-image-thumb-wrap:hover {
+  transform: translateY(-2px);
+  border-color: rgba(96, 165, 250, 0.55);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.light .message-image-thumb-wrap:hover {
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(96, 165, 250, 0.4);
+}
+
+.message-image-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 7px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.message-image-thumb-wrap:hover .message-image-thumb {
+  transform: scale(1.06);
+}
+
+.message-image-thumb-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(1.5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f8fafc;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.message-image-thumb-wrap:hover .message-image-thumb-overlay {
+  opacity: 1;
+}
+
+.message-image-thumb-overlay svg {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+}
+
 .file-badge-icon {
   font-size: 20px;
   color: #60a5fa;
@@ -5301,7 +5400,7 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text-color, #1e293b);
+  color: var(--text-primary, #1e293b);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -11910,6 +12009,170 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
   scrollbar-gutter: stable;
   padding: 4px 4px 6px;
   box-sizing: border-box;
+}
+
+/* 深色模式下的 collaboration-chat-card 适配 */
+.agent-window-container.dark .collaboration-chat-card,
+.dark .collaboration-chat-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #141923;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.agent-window-container.dark .collaboration-chat-card.status-completed,
+.dark .collaboration-chat-card.status-completed {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.agent-window-container.dark .collaboration-chat-card.status-failed,
+.agent-window-container.dark .collaboration-chat-card.status-blocked,
+.agent-window-container.dark .collaboration-chat-card.status-cancelled,
+.dark .collaboration-chat-card.status-failed,
+.dark .collaboration-chat-card.status-blocked,
+.dark .collaboration-chat-card.status-cancelled {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.agent-window-container.dark .collaboration-chat-card-header,
+.dark .collaboration-chat-card-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: #1a202c;
+}
+
+.agent-window-container.dark .collaboration-chat-card-icon,
+.dark .collaboration-chat-card-icon {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.agent-window-container.dark .collaboration-chat-card-header small,
+.dark .collaboration-chat-card-header small {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .collaboration-chat-card-header strong,
+.dark .collaboration-chat-card-header strong {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .collaboration-chat-card-header > em,
+.dark .collaboration-chat-card-header > em {
+  color: #60a5fa;
+}
+
+.agent-window-container.dark .collaboration-chat-card.status-completed .collaboration-chat-card-header > em,
+.dark .collaboration-chat-card.status-completed .collaboration-chat-card-header > em {
+  color: #4ade80;
+}
+
+.agent-window-container.dark .collaboration-chat-card.status-failed .collaboration-chat-card-header > em,
+.agent-window-container.dark .collaboration-chat-card.status-blocked .collaboration-chat-card-header > em,
+.agent-window-container.dark .collaboration-chat-card.status-cancelled .collaboration-chat-card-header > em,
+.dark .collaboration-chat-card.status-failed .collaboration-chat-card-header > em,
+.dark .collaboration-chat-card.status-blocked .collaboration-chat-card-header > em,
+.dark .collaboration-chat-card.status-cancelled .collaboration-chat-card-header > em {
+  color: #f87171;
+}
+
+.agent-window-container.dark .collaboration-chat-card-header > button,
+.dark .collaboration-chat-card-header > button {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #232b3b;
+  color: #93c5fd;
+}
+
+.agent-window-container.dark .collaboration-chat-card-header > button:hover,
+.dark .collaboration-chat-card-header > button:hover {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: #2d374d;
+  color: #ffffff;
+}
+
+.agent-window-container.dark .collaboration-chat-result,
+.dark .collaboration-chat-result {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .collaboration-chat-result > header strong,
+.dark .collaboration-chat-result > header strong {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .collaboration-chat-result > header small,
+.dark .collaboration-chat-result > header small {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .collaboration-result-markdown,
+.dark .collaboration-result-markdown {
+  color: #cbd5e1;
+}
+
+.agent-window-container.dark .collaboration-result-markdown h1,
+.agent-window-container.dark .collaboration-result-markdown h2,
+.agent-window-container.dark .collaboration-result-markdown h3,
+.agent-window-container.dark .collaboration-result-markdown h4,
+.agent-window-container.dark .collaboration-result-markdown strong,
+.dark .collaboration-result-markdown h1,
+.dark .collaboration-result-markdown h2,
+.dark .collaboration-result-markdown h3,
+.dark .collaboration-result-markdown h4,
+.dark .collaboration-result-markdown strong {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .collaboration-result-markdown p,
+.agent-window-container.dark .collaboration-result-markdown li,
+.dark .collaboration-result-markdown p,
+.dark .collaboration-result-markdown li {
+  color: #cbd5e1;
+}
+
+.agent-window-container.dark .collaboration-result-markdown code,
+.dark .collaboration-result-markdown code {
+  background: #1e293b;
+  color: #93c5fd;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.agent-window-container.dark .collaboration-chat-artifacts,
+.dark .collaboration-chat-artifacts {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .collab-artifact-card,
+.dark .collab-artifact-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #1a202c;
+  color: #e2e8f0;
+}
+
+.agent-window-container.dark .collab-artifact-card:hover,
+.dark .collab-artifact-card:hover {
+  border-color: rgba(96, 165, 250, 0.4);
+  background: #232b3b;
+}
+
+.agent-window-container.dark .collab-artifact-icon,
+.dark .collab-artifact-icon {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.25);
+  color: #60a5fa;
+}
+
+.agent-window-container.dark .collab-artifact-name,
+.dark .collab-artifact-name {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .collab-artifact-card:hover .collab-artifact-name,
+.dark .collab-artifact-card:hover .collab-artifact-name {
+  color: #93c5fd;
+}
+
+.agent-window-container.dark .collab-artifact-path,
+.dark .collab-artifact-path {
+  color: #94a3b8;
 }
 
 .collab-approval-card {

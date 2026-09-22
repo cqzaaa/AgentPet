@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { join, relative, resolve, sep } from 'path'
 import { getActiveStorageDir } from '../tools/utils/paths'
 import { getBuiltinSkill, listBuiltinSkills } from './builtin-skills'
+import { skillInstructionTokens, type SkillLoadBudget } from './skill-budget'
 
 export type SkillSourceType = 'import' | 'skillhub' | 'legacy'
 
@@ -37,6 +38,7 @@ export type SkillLoadRequest = {
 }
 
 export type LoadedSkill = {
+  reused?: boolean
   id: string
   name: string
   instructions: string
@@ -194,16 +196,12 @@ export class SkillRegistry {
       this.loadedBySession.set(sessionId, new Map())
     }
     const sessionSkills = this.loadedBySession.get(sessionId)!
-    // Keep the same three-skill ceiling as a normal turn. Updating insertion
-    // order makes the session cache a small LRU instead of an ever-growing set.
+    // Memory cache capacity is independent of model-context admission.
     sessionSkills.delete(loadKey)
-    if (sessionSkills.size >= 3) {
-      sessionSkills.delete(sessionSkills.keys().next().value as string)
-    }
     sessionSkills.set(loadKey, this.cloneLoadedSkill(skill))
     while (
       sessionSkills.size > 1 &&
-      [...sessionSkills.values()].reduce((sum, item) => sum + item.estimatedTokens, 0) > MAX_SKILL_TOKENS_PER_TURN
+      [...sessionSkills.values()].reduce((sum, item) => sum + item.estimatedTokens, 0) > 256_000
     ) {
       sessionSkills.delete(sessionSkills.keys().next().value as string)
     }
@@ -336,7 +334,7 @@ export class SkillRegistry {
     return result
   }
 
-  public async requestSkills(requests: SkillLoadRequest[], sessionId?: string, messageId?: number): Promise<{ loaded: LoadedSkill[]; rejected: Array<{ id: string; reason: string }>; remainingSkillBudget: number }> {
+  public async requestSkills(requests: SkillLoadRequest[], sessionId?: string, messageId?: number, budget?: SkillLoadBudget): Promise<{ loaded: LoadedSkill[]; rejected: Array<{ id: string; reason: string }>; remainingSkillBudget: number }> {
     const turnKey = `${sessionId || 'default'}:${messageId || 'unknown'}`
     if (!this.loadedByTurn.has(turnKey)) {
       if (this.loadedByTurn.size >= 200) this.loadedByTurn.delete(this.loadedByTurn.keys().next().value as string)
@@ -345,15 +343,34 @@ export class SkillRegistry {
     const turnState = this.loadedByTurn.get(turnKey)!
     const loaded: LoadedSkill[] = []
     const rejected: Array<{ id: string; reason: string }> = []
-    let remainingSkillBudget = Math.max(0, MAX_SKILL_TOKENS_PER_TURN - turnState.tokens)
-    const normalizedRequests = requests.slice(0, 3).map(request => ({
+    const remaining = () => budget ? budget.remainingTokens : Math.max(0, MAX_SKILL_TOKENS_PER_TURN - turnState.tokens)
+    const admit = (skill: LoadedSkill, loadKey: string): void => {
+      if (budget?.loadedKeys.has(loadKey)) {
+        loaded.push({ ...skill, instructions: '', reused: true })
+        return
+      }
+      const needed = skillInstructionTokens(skill.instructions)
+      if (needed > remaining()) {
+        rejected.push({ id: skill.id, reason: `Skill 完整加载预计需要 ${needed} token，当前可用 ${remaining()} token（已预留回答和工具输出空间）。请压缩旧上下文后重试、使用更大上下文模型，或将参考资料拆分到 references；本次未截断或加载部分规范。${budget ? '' : '当前调用未提供模型上下文，采用保守预算。'}` })
+        return
+      }
+      if (budget) {
+        budget.remainingTokens -= needed
+        budget.loadedKeys.add(loadKey)
+      }
+      turnState.tokens += needed
+      turnState.ids.add(skill.id)
+      turnState.loads.add(loadKey)
+      skill.estimatedTokens = needed
+      loaded.push(skill)
+      this.rememberSessionSkill(sessionId, loadKey, skill)
+    }
+    const normalizedRequests = requests.map(request => ({
       id: safeId(request.id),
       sections: [...new Set((request.sections || []).map(safeId).filter(Boolean))].sort()
     }))
     for (const request of normalizedRequests) {
       const rawId = request.id
-      const isNewSkill = !turnState.ids.has(rawId)
-      if (isNewSkill && turnState.ids.size >= 3) { rejected.push({ id: rawId, reason: '本轮最多加载 3 个 Skill' }); continue }
       const builtin = getBuiltinSkill(rawId)
       if (builtin) {
         if (builtin.sections?.length && request.sections.length === 0) {
@@ -366,16 +383,10 @@ export class SkillRegistry {
           continue
         }
         const loadKey = `${builtin.id}:${request.sections.join(',') || 'overview'}`
-        if (turnState.loads.has(loadKey)) { rejected.push({ id: rawId, reason: '本轮已经加载相同 section' }); continue }
         try {
           const cached = sessionId ? this.loadedBySession.get(sessionId)?.get(loadKey) : undefined
           const instructions = cached?.instructions || await builtin.loadInstructions(request.sections)
-          const actualTokens = cached?.estimatedTokens || estimateTokens(instructions)
-          if (actualTokens > remainingSkillBudget) { rejected.push({ id: rawId, reason: '超过本轮 Skill token 预算' }); continue }
-          remainingSkillBudget -= actualTokens
-          turnState.tokens += actualTokens
-          turnState.ids.add(builtin.id)
-          turnState.loads.add(loadKey)
+          const actualTokens = skillInstructionTokens(instructions)
           const loadedSkill: LoadedSkill = {
             id: builtin.id,
             name: builtin.name,
@@ -385,8 +396,7 @@ export class SkillRegistry {
             allowedTools: [...builtin.allowedTools],
             sections: request.sections.length > 0 ? [...request.sections] : undefined
           }
-          loaded.push(loadedSkill)
-          this.rememberSessionSkill(sessionId, loadKey, loadedSkill)
+          admit(loadedSkill, loadKey)
         } catch (error: any) {
           rejected.push({ id: rawId, reason: `Builtin Skill load failed: ${error?.message || String(error)}` })
         }
@@ -397,16 +407,9 @@ export class SkillRegistry {
       if (!record.enabled) { rejected.push({ id: rawId, reason: 'Skill 未启用' }); continue }
       if (request.sections.length > 0) { rejected.push({ id: rawId, reason: '该 Skill 不支持 sections' }); continue }
       const loadKey = `${record.id}:full`
-      if (turnState.loads.has(loadKey)) { rejected.push({ id: rawId, reason: '本轮已经加载' }); continue }
       const cached = sessionId ? this.loadedBySession.get(sessionId)?.get(loadKey) : undefined
-      const actualTokens = cached?.estimatedTokens || record.estimatedTokens
-      if (actualTokens > remainingSkillBudget) { rejected.push({ id: rawId, reason: '超过本轮 Skill token 预算' }); continue }
       if (cached) {
-        remainingSkillBudget -= actualTokens
-        turnState.tokens += actualTokens
-        turnState.ids.add(record.id)
-        turnState.loads.add(loadKey)
-        loaded.push(this.cloneLoadedSkill(cached))
+        admit(this.cloneLoadedSkill(cached), loadKey)
         continue
       }
       const folderRoot = resolve(skillsDirectory(), record.archiveName.replace(/\.zip$/i, ''))
@@ -419,10 +422,6 @@ export class SkillRegistry {
         contents.push(await fs.promises.readFile(absolutePath, 'utf8'))
       }
       if (unsafePath) { rejected.push({ id: rawId, reason: 'Skill 索引路径不安全' }); continue }
-      remainingSkillBudget -= actualTokens
-      turnState.tokens += actualTokens
-      turnState.ids.add(record.id)
-      turnState.loads.add(loadKey)
       const loadedSkill: LoadedSkill = {
         id: record.id,
         name: record.name,
@@ -431,10 +430,9 @@ export class SkillRegistry {
         artifactRoot: folderRoot,
         allowedTools: [...record.allowedTools]
       }
-      loaded.push(loadedSkill)
-      this.rememberSessionSkill(sessionId, loadKey, loadedSkill)
+      admit(loadedSkill, loadKey)
     }
-    return { loaded, rejected, remainingSkillBudget }
+    return { loaded, rejected, remainingSkillBudget: remaining() }
   }
 
   public async removeIndex(idOrArchive: string): Promise<void> {

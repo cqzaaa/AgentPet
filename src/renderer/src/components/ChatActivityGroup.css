@@ -1,0 +1,50 @@
+.chat-activity-group { min-width: 0; margin: 8px 0 14px; }
+.chat-activity-summary {
+  display: inline-flex; align-items: center; gap: 8px; width: fit-content;
+  max-width: 100%; padding: 4px 8px; margin-left: -8px; color: var(--text-muted);
+  font: inherit; font-size: 12.5px; cursor: pointer; list-style: none;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  user-select: none;
+}
+.chat-activity-summary::-webkit-details-marker { display: none; }
+.chat-activity-summary:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+.agent-window-container.dark .chat-activity-summary:hover,
+.dark .chat-activity-summary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.chat-activity-summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 6px; }
+.chat-activity-summary:active { opacity: .75; }
+.chat-activity-chevron {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease;
+  opacity: 0.7;
+}
+.chat-activity-summary:hover .chat-activity-chevron { opacity: 1; }
+.chat-activity-group[open] > summary .chat-activity-chevron { transform: rotate(90deg); opacity: 1; }
+.chat-activity-items { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; min-width: 0; }
+.chat-tool-summary {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  padding: 3px 8px; margin-left: -8px; border: 0; background: transparent; color: var(--text-muted);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.chat-tool-summary:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+.agent-window-container.dark .chat-tool-summary:hover,
+.dark .chat-tool-summary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.chat-tool-summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.chat-tool-summary:active { opacity: .75; }
+.chat-tool-summary > span:first-child { flex-shrink: 0; }
+.chat-tool-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-commentary { margin: 10px 0 14px; min-width: 0; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-activity-group .icon-spin { animation: none; }
+}

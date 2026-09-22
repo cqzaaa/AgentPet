@@ -1439,6 +1439,7 @@ function ChatPageImpl(): React.JSX.Element {
         <ChatMessageItem
           msg={message}
           currentAvatarName={currentAvatarName}
+          sessionId={activeSessionId}
           requestMessage={requestMessageById.get(message.id)}
           highlightedMessageId={highlightedMessageId}
           onPreviewFile={handlePreviewFile}
@@ -1464,6 +1465,7 @@ function ChatPageImpl(): React.JSX.Element {
       messageById,
       requestMessageById,
       currentAvatarName,
+      activeSessionId,
       highlightedMessageId,
       handlePreviewFile,
       handleQuoteSelection,

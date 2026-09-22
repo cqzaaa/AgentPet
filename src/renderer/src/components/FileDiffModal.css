@@ -370,6 +370,17 @@ body > .file-diff-drawer-layer {
   font-size: 13px;
 }
 
+.file-diff-gap {
+  padding: 3px 12px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface, #f8fafc);
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+  text-align: center;
+  user-select: none;
+}
+
 .file-diff-row {
   display: flex;
   align-items: stretch;
@@ -458,4 +469,141 @@ body > .file-diff-drawer-layer {
   .file-diff-resizer {
     display: none;
   }
+}
+
+/* ==========================================================================
+   深色模式适配 (FileDiffModal)
+   ========================================================================== */
+.agent-window-container.dark .file-diff-drawer,
+.dark .file-diff-drawer {
+  background: #141923;
+  border-left-color: rgba(255, 255, 255, 0.08);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+  color: #f1f5f9;
+}
+
+.agent-window-container.dark .file-diff-drawer-header,
+.dark .file-diff-drawer-header {
+  background: #1a202c;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .file-diff-filename,
+.dark .file-diff-filename {
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .file-diff-relpath,
+.dark .file-diff-relpath {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .diff-tag-reverted,
+.dark .diff-tag-reverted {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .file-diff-revert-btn,
+.dark .file-diff-revert-btn {
+  background: #27272a;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+}
+
+.agent-window-container.dark .file-diff-revert-btn:hover:not(:disabled),
+.dark .file-diff-revert-btn:hover:not(:disabled) {
+  background: #3f3f46;
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.agent-window-container.dark .file-diff-revert-btn.is-reverted,
+.dark .file-diff-revert-btn.is-reverted {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.agent-window-container.dark .file-diff-close-btn,
+.dark .file-diff-close-btn {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .file-diff-close-btn:hover,
+.dark .file-diff-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.agent-window-container.dark .file-diff-tabs,
+.dark .file-diff-tabs {
+  background: #11151d;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .file-diff-tab-item,
+.dark .file-diff-tab-item {
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .file-diff-tab-item:hover,
+.dark .file-diff-tab-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f5f9;
+}
+
+.agent-window-container.dark .file-diff-tab-item.is-active,
+.dark .file-diff-tab-item.is-active {
+  background: #1e2430;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #60a5fa;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.agent-window-container.dark .file-diff-content-wrapper,
+.dark .file-diff-content-wrapper {
+  background: #0d1117;
+}
+
+.agent-window-container.dark .file-diff-gap,
+.dark .file-diff-gap {
+  background: #1a202c;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-normal,
+.dark .file-diff-row.diff-type-normal {
+  color: #cbd5e1;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-add,
+.dark .file-diff-row.diff-type-add {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-del,
+.dark .file-diff-row.diff-type-del {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.agent-window-container.dark .diff-num,
+.dark .diff-num {
+  color: #64748b;
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .diff-type-add .diff-num,
+.dark .diff-type-add .diff-num {
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.agent-window-container.dark .diff-type-del .diff-num,
+.dark .diff-type-del .diff-num {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
 }

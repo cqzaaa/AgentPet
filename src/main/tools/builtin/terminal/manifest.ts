@@ -98,7 +98,7 @@ export const terminalManifest: ToolManifest = {
     },
     {
       name: 'run_python',
-      description: '使用 AgentPet 管理的嵌入式 Python 运行短代码或工作区内的 .py 脚本，不依赖用户安装系统 Python。运行时缺失时沿用应用内安装确认与下载流程。code 与 script_path 必须且只能提供一个。',
+      description: '使用 AgentPet 管理的嵌入式 Python 运行短代码或工作区内的 .py 脚本，不依赖用户安装系统 Python。运行时缺失时沿用应用内安装确认与下载流程。code 与 script_path 必须且只能提供一个。图片已直接提供给模型时不要用 PIL/OCR 重复分析，除非需要像素级测量或直接视觉无法识别。',
       timeout: 120000,
       humanIntervention: 'required',
       parameters: {

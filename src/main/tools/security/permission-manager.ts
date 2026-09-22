@@ -13,6 +13,7 @@ export class PermissionManager {
   private pendingPermissions = new Map<number, (response: PermissionResponse) => void>()
   private pendingNotifications = new Map<number, Notification>()
   private turnApprovals = new Map<string, number>()
+  private scopedApprovalRequests = new Map<string, Promise<PermissionResponse>>()
   private nextPermissionRequestId = 1
 
   private constructor() {
@@ -58,6 +59,19 @@ export class PermissionManager {
       return { approved: true, scope: 'turn' }
     }
 
+    // Tool calls can execute in parallel. Queue approval prompts for the same
+    // conversation so the UI never has two active cards. If the first ordinary
+    // request grants turn scope, eligible waiters inherit it immediately.
+    if (approvalScopeId) {
+      const pendingScopedApproval = this.scopedApprovalRequests.get(approvalScopeId)
+      if (pendingScopedApproval) {
+        const response = await pendingScopedApproval
+        if (!params.forcePrompt && !highRisk && response.approved && response.scope === 'turn' && this.isTurnApprovalGranted(approvalScopeId)) {
+          return { approved: true, scope: 'turn' }
+        }
+      }
+    }
+
     const ownerWin = params.sender ? BrowserWindow.fromWebContents(params.sender) : null
     const activeWin =
       ownerWin || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
@@ -67,7 +81,7 @@ export class PermissionManager {
     }
 
     const reqId = this.nextPermissionRequestId++
-    return new Promise<PermissionResponse>((resolve) => {
+    const permissionRequest = new Promise<PermissionResponse>((resolve) => {
       this.pendingPermissions.set(reqId, (response) => {
         if (
           response.approved &&
@@ -103,6 +117,16 @@ export class PermissionManager {
         resolve({ approved: false, scope: 'once' })
       }, 300000)
     })
+    if (approvalScopeId) {
+      this.scopedApprovalRequests.set(approvalScopeId, permissionRequest)
+    }
+    try {
+      return await permissionRequest
+    } finally {
+      if (approvalScopeId && this.scopedApprovalRequests.get(approvalScopeId) === permissionRequest) {
+        this.scopedApprovalRequests.delete(approvalScopeId)
+      }
+    }
   }
 
   public isTurnApprovalGranted(sessionId?: string): boolean {
@@ -127,6 +151,7 @@ export class PermissionManager {
       resolve({ approved: false, scope: 'once' })
     }
     this.pendingPermissions.clear()
+    this.scopedApprovalRequests.clear()
     for (const requestId of this.pendingNotifications.keys()) this.closeNotification(requestId)
     this.turnApprovals.clear()
   }

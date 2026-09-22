@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { ChatStreamUpdate } from './chat-stream'
 
 type SessionMutation =
   | { type: 'session-upsert'; session: any }
@@ -140,7 +141,7 @@ const api = {
     ipcRenderer.invoke('api:save-generated-file-as', filePath),
   revertFileChanges: (changes: any[]): Promise<{ success: boolean; revertedCount: number; error?: string }> =>
     ipcRenderer.invoke('api:revert-file-changes', changes),
-  exportToolTrace: (payload: { defaultFileName?: string; trace: any }): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+  exportToolTrace: (payload: { defaultFileName?: string; sessionId?: string; messageId?: string | number; trace?: any }): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('api:export-tool-trace', payload),
   deleteGeneratedFile: (filePath: string, sessionId?: string): Promise<boolean> =>
     ipcRenderer.invoke('api:delete-generated-file', filePath, sessionId),
@@ -227,8 +228,8 @@ const api = {
     ipcRenderer.on('api:automation-progress', subscription)
     return () => ipcRenderer.removeListener('api:automation-progress', subscription)
   },
-  onLlmTextDelta: (callback: (data: { content: string; sessionId?: string; messageId?: number }) => void): (() => void) => {
-    const subscription = (_event: any, data: { content: string; sessionId?: string; messageId?: number }) => callback(data)
+  onLlmTextDelta: (callback: (data: ChatStreamUpdate) => void): (() => void) => {
+    const subscription = (_event: any, data: ChatStreamUpdate) => callback(data)
     ipcRenderer.on('api:llm-text-delta', subscription)
     return () => ipcRenderer.removeListener('api:llm-text-delta', subscription)
   },

@@ -323,11 +323,11 @@ export class SystemExecutor implements IToolExecutor {
               sections: Array.isArray(value?.sections)
                 ? value.sections.map((section: unknown) => String(section || '').trim()).filter(Boolean)
                 : undefined
-            })).filter((value: { id: string }) => Boolean(value.id)).slice(0, 3)
+            })).filter((value: { id: string }) => Boolean(value.id))
           : []
         const reason = String(args.reason || '').trim().slice(0, 500)
         if (skills.length === 0 || !reason) {
-          return { content: 'request_skill requires one to three skills and a reason.', success: false }
+          return { content: 'request_skill requires at least one skill and a reason.', success: false }
         }
         const readySkills: typeof skills = []
         const preparing: Array<Record<string, unknown>> = []
@@ -352,12 +352,13 @@ export class SystemExecutor implements IToolExecutor {
           }
         }
         const result = readySkills.length > 0
-          ? await skillRegistry.requestSkills(readySkills, context.sessionId, context.messageId)
-          : { loaded: [], rejected: [], remainingSkillBudget: 16_000 }
+          ? await skillRegistry.requestSkills(readySkills, context.sessionId, context.messageId, context.skillBudget)
+          : { loaded: [], rejected: [], remainingSkillBudget: context.skillBudget?.remainingTokens ?? 16_000 }
         const allowedToolNames = [...new Set(result.loaded.flatMap(skill => skill.allowedTools))]
         return {
-          content: JSON.stringify({ reason, ...result, preparing }),
+          content: JSON.stringify({ reason, ...result, loaded: result.loaded.map(skill => context.skillBudget ? { ...skill, instructions: '[完整规范保留在 system context]' } : skill), preparing }),
           state: {
+            loadedSkills: result.loaded,
             loadedSkillIds: result.loaded.map(skill => skill.id),
             allowedToolNames,
             pendingSkillIds: preparing.map(skill => String(skill.id))
@@ -383,11 +384,12 @@ export class SystemExecutor implements IToolExecutor {
             success: preparation.status === 'preparing'
           }
         }
-        const result = await skillRegistry.requestSkills([{ id }], context.sessionId, context.messageId)
+        const result = await skillRegistry.requestSkills([{ id }], context.sessionId, context.messageId, context.skillBudget)
         const allowedToolNames = [...new Set(result.loaded.flatMap(skill => skill.allowedTools))]
         return {
-          content: JSON.stringify({ id, status: 'installed', ...result }),
+          content: JSON.stringify({ id, status: 'installed', ...result, loaded: result.loaded.map(skill => context.skillBudget ? { ...skill, instructions: '[完整规范保留在 system context]' } : skill) }),
           state: {
+            loadedSkills: result.loaded,
             loadedSkillIds: result.loaded.map(skill => skill.id),
             allowedToolNames,
             pendingSkillIds: []

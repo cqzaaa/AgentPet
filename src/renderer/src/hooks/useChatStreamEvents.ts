@@ -1,12 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type */
 import { useEffect } from 'react'
 import type { MutableRefObject } from 'react'
-
-interface StreamUpdate {
-  sessionId: string
-  messageId: number
-  content: string
-}
+import type { ChatStreamUpdate } from '../../../preload/chat-stream'
+import { applyChatStreamUpdate } from './chat-stream-state'
 
 interface UseChatStreamEventsOptions {
   updateSessionMessages: (sessionId: string, updater: (messages: any[]) => any[]) => void
@@ -18,41 +14,45 @@ export function useChatStreamEvents({ updateSessionMessages, abortedReplyIdsRef 
   useEffect(() => {
     if (!window.api.onLlmTextDelta) return
 
-    const pendingByMessage = new Map<string, StreamUpdate>()
+    let pending: ChatStreamUpdate[] = []
     let frameId: number | null = null
 
     const flush = () => {
       frameId = null
-      if (pendingByMessage.size === 0) return
-      const updatesBySession = new Map<string, Map<number, string>>()
-      for (const update of pendingByMessage.values()) {
-        const updates = updatesBySession.get(update.sessionId) || new Map<number, string>()
-        updates.set(update.messageId, (updates.get(update.messageId) || '') + update.content)
-        updatesBySession.set(update.sessionId, updates)
+      if (pending.length === 0) return
+      const updatesBySession = new Map<string, ChatStreamUpdate[]>()
+      for (const update of pending) {
+        const updates = updatesBySession.get(update.sessionId!) || []
+        updates.push(update)
+        updatesBySession.set(update.sessionId!, updates)
       }
-      pendingByMessage.clear()
+      pending = []
 
       for (const [sessionId, updates] of updatesBySession) {
         updateSessionMessages(sessionId, previous => {
           let messages: any[] | null = null
           for (let index = 0; index < previous.length; index++) {
             const message = previous[index]
-            const content = updates.get(message.id)
-            if (!content || !message.isThinking || abortedReplyIdsRef.current.has(message.id)) continue
+            const relevant = updates.filter(update => update.messageId === message.id)
+            if (!relevant.length || !message.isThinking || abortedReplyIdsRef.current.has(message.id)) continue
             if (!messages) messages = [...previous]
-            messages[index] = { ...message, text: (message.text || '') + content }
+            messages[index] = relevant.reduce(applyChatStreamUpdate, message)
           }
           return messages || previous
         })
       }
     }
 
-    const unsubscribe = window.api.onLlmTextDelta(({ content, sessionId, messageId }) => {
-      if (!content || !sessionId || !messageId) return
-      const key = `${sessionId}:${messageId}`
-      const pending = pendingByMessage.get(key)
-      if (pending) pending.content += content
-      else pendingByMessage.set(key, { sessionId, messageId, content })
+    const unsubscribe = window.api.onLlmTextDelta((update) => {
+      if (!update.sessionId || update.messageId == null) return
+      pending.push(update)
+      // Commit boundaries immediately, before the invoke result finalizes/saves
+      // the message; a pending animation frame would otherwise lose the tail.
+      if (update.phase && update.phase !== 'delta') {
+        if (frameId !== null) cancelAnimationFrame(frameId)
+        flush()
+        return
+      }
       if (frameId === null) frameId = requestAnimationFrame(flush)
     })
 
