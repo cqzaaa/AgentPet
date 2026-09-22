@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useRef } from 'react'
 import type { MutableRefObject } from 'react'
+import { recordActivityDuration } from './chat-activity-duration'
 
 interface ReplyRuntimeOptions {
   setSessions: (updater: (sessions: any[]) => any[]) => void
@@ -16,6 +17,7 @@ interface ChatReplyRuntime {
 }
 
 function withoutEphemeralInteractionSteps(message: any): any {
+  message = recordActivityDuration(message)
   if (!Array.isArray(message?.toolSteps)) return message
   return {
     ...message,

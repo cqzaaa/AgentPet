@@ -45,6 +45,9 @@
 .chat-tool-summary > span:first-child { flex-shrink: 0; }
 .chat-tool-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .chat-commentary { margin: 10px 0 14px; min-width: 0; overflow-wrap: anywhere; }
+.chat-turn-activity { min-width: 0; margin: 8px 0 18px; padding-bottom: 8px; border-bottom: 1px solid var(--border-card); }
+.chat-turn-activity[open] > summary .chat-activity-chevron { transform: rotate(90deg); opacity: 1; }
+.chat-turn-activity-content { min-width: 0; padding-top: 8px; }
 @media (prefers-reduced-motion: reduce) {
   .chat-activity-group .icon-spin { animation: none; }
 }

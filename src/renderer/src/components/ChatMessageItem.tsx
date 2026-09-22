@@ -3,7 +3,8 @@ import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'r
 import { createPortal } from 'react-dom'
 import { setInternalClipboard } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
-import { ChatActivityGroup } from './ChatActivityGroup'
+import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
+import { activityDurationMs } from '../hooks/chat-activity-duration'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
@@ -2307,6 +2308,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           <OfficeRuntimeInstallCard key={step.id} step={step} />
         ))}
 
+        {activityBlocks.length > 0 && <ChatTurnActivity running={msg.isThinking} durationMs={activityDurationMs(msg)}>
         {activityBlocks.map(block => block.type === 'commentary' ? (
           <div key={block.id} className="message-text chat-commentary">
             {renderAdvancedMessage(block.steps[0].detail, onPreviewFile)}
@@ -2330,6 +2332,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             })}
           </ChatActivityGroup>
         ))}
+        </ChatTurnActivity>}
 
         {quotedMessage && (
           <QuotedSelectionPreview sourceName={quotedMessage.sourceName} quote={quotedMessage.quote} />
