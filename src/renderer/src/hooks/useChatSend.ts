@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback } from 'react'
+import { resumeActivityDuration } from './chat-activity-duration'
 import type { MutableRefObject } from 'react'
 import { formatDateTime } from '../utils/helpers'
 import { mergeCollaborationHistory } from '../utils/collaborationContext'
@@ -23,6 +24,8 @@ interface ChatSendState {
   ttsEnabled: boolean
 }
 
+type ChatSendRequest = { messageId: number; text: string; sessionId: string } | { retryReplyId: number; sessionId: string }
+
 interface ChatSendOptions {
   getState: () => ChatSendState
   workspacePath: string
@@ -32,7 +35,7 @@ interface ChatSendOptions {
   setAttachedFiles: (files: any[]) => void
   setSendingSessionIds: (updater: (sending: Record<string, boolean>) => Record<string, boolean>) => void
   abortedReplyIdsRef: MutableRefObject<Set<number>>
-  finalizeReply: (replyId: number, text: string, sessionId: string, onComplete: () => void) => void
+  finalizeReply: (replyId: number, text: string, sessionId: string, onComplete?: () => void) => void
   failReply: (replyId: number, sessionId: string, error: unknown) => void
   triggerSessionSummary: (sessionId: string, sessions: any[]) => Promise<void>
 }
@@ -122,22 +125,32 @@ export function useChatSend({
   finalizeReply,
   failReply,
   triggerSessionSummary
-}: ChatSendOptions): { handleSendChat: (edit?: { messageId: number; text: string; sessionId: string }) => Promise<void> } {
-  const handleSendChat = useCallback(async (edit?: { messageId: number; text: string; sessionId: string }): Promise<void> => {
+}: ChatSendOptions): { handleSendChat: (request?: ChatSendRequest) => Promise<void> } {
+  const handleSendChat = useCallback(async (request?: ChatSendRequest): Promise<void> => {
+    const edit = request && 'messageId' in request ? request : undefined
+    const retry = request && 'retryReplyId' in request ? request : undefined
     const state = { ...getState() }
     const sessionId = state.activeSessionId
     const originalSession = state.sessions.find(session => session.id === sessionId)
+    const failedReplyIndex = retry ? originalSession?.messages.findIndex((message: any) =>
+      message.id === retry.retryReplyId && message.sender === 'agent' && (message.isError || String(message.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')) && !message.isThinking) : -1
+    const retryUserIndex = retry && failedReplyIndex != null && failedReplyIndex >= 0
+      ? originalSession.messages.findLastIndex((message: any, index: number) => index < failedReplyIndex && message.sender === 'user') : -1
+    if (retry && (retry.sessionId !== sessionId || state.sendingSessionIds[sessionId] || failedReplyIndex !== originalSession?.messages.length - 1 ||
+      retryUserIndex == null || retryUserIndex < 0)) {
+      throw new Error('只能重试当前会话中最新的失败回复。')
+    }
     const editIndex = edit ? originalSession?.messages.findIndex((message: any) => message.id === edit.messageId && message.sender === 'user') : -1
     if (edit && (edit.sessionId !== sessionId || state.sendingSessionIds[sessionId] || editIndex == null || editIndex < 0)) {
       throw new Error('当前会话无法编辑，请等待生成结束后重试。')
     }
-    const originalMessage = edit ? originalSession.messages[editIndex] : null
-    const attachedFiles = edit ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))] : [...state.attachedFiles]
-    if (edit) {
+    const originalMessage = edit ? originalSession.messages[editIndex] : retry ? originalSession.messages[retryUserIndex] : null
+    const attachedFiles = originalMessage ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))] : [...state.attachedFiles]
+    if (edit || retry) {
       state.selectedKnowledgeBaseId = originalMessage.knowledgeBase?.id || ''
       state.selectedKnowledgeBaseName = originalMessage.knowledgeBase?.name || ''
     }
-    const text = (edit ? edit.text : state.inputValue).trim()
+    const text = (edit ? edit.text : retry ? originalMessage.text : state.inputValue).trim()
     if (!text && attachedFiles.length === 0) return
     // A send while the model is working is a steering instruction. The main process
     // replaces the active request for this session with one that includes this message.
@@ -146,13 +159,13 @@ export function useChatSend({
     const llmConfig = { ...state.llmConfig }
     if (llmConfig.provider !== 'ollama' && !llmConfig.apiKey && !llmConfig.hasApiKey) {
       setShowApiKeyModal(true)
-      if (edit) throw new Error('请先配置模型 API Key。')
+      if (edit || retry) throw new Error('请先配置模型 API Key。')
       return
     }
 
     const time = formatDateTime()
     const fileNames = attachedFiles.map(file => file.name).join(', ')
-    const userMessage: any = {
+    const userMessage: any = retry ? originalMessage : {
       id: Date.now(),
       sender: 'user',
       text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''),
@@ -160,13 +173,13 @@ export function useChatSend({
       isSteering
     }
     if (originalMessage?.knowledgeBase) userMessage.knowledgeBase = originalMessage.knowledgeBase
-    if (!edit && state.selectedKnowledgeBaseId) {
+    if (!edit && !retry && state.selectedKnowledgeBaseId) {
       userMessage.knowledgeBase = {
         id: state.selectedKnowledgeBaseId,
         name: state.selectedKnowledgeBaseName
       }
     }
-    if (attachedFiles.length > 0) {
+    if (!retry && attachedFiles.length > 0) {
       userMessage.fileInfos = attachedFiles.map(file => ({
         name: file.name,
         path: file.path,
@@ -175,15 +188,17 @@ export function useChatSend({
       }))
     }
 
-    const replyId = Date.now() + 1
-    const placeholder: any = {
-      id: replyId,
-      sender: 'agent',
-      text: '',
-      isThinking: true,
-      toolSteps: [],
-      time
-    }
+    const failedReply = retry ? originalSession.messages[failedReplyIndex] : null
+    const replyId = failedReply ? failedReply.id : Date.now() + 1
+    const retryBaseText = failedReply
+      ? String(failedReply.text || '')
+          .replace(/(?:\n\n)?⚠️ (?:模型服务鉴权失败|模型服务当前请求过于频繁|当前模型服务未接受这次请求|模型上游服务暂时不可用|本次回复未能继续完成)[^\n]*$/, '')
+          .replace(/(?:\n\n)?⚠️ \[系统提示\] 大模型在执行完工具链后返回了空回复[^\n]*$/, '')
+          .trimEnd()
+      : ''
+    const placeholder: any = failedReply
+      ? resumeActivityDuration({ ...failedReply, text: retryBaseText, retryBaseText, isThinking: true, isError: false })
+      : { id: replyId, sender: 'agent', text: '', isThinking: true, toolSteps: [], time }
 
     if (edit) {
       const removedIds = originalSession.messages.slice(editIndex).map((message: any) => String(message.id))
@@ -221,12 +236,12 @@ export function useChatSend({
           window.api.saveMessage({ ...cleaned, sessionId }).catch(console.error)
           return cleaned
         })
-        return { ...session, ...(edit ? { contextSummary: '' } : {}), name, messages: [...messages, userMessage, placeholder] }
+        return { ...session, ...(edit ? { contextSummary: '' } : {}), name, messages: retry ? messages.map((message: any) => message.id === replyId ? placeholder : message) : [...messages, userMessage, placeholder] }
       })
       return updatedSessions
     })
 
-    if (!edit) {
+    if (!edit && !retry) {
       setInputValue('')
       setAttachedFiles([])
     }
@@ -234,7 +249,7 @@ export function useChatSend({
 
     const activeSession = updatedSessions.find(session => session.id === sessionId)
     ;(async () => {
-      await window.api.saveMessage({ ...userMessage, sessionId })
+      if (!retry) await window.api.saveMessage({ ...userMessage, sessionId })
       await window.api.saveMessage({ ...placeholder, sessionId })
       if (activeSession) await window.api.updateSession(sessionId, { name: activeSession.name })
     })().catch(console.error)
@@ -243,10 +258,9 @@ export function useChatSend({
       if (!activeSession) throw new Error(`SessionNotFound: ${sessionId}`)
       const taskSnapshots = await window.api.listTaskRuns(sessionId)
       const eligibleSnapshots = edit ? taskSnapshots.filter((snapshot: any) => snapshot.run.createdAt < Number(originalMessage.id)) : taskSnapshots
-      const mergedHistory = mergeCollaborationHistory(activeSession.messages, eligibleSnapshots, sessionId, userMessage.id)
-      const selectedHistory = state.contextRounds > 0
-        ? mergedHistory.slice(-state.contextRounds * 2)
-        : mergedHistory
+      const historyMessages = retry ? activeSession.messages.slice(0, retryUserIndex + 1) : activeSession.messages
+      const mergedHistory = mergeCollaborationHistory(historyMessages, eligibleSnapshots, sessionId, userMessage.id)
+      const selectedHistory = mergedHistory
       const chatMessages = selectedHistory.map(toLlmMessage)
 
       const retrievalQuery = [text, fileNames].filter(Boolean).join('\n')
@@ -350,6 +364,7 @@ ${skillsContext}
 <output_rules>
 - 对话风格：语气需保持人设风格（${avatar.style === 'cute' ? '可爱、萌系、活泼' : '专业、友好、自然'}）。
 - 错误处理：遇到工具执行报错或空结果时，请以萌宠的语气告知主人，并尝试提供替代的解决方法。
+- 代码交付规范：聊天界面已原生挂载交互式 Diff 变更对比与审核卡片，严禁在最终正文中重复输出 Markdown diff 代码块、git diff 文本或大段变更代码一览；请专注于总结关键行为改动、设计决策与真实验证证据。
 - 主动澄清与消歧准则（Disambiguation Rules）：
   1. 识别模糊与多义性：当用户的提问存在多种合理的解释，或者你无法确定具体指向（例如“记忆api”可能指代码文件，也可能指持久化数据，或外部项目）时，禁止擅自做假设或发散脑补。
   2. 停止并提问：此时你必须立刻暂停长篇大论的回答，转而向用户提出一个简明、有针对性的澄清问题。
@@ -360,14 +375,14 @@ ${skillsContext}
       chatMessages.unshift({ role: 'system', content: systemPrompt })
       const rawSummary = activeSession.contextSummary || ''
       if (rawSummary.trim()) {
-        const trimmedSummary = rawSummary.length > 8000 ? `...(旧摘要已裁剪)...\n${rawSummary.slice(-8000)}` : rawSummary
+        const trimmedSummary = rawSummary
         chatMessages.splice(1, 0, {
           role: 'user',
           content: `📝 [历史对话摘要]（以下是当前会话中超出上下文窗口的旧对话的精炼总结，请以此为参考背景）：\n${trimmedSummary}`
         })
       }
 
-      window.api.getToolsDefinition().then((toolsDefinition: any[]) => {
+      if (!retry) window.api.getToolsDefinition().then((toolsDefinition: any[]) => {
         const promptInfo = {
           systemPrompt,
           chatMessages: [...chatMessages],
@@ -391,16 +406,13 @@ ${skillsContext}
 
       if (abortedReplyIdsRef.current.has(replyId)) throw new Error('UserAborted')
       const response = await window.api.callLLM(
-        { ...llmConfig, sessionId, messageId: replyId },
+        { ...llmConfig, sessionId, messageId: replyId, ...(retry ? { retryFailedReplyId: retry.retryReplyId } : {}) },
         chatMessages,
         workspacePath
       )
 
       if (response !== undefined) {
-        finalizeReply(replyId, response, sessionId, () => {
-          const latestSessions = getState().sessions
-          void triggerSessionSummary(sessionId, latestSessions)
-        })
+        finalizeReply(replyId, response, sessionId)
         if (relevantExperiences.length > 0) {
           window.api.strengthenExperiences(relevantExperiences.map(experience => experience.id)).catch((error: any) => {
             console.error('[Memory] 强化复习记忆失败:', error)

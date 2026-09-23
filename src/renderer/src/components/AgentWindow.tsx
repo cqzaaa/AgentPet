@@ -709,10 +709,24 @@ export function AgentWindow(): React.JSX.Element {
             />
           )}
 
-          <div className={`sidebar-menu ${menuCollapsed ? '' : 'open'}`} aria-hidden={menuCollapsed}>
+          <div className={`sidebar-menu ${menuCollapsed ? '' : 'open'}`} aria-hidden={isCollapsed ? false : menuCollapsed}>
+            {isCollapsed && (
+              <Tooltip content="当前对话" placement="right">
+                <div
+                  className={`menu-item ${activeTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('chat')}
+                >
+                  <div className="menu-item-left">
+                    <MessageSquareText size={18} strokeWidth={2} aria-hidden="true" />
+                    <span>对话</span>
+                  </div>
+                </div>
+              </Tooltip>
+            )}
+            <Tooltip content="订阅频道" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'control' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('control'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('control'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <OverviewIcon />
@@ -725,9 +739,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="代理" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'agent' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('agent'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('agent'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <SkillsIcon />
@@ -740,9 +756,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="技能市场" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'skillhub' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('skillhub'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('skillhub'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <Store size={18} strokeWidth={2} aria-hidden="true" />
@@ -755,9 +773,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="知识库" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('knowledge'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('knowledge'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <Library size={18} strokeWidth={2} aria-hidden="true" />
@@ -770,9 +790,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="工作流" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'workflow' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('workflow'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('workflow'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <Workflow size={18} strokeWidth={2} aria-hidden="true" />
@@ -785,9 +807,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="日志" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'logs' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('logs'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('logs'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <ScrollText size={18} strokeWidth={2} aria-hidden="true" />
@@ -800,9 +824,11 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
+            <Tooltip content="设置" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('settings'); setMenuCollapsed(true) }}
+                onClick={() => { setActiveTab('settings'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <SettingsIcon />
@@ -815,6 +841,7 @@ export function AgentWindow(): React.JSX.Element {
                   aria-hidden="true"
                 />
               </div>
+            </Tooltip>
           </div>
         </div>
 
@@ -829,20 +856,22 @@ export function AgentWindow(): React.JSX.Element {
               )}
             </button>
           </Tooltip>
-          <Tooltip content={menuCollapsed ? '打开菜单' : '关闭菜单'} placement="right">
-            <button
-              className={`sidebar-menu-icon-btn ${menuCollapsed ? '' : 'active'}`}
-              onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
-              aria-label={menuCollapsed ? '打开菜单' : '关闭菜单'}
-              aria-expanded={!menuCollapsed}
-            >
-              {menuCollapsed ? (
-                <Menu size={18} strokeWidth={1.8} aria-hidden="true" />
-              ) : (
-                <X size={18} strokeWidth={1.8} aria-hidden="true" />
-              )}
-            </button>
-          </Tooltip>
+          {!isCollapsed && (
+            <Tooltip content={menuCollapsed ? '打开菜单' : '关闭菜单'} placement="right">
+              <button
+                className={`sidebar-menu-icon-btn ${menuCollapsed ? '' : 'active'}`}
+                onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
+                aria-label={menuCollapsed ? '打开菜单' : '关闭菜单'}
+                aria-expanded={!menuCollapsed}
+              >
+                {menuCollapsed ? (
+                  <Menu size={18} strokeWidth={1.8} aria-hidden="true" />
+                ) : (
+                  <X size={18} strokeWidth={1.8} aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
 

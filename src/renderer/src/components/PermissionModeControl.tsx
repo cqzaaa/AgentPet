@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, Hand, PenLine, ShieldAlert } from 'lucide-react'
 import { useAppStoreRaw } from '../hooks/useAppStore'
+import { Tooltip } from './Tooltip'
 import './PermissionModeControl.css'
 
 type PermissionMode = 'default' | 'assist' | 'full'
@@ -93,21 +94,27 @@ export function PermissionModeControl(): React.JSX.Element | null {
   if (!portalTarget) return null
   return createPortal(
     <div className="permission-mode-control" ref={rootRef}>
-      <button
-        type="button"
-        className={`permission-mode-trigger ${open ? 'is-open' : ''}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={selected.label}
-        title={`${selected.label}：${selected.description}`}
-        onClick={() => {
-          setError('')
-          setOpen((value) => !value)
-        }}
+      <Tooltip
+        title={selected.label}
+        description={selected.description}
+        placement="top"
+        disabled={open}
       >
-        <SelectedIcon size={17} strokeWidth={1.9} aria-hidden="true" />
-        <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-      </button>
+        <button
+          type="button"
+          className={`permission-mode-trigger ${open ? 'is-open' : ''}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={selected.label}
+          onClick={() => {
+            setError('')
+            setOpen((value) => !value)
+          }}
+        >
+          <SelectedIcon size={17} strokeWidth={1.9} aria-hidden="true" />
+          <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </Tooltip>
       {open && (
         <div
           className="permission-mode-menu"

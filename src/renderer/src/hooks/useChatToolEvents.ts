@@ -1,6 +1,29 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type */
 import { useCallback, useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
+import { computeDiffLines, type FileChangeItem } from '../components/FileDiffModal'
+
+function mergeFileChanges(previous: FileChangeItem[] = [], incoming: FileChangeItem[] = []): FileChangeItem[] {
+  const changes = new Map(previous.map(change => [change.filePath, change]))
+  for (const change of incoming) {
+    if (!change?.filePath) continue
+    const earlier = changes.get(change.filePath)
+    if (!earlier) {
+      changes.set(change.filePath, change)
+      continue
+    }
+    const originalContent = earlier.originalContent
+    const currentContent = change.currentContent
+    const lines = computeDiffLines(originalContent, currentContent)
+    changes.set(change.filePath, {
+      ...earlier, ...change, originalContent, currentContent,
+      wasCreated: earlier.wasCreated || change.wasCreated,
+      additions: lines.filter(line => line.type === 'add').length,
+      deletions: lines.filter(line => line.type === 'del').length
+    })
+  }
+  return [...changes.values()]
+}
 
 interface UseChatToolEventsOptions {
   updateSessionMessages: (sessionId: string, updater: (messages: any[]) => any[]) => void
@@ -17,7 +40,13 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
     const timestamp = Number(eventTimestamp) || Date.now()
     const id = `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
-    if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
+    if (type === 'context_usage') {
+      const previous = toolSteps.findIndex(step => step.type === 'context_usage')
+      const snapshot = { id, sequence, timestamp, type, contextTokens }
+      if (previous >= 0) toolSteps[previous] = snapshot
+      else toolSteps.push(snapshot)
+    }
+    else if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
     else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result, contextTokens })
     else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
     else if (type === 'context_compaction') {
@@ -75,7 +104,7 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
     else if (type === 'file_changes' && Array.isArray(changes)) {
       const existing = toolSteps.findIndex(step => step.type === 'fileChanges')
       if (existing >= 0) {
-        toolSteps[existing] = { id, sequence: toolSteps[existing].sequence, timestamp, type: 'fileChanges', changes }
+        toolSteps[existing] = { id, sequence: toolSteps[existing].sequence, timestamp, type: 'fileChanges', changes: mergeFileChanges(toolSteps[existing].changes, changes) }
       } else {
         toolSteps.push({ id, sequence, timestamp, type: 'fileChanges', changes })
       }
@@ -127,7 +156,7 @@ function toolNoticeForEvent(event: any): { message: string; type: 'success' | 'e
   return null
 }
 
-/** Batches tool IPC updates and persists only the latest affected chat message. */
+/** Batches tool IPC updates and persists each affected chat message independently. */
 export function useChatToolEvents({
   updateSessionMessages,
   setCronTasks,
@@ -135,14 +164,16 @@ export function useChatToolEvents({
   cronRunningLogsRef,
   showToast,
   onFinalArtifacts
-}: UseChatToolEventsOptions): { discardPendingMessageSave: () => void } {
-  const latestMessageRef = useRef<any>(null)
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+}: UseChatToolEventsOptions): { discardPendingMessageSave: (sessionId: string, messageId: string | number) => void } {
+  const pendingSavesRef = useRef(new Map<string, { message: any; timer: ReturnType<typeof setTimeout> }>())
+  const messageKey = (sessionId: string, messageId: string | number): string => `${sessionId}\u0000${messageId}`
 
-  const discardPendingMessageSave = useCallback(() => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = null
-    latestMessageRef.current = null
+  const discardPendingMessageSave = useCallback((sessionId: string, messageId: string | number) => {
+    const key = messageKey(sessionId, messageId)
+    const pending = pendingSavesRef.current.get(key)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    pendingSavesRef.current.delete(key)
   }, [])
 
   useEffect(() => {
@@ -151,17 +182,19 @@ export function useChatToolEvents({
     let pendingEvents: any[] = []
     let throttleTimeout: ReturnType<typeof setTimeout> | null = null
 
-    const saveLatestMessage = () => {
-      saveTimeoutRef.current = null
-      const message = latestMessageRef.current
-      latestMessageRef.current = null
-      if (message) window.api.saveMessage(withoutEphemeralToolSteps(message)).catch(console.error)
+    const savePendingMessage = (key: string) => {
+      const pending = pendingSavesRef.current.get(key)
+      if (!pending) return
+      pendingSavesRef.current.delete(key)
+      window.api.saveMessage(withoutEphemeralToolSteps(pending.message)).catch(console.error)
     }
 
     const scheduleSave = (message: any) => {
-      latestMessageRef.current = message
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-      saveTimeoutRef.current = setTimeout(saveLatestMessage, 500)
+      const key = messageKey(message.sessionId, message.id)
+      const pending = pendingSavesRef.current.get(key)
+      if (pending) clearTimeout(pending.timer)
+      const timer = setTimeout(() => savePendingMessage(key), 500)
+      pendingSavesRef.current.set(key, { message, timer })
     }
 
     const flushEvents = () => {
@@ -170,38 +203,42 @@ export function useChatToolEvents({
       const events = pendingEvents
       pendingEvents = []
 
-      const normalBySession = new Map<string, any[]>()
+      const normalByMessage = new Map<string, { sessionId: string; messageId: string | number | undefined; events: any[] }>()
       const cronBySession = new Map<string, any[]>()
       for (const event of events) {
-        const sessionId = event.sessionId || activeSessionIdRef.current
-        const target = sessionId.startsWith('cron:') ? cronBySession : normalBySession
-        const group = target.get(sessionId)
-        if (group) group.push(event)
-        else target.set(sessionId, [event])
+        const sessionId = String(event.sessionId || '')
+        if (!sessionId) continue
+        if (sessionId.startsWith('cron:')) {
+          const group = cronBySession.get(sessionId)
+          if (group) group.push(event)
+          else cronBySession.set(sessionId, [event])
+          continue
+        }
+        const key = messageKey(sessionId, event.messageId ?? '')
+        const group = normalByMessage.get(key)
+        if (group) group.events.push(event)
+        else normalByMessage.set(key, { sessionId, messageId: event.messageId, events: [event] })
       }
 
-      if (normalBySession.size > 0) {
-        for (const [sessionId, sessionEvents] of normalBySession) {
-          let savedMessage: any = null
-          updateSessionMessages(sessionId, previous => {
-            const eventMessageId = sessionEvents.findLast((event: any) => event.messageId != null)?.messageId
-            const index = eventMessageId != null
-              ? previous.findIndex((message: any) => message.id === eventMessageId)
-              : previous.findLastIndex((message: any) => message.sender === 'agent')
-            if (index < 0) return previous
-            const messages = [...previous]
-            const message = { ...messages[index] }
-            message.toolSteps = appendToolSteps(message.toolSteps, sessionEvents)
-            const latestFileChanges = sessionEvents.findLast((e: any) => e.type === 'file_changes' && Array.isArray(e.changes))?.changes
-            if (latestFileChanges) {
-              message.fileChanges = latestFileChanges
-            }
-            messages[index] = message
-            savedMessage = { ...message, sessionId }
-            return messages
-          })
-          if (savedMessage) scheduleSave(savedMessage)
-        }
+      for (const { sessionId, messageId: eventMessageId, events: sessionEvents } of normalByMessage.values()) {
+        let savedMessage: any = null
+        updateSessionMessages(sessionId, previous => {
+          const index = eventMessageId != null
+            ? previous.findIndex((message: any) => String(message.id) === String(eventMessageId))
+            : previous.findLastIndex((message: any) => message.sender === 'agent')
+          if (index < 0) return previous
+          const messages = [...previous]
+          const message = { ...messages[index] }
+          message.toolSteps = appendToolSteps(message.toolSteps, sessionEvents)
+          if (sessionEvents.some((event: any) => event.type === 'file_changes')) {
+            const collectedChanges = message.toolSteps.find((step: any) => step.type === 'fileChanges')?.changes
+            message.fileChanges = mergeFileChanges(message.fileChanges, collectedChanges)
+          }
+          messages[index] = message
+          savedMessage = { ...message, sessionId }
+          return messages
+        })
+        if (savedMessage) scheduleSave(savedMessage)
       }
 
       if (cronBySession.size > 0) {
@@ -245,9 +282,11 @@ export function useChatToolEvents({
       unsubscribe()
       if (throttleTimeout) clearTimeout(throttleTimeout)
       flushEvents()
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-      if (latestMessageRef.current) window.api.saveMessage(withoutEphemeralToolSteps(latestMessageRef.current)).catch(console.error)
-      latestMessageRef.current = null
+      for (const key of pendingSavesRef.current.keys()) {
+        const pending = pendingSavesRef.current.get(key)
+        if (pending) clearTimeout(pending.timer)
+        savePendingMessage(key)
+      }
     }
   }, [activeSessionIdRef, cronRunningLogsRef, onFinalArtifacts, setCronTasks, showToast, updateSessionMessages])
 

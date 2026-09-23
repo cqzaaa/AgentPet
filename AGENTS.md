@@ -20,3 +20,4 @@
 - Run `git diff --check` and inspect the relevant diff before handoff.
 - Do not claim a test, typecheck, lint, or build passed unless the current session contains its successful result.
 - Report checks that were intentionally skipped and distinguish pre-existing failures from regressions caused by the change.
+- Lead with the completed outcome and verification evidence; do not dump raw diff blocks in response text as the UI natively renders interactive Diff review cards.

@@ -11,7 +11,7 @@ export const fileManifest: ToolManifest = {
   api: [
     {
       name: 'read_file',
-      description: '读取文件的语义文本。代码调查时通常一次读取约 150–300 行上下文；同一文件有多个离散命中时优先用 line_ranges 一次读取，避免连续调用许多十几行的小片段。支持 PDF、Word、Excel、CSV 及文本文件，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。默认最多返回 30000 字符。',
+      description: '读取文件。PNG、JPEG、WebP、GIF、BMP 图片通过多模态通道返回，可直接查看历史附件或本地截图，无需 Python/OCR；文本分页参数不适用于图片。代码调查时通常一次读取约 150–300 行上下文；同一文件有多个离散命中时优先用 line_ranges 一次读取，避免连续调用许多十几行的小片段。支持 PDF、Word、Excel、CSV 及文本文件的语义文本，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。默认最多返回 30000 字符。',
       parameters: {
         type: 'object',
         properties: {

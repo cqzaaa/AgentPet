@@ -8,6 +8,8 @@
   user-select: none;
 }
 .chat-activity-summary::-webkit-details-marker { display: none; }
+.chat-activity-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-activity-count { flex-shrink: 0; opacity: .72; }
 .chat-activity-summary:hover {
   color: var(--text-primary);
   background: rgba(0, 0, 0, 0.04);
@@ -24,7 +26,17 @@
 }
 .chat-activity-summary:hover .chat-activity-chevron { opacity: 1; }
 .chat-activity-group[open] > summary .chat-activity-chevron { transform: rotate(90deg); opacity: 1; }
-.chat-activity-items { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; min-width: 0; }
+.chat-activity-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  min-width: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
 .chat-tool-summary {
   display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
   padding: 3px 8px; margin-left: -8px; border: 0; background: transparent; color: var(--text-muted);
@@ -47,7 +59,118 @@
 .chat-commentary { margin: 10px 0 14px; min-width: 0; overflow-wrap: anywhere; }
 .chat-turn-activity { min-width: 0; margin: 8px 0 18px; padding-bottom: 8px; border-bottom: 1px solid var(--border-card); }
 .chat-turn-activity[open] > summary .chat-activity-chevron { transform: rotate(90deg); opacity: 1; }
-.chat-turn-activity-content { min-width: 0; padding-top: 8px; }
+.chat-turn-activity-content {
+  min-width: 0;
+  padding-top: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.chat-activity-items::-webkit-scrollbar,
+.chat-turn-activity-content::-webkit-scrollbar {
+  width: 4px;
+}
+.chat-activity-items::-webkit-scrollbar-track,
+.chat-turn-activity-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-activity-items::-webkit-scrollbar-thumb,
+.chat-turn-activity-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 4px;
+}
+.dark .chat-activity-items::-webkit-scrollbar-thumb,
+.dark .chat-turn-activity-content::-webkit-scrollbar-thumb,
+.agent-window-container.dark .chat-activity-items::-webkit-scrollbar-thumb,
+.agent-window-container.dark .chat-turn-activity-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+.chat-activity-items::-webkit-scrollbar-thumb:hover,
+.chat-turn-activity-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+.dark .chat-activity-items::-webkit-scrollbar-thumb:hover,
+.dark .chat-turn-activity-content::-webkit-scrollbar-thumb:hover,
+.agent-window-container.dark .chat-activity-items::-webkit-scrollbar-thumb:hover,
+.agent-window-container.dark .chat-turn-activity-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
 @media (prefers-reduced-motion: reduce) {
   .chat-activity-group .icon-spin { animation: none; }
+}
+
+/* ==========================================================================
+   正在启动 / 正在思考 - 流光文字扫描动画 (Shimmer Text Effect)
+   ========================================================================== */
+.chat-thinking-shimmer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  margin: 6px 0 10px;
+  user-select: none;
+}
+
+.chat-thinking-shimmer-text,
+.chat-activity-shimmer-text {
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thinkingShimmer 4.8s infinite linear;
+}
+
+.chat-thinking-shimmer-text {
+  font-size: 13.5px;
+}
+
+/* 亮色模式：中灰基底 + 深深灰高光扫描 */
+:root:not(.dark) .chat-thinking-shimmer-text,
+:root:not(.dark) .chat-activity-shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    #94a3b8 0%,
+    #94a3b8 35%,
+    #1e293b 50%,
+    #94a3b8 65%,
+    #94a3b8 100%
+  );
+}
+
+/* 暗色模式：半透明灰白基底 + 纯亮白扫描波峰 */
+.dark .chat-thinking-shimmer-text,
+.dark .chat-activity-shimmer-text,
+.agent-window-container.dark .chat-thinking-shimmer-text,
+.agent-window-container.dark .chat-activity-shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.38) 0%,
+    rgba(255, 255, 255, 0.38) 35%,
+    #ffffff 50%,
+    rgba(255, 255, 255, 0.38) 65%,
+    rgba(255, 255, 255, 0.38) 100%
+  );
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+}
+
+@keyframes thinkingShimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-thinking-shimmer-text,
+  .chat-activity-shimmer-text {
+    animation: none;
+    color: var(--text-muted);
+    -webkit-text-fill-color: var(--text-muted);
+  }
 }

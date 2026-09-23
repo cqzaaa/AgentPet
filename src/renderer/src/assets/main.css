@@ -2010,17 +2010,74 @@ body {
   color: var(--text-menu-active);
 }
 
+/* 侧边栏收起时的菜单容器与项 */
+.agent-sidebar.collapsed .sidebar-menu {
+  position: static;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 6px 0;
+  margin-top: 10px;
+  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.agent-sidebar.collapsed .sidebar-menu::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
 .agent-sidebar.collapsed .menu-item {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 10px 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  margin: 0 auto 6px auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  padding: 0;
+  margin: 0 auto;
+  color: var(--text-menu);
+  border: 1px solid transparent;
+  transition: all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.agent-sidebar.collapsed .menu-item:hover {
+  background: var(--bg-menu-hover);
+  color: var(--text-primary);
+  transform: scale(1.06);
+}
+
+.agent-sidebar.collapsed .menu-item.active {
+  background: var(--bg-menu-active);
+  color: var(--text-menu-active);
+  border-color: var(--border-menu-active);
+}
+
+.agent-sidebar.collapsed .menu-item-left {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  gap: 0;
 }
 
 .agent-sidebar.collapsed .menu-item span,
 .agent-sidebar.collapsed .menu-item-arrow {
+  display: none;
+}
+
+.agent-sidebar.collapsed .sidebar-menu-icon-btn {
   display: none;
 }
 
@@ -5338,7 +5395,8 @@ body {
   padding-top: 8px;
   margin-top: 6px;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap !important;
+  min-width: 0;
 }
 
 .light .chat-control-toolbar {
@@ -5350,7 +5408,211 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.toolbar-group-left {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.toolbar-group-right {
+  flex-shrink: 0;
+}
+
+/* 窄态紧凑收纳模式 */
+.chat-control-toolbar.is-narrow {
+  gap: 4px;
+}
+
+.chat-control-toolbar.is-narrow .toolbar-group-left {
+  gap: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.chat-control-toolbar.is-narrow .toolbar-group-right {
+  gap: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.chat-control-toolbar.is-narrow .model-dropdown-container {
+  padding: 0 4px;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.chat-control-toolbar.is-narrow .chat-knowledge-trigger {
+  padding: 0 4px;
+  gap: 3px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.chat-control-toolbar.is-narrow .permission-mode-control,
+.chat-control-toolbar.is-narrow .permission-mode-trigger {
+  flex-shrink: 0;
+  padding: 0 4px;
+  gap: 3px;
+  height: 28px;
+  min-height: 28px;
+}
+
+/* 更多工具收纳菜单 */
+.chat-more-tools-popover {
+  box-sizing: border-box;
+}
+
+.chat-more-tools-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.12));
+  margin-bottom: 6px;
+}
+
+.chat-more-tools-header > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-color, #1e293b);
+}
+
+.chat-more-tools-header > small {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.chat-more-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 290px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-more-tools-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-more-tools-list::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 4px;
+}
+
+.chat-more-tool-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-color, #1e293b);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.chat-more-tool-item:hover {
+  background: var(--bg-menu-hover, rgba(128, 128, 128, 0.08));
+  border-color: var(--border-color, rgba(128, 128, 128, 0.14));
+}
+
+.chat-more-tool-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--bg-subtle, rgba(128, 128, 128, 0.08));
+  color: var(--text-secondary, #64748b);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-more-tool-item:hover .chat-more-tool-icon {
+  background: var(--accent-light, rgba(79, 140, 255, 0.12));
+  color: var(--accent-color, #4f8cff);
+}
+
+.chat-more-tool-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-more-tool-content > strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-color, #1e293b);
+}
+
+.chat-more-tool-content > small {
+  font-size: 10.5px;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.chat-more-tool-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-subtle, rgba(128, 128, 128, 0.1));
+  color: var(--text-secondary, #64748b);
+  flex-shrink: 0;
+}
+
+.chat-more-tool-item:hover .chat-more-tool-badge {
+  background: var(--accent-light, rgba(79, 140, 255, 0.14));
+  color: var(--accent-color, #4f8cff);
+}
+
+.dark .chat-more-tool-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark .chat-more-tool-icon {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dark .chat-more-tool-item:hover .chat-more-tool-icon {
+  background: rgba(79, 140, 255, 0.22);
+  color: #60a5fa;
+}
+
+.dark .chat-more-tool-content > strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.dark .chat-more-tool-content > small {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.dark .chat-more-tool-badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.dark .chat-more-tool-item:hover .chat-more-tool-badge {
+  background: rgba(79, 140, 255, 0.25);
+  color: #93c5fd;
 }
 
 @media (max-width: 680px) {

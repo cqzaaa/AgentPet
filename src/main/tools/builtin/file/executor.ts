@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import { dirname, basename, join, extname, relative } from 'path'
 import { app, shell } from 'electron'
 import { replaceExactText } from './text-edit'
+import { fileReadCache, fileVersion, type ReadRange } from './read-cache'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getDefaultWorkingDirectory, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
 
@@ -80,6 +81,17 @@ export class FileExecutor implements IToolExecutor {
         }
 
         const ext = file_path.split('.').pop()?.toLowerCase() || ''
+        const version = fileVersion(stat)
+        const cacheSession = context.sessionId || `workspace:${context.workspacePath}`
+        const plainText = !['pdf', 'docx', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'].includes(ext)
+        const cached = plainText ? fileReadCache.get(cacheSession, file_path, version) : undefined
+        if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)) {
+          return {
+            content: `图片已读取，将通过多模态通道提供视觉内容：${file_path}。请直接观察图片，不要使用 OCR 或字符画代替看图。`,
+            state: { imagePaths: [file_path] },
+            success: true
+          }
+        }
         let content = ''
 
         if (ext === 'pdf') {
@@ -135,7 +147,10 @@ export class FileExecutor implements IToolExecutor {
         } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
           content = `[图片文件: ${basename(file_path)}，路径: ${file_path}]`
         } else {
-          content = await fs.promises.readFile(file_path, 'utf-8')
+          content = cached?.text ?? await fs.promises.readFile(file_path, 'utf-8')
+          if (!cached && version === fileVersion(await fs.promises.stat(file_path))) {
+            fileReadCache.put(cacheSession, file_path, version, content)
+          }
         }
 
         let finalContent = content
@@ -144,6 +159,7 @@ export class FileExecutor implements IToolExecutor {
         const DEFAULT_LIMIT_LINES = 800
         const lines = content.split(/\r?\n/)
         const requestedRanges = Array.isArray(args.line_ranges) ? args.line_ranges : []
+        const deliveredRanges: ReadRange[] = []
         if (requestedRanges.length > 0) {
           if (requestedRanges.length > 12) {
             return { content: '错误：line_ranges 最多支持 12 个区间', success: false }
@@ -166,6 +182,7 @@ export class FileExecutor implements IToolExecutor {
           if (requestedLineCount > 1600) {
             return { content: `错误：line_ranges 合计请求 ${requestedLineCount} 行，超过 1600 行上限；请缩小到与当前任务相关的上下文`, success: false }
           }
+          deliveredRanges.push(...normalizedRanges)
           finalContent = `[读取文件 ${basename(file_path)}，共 ${normalizedRanges.length} 个区间，总行数: ${lines.length}]\n` +
             normalizedRanges.map(({ start, end }) => {
               const body = lines.slice(start - 1, end)
@@ -191,6 +208,7 @@ export class FileExecutor implements IToolExecutor {
           } else if (e < s) {
             finalContent = '[错误] end_line 必须大于或等于 start_line'
           } else {
+            deliveredRanges.push({ start: s, end: e })
             const sliced = lines.slice(s - 1, e)
             finalContent = `[读取文件 ${basename(file_path)}，第 ${s} 行 到 第 ${e} 行，总行数: ${lines.length}]\n` +
               sliced.map((line, idx) => `${s + idx}: ${line}`).join('\n')
@@ -202,10 +220,23 @@ export class FileExecutor implements IToolExecutor {
         }
 
         const MAX_READ_LEN = 30000
-        if (finalContent.length > MAX_READ_LEN) {
+        const truncated = finalContent.length > MAX_READ_LEN
+        if (truncated) {
           finalContent = finalContent.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请在参数中使用 start_line 和 end_line 进行精确的分页读取。]`
         }
-        return { content: finalContent, success: true }
+        const unchanged = plainText && version === fileVersion(await fs.promises.stat(file_path))
+        const overlap = unchanged && !truncated
+          ? fileReadCache.record(cacheSession, file_path, version, deliveredRanges)
+          : 0
+        if (overlap > 0) finalContent += `\n[已读内容复用：文件版本未变，${overlap} 行与本会话已读范围重叠。内容已返回；后续请直接复用，或一次合并尚未读取的相关区间。]`
+        return {
+          content: finalContent, success: true,
+          state: plainText ? { readEvidence: {
+            path: file_path, version, ranges: truncated ? [] : deliveredRanges,
+            truncated, unchanged, cacheHit: !!cached, overlap,
+            unresolved: truncated ? '输出截断；需缩小到相关行区间' : !unchanged ? '读取期间文件变化，需重新检查' : undefined
+          } } : undefined
+        }
       }
 
       if (api === 'get_file_metadata') {

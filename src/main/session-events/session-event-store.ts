@@ -248,13 +248,13 @@ export class SessionEventStore {
   }
 
   /** Read the complete durable turn associated with one assistant message. */
-  public async readTurnByMessageId(sessionId: string, messageId: string | number): Promise<SessionEventTurn | null> {
+  public async readTurnByMessageId(sessionId: string, messageId: string | number, mode: 'first' | 'latest' | 'all' = 'first'): Promise<SessionEventTurn | null> {
     await this.flush(sessionId)
     const database = await this.getDatabase()
     const boundary = await database.get<any>(
       `SELECT turn_no FROM session_events
        WHERE session_id = ? AND message_id = ? AND turn_no IS NOT NULL
-       ORDER BY CASE WHEN type = 'turn/start' THEN 0 ELSE 1 END, seq ASC
+       ORDER BY turn_no ${mode === 'first' ? 'ASC' : 'DESC'}, seq ASC
        LIMIT 1`,
       sessionId,
       String(messageId)
@@ -265,9 +265,11 @@ export class SessionEventStore {
     const rows = await database.all<any[]>(
       `SELECT session_id, seq, time, type, source, turn_no, step_no, correlation_id, message_id,
               payload_json, payload_blob, payload_bytes, payload_codec
-       FROM session_events WHERE session_id = ? AND turn_no = ? ORDER BY seq ASC`,
+       FROM session_events WHERE session_id = ? AND ${mode === 'all'
+         ? 'turn_no IN (SELECT DISTINCT turn_no FROM session_events WHERE session_id = ? AND message_id = ? AND turn_no IS NOT NULL)'
+         : 'turn_no = ?'} ORDER BY seq ASC`,
       sessionId,
-      turn
+      ...(mode === 'all' ? [sessionId, String(messageId)] : [turn])
     )
     const events: SessionEventRecord[] = []
     for (const row of rows) {

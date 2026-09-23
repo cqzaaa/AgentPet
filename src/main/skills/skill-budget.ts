@@ -1,4 +1,4 @@
-import { countTokens } from '../tools/context/token-counter'
+import { countTokens, countMessagesTokens } from '../tools/context/token-counter'
 
 export type SkillLoadBudget = {
   remainingTokens: number
@@ -7,10 +7,10 @@ export type SkillLoadBudget = {
 }
 
 export function availableSkillTokens(contextWindow: number, messages: unknown[], tools: unknown[], maxOutputTokens?: number): number {
-  const used = countTokens(JSON.stringify(messages)) + countTokens(JSON.stringify(tools))
+  const used = countMessagesTokens(messages) + countTokens(JSON.stringify(tools))
   const outputReserve = Math.max(4096, maxOutputTokens || 0)
-  const toolReserve = Math.max(4096, Math.ceil(contextWindow * 0.08))
-  const estimationMargin = Math.ceil(contextWindow * 0.1)
+  const toolReserve = Math.min(8192, Math.max(2048, Math.ceil(contextWindow * 0.02)))
+  const estimationMargin = Math.min(8192, Math.ceil(contextWindow * 0.03))
   return Math.max(0, Math.floor(contextWindow - used - outputReserve - toolReserve - estimationMargin))
 }
 

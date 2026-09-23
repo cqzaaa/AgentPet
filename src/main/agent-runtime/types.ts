@@ -15,5 +15,6 @@ export type AgentStepEvent =
   | { type: 'text_delta'; content: string }
   | { type: 'text'; content: string }
   | { type: 'token'; promptTokens: number; completionTokens: number }
+  | { type: 'context_usage'; contextTokens: number }
   | { type: 'done'; finalResponse: string }
   | { type: 'error'; message: string }

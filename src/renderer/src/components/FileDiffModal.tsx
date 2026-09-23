@@ -199,19 +199,24 @@ export function FileDiffDrawer({
 
   // 抽屉宽度状态，支持从本地持久化加载并自适应默认宽度
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+    const winW = typeof window !== 'undefined' ? window.innerWidth : 1000
+    // 默认弹出比例：优先保证左侧主聊天区空间舒展充足（>= 560px），不触发底栏折叠与卡片拥挤
+    const computeOptimalDefault = (): number => {
+      const target = Math.min(Math.round(winW * 0.36), Math.max(340, winW - 560))
+      return Math.max(340, Math.min(600, target))
+    }
+
     try {
       const saved = localStorage.getItem('agentpet_diff_drawer_width')
       if (saved) {
         const parsed = parseInt(saved, 10)
-        if (!isNaN(parsed) && parsed >= 320 && parsed <= 1800) {
+        // 若之前保存的值导致左侧主视口过窄（小于 520px），则重新按推荐比例自适应
+        if (!isNaN(parsed) && parsed >= 320 && parsed <= winW - 520) {
           return parsed
         }
       }
     } catch {}
-    if (typeof window !== 'undefined') {
-      return Math.max(460, Math.min(700, Math.round(window.innerWidth * 0.46)))
-    }
-    return 560
+    return computeOptimalDefault()
   })
 
   const [isDragging, setIsDragging] = useState(false)
@@ -300,7 +305,9 @@ export function FileDiffDrawer({
   const handleResetWidth = (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    const defaultW = Math.max(460, Math.min(700, Math.round(window.innerWidth * 0.46)))
+    const winW = window.innerWidth
+    const target = Math.min(Math.round(winW * 0.36), Math.max(340, winW - 560))
+    const defaultW = Math.max(340, Math.min(600, target))
     setDrawerWidth(defaultW)
     try {
       localStorage.setItem('agentpet_diff_drawer_width', String(defaultW))

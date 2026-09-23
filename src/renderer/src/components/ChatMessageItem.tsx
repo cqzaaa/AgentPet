@@ -41,6 +41,7 @@ import {
   Network,
   Orbit,
   Ruler,
+  RotateCcw,
   Search,
   Wrench,
   X
@@ -1184,6 +1185,11 @@ function ContextCompactionItem({ step }: { step: any }) {
   )
 }
 
+function stripRuntimeNudges(text: string): string {
+  if (!text) return text
+  return text.replace(/\n\n?\[(?:Coding 检索提示|调用链优化提示)\][\s\S]*$/g, '').trimEnd()
+}
+
 // ── 可独立折叠的工具具体执行结果子组件 ─────────────────────────────────
 export function ToolResultItem({ step, isThinking }: { step: any; isThinking: boolean }) {
   const [isItemCollapsed, setIsItemCollapsed] = useState(true)
@@ -1192,9 +1198,10 @@ export function ToolResultItem({ step, isThinking }: { step: any; isThinking: bo
     if (!isThinking) setIsItemCollapsed(true)
   }, [isThinking])
 
-  const displayResult = typeof step.detail === 'string'
+  const rawResult = typeof step.detail === 'string'
     ? step.detail
     : JSON.stringify(step.detail, null, 2)
+  const displayResult = stripRuntimeNudges(rawResult)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1436,6 +1443,52 @@ function translateToolName(name: string): string {
   return `启用了工具 ${name}`
 }
 
+function activityTarget(value: unknown, keepEnd = false): string {
+  if (typeof value !== 'string') return ''
+  const clean = value.replace(/\s+/g, ' ').trim()
+  if (clean.length <= 90) return clean
+  return keepEnd ? `…${clean.slice(-89)}` : `${clean.slice(0, 89)}…`
+}
+
+function describeActivity(step: any, messageRunning: boolean): string {
+  if (!step) return ''
+  if (step.type === 'compaction') return step.status === 'completed' ? '已压缩上下文' : '正在压缩上下文'
+  if (step.type === 'think') return messageRunning ? '正在分析结果' : '已分析结果'
+  if (step.type !== 'tool') return ''
+
+  const args = step.callDetail && typeof step.callDetail === 'object' ? step.callDetail : {}
+  const prefix = step.isWaiting ? '正在' : '已'
+  const name = String(step.name || '')
+  const path = activityTarget(args.file_path || args.path || args.directory_path, true)
+  if (name === 'read_file' || name === 'view_file') return `${prefix}读取${path ? ` ${path}` : '文件'}`
+  if (name === 'list_directory' || name === 'list_dir') return `${prefix}列出${path ? ` ${path}` : '目录'}`
+  if (name === 'get_file_metadata') return `${prefix}检查${path ? ` ${path}` : '文件信息'}`
+  if (name === 'grep_content') {
+    const queries = Array.isArray(args.queries) ? args.queries : []
+    const pattern = activityTarget(args.pattern || queries[0]?.pattern)
+    return `${prefix}检索${queries.length > 1 ? ` ${queries.length} 项代码问题` : pattern ? `「${pattern}」` : '代码'}`
+  }
+  if (name === 'find_files') {
+    const fileName = activityTarget(args.file_name)
+    return `${prefix}查找${fileName ? ` ${fileName}` : '文件'}`
+  }
+  if (name === 'write_file' || name === 'write_to_file' || name === 'replace_file_content' || name === 'multi_replace_file_content') {
+    return `${prefix}修改${path ? ` ${path}` : '文件'}`
+  }
+  if (name === 'run_terminal_command' || name === 'run_command') {
+    const command = activityTarget(args.command)
+    return `${prefix}执行${command ? ` ${command}` : '终端命令'}`
+  }
+  if (name === 'search_web') {
+    const query = activityTarget(args.query || args.search_query)
+    return `${prefix}搜索${query ? `「${query}」` : '网络'}`
+  }
+  if (name === 'read_url_content') return `${prefix}读取网页`
+  if (name === 'request_skill') return `${prefix}加载能力`
+  const translated = translateToolName(name)
+  return step.isWaiting ? translated.replace(/^(.{1,3})了/, '正在$1') : translated
+}
+
 function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
   const combined: any[] = []
 
@@ -1507,9 +1560,10 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
     ? (step.callDetail.command || JSON.stringify(step.callDetail, null, 2))
     : String(step.callDetail)
 
-  const displayResult = typeof step.resultDetail === 'string'
+  const rawResult = typeof step.resultDetail === 'string'
     ? step.resultDetail
     : JSON.stringify(step.resultDetail, null, 2)
+  const displayResult = stripRuntimeNudges(rawResult)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1583,6 +1637,8 @@ interface MessageItemProps {
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
   onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
   onEditMessage?: (messageId: number, text: string) => Promise<void>
+  onRetryFailed?: (messageId: number) => Promise<void>
+  retryDisabled?: boolean
   editDisabled?: boolean
   delegateTaskAttachments?: React.ReactNode[]
 }
@@ -1708,7 +1764,7 @@ function QuotedSelectionPreview({ sourceName, quote }: { sourceName: string; quo
 }
 
 function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemProps): boolean {
-  if (previous.onEditMessage !== next.onEditMessage || previous.editDisabled !== next.editDisabled || previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.sessionId !== next.sessionId || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
+  if (previous.onEditMessage !== next.onEditMessage || previous.editDisabled !== next.editDisabled || previous.onRetryFailed !== next.onRetryFailed || previous.retryDisabled !== next.retryDisabled || previous.msg !== next.msg || previous.currentAvatarName !== next.currentAvatarName || previous.sessionId !== next.sessionId || previous.requestMessage !== next.requestMessage || previous.onPreviewFile !== next.onPreviewFile || previous.onQuoteSelection !== next.onQuoteSelection || previous.delegateTaskAttachments !== next.delegateTaskAttachments) {
     return false
   }
   if (previous.highlightedMessageId === next.highlightedMessageId) return true
@@ -1798,7 +1854,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, onRetryFailed, retryDisabled = false, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -2316,8 +2372,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         ) : (
           <ChatActivityGroup key={block.id}
             count={block.steps.filter(step => step.type === 'tool').length}
+            activityLabel={describeActivity(block.steps.at(-1), msg.isThinking)}
             running={msg.isThinking && (block.steps.some(step => step.isWaiting) ||
-              (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}>
+              (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
+            isThinking={msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
             {block.steps.map((step: any) => {
               if (step.type === 'tool') {
                 const attachment = step.name === 'delegate_tasks'
@@ -2333,6 +2391,13 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           </ChatActivityGroup>
         ))}
         </ChatTurnActivity>}
+
+        {/* ✨ 扫光流光动效：仅在刚启动尚未产生任何步骤和正文时展示 */}
+        {msg.sender !== 'user' && msg.isThinking && !renderedText && activityBlocks.length === 0 && (!visibleToolSteps || visibleToolSteps.length === 0) && (
+          <div className="chat-thinking-shimmer" role="status" aria-label="处理中">
+            <span className="chat-thinking-shimmer-text">正在启动中</span>
+          </div>
+        )}
 
         {quotedMessage && (
           <QuotedSelectionPreview sourceName={quotedMessage.sourceName} quote={quotedMessage.quote} />
@@ -2375,7 +2440,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         )}
 
         {/* 📦 结构化成果交付区（方案二：正文与交付物解耦，统一收纳在消息底部） */}
-        {!editing && deliverables.length > 0 && (
+        {!editing && !msg.isThinking && deliverables.length > 0 && (
           <div className="chat-deliverables-container">
             <div className="chat-deliverables-header">
               <Package size={14} className="chat-deliverables-header-icon" aria-hidden="true" />
@@ -2394,7 +2459,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         )}
 
         {/* 📝 代码/文件 Diff 修改记录卡片（已编辑文件列表、逐行 Diff 审核与一键撤销） */}
-        {!editing && fileChanges.length > 0 && (
+        {!editing && !msg.isThinking && fileChanges.length > 0 && (
           <FileChangesCard changes={fileChanges} />
         )}
 
@@ -2519,13 +2584,39 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             </button>
           </Tooltip>
           {msg.sender === 'agent' && !msg.isThinking && toolSteps.some((step: any) => step.type === 'call' || step.type === 'result') && (
-            <Tooltip content="原样导出本轮模型回复的全部工具调用参数和返回结果" placement="top">
+            <Tooltip
+              content={
+                traceExportState === 'saving'
+                  ? '导出中…'
+                  : traceExportState === 'success'
+                    ? '已导出'
+                    : traceExportState === 'error'
+                      ? '导出失败'
+                      : '导出调用过程'
+              }
+              placement="top"
+            >
               <button
-                className="msg-export-trace-btn"
+                type="button"
+                className="msg-copy-btn"
                 onClick={handleExportToolTrace}
                 disabled={traceExportState === 'saving'}
+                aria-label="导出调用过程"
               >
-                {traceExportState === 'saving' ? '导出中…' : traceExportState === 'success' ? '已导出' : traceExportState === 'error' ? '导出失败' : <><Download size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />导出调用过程</>}
+                {traceExportState === 'saving' ? (
+                  <LoaderCircle size={14} className="icon-spin" aria-hidden="true" />
+                ) : traceExportState === 'success' ? (
+                  <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+                ) : (
+                  <Download size={14} strokeWidth={2} aria-hidden="true" />
+                )}
+              </button>
+            </Tooltip>
+          )}
+          {msg.sender === 'agent' && (msg.isError || String(msg.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')) && onRetryFailed && (
+            <Tooltip content={retryDisabled ? '只能重试最新的失败回复，且需等待当前请求结束' : '接着失败前的进度重试'} placement="top">
+              <button type="button" className="msg-copy-btn" disabled={retryDisabled} aria-label="接着失败前的进度重试" onClick={() => void onRetryFailed(msg.id)}>
+                <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
               </button>
             </Tooltip>
           )}

@@ -21,12 +21,22 @@ function getMessageBody(message: any): string {
 }
 
 function getActiveToolTrace(message: any): any[] {
-  if (!message?.isThinking || !Array.isArray(message.toolSteps)) return []
+  if (!Array.isArray(message?.toolSteps)) return []
   return message.toolSteps.filter((step: any) => step?.type === 'call' || step?.type === 'result' || step?.type === 'compaction')
 }
 
 export function getContextMessageSignature(message: any): string {
   return [message.sender || '', getMessageBody(message), JSON.stringify(getActiveToolTrace(message))].join('\u0000')
+}
+
+export function latestContextSnapshot(session: any): number | undefined {
+  for (const message of [...(session?.messages || [])].reverse()) {
+    const snapshots = (message.toolSteps || []).filter((step: any) => step.type === 'context_usage' || (step.type === 'compaction' && step.status === 'completed'))
+      .sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp))
+    const latest = snapshots[0]
+    if (latest) return Number(latest.type === 'compaction' ? latest.afterTokens : latest.contextTokens) || 0
+  }
+  return undefined
 }
 
 export function estimateContextMessageTokens(message: any): number {

@@ -13,6 +13,7 @@ import { useSessionSyncRuntime } from './useSessionSyncRuntime'
 import { useTokenUsageRuntime } from './useTokenUsageRuntime'
 import {
   estimateContextMessageTokens,
+  latestContextSnapshot,
   estimatePromptEnvelopeTokens,
   getContextMessageSignature,
   getPromptEnvelopeSignature,
@@ -135,6 +136,8 @@ interface SessionContextCache {
 const contextTokenCache = new Map<string, SessionContextCache>()
 
 function rebuildSessionContextTokens(session: Session, contextRounds: number): number {
+  const snapshot = latestContextSnapshot(session)
+  if (snapshot !== undefined) return snapshot
   const messages = new Map<string | number, CachedContextMessage>()
   const scopeSignature = `${contextRounds}\u0000${getPromptEnvelopeSignature(session)}`
   let total = estimatePromptEnvelopeTokens(session)
@@ -154,6 +157,8 @@ function rebuildSessionContextTokens(session: Session, contextRounds: number): n
  * a full rebuild.
  */
 function getSessionContextTokens(previous: Session | undefined, next: Session, contextRounds: number): number {
+  const snapshot = latestContextSnapshot(next)
+  if (snapshot !== undefined) return snapshot
   const cache = contextTokenCache.get(next.id)
   const scopeSignature = `${contextRounds}\u0000${getPromptEnvelopeSignature(next)}`
   const previousMessages = previous?.messages || []
@@ -421,7 +426,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   })(),
   contextRounds: (() => {
     const migrationKey = 'agentpet_context_mode_version'
-    const fullSessionVersion = '258k-full-session-v1'
+    const fullSessionVersion = 'threshold-compaction-v2'
     if (localStorage.getItem(migrationKey) !== fullSessionVersion) {
       localStorage.setItem(migrationKey, fullSessionVersion)
       localStorage.setItem('agentpet_context_rounds', '0')
@@ -1163,6 +1168,13 @@ export function useAppStore() {
 
               const mergedMessages = (ls.messages || []).map((lm: any) => {
                 const pm = previousMessagesById.get(lm.id) as any
+                // Inactive sessions are loaded as previews without tool_steps. Keep
+                // the complete in-memory message while their requests continue.
+                if (pm && ls.id !== currentActiveId && lm.toolSteps === undefined) {
+                  return pm.isThinking
+                    ? pm
+                    : { ...lm, toolSteps: pm.toolSteps, fileChanges: pm.fileChanges }
+                }
                 const hasPendingClarification = pm?.isThinking && Array.isArray(pm.toolSteps) && pm.toolSteps.some((step: any) => step?.type === 'clarification')
                 if (hasPendingClarification) {
                   return {

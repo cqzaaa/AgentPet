@@ -31,6 +31,7 @@ import {
   Link,
   Mic,
   Monitor,
+  MoreHorizontal,
   Network,
   Palette,
   Plug,
@@ -332,6 +333,12 @@ function ChatPageImpl(): React.JSX.Element {
   const modelPopoverRef = useRef<HTMLDivElement>(null)
   const knowledgePopoverRef = useRef<HTMLDivElement>(null)
 
+  // 工具栏响应式窄屏收纳与更多工具 Popover 状态与 Refs
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [isToolbarNarrow, setIsToolbarNarrow] = useState(false)
+  const [showMorePopover, setShowMorePopover] = useState(false)
+  const morePopoverRef = useRef<HTMLDivElement>(null)
+
   // 搜索过滤
   const [skillsSearchKey, setSkillsSearchKey] = useState('')
   const [mcpSearchKey, setMcpSearchKey] = useState('')
@@ -367,6 +374,21 @@ function ChatPageImpl(): React.JSX.Element {
       setModelSearchKey('')
     }
   }, [showModelPopover])
+
+  // 监听输入栏工具条实际物理宽度，自适应触发单行紧凑与功能溢出收纳
+  useEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        // 当工具栏总宽度小于 550px 时（如右侧打开 Diff 抽屉或视口较窄），触发智能收纳
+        setIsToolbarNarrow(width > 0 && width < 550)
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const refreshKnowledgeBases = useCallback(async () => {
     try {
@@ -441,6 +463,16 @@ function ChatPageImpl(): React.JSX.Element {
       ) {
         setShowKnowledgePopover(false)
       }
+      if (
+        showMorePopover &&
+        morePopoverRef.current &&
+        !morePopoverRef.current.contains(event.target as Node)
+      ) {
+        const isClickOnBtn = (event.target as HTMLElement).closest('.toolbar-action-btn-more')
+        if (!isClickOnBtn) {
+          setShowMorePopover(false)
+        }
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -449,7 +481,8 @@ function ChatPageImpl(): React.JSX.Element {
     showMcpPopover,
     showFeaturePopover,
     showModelPopover,
-    showKnowledgePopover
+    showKnowledgePopover,
+    showMorePopover
   ])
 
   // 挂载时刷新技能与 MCP 状态
@@ -733,6 +766,169 @@ function ChatPageImpl(): React.JSX.Element {
       </div>
     </div>
   )
+
+  const renderMorePopover = () => {
+    const enabledSkillsCount = skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length
+    const enabledMcpCount = allMcpServers.filter((s: any) => s.enabled).length
+
+    return (
+      <div
+        ref={morePopoverRef}
+        className="chat-popover-card chat-more-tools-popover"
+        style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 8px)',
+          right: 0,
+          width: '236px',
+          background: 'var(--bg-card, #ffffff)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+          borderRadius: '12px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.14)',
+          zIndex: 1000,
+          padding: '8px',
+          animation: 'slideUpMenu 0.15s ease-out'
+        }}
+      >
+        <div className="chat-more-tools-header">
+          <span>更多工具与扩展</span>
+          <small>收纳次频功能</small>
+        </div>
+        <div className="chat-more-tools-list">
+          {/* 多 Agent 协作 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              setOpenedSubtask(null)
+              setOpenedCollaborationRunId('')
+              setShowCollaborationComposer(true)
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              <Network size={15} strokeWidth={2} />
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>多 Agent 协作</strong>
+              <small>多智能体分工协同处理目标</small>
+            </span>
+          </button>
+
+          {/* 技能扩展包 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              setShowSkillsPopover(true)
+              setShowMcpPopover(false)
+              setShowFeaturePopover(false)
+              setShowDeviceMenu(false)
+              refreshSkillsAndStorage()
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              <Puzzle size={15} strokeWidth={2} />
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>技能扩展包</strong>
+              <small>管理与配置已启用技能</small>
+            </span>
+            <span className="chat-more-tool-badge">
+              {enabledSkillsCount}/{skillsList.length}
+            </span>
+          </button>
+
+          {/* MCP 服务 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              setShowMcpPopover(true)
+              setShowSkillsPopover(false)
+              setShowFeaturePopover(false)
+              setShowDeviceMenu(false)
+              refreshMcpServers()
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              <Link size={15} strokeWidth={2} />
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>MCP 扩展服务</strong>
+              <small>外部协议工具接入</small>
+            </span>
+            <span className="chat-more-tool-badge">
+              {enabledMcpCount}/{allMcpServers.length}
+            </span>
+          </button>
+
+          {/* AI 会议录音 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              setShowMeetingRecorder(true)
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              <Mic size={15} strokeWidth={2} />
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>AI 会议录音</strong>
+              <small>实时录音与会议纪要整理</small>
+            </span>
+          </button>
+
+          {/* 桌面悬浮助手 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              void window.api.openGlobalAssistant()
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              <Radar size={15} strokeWidth={2} />
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>桌面悬浮助手</strong>
+              <small>常驻屏幕右上角交互窗</small>
+            </span>
+          </button>
+
+          {/* 执行设备切换 */}
+          <button
+            type="button"
+            className="chat-more-tool-item"
+            onClick={() => {
+              setShowMorePopover(false)
+              setShowDeviceMenu(true)
+              setShowSkillsPopover(false)
+              setShowMcpPopover(false)
+              setShowFeaturePopover(false)
+            }}
+          >
+            <span className="chat-more-tool-icon">
+              {executionDevice === 'ssh' ? <Globe2 size={15} /> : <Monitor size={15} />}
+            </span>
+            <span className="chat-more-tool-content">
+              <strong>执行设备切换</strong>
+              <small>{executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机环境执行'}</small>
+            </span>
+            <span className="chat-more-tool-badge">
+              {executionDevice === 'ssh' ? 'SSH' : '本机'}
+            </span>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const renderMcpPopover = () => {
     const filtered = mcpSearchKey
@@ -1124,8 +1320,8 @@ function ChatPageImpl(): React.JSX.Element {
   }, [contextLimit, estimatedContextTokens])
 
   const handleSendIntercept = () => {
-    if (estimatedContextTokens >= contextLimit) {
-      showToast('上下文额度已用满，请创建新会话以继续对话！', 'error')
+    if (estimateDraftTokens(inputValue, attachedFiles) >= contextLimit) {
+      showToast('单次输入过大，请缩短输入或附件内容后继续。', 'error')
       return
     }
     if (!quotedSelection) {
@@ -1148,7 +1344,7 @@ function ChatPageImpl(): React.JSX.Element {
     (selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
       if (sendNow) {
         const payload = formatQuotedPrompt(selection, prompt)
-        if (currentContextTokens + estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
+        if (estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
           showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
           return
         }
@@ -1240,8 +1436,171 @@ function ChatPageImpl(): React.JSX.Element {
     e.currentTarget.style.backgroundColor = 'transparent'
   }
 
-  // 检测是否在底部附近（阈值 100px）
+  const renderDeviceMenu = (alignRight = false) => (
+    <div
+      className="custom-device-menu"
+      style={{
+        position: 'absolute',
+        bottom: 'calc(100% + 6px)',
+        ...(alignRight ? { right: 0 } : { left: 0 }),
+        background: 'var(--bg-card, #ffffff)',
+        border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
+        borderRadius: '8px',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+        zIndex: 1000,
+        minWidth: '180px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        padding: '4px 0',
+        animation: 'slideUpMenu 0.15s ease-out'
+      }}
+    >
+      <div
+        className={`device-menu-item ${executionDevice === 'local' ? 'active' : ''}`}
+        onClick={async () => {
+          await handleUpdateExecutionDevice('local')
+          setShowDeviceMenu(false)
+        }}
+        style={getMenuItemStyle(executionDevice === 'local')}
+        onMouseEnter={handleMenuItemMouseEnter}
+        onMouseLeave={handleMenuItemMouseLeave}
+      >
+        <Monitor
+          size={16}
+          strokeWidth={2}
+          className="ui-icon-leading"
+          aria-hidden="true"
+        />
+        <span>本机执行</span>
+        {executionDevice === 'local' && (
+          <Check
+            size={16}
+            strokeWidth={2}
+            style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
+            aria-hidden="true"
+          />
+        )}
+      </div>
+
+      {sshConnected ? (
+        <div
+          className={`device-menu-item ${executionDevice === 'ssh' ? 'active' : ''}`}
+          onClick={async () => {
+            await handleUpdateExecutionDevice('ssh')
+            setShowDeviceMenu(false)
+          }}
+          style={getMenuItemStyle(executionDevice === 'ssh')}
+          onMouseEnter={handleMenuItemMouseEnter}
+          onMouseLeave={handleMenuItemMouseLeave}
+        >
+          <Globe2
+            size={16}
+            strokeWidth={2}
+            className="ui-icon-leading"
+            aria-hidden="true"
+          />
+          <span
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '110px'
+            }}
+            title={`${sshUsername}@${sshHost}`}
+          >
+            SSH: {sshUsername}@${sshHost}
+          </span>
+          {executionDevice === 'ssh' && (
+            <Check
+              size={16}
+              strokeWidth={2}
+              style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
+              aria-hidden="true"
+            />
+          )}
+        </div>
+      ) : null}
+
+      <div
+        className="device-menu-item"
+        onClick={() => {
+          setShowSshModal(true)
+          setShowDeviceMenu(false)
+        }}
+        style={getMenuItemStyle(false)}
+        onMouseEnter={handleMenuItemMouseEnter}
+        onMouseLeave={handleMenuItemMouseLeave}
+      >
+        <Settings2
+          size={16}
+          strokeWidth={2}
+          className="ui-icon-leading"
+          aria-hidden="true"
+        />
+        <span>{sshConnected ? '配置其它 SSH...' : '配置远程 SSH...'}</span>
+      </div>
+
+      {sshConnected && (
+        <>
+          <div
+            style={{
+              height: '1px',
+              background: 'var(--border-color, rgba(128,128,128,0.12))',
+              margin: '4px 0'
+            }}
+          />
+          <div
+            className="device-menu-item disconnect"
+            onClick={async () => {
+              setShowDeviceMenu(false)
+              if (
+                await requestConfirmation({
+                  title: '断开 SSH 连接？',
+                  description: '确认断开当前 SSH 连接并切换回本机执行吗？',
+                  confirmLabel: '断开连接',
+                  tone: 'warning'
+                })
+              ) {
+                await handleDisconnectSsh()
+              }
+            }}
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              color: '#ef4444',
+              fontWeight: 500,
+              transition: 'background 0.15s ease'
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor =
+                'var(--bg-menu-hover, rgba(128,128,128,0.06))')
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor = 'transparent')
+            }
+          >
+            <Plug
+              size={16}
+              strokeWidth={2}
+              className="ui-icon-leading"
+              aria-hidden="true"
+            />
+            <span>断开连接</span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
+  // 记录是否处于底部附近（供抽屉分栏调整或窗口缩放时锚定保持）
+  const isAtBottomRef = useRef(true)
+  // 检测是否在底部附近（阈值 120px）
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    isAtBottomRef.current = atBottom
     setShowScrollToBottom(!atBottom)
   }, [])
 
@@ -1282,12 +1641,67 @@ function ChatPageImpl(): React.JSX.Element {
 
   // 切换会话时重置滚动状态
   useEffect(() => {
+    isAtBottomRef.current = true
     setShowScrollToBottom(false)
   }, [activeSessionId])
 
   const scrollToBottom = () => {
+    isAtBottomRef.current = true
+    setShowScrollToBottom(false)
     virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
   }
+
+  // 尺寸自适应贴底保持：监听聊天容器尺寸变化（打开/关闭抽屉、分栏拖拽、窗口缩放等）
+  // 当宽度或高度变化且用户原本处于贴底状态时，自动重新校准滚动到底部，避免因文本折行导致内容增高而被顶出视口
+  const lastContainerSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
+  const resizeScrollRafRef = useRef<number | null>(null)
+  const resizeScrollTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const el = messagesBoxRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+
+    const rect = el.getBoundingClientRect()
+    lastContainerSizeRef.current = { width: rect.width, height: rect.height }
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        const prev = lastContainerSizeRef.current
+        const widthChanged = Math.abs(width - prev.width) > 1
+        const heightChanged = Math.abs(height - prev.height) > 1
+        lastContainerSizeRef.current = { width, height }
+
+        if ((widthChanged || heightChanged) && isAtBottomRef.current) {
+          if (resizeScrollRafRef.current) {
+            cancelAnimationFrame(resizeScrollRafRef.current)
+          }
+          if (resizeScrollTimerRef.current) {
+            window.clearTimeout(resizeScrollTimerRef.current)
+          }
+
+          resizeScrollRafRef.current = requestAnimationFrame(() => {
+            virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+            setShowScrollToBottom(false)
+          })
+
+          resizeScrollTimerRef.current = window.setTimeout(() => {
+            if (isAtBottomRef.current) {
+              virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+              setShowScrollToBottom(false)
+            }
+          }, 80)
+        }
+      }
+    })
+
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (resizeScrollRafRef.current) cancelAnimationFrame(resizeScrollRafRef.current)
+      if (resizeScrollTimerRef.current) window.clearTimeout(resizeScrollTimerRef.current)
+    }
+  }, [])
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
@@ -1417,6 +1831,14 @@ function ChatPageImpl(): React.JSX.Element {
     await handleSendChat({ messageId, text, sessionId: activeSessionId })
   }, [handleSendChat, activeSessionId])
 
+  const handleRetryFailed = useCallback(async (messageId: number) => {
+    try {
+      await handleSendChat({ retryReplyId: messageId, sessionId: activeSessionId })
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '重试失败，请稍后再试。', 'error')
+    }
+  }, [handleSendChat, activeSessionId, showToast])
+
   const itemContent = useCallback(
     (_index: number, timelineId: string) => {
       if (timelineId.startsWith('orchestration:')) {
@@ -1445,6 +1867,8 @@ function ChatPageImpl(): React.JSX.Element {
           onPreviewFile={handlePreviewFile}
           onQuoteSelection={handleQuoteSelection}
           onEditMessage={handleEditMessage}
+          onRetryFailed={handleRetryFailed}
+          retryDisabled={isSending || activeSessMessages.at(-1)?.id !== message.id}
           editDisabled={isSending}
           delegateTaskAttachments={delegatedRuns.map((snapshot) => (
             <SubtaskCapsuleGroup
@@ -1471,7 +1895,9 @@ function ChatPageImpl(): React.JSX.Element {
       handleQuoteSelection,
       handleOpenSubtask,
       handleEditMessage,
+      handleRetryFailed,
       isSending,
+      activeSessMessages,
       openedSubtask
     ]
   )
@@ -1573,9 +1999,15 @@ function ChatPageImpl(): React.JSX.Element {
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
               followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
               // Follow height changes within an existing streaming message as well as new items.
-              totalListHeightChanged={() => virtuosoRef.current?.autoscrollToBottom()}
+              totalListHeightChanged={() => {
+                if (isAtBottomRef.current) {
+                  virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+                } else {
+                  virtuosoRef.current?.autoscrollToBottom()
+                }
+              }}
               initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
-              atBottomThreshold={100}
+              atBottomThreshold={120}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}
             />
@@ -1999,14 +2431,14 @@ function ChatPageImpl(): React.JSX.Element {
             className="chat-textarea-field resize-none"
             rows={2}
             placeholder={
-              estimatedContextTokens >= contextLimit
-                ? '上下文额度已用满，请创建新会话以继续对话！'
+              estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
+                ? '单次输入过大，请缩短输入或附件内容后继续。'
                 : isSending
                   ? `${currentAvatarName} 正在思考中…可继续发送追加指引`
                   : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
-            disabled={estimatedContextTokens >= contextLimit}
+            disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}
             onChange={(e) => setInputValue(e.target.value)}
             onPaste={async (e) => {
               // 优先检查内部剪贴板（从消息复制的文件+文本）
@@ -2067,11 +2499,11 @@ function ChatPageImpl(): React.JSX.Element {
             }}
           />
 
-          <div className="chat-control-toolbar">
+          <div className={`chat-control-toolbar ${isToolbarNarrow ? 'is-narrow' : ''}`} ref={toolbarRef}>
             {/* 左侧：模型切换 */}
             <div
               className="toolbar-group-left"
-              style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+              style={{ display: 'flex', gap: isToolbarNarrow ? '4px' : '8px', alignItems: 'center' }}
             >
               <div
                 className="custom-model-select-container"
@@ -2114,7 +2546,7 @@ function ChatPageImpl(): React.JSX.Element {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        maxWidth: '85px'
+                        maxWidth: isToolbarNarrow ? '56px' : '85px'
                       }}
                     >
                       {llmConfig.model || '选择模型'}
@@ -2131,29 +2563,34 @@ function ChatPageImpl(): React.JSX.Element {
               </div>
 
               <div className="chat-knowledge-select" ref={knowledgePopoverRef}>
-                <button
-                  type="button"
-                  className={`chat-knowledge-trigger ${selectedKnowledgeBaseId ? 'selected' : ''}`}
-                  onClick={() => {
-                    const next = !showKnowledgePopover
-                    setShowKnowledgePopover(next)
-                    setShowModelPopover(false)
-                    if (next) void refreshKnowledgeBases()
-                  }}
-                  aria-label={
-                    selectedKnowledgeBaseId
-                      ? `当前知识库：${selectedKnowledgeBaseName}`
-                      : '知识库'
-                  }
-                  title={
+                <Tooltip
+                  content={
                     selectedKnowledgeBaseId
                       ? `当前知识库：${selectedKnowledgeBaseName}`
                       : '选择本轮聊天使用的知识库'
                   }
+                  placement="top"
+                  disabled={showKnowledgePopover}
                 >
-                  <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
-                  <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
-                </button>
+                  <button
+                    type="button"
+                    className={`chat-knowledge-trigger ${selectedKnowledgeBaseId ? 'selected' : ''}`}
+                    onClick={() => {
+                      const next = !showKnowledgePopover
+                      setShowKnowledgePopover(next)
+                      setShowModelPopover(false)
+                      if (next) void refreshKnowledgeBases()
+                    }}
+                    aria-label={
+                      selectedKnowledgeBaseId
+                        ? `当前知识库：${selectedKnowledgeBaseName}`
+                        : '知识库'
+                    }
+                  >
+                    <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
+                    <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </Tooltip>
 
                 {showKnowledgePopover && (
                   <div className="chat-knowledge-popover">
@@ -2221,214 +2658,167 @@ function ChatPageImpl(): React.JSX.Element {
                 )}
               </div>
 
-              {/* 执行设备选择 */}
-              <div
-                className="custom-device-select-container"
-                style={{ position: 'relative' }}
-                ref={deviceMenuRef}
-              >
-              <Tooltip content={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`} placement="top">
+              {/* 执行设备选择（窄态下收纳至“更多工具”菜单，常规态在左侧平铺） */}
+              {!isToolbarNarrow && (
                 <div
-                  className={`toolbar-icon-btn custom-device-trigger ${showDeviceMenu ? 'active' : ''}`}
-                  onClick={() => {
-                    if (!isSending) setShowDeviceMenu(!showDeviceMenu)
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: isSending ? 'not-allowed' : 'pointer',
-                    userSelect: 'none',
-                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-                  }}
+                  className="custom-device-select-container"
+                  style={{ position: 'relative' }}
+                  ref={deviceMenuRef}
                 >
-                  {executionDevice === 'ssh' ? (
-                    <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
-                  ) : (
-                    <Monitor size={17} strokeWidth={2} aria-hidden="true" />
-                  )}
-                </div>
-              </Tooltip>
-
-                {showDeviceMenu && (
-                  <div
-                    className="custom-device-menu"
-                    style={{
-                      position: 'absolute',
-                      bottom: 'calc(100% + 6px)',
-                      left: 0,
-                      background: 'var(--bg-card, #ffffff)',
-                      border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
-                      zIndex: 999,
-                      minWidth: '180px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      overflow: 'hidden',
-                      padding: '4px 0',
-                      animation: 'slideUpMenu 0.15s ease-out'
-                    }}
+                  <Tooltip
+                    content={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
+                    placement="top"
+                    disabled={showDeviceMenu}
                   >
                     <div
-                      className={`device-menu-item ${executionDevice === 'local' ? 'active' : ''}`}
-                      onClick={async () => {
-                        await handleUpdateExecutionDevice('local')
-                        setShowDeviceMenu(false)
+                      className={`toolbar-icon-btn custom-device-trigger ${showDeviceMenu ? 'active' : ''}`}
+                      onClick={() => {
+                        if (!isSending) setShowDeviceMenu(!showDeviceMenu)
                       }}
-                      style={getMenuItemStyle(executionDevice === 'local')}
-                      onMouseEnter={handleMenuItemMouseEnter}
-                      onMouseLeave={handleMenuItemMouseLeave}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: isSending ? 'not-allowed' : 'pointer',
+                        userSelect: 'none',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                      }}
                     >
-                      <Monitor
-                        size={16}
-                        strokeWidth={2}
-                        className="ui-icon-leading"
-                        aria-hidden="true"
-                      />
-                      <span>本机执行</span>
-                      {executionDevice === 'local' && (
-                        <Check
-                          size={16}
-                          strokeWidth={2}
-                          style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
-                          aria-hidden="true"
-                        />
+                      {executionDevice === 'ssh' ? (
+                        <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
+                      ) : (
+                        <Monitor size={17} strokeWidth={2} aria-hidden="true" />
                       )}
                     </div>
-
-                    {sshConnected ? (
-                      <div
-                        className={`device-menu-item ${executionDevice === 'ssh' ? 'active' : ''}`}
-                        onClick={async () => {
-                          await handleUpdateExecutionDevice('ssh')
-                          setShowDeviceMenu(false)
-                        }}
-                        style={getMenuItemStyle(executionDevice === 'ssh')}
-                        onMouseEnter={handleMenuItemMouseEnter}
-                        onMouseLeave={handleMenuItemMouseLeave}
-                      >
-                        <Globe2
-                          size={16}
-                          strokeWidth={2}
-                          className="ui-icon-leading"
-                          aria-hidden="true"
-                        />
-                        <span
-                          style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            maxWidth: '110px'
-                          }}
-                          title={`${sshUsername}@${sshHost}`}
-                        >
-                          SSH: {sshUsername}@${sshHost}
-                        </span>
-                        {executionDevice === 'ssh' && (
-                          <Check
-                            size={16}
-                            strokeWidth={2}
-                            style={{ marginLeft: 'auto', color: 'var(--accent-color, #4f8cff)' }}
-                            aria-hidden="true"
-                          />
-                        )}
-                      </div>
-                    ) : null}
-
-                    <div
-                      className="device-menu-item"
-                      onClick={() => {
-                        setShowSshModal(true)
-                        setShowDeviceMenu(false)
-                      }}
-                      style={getMenuItemStyle(false)}
-                      onMouseEnter={handleMenuItemMouseEnter}
-                      onMouseLeave={handleMenuItemMouseLeave}
-                    >
-                      <Settings2
-                        size={16}
-                        strokeWidth={2}
-                        className="ui-icon-leading"
-                        aria-hidden="true"
-                      />
-                      <span>{sshConnected ? '配置其它 SSH...' : '配置远程 SSH...'}</span>
-                    </div>
-
-                    {sshConnected && (
-                      <>
-                        <div
-                          style={{
-                            height: '1px',
-                            background: 'var(--border-color, rgba(128,128,128,0.12))',
-                            margin: '4px 0'
-                          }}
-                        />
-                        <div
-                          className="device-menu-item disconnect"
-                          onClick={async () => {
-                            setShowDeviceMenu(false)
-                            if (await requestConfirmation({
-                              title: '断开 SSH 连接？',
-                              description: '确认断开当前 SSH 连接并切换回本机执行吗？',
-                              confirmLabel: '断开连接',
-                              tone: 'warning'
-                            })) {
-                              await handleDisconnectSsh()
-                            }
-                          }}
-                          style={{
-                            padding: '8px 12px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            color: '#ef4444',
-                            fontWeight: 500,
-                            transition: 'background 0.15s ease'
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.backgroundColor =
-                              'var(--bg-menu-hover, rgba(128,128,128,0.06))')
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.backgroundColor = 'transparent')
-                          }
-                        >
-                          <Plug
-                            size={16}
-                            strokeWidth={2}
-                            className="ui-icon-leading"
-                            aria-hidden="true"
-                          />
-                          <span>断开连接</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+                  </Tooltip>
+                  {showDeviceMenu && renderDeviceMenu(false)}
+                </div>
+              )}
             </div>
 
             {/* 右侧：文件上传与发送按钮 */}
             <div
               className="toolbar-group-right"
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: isToolbarNarrow ? '5px' : '8px' }}
             >
-              <Tooltip content="新建多 Agent 协作任务" placement="top">
-                <button
-                  className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
-                  type="button"
-                  onClick={() => {
-                    setOpenedSubtask(null)
-                    setOpenedCollaborationRunId('')
-                    setShowCollaborationComposer(true)
-                  }}
-                  aria-label="新建多 Agent 协作任务"
-                >
-                  <Network size={17} strokeWidth={2} aria-hidden="true" />
-                </button>
-              </Tooltip>
+              {/* 窄屏紧凑模式：以「更多工具」按钮替代原本横排占位过长的功能组 */}
+              {isToolbarNarrow ? (
+                <div style={{ position: 'relative' }}>
+                  <Tooltip content="更多工具与扩展" placement="top" disabled={showMorePopover}>
+                    <button
+                      type="button"
+                      className={`toolbar-icon-btn toolbar-action-btn-more ${showMorePopover ? 'active' : ''}`}
+                      onClick={() => {
+                        const next = !showMorePopover
+                        setShowMorePopover(next)
+                        setShowSkillsPopover(false)
+                        setShowMcpPopover(false)
+                        setShowFeaturePopover(false)
+                        setShowDeviceMenu(false)
+                      }}
+                      aria-label="更多工具与扩展"
+                    >
+                      <MoreHorizontal size={17} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  {showMorePopover && renderMorePopover()}
+                  {/* 窄态下从更多菜单触发的二级 Popover 在此统一挂载 */}
+                  {showSkillsPopover && renderSkillsPopover()}
+                  {showMcpPopover && renderMcpPopover()}
+                  {showFeaturePopover && renderFeaturePopover()}
+                  {showDeviceMenu && renderDeviceMenu(true)}
+                </div>
+              ) : (
+                /* 常规宽态：完整平铺各个常用功能入口 */
+                <>
+                  <Tooltip content="新建多 Agent 协作任务" placement="top">
+                    <button
+                      className={`toolbar-icon-btn toolbar-action-btn-collaboration ${showCollaborationComposer ? 'active' : ''}`}
+                      type="button"
+                      onClick={() => {
+                        setOpenedSubtask(null)
+                        setOpenedCollaborationRunId('')
+                        setShowCollaborationComposer(true)
+                      }}
+                      aria-label="新建多 Agent 协作任务"
+                    >
+                      <Network size={17} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+
+                  {/* 技能快捷开关按钮与 Popover */}
+                  <div style={{ position: 'relative' }}>
+                    <Tooltip content={`管理与启用技能扩展包 (当前启用: ${skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`} placement="top">
+                      <div
+                        className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
+                        onClick={() => {
+                          const next = !showSkillsPopover
+                          setShowSkillsPopover(next)
+                          setShowMcpPopover(false)
+                          setShowFeaturePopover(false)
+                          if (next) {
+                            refreshSkillsAndStorage()
+                          }
+                        }}
+                      >
+                        <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
+                      </div>
+                    </Tooltip>
+                    {showSkillsPopover && renderSkillsPopover()}
+                  </div>
+
+                  {/* MCP 快捷查看按钮与 Popover */}
+                  <div style={{ position: 'relative' }}>
+                    <Tooltip content={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`} placement="top">
+                      <div
+                        className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
+                        onClick={() => {
+                          const next = !showMcpPopover
+                          setShowMcpPopover(next)
+                          setShowSkillsPopover(false)
+                          setShowFeaturePopover(false)
+                          if (next) {
+                            refreshMcpServers()
+                          }
+                        }}
+                      >
+                        <Link size={17} strokeWidth={2} aria-hidden="true" />
+                      </div>
+                    </Tooltip>
+                    {showMcpPopover && renderMcpPopover()}
+                  </div>
+
+                  {/* 独立功能入口：会议录音与全局悬浮助手 */}
+                  <div style={{ position: 'relative' }}>
+                    <Tooltip content="功能菜单" placement="top">
+                      <div
+                        className={`toolbar-icon-btn toolbar-action-btn-features ${showFeaturePopover ? 'active' : ''}`}
+                        onClick={() => {
+                          const next = !showFeaturePopover
+                          setShowFeaturePopover(next)
+                          setShowSkillsPopover(false)
+                          setShowMcpPopover(false)
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            const next = !showFeaturePopover
+                            setShowFeaturePopover(next)
+                            setShowSkillsPopover(false)
+                            setShowMcpPopover(false)
+                          }
+                        }}
+                      >
+                        <Radar size={17} strokeWidth={2} aria-hidden="true" />
+                      </div>
+                    </Tooltip>
+                    {showFeaturePopover && renderFeaturePopover()}
+                  </div>
+                </>
+              )}
+
               {/* SVG 额度环 */}
               <div
                 style={{
@@ -2500,84 +2890,11 @@ function ChatPageImpl(): React.JSX.Element {
                   </div>
                 )}
               </div>
-
-              {/* 技能快捷开关按钮与 Popover */}
-              <div style={{ position: 'relative' }}>
-                <Tooltip content={`管理与启用技能扩展包 (当前启用: ${skillsList.filter((s) => !disabledSkillNames.includes(s.name)).length}/${skillsList.length})`} placement="top">
-                  <div
-                    className={`toolbar-icon-btn toolbar-action-btn-skills ${showSkillsPopover ? 'active' : ''}`}
-                    onClick={() => {
-                      const next = !showSkillsPopover
-                      setShowSkillsPopover(next)
-                      setShowMcpPopover(false)
-                      setShowFeaturePopover(false)
-                      if (next) {
-                        refreshSkillsAndStorage()
-                      }
-                    }}
-                  >
-                    <Puzzle size={18} strokeWidth={2} aria-hidden="true" />
-                  </div>
-                </Tooltip>
-                {showSkillsPopover && renderSkillsPopover()}
-              </div>
-
-              {/* MCP 快捷查看按钮与 Popover */}
-              <div style={{ position: 'relative' }}>
-                <Tooltip content={`管理与启用 MCP 服务 (当前启用: ${allMcpServers.filter((s: any) => s.enabled).length}/${allMcpServers.length})`} placement="top">
-                  <div
-                    className={`toolbar-icon-btn toolbar-action-btn-mcp ${showMcpPopover ? 'active' : ''}`}
-                    onClick={() => {
-                      const next = !showMcpPopover
-                      setShowMcpPopover(next)
-                      setShowSkillsPopover(false)
-                      setShowFeaturePopover(false)
-                      if (next) {
-                        refreshMcpServers()
-                      }
-                    }}
-                  >
-                    <Link size={17} strokeWidth={2} aria-hidden="true" />
-                  </div>
-                </Tooltip>
-                {showMcpPopover && renderMcpPopover()}
-              </div>
-
-              {/* 独立功能入口：会议录音与全局悬浮助手 */}
-              <div style={{ position: 'relative' }}>
-                <Tooltip content="功能菜单" placement="top">
-                  <div
-                    className={`toolbar-icon-btn toolbar-action-btn-features ${showFeaturePopover ? 'active' : ''}`}
-                    onClick={() => {
-                      const next = !showFeaturePopover
-                      setShowFeaturePopover(next)
-                      setShowSkillsPopover(false)
-                      setShowMcpPopover(false)
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        const next = !showFeaturePopover
-                        setShowFeaturePopover(next)
-                        setShowSkillsPopover(false)
-                        setShowMcpPopover(false)
-                      }
-                    }}
-                  >
-                    <Radar size={17} strokeWidth={2} aria-hidden="true" />
-                  </div>
-                </Tooltip>
-                {showFeaturePopover && renderFeaturePopover()}
-              </div>
-
-              {/* 上传文件按钮 */}
-              <Tooltip content={estimatedContextTokens >= contextLimit ? '上下文额度已用满' : '上传文件进行分析'} placement="top">
+              <Tooltip content={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit ? '单次输入过大' : '上传文件进行分析'} placement="top">
                 <button
                   className="toolbar-icon-btn toolbar-action-btn upload"
                   onClick={handleUploadFile}
-                  disabled={estimatedContextTokens >= contextLimit}
+                  disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}
                 >
                   <Plus size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
@@ -2599,7 +2916,7 @@ function ChatPageImpl(): React.JSX.Element {
                       onClick={handleSendIntercept}
                       disabled={
                         (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
-                        estimatedContextTokens >= contextLimit
+                        estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
                       }
                     >
                       <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
@@ -2613,7 +2930,7 @@ function ChatPageImpl(): React.JSX.Element {
                     onClick={handleSendIntercept}
                     disabled={
                       (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
-                      estimatedContextTokens >= contextLimit
+                      estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
                     }
                   >
                     <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />

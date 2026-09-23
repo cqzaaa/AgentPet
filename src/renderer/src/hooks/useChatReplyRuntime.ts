@@ -2,16 +2,17 @@
 import { useCallback, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { recordActivityDuration } from './chat-activity-duration'
+import { replyTextWithRetryBase } from './chat-stream-state'
 
 interface ReplyRuntimeOptions {
   setSessions: (updater: (sessions: any[]) => any[]) => void
   setSendingSessionIds: (updater: (sending: Record<string, boolean>) => Record<string, boolean>) => void
-  discardPendingMessageSave: () => void
+  discardPendingMessageSave: (sessionId: string, messageId: string | number) => void
 }
 
 interface ChatReplyRuntime {
   abortedReplyIdsRef: MutableRefObject<Set<number>>
-  finalizeReply: (replyId: number, fullText: string, sessionId: string, onComplete: () => void) => void
+  finalizeReply: (replyId: number, fullText: string, sessionId: string, onComplete?: () => void) => void
   failReply: (replyId: number, sessionId: string, error: unknown) => void
   abortReply: (sessionId: string, messages: any[], showToast: (message: string, type: 'info' | 'error') => void) => Promise<void>
 }
@@ -59,8 +60,8 @@ export function useChatReplyRuntime({
 }: ReplyRuntimeOptions): ChatReplyRuntime {
   const abortedReplyIdsRef = useRef<Set<number>>(new Set())
 
-  const finalizeReply = useCallback((replyId: number, fullText: string, sessionId: string, onComplete: () => void) => {
-    discardPendingMessageSave()
+  const finalizeReply = useCallback((replyId: number, fullText: string, sessionId: string, onComplete?: () => void) => {
+    discardPendingMessageSave(sessionId, replyId)
     let savedMessage: any = null
     let wasAborted = false
     let hasAnotherActiveReply = false
@@ -73,7 +74,13 @@ export function useChatReplyRuntime({
             wasAborted = true
             return message
           }
-          return withoutEphemeralInteractionSteps({ ...message, text: fullText, isThinking: false })
+          return withoutEphemeralInteractionSteps({
+            ...message,
+            text: replyTextWithRetryBase(message, fullText),
+            retryBaseText: undefined,
+            isThinking: false,
+            isError: fullText.startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')
+          })
         })
         const target = messages.find((message: any) => message.id === replyId)
         hasAnotherActiveReply = messages.some((message: any) => message.id !== replyId && message.isThinking)
@@ -86,13 +93,15 @@ export function useChatReplyRuntime({
     setSendingSessionIds(previous => ({ ...previous, [sessionId]: hasAnotherActiveReply }))
     if (savedMessage && !wasAborted) {
       notifyReplySettled('AgentPet 已回复', fullText)
-      setTimeout(onComplete, 500)
+      if (onComplete) {
+        setTimeout(onComplete, 500)
+      }
     }
     abortedReplyIdsRef.current.delete(replyId)
   }, [discardPendingMessageSave, setSendingSessionIds, setSessions])
 
   const failReply = useCallback((replyId: number, sessionId: string, error: unknown) => {
-    discardPendingMessageSave()
+    discardPendingMessageSave(sessionId, replyId)
     const message = error instanceof Error ? error.message : String(error)
     const isAbort = message.includes('UserAborted') || message.toLowerCase().includes('aborted')
     const isAuthError = /HTTP\s*(401|403)\b|api[_ -]?key|鉴权|unauthorized|forbidden/i.test(message)
@@ -125,6 +134,7 @@ export function useChatReplyRuntime({
         savedMessage = withoutEphemeralInteractionSteps({
           ...item,
           text: currentText + suffix,
+          retryBaseText: undefined,
           isThinking: false,
           isError: !isAbort
         })

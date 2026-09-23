@@ -225,6 +225,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const hasLocatedInitialSessionRef = useRef(false)
+  const lastScrolledSessionIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!activeSessionId || hasLocatedInitialSessionRef.current) return
@@ -362,10 +363,15 @@ export function RecentSessionList(props: Props): React.JSX.Element {
 
   useEffect(() => {
     if (searchQuery.trim()) return
+    if (!activeSessionId) return
+    if (lastScrolledSessionIdRef.current === activeSessionId) return
+
     const activeIndex = rows.findIndex(
       (row) => row.type === 'item' && row.session.id === activeSessionId
     )
     if (activeIndex < 0) return
+
+    lastScrolledSessionIdRef.current = activeSessionId
     const frame = requestAnimationFrame(() => {
       virtuosoRef.current?.scrollToIndex({ index: activeIndex, align: 'center', behavior: 'smooth' })
     })
