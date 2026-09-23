@@ -6673,7 +6673,8 @@ body {
 }
 
 .chat-knowledge-trigger {
-  height: 30px;
+  min-height: 32px;
+  height: 32px;
   max-width: 150px;
   padding: 0 8px;
   display: inline-flex;
@@ -6684,9 +6685,11 @@ body {
   color: var(--text-secondary);
   background: transparent;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 650;
   cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-knowledge-trigger > span {

@@ -2657,8 +2657,8 @@ function ChatPageImpl(): React.JSX.Element {
                         : '知识库'
                     }
                   >
-                    <BookOpen size={14} strokeWidth={2} aria-hidden="true" />
-                    <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
+                    <BookOpen size={17} strokeWidth={1.9} aria-hidden="true" />
+                    <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
                   </button>
                 </Tooltip>
 
