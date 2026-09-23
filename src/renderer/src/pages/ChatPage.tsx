@@ -1604,6 +1604,25 @@ function ChatPageImpl(): React.JSX.Element {
     setShowScrollToBottom(!atBottom)
   }, [])
 
+  // 仅在提问与生成回答期间（isSending）动态支撑精确的一屏差额，使得当前轮次总高度恰好贴满视口：
+  // 气泡精准定位在右上顶，同时滚动条自然滑到底部（y 轴贴底），底下绝无多余可滚动的死空白；
+  // 回复完成后自动收缩为 0px，不留多余空白。
+  const virtuosoComponents = useMemo(
+    () => ({
+      Footer: React.memo(() => (
+        <div
+          className="chat-virtuoso-footer-spacer"
+          style={{
+            height: 'var(--chat-turn-spacer, 0px)',
+            minHeight: 'var(--chat-turn-spacer, 0px)',
+            pointerEvents: 'none'
+          }}
+        />
+      ))
+    }),
+    []
+  )
+
   // 以实际加入的用户消息触发滚动，避免发送状态先变化时读到旧列表。
   // 虚拟列表包含协作卡片，因此不能用聊天消息数量计算最后一项。
   const latestUserMessageId = useMemo(() => {
@@ -1612,6 +1631,37 @@ function ChatPageImpl(): React.JSX.Element {
     }
     return null
   }, [activeSessMessages])
+
+  const updateTurnSpacer = useCallback(() => {
+    const container = messagesBoxRef.current
+    if (!container) return
+    if (!isSending || !latestUserMessageId) {
+      container.style.setProperty('--chat-turn-spacer', '0px')
+      return
+    }
+    const viewportHeight = container.clientHeight
+    if (viewportHeight <= 0) return
+    const userMsgEl = document.getElementById(`msg-${latestUserMessageId}`)
+    if (!userMsgEl) {
+      const estimatedSpacer = Math.max(0, viewportHeight - 100)
+      container.style.setProperty('--chat-turn-spacer', `${estimatedSpacer}px`)
+      return
+    }
+    const scroller = container.querySelector('[data-virtuoso-scroller="true"]')
+    const rows = scroller ? Array.from(scroller.querySelectorAll('.message-row')) : []
+    const lastRow = rows.length > 0 ? (rows[rows.length - 1] as HTMLElement) : userMsgEl
+    const turnTop = userMsgEl.getBoundingClientRect().top
+    const turnBottom = lastRow.getBoundingClientRect().bottom
+    const turnHeight = Math.max(0, turnBottom - turnTop)
+    // 补齐高度刚好等于视口剩余高度：提问在右上顶，滚动条正好贴底
+    const spacer = Math.max(0, viewportHeight - turnHeight)
+    container.style.setProperty('--chat-turn-spacer', `${spacer}px`)
+  }, [isSending, latestUserMessageId])
+
+  useEffect(() => {
+    updateTurnSpacer()
+  }, [isSending, latestUserMessageId, updateTurnSpacer])
+
   const lastScrollMessageRef = useRef({
     sessionId: activeSessionId,
     messageId: latestUserMessageId
@@ -1624,12 +1674,30 @@ function ChatPageImpl(): React.JSX.Element {
       return
     }
     if (!latestUserMessageId || previous.messageId === latestUserMessageId) return
+    let timeoutId: number | null = null
     const frame = requestAnimationFrame(() => {
       lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
-      virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+      updateTurnSpacer()
+      const targetKey = `message:${String(latestUserMessageId)}`
+      const doScroll = (behavior: 'smooth' | 'auto') => {
+        updateTurnSpacer()
+        const targetIndex = messageIdsRef.current.indexOf(targetKey)
+        if (targetIndex !== -1) {
+          virtuosoRef.current?.scrollToIndex({
+            index: targetIndex,
+            align: 'start',
+            behavior
+          })
+        }
+      }
+      doScroll('smooth')
+      timeoutId = window.setTimeout(() => doScroll('auto'), 80)
     })
-    return () => cancelAnimationFrame(frame)
-  }, [activeSessionId, latestUserMessageId, isSessionSwitching])
+    return () => {
+      cancelAnimationFrame(frame)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [activeSessionId, latestUserMessageId, isSessionSwitching, updateTurnSpacer])
 
   const handlePreviewFile = useCallback(
     (f: { name: string; path: string; size: number }) => {
@@ -1643,6 +1711,7 @@ function ChatPageImpl(): React.JSX.Element {
   useEffect(() => {
     isAtBottomRef.current = true
     setShowScrollToBottom(false)
+    messagesBoxRef.current?.style.setProperty('--chat-turn-spacer', '0px')
   }, [activeSessionId])
 
   const scrollToBottom = () => {
@@ -1995,14 +2064,15 @@ function ChatPageImpl(): React.JSX.Element {
               ref={virtuosoRef}
               style={{ height: '100%' }}
               data={messageIds}
+              context={{ isSending }}
+              components={virtuosoComponents}
               computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
               followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
               // Follow height changes within an existing streaming message as well as new items.
               totalListHeightChanged={() => {
+                updateTurnSpacer()
                 if (isAtBottomRef.current) {
-                  virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
-                } else {
                   virtuosoRef.current?.autoscrollToBottom()
                 }
               }}
@@ -2012,7 +2082,7 @@ function ChatPageImpl(): React.JSX.Element {
               itemContent={itemContent}
             />
           )}
-          {showScrollToBottom && (
+          {showScrollToBottom && !isSending && (
             <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
               <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
               回到最新
