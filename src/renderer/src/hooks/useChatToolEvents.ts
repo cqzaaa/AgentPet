@@ -50,7 +50,7 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
     else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result, contextTokens })
     else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
     else if (type === 'context_compaction') {
-      const existing = toolSteps.findIndex(step => step.type === 'compaction')
+      const existing = status === 'started' ? -1 : toolSteps.findLastIndex(step => step.type === 'compaction' && step.status === 'started')
       const compactionStep = {
         id: existing >= 0 ? toolSteps[existing].id : id,
         sequence: existing >= 0 ? toolSteps[existing].sequence : sequence,

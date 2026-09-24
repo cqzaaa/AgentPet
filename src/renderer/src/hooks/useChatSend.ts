@@ -24,7 +24,10 @@ interface ChatSendState {
   ttsEnabled: boolean
 }
 
-type ChatSendRequest = { messageId: number; text: string; sessionId: string } | { retryReplyId: number; sessionId: string }
+type ChatSendRequest =
+  | { messageId: number; text: string; sessionId: string }
+  | { retryReplyId: number; sessionId: string }
+  | { text: string; sessionId?: string }
 
 interface ChatSendOptions {
   getState: () => ChatSendState
@@ -129,11 +132,12 @@ export function useChatSend({
   const handleSendChat = useCallback(async (request?: ChatSendRequest): Promise<void> => {
     const edit = request && 'messageId' in request ? request : undefined
     const retry = request && 'retryReplyId' in request ? request : undefined
+    const customText = request && 'text' in request && !edit ? request.text : undefined
     const state = { ...getState() }
-    const sessionId = state.activeSessionId
+    const sessionId = (request && 'sessionId' in request && request.sessionId) ? request.sessionId : state.activeSessionId
     const originalSession = state.sessions.find(session => session.id === sessionId)
     const failedReplyIndex = retry ? originalSession?.messages.findIndex((message: any) =>
-      message.id === retry.retryReplyId && message.sender === 'agent' && (message.isError || String(message.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')) && !message.isThinking) : -1
+      message.id === retry.retryReplyId && message.sender === 'agent' && (message.isError || String(message.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复') || /(?:^|\n\n)⚠️ 对话生成已被(?:用户)?手动中断。$/.test(String(message.text || ''))) && !message.isThinking) : -1
     const retryUserIndex = retry && failedReplyIndex != null && failedReplyIndex >= 0
       ? originalSession.messages.findLastIndex((message: any, index: number) => index < failedReplyIndex && message.sender === 'user') : -1
     if (retry && (retry.sessionId !== sessionId || state.sendingSessionIds[sessionId] || failedReplyIndex !== originalSession?.messages.length - 1 ||
@@ -145,12 +149,16 @@ export function useChatSend({
       throw new Error('当前会话无法编辑，请等待生成结束后重试。')
     }
     const originalMessage = edit ? originalSession.messages[editIndex] : retry ? originalSession.messages[retryUserIndex] : null
-    const attachedFiles = originalMessage ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))] : [...state.attachedFiles]
+    const attachedFiles = originalMessage
+      ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))]
+      : customText !== undefined
+        ? []
+        : [...state.attachedFiles]
     if (edit || retry) {
       state.selectedKnowledgeBaseId = originalMessage.knowledgeBase?.id || ''
       state.selectedKnowledgeBaseName = originalMessage.knowledgeBase?.name || ''
     }
-    const text = (edit ? edit.text : retry ? originalMessage.text : state.inputValue).trim()
+    const text = (edit ? edit.text : retry ? originalMessage.text : customText !== undefined ? customText : state.inputValue).trim()
     if (!text && attachedFiles.length === 0) return
     // A send while the model is working is a steering instruction. The main process
     // replaces the active request for this session with one that includes this message.
@@ -194,6 +202,7 @@ export function useChatSend({
       ? String(failedReply.text || '')
           .replace(/(?:\n\n)?⚠️ (?:模型服务鉴权失败|模型服务当前请求过于频繁|当前模型服务未接受这次请求|模型上游服务暂时不可用|本次回复未能继续完成)[^\n]*$/, '')
           .replace(/(?:\n\n)?⚠️ \[系统提示\] 大模型在执行完工具链后返回了空回复[^\n]*$/, '')
+          .replace(/(?:\n\n)?⚠️ 对话生成已被(?:用户)?手动中断。$/, '')
           .trimEnd()
       : ''
     const placeholder: any = failedReply
@@ -241,7 +250,7 @@ export function useChatSend({
       return updatedSessions
     })
 
-    if (!edit && !retry) {
+    if (!edit && !retry && customText === undefined) {
       setInputValue('')
       setAttachedFiles([])
     }

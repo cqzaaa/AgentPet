@@ -582,7 +582,7 @@ export function AgentWindow(): React.JSX.Element {
               className={`chat-mode-panel conversation ${showTrajectory ? 'inactive' : 'active'}`}
             >
               <ChatControllerProvider actions={chatActions}>
-                <ChatPage />
+                <ChatPage restoreScrollPosition={workspaceTabs.some((tab) => tab.kind === 'session' && tab.sessionId === activeSessionId)} />
                 <PermissionModeControl />
               </ChatControllerProvider>
             </div>

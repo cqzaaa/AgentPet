@@ -32,7 +32,7 @@ export function getContextMessageSignature(message: any): string {
 export function latestContextSnapshot(session: any): number | undefined {
   for (const message of [...(session?.messages || [])].reverse()) {
     const snapshots = (message.toolSteps || []).filter((step: any) => step.type === 'context_usage' || (step.type === 'compaction' && step.status === 'completed'))
-      .sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp))
+      .sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp) || Number(b.sequence) - Number(a.sequence))
     const latest = snapshots[0]
     if (latest) return Number(latest.type === 'compaction' ? latest.afterTokens : latest.contextTokens) || 0
   }

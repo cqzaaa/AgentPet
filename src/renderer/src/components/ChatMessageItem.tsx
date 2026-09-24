@@ -1452,7 +1452,7 @@ function activityTarget(value: unknown, keepEnd = false): string {
 
 function describeActivity(step: any, messageRunning: boolean): string {
   if (!step) return ''
-  if (step.type === 'compaction') return step.status === 'completed' ? '已压缩上下文' : '正在压缩上下文'
+  if (step.type === 'compaction') return step.status === 'completed' ? '已压缩上下文' : step.status === 'failed' ? '压缩上下文失败' : '正在压缩上下文'
   if (step.type === 'think') return messageRunning ? '正在分析结果' : '已分析结果'
   if (step.type !== 'tool') return ''
 
@@ -1870,6 +1870,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [editText, setEditText] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+  const [retryingFailed, setRetryingFailed] = useState(false)
   const editTriggerRef = useRef<HTMLButtonElement>(null)
   const cancelEdit = () => {
     setEditing(false)
@@ -2206,7 +2207,16 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   }
 
   const toolSteps = msg.toolSteps || []
-  const visibleToolSteps = toolSteps.filter((step: any) => step.name !== 'update_task_plan')
+  const visibleToolSteps = toolSteps.filter((step: any) =>
+    step.name !== 'update_task_plan' &&
+    step.type !== 'turnTiming' &&
+    step.type !== 'sources' &&
+    step.type !== 'fileChanges' &&
+    step.type !== 'clarification' &&
+    step.type !== 'credential' &&
+    step.type !== 'officeRuntime' &&
+    step.type !== 'generated_files'
+  )
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
   const credentialSteps = toolSteps.filter((step: any) => step.type === 'credential')
   const officeRuntimeSteps = toolSteps.filter((step: any) => step.type === 'officeRuntime')
@@ -2224,10 +2234,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   for (const step of combinedVisibleToolSteps) {
     const previous = activityBlocks[activityBlocks.length - 1]
     if (step.type === 'commentary') activityBlocks.push({ id: step.id, type: 'commentary', steps: [step] })
-    else if (previous?.type === 'group') previous.steps.push(step)
+    else if (step.type === 'compaction') activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
+    else if (previous?.type === 'group' && previous.steps[0]?.type !== 'compaction') previous.steps.push(step)
     else activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
   }
   let delegateAttachmentIndex = 0
+
+  const showThinkingShimmer = msg.sender !== 'user' && msg.isThinking && !renderedText && activityBlocks.length === 0
+  const shimmerText = '正在启动中'
 
   return (
     <div id={`msg-${msg.id}`} className={`message-row ${msg.sender} ${highlightedMessageId === msg.id ? 'highlight-pulse' : ''}`}>
@@ -2371,11 +2385,13 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           </div>
         ) : (
           <ChatActivityGroup key={block.id}
-            count={block.steps.filter(step => step.type === 'tool').length}
+            count={block.steps.filter(step => step.type === 'tool' || step.type === 'compaction').length}
             activityLabel={describeActivity(block.steps.at(-1), msg.isThinking)}
-            running={msg.isThinking && (block.steps.some(step => step.isWaiting) ||
-              (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
-            isThinking={msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
+            running={block.steps[0]?.type === 'compaction'
+              ? block.steps[0].status === 'started'
+              : msg.isThinking && (block.steps.some(step => step.isWaiting) ||
+                (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
+            isThinking={block.steps[0]?.type !== 'compaction' && msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
             {block.steps.map((step: any) => {
               if (step.type === 'tool') {
                 const attachment = step.name === 'delegate_tasks'
@@ -2393,9 +2409,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         </ChatTurnActivity>}
 
         {/* ✨ 扫光流光动效：仅在刚启动尚未产生任何步骤和正文时展示 */}
-        {msg.sender !== 'user' && msg.isThinking && !renderedText && activityBlocks.length === 0 && (!visibleToolSteps || visibleToolSteps.length === 0) && (
+        {showThinkingShimmer && (
           <div className="chat-thinking-shimmer" role="status" aria-label="处理中">
-            <span className="chat-thinking-shimmer-text">正在启动中</span>
+            <span className="chat-thinking-shimmer-text">{shimmerText}</span>
           </div>
         )}
 
@@ -2613,10 +2629,28 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               </button>
             </Tooltip>
           )}
-          {msg.sender === 'agent' && (msg.isError || String(msg.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')) && onRetryFailed && (
-            <Tooltip content={retryDisabled ? '只能重试最新的失败回复，且需等待当前请求结束' : '接着失败前的进度重试'} placement="top">
-              <button type="button" className="msg-copy-btn" disabled={retryDisabled} aria-label="接着失败前的进度重试" onClick={() => void onRetryFailed(msg.id)}>
-                <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
+          {msg.sender === 'agent' && (msg.isError || String(msg.text || '').startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复') || /(?:^|\n\n)⚠️ 对话生成已被(?:用户)?手动中断。$/.test(String(msg.text || ''))) && onRetryFailed && (
+            <Tooltip content={retryDisabled || retryingFailed ? '只能重试最新的失败回复，且需等待当前请求结束' : '接着失败前的进度重试'} placement="top">
+              <button
+                type="button"
+                className="msg-copy-btn"
+                disabled={retryDisabled || retryingFailed}
+                aria-label="接着失败前的进度重试"
+                onClick={async () => {
+                  if (retryDisabled || retryingFailed) return
+                  setRetryingFailed(true)
+                  try {
+                    await onRetryFailed(msg.id)
+                  } finally {
+                    setRetryingFailed(false)
+                  }
+                }}
+              >
+                {retryingFailed ? (
+                  <LoaderCircle size={14} className="icon-spin" aria-hidden="true" />
+                ) : (
+                  <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
+                )}
               </button>
             </Tooltip>
           )}

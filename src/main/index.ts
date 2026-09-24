@@ -6041,6 +6041,7 @@ app.whenReady().then(() => {
     let traceTurn: number | undefined
     let traceStep = 0
     let traceRequestId = ''
+    let compactionCallId = ''
     let streamItemId = ''
     let streamItemTimestamp: number | undefined
     let tracePreviousMessageFingerprints: string[] | undefined
@@ -6475,6 +6476,14 @@ app.whenReady().then(() => {
         } else if (step.type === 'context_usage') {
           if (event) event.sender.send('api:llm-tool-event', { type: 'context_usage', sessionId, messageId: config.messageId, contextTokens: step.contextTokens })
         } else if (step.type === 'context_compaction') {
+          if (step.status === 'started') {
+            compactionCallId = `context-compaction-${randomUUID()}`
+            await appendTrace('tool/call', 'tool', {
+              callId: compactionCallId,
+              name: 'context_compaction',
+              arguments: { thresholdPercent: 90, beforeTokens: step.beforeTokens }
+            }, { correlationId: compactionCallId })
+          }
           await appendTrace(`compaction/${step.status}`, 'context', {
             beforeTokens: step.beforeTokens,
             afterTokens: step.afterTokens,
@@ -6483,6 +6492,23 @@ app.whenReady().then(() => {
             removedMessages: step.removedMessages,
             detail: step.detail
           })
+          if (step.status !== 'started' && compactionCallId) {
+            const result = step.status === 'completed'
+              ? `已压缩上下文：${step.beforeTokens} → ${step.afterTokens} tokens，归档 ${step.removedMessages} 条消息`
+              : `压缩上下文失败：${step.detail || '未知错误'}`
+            await appendTrace('tool/result', 'tool', {
+              callId: compactionCallId,
+              name: 'context_compaction',
+              modelResult: result,
+              displayResult: result,
+              beforeTokens: step.beforeTokens,
+              afterTokens: step.afterTokens,
+              archivePath: step.archivePath,
+              removedMessages: step.removedMessages,
+              status: step.status
+            }, { correlationId: compactionCallId })
+            compactionCallId = ''
+          }
           const payload = {
             type: 'context_compaction',
             name: '上下文压缩',

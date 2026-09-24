@@ -7636,7 +7636,7 @@ body {
 }
 
 .markdown-body p {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
 }
 
 .markdown-body p:last-child {
@@ -7645,7 +7645,7 @@ body {
 
 /* 数学公式容器与适配 */
 .katex-display-wrapper {
-  margin: 12px 0;
+  margin: 10px 0;
   overflow-x: auto;
   overflow-y: hidden;
   max-width: 100%;
@@ -7675,7 +7675,6 @@ body {
 .markdown-body h5,
 .markdown-body h6 {
   color: var(--text-primary);
-  margin: 24px 0 10px;
   font-weight: 680;
   line-height: 1.4;
   display: flex;
@@ -7694,25 +7693,41 @@ body {
 
 .markdown-body h1 {
   font-size: 19px;
+  margin: 18px 0 8px;
 }
 
 .markdown-body h2 {
   font-size: 16px;
+  margin: 16px 0 8px;
 }
 
 .markdown-body h3 {
   font-size: 14.5px;
+  margin: 14px 0 6px;
 }
 
 .markdown-body h4 {
   font-size: 13px;
   color: var(--text-secondary);
+  margin: 12px 0 5px;
 }
 
 .markdown-body h5,
 .markdown-body h6 {
   font-size: 12px;
   color: var(--text-secondary);
+  margin: 10px 0 4px;
+}
+
+/* 相邻连续标题紧凑排布 */
+.markdown-body h1 + h2,
+.markdown-body h1 + h3,
+.markdown-body h2 + h3,
+.markdown-body h2 + h4,
+.markdown-body h3 + h4,
+.markdown-body h4 + h5,
+.markdown-body h5 + h6 {
+  margin-top: 6px;
 }
 
 .markdown-body strong {
@@ -7730,12 +7745,12 @@ body {
 .markdown-list,
 .markdown-body ul,
 .markdown-body ol {
-  margin: 0 0 14px;
-  padding-left: 22px;
+  margin: 0 0 10px;
+  padding-left: 20px;
 }
 
 .markdown-body li {
-  margin-bottom: 8px;
+  margin-bottom: 5px;
   padding-left: 3px;
 }
 
@@ -7749,10 +7764,10 @@ body {
 }
 
 .markdown-quote {
-  margin: 14px 0 18px;
-  padding: 12px 14px;
+  margin: 10px 0 14px;
+  padding: 10px 12px;
   border: 1px solid color-mix(in srgb, #d39a32 24%, var(--border-color));
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-primary);
   background: color-mix(in srgb, #d39a32 7%, var(--bg-card));
 }
@@ -8032,7 +8047,16 @@ body {
 .markdown-body hr {
   border: none;
   border-top: 1px solid var(--border-color);
-  margin: 22px 0;
+  margin: 12px 0;
+}
+
+.markdown-body hr + h1,
+.markdown-body hr + h2,
+.markdown-body hr + h3,
+.markdown-body hr + h4,
+.markdown-body hr + h5,
+.markdown-body hr + h6 {
+  margin-top: 10px;
 }
 
 /* 消息内的高级 Markdown 表格 */
@@ -9858,6 +9882,13 @@ body {
 .chat-skeleton-container {
   padding: 0 20px;
   box-sizing: border-box;
+}
+
+.chat-skeleton-overlay {
+  position: absolute;
+  inset: 15px 10px 0;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .web-citation {
@@ -13860,6 +13891,118 @@ html.collab-takeover-active:has(.chat-mode-panel.conversation.inactive) .content
 
 .agent-window-container.dark .composer-selection-context {
   color: #86efac;
+}
+
+/* ── 追加方向缓存区域（Steering Prompt Draft Bar） ──────────────── */
+.steering-draft-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  background: var(--bg-composer, var(--bg-card, #ffffff));
+  border: 1px solid var(--border-card, rgba(0, 0, 0, 0.08));
+  border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.03);
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: fadeInDown 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+}
+
+.agent-window-container.dark .steering-draft-bar {
+  background: var(--bg-composer, var(--bg-card, #1e293b));
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+}
+
+.steering-draft-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.steering-draft-icon {
+  flex-shrink: 0;
+  color: var(--text-muted, #94a3b8);
+}
+
+.steering-draft-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  user-select: text;
+}
+
+.steering-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.steering-draft-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #64748b);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.steering-draft-confirm-btn:hover {
+  color: var(--text-primary);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.steering-draft-confirm-btn:active {
+  transform: scale(0.97);
+}
+
+.steering-draft-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.steering-draft-icon-btn:hover {
+  color: var(--text-primary);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.steering-draft-icon-btn.danger:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 
 @media (max-width: 620px) {

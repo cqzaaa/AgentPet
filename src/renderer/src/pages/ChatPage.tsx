@@ -23,6 +23,8 @@ import {
   Check,
   ChevronDown,
   Code2,
+  CornerDownRight,
+  CornerUpRight,
   FileKey2,
   FileText,
   FolderOpen,
@@ -43,6 +45,7 @@ import {
   Settings2,
   ShieldAlert,
   Square,
+  Trash2,
   TriangleAlert,
   X
 } from 'lucide-react'
@@ -69,7 +72,9 @@ function formatQuotedPrompt(selection: QuotedSelection, prompt: string): string 
   return `> 引用自 ${selection.senderName}\n${quotedLines}\n\n${question}`
 }
 
-function ChatPageImpl(): React.JSX.Element {
+const sessionVisibleMessages = new Map<string, string>()
+
+function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition?: boolean }): React.JSX.Element {
   const {
     llmConfig,
     activeSessMessages,
@@ -127,6 +132,7 @@ function ChatPageImpl(): React.JSX.Element {
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [positionedSessionId, setPositionedSessionId] = useState('')
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
   const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
@@ -134,8 +140,24 @@ function ChatPageImpl(): React.JSX.Element {
   const [collaborationRuns, setCollaborationRuns] = useState<CollaborationSnapshot[]>([])
   const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
   const [showQuotedSelectionPreview, setShowQuotedSelectionPreview] = useState(false)
+  const [pendingSteeringPrompts, setPendingSteeringPrompts] = useState<Record<string, string>>({})
+  const pendingSteeringPrompt = pendingSteeringPrompts[activeSessionId] || null
+  const setPendingSteeringPrompt = useCallback(
+    (val: string | null) => {
+      setPendingSteeringPrompts((prev) => {
+        if (!val) {
+          const next = { ...prev }
+          delete next[activeSessionId]
+          return next
+        }
+        return { ...prev, [activeSessionId]: val }
+      })
+    },
+    [activeSessionId]
+  )
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const visibleMessage = restoreScrollPosition ? sessionVisibleMessages.get(activeSessionId) : undefined
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null)
   const composerSelectionContextRef = useRef<HTMLDivElement>(null)
 
@@ -1319,11 +1341,44 @@ function ChatPageImpl(): React.JSX.Element {
     return Math.min(100, (estimatedContextTokens / contextLimit) * 100)
   }, [contextLimit, estimatedContextTokens])
 
+  const handleConfirmSteering = useCallback(() => {
+    if (!pendingSteeringPrompt?.trim()) return
+    const textToSend = pendingSteeringPrompt.trim()
+    setPendingSteeringPrompt(null)
+    isAligningUserTurnRef.current = true
+    window.setTimeout(() => {
+      void handleSendChat({ text: textToSend, sessionId: activeSessionId })
+    }, 0)
+  }, [pendingSteeringPrompt, handleSendChat, activeSessionId, setPendingSteeringPrompt])
+
+  const handleDiscardSteering = useCallback(() => {
+    setPendingSteeringPrompt(null)
+  }, [setPendingSteeringPrompt])
+
+  const handleEditSteering = useCallback(() => {
+    if (!pendingSteeringPrompt) return
+    setInputValue(pendingSteeringPrompt)
+    setPendingSteeringPrompt(null)
+    window.requestAnimationFrame(() => chatTextareaRef.current?.focus())
+  }, [pendingSteeringPrompt, setInputValue, setPendingSteeringPrompt])
+
   const handleSendIntercept = () => {
     if (estimateDraftTokens(inputValue, attachedFiles) >= contextLimit) {
       showToast('单次输入过大，请缩短输入或附件内容后继续。', 'error')
       return
     }
+    // 正在生成且输入框有追加内容时，优先进入方向缓存区，供确认后再次发送调整
+    if (isSending && inputValue.trim()) {
+      setPendingSteeringPrompt(inputValue.trim())
+      setInputValue('')
+      return
+    }
+    // 存在方向缓存且当前无新输入时，按回车或点击发送直接确认发送该缓存内容
+    if (pendingSteeringPrompt && !inputValue.trim()) {
+      handleConfirmSteering()
+      return
+    }
+    isAligningUserTurnRef.current = true
     if (!quotedSelection) {
       void handleSendChat()
       return
@@ -1340,12 +1395,48 @@ function ChatPageImpl(): React.JSX.Element {
     }
   }
 
+  const sendingSessionIds = useAppStoreRaw(
+    (state: any) => state.sendingSessionIds || {}
+  )
+  const prevSendingSessionIdsRef = useRef<Record<string, boolean>>(sendingSessionIds)
+  const pendingSteeringPromptsRef = useRef(pendingSteeringPrompts)
+  pendingSteeringPromptsRef.current = pendingSteeringPrompts
+
+  useEffect(() => {
+    const prevSending = prevSendingSessionIdsRef.current
+    prevSendingSessionIdsRef.current = sendingSessionIds
+
+    // 监听生成结束：若会话由“生成中(true)”变为“已完成(false)”，且该会话仍有方向缓存内容，则自动作为新轮次发送
+    Object.keys(prevSending).forEach((sessId) => {
+      if (prevSending[sessId] && !sendingSessionIds[sessId]) {
+        const bufferedPrompt = pendingSteeringPromptsRef.current[sessId]?.trim()
+        if (bufferedPrompt) {
+          // 清理该会话的方向缓存
+          setPendingSteeringPrompts((prev) => {
+            const next = { ...prev }
+            delete next[sessId]
+            return next
+          })
+          if (sessId === activeSessionId) {
+            isAligningUserTurnRef.current = true
+          }
+          // 稍作延时（100ms），等待上一轮生成的消息完成本地持久化落库和 DOM 结算，再自动无缝开启新一轮对话
+          window.setTimeout(() => {
+            void handleSendChat({ text: bufferedPrompt, sessionId: sessId })
+          }, 100)
+        }
+      }
+    })
+  }, [sendingSessionIds, activeSessionId, handleSendChat])
+
   const handleQuoteSelection = useCallback(
     (selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
       if (sendNow) {
+        isAligningUserTurnRef.current = true
         const payload = formatQuotedPrompt(selection, prompt)
         if (estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
           showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
+          isAligningUserTurnRef.current = false
           return
         }
         const draft = inputValue
@@ -1598,30 +1689,25 @@ function ChatPageImpl(): React.JSX.Element {
 
   // 记录是否处于底部附近（供抽屉分栏调整或窗口缩放时锚定保持）
   const isAtBottomRef = useRef(true)
+  const visibleStartIndexRef = useRef(0)
   // 检测是否在底部附近（阈值 120px）
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     isAtBottomRef.current = atBottom
     setShowScrollToBottom(!atBottom)
-  }, [])
+    if (atBottom) {
+      sessionVisibleMessages.delete(activeSessionId)
+    } else {
+      const key = messageIdsRef.current[visibleStartIndexRef.current]
+      if (key) sessionVisibleMessages.set(activeSessionId, key)
+    }
+  }, [activeSessionId])
 
-  // 仅在提问与生成回答期间（isSending）动态支撑精确的一屏差额，使得当前轮次总高度恰好贴满视口：
-  // 气泡精准定位在右上顶，同时滚动条自然滑到底部（y 轴贴底），底下绝无多余可滚动的死空白；
-  // 回复完成后自动收缩为 0px，不留多余空白。
-  const virtuosoComponents = useMemo(
-    () => ({
-      Footer: React.memo(() => (
-        <div
-          className="chat-virtuoso-footer-spacer"
-          style={{
-            height: 'var(--chat-turn-spacer, 0px)',
-            minHeight: 'var(--chat-turn-spacer, 0px)',
-            pointerEvents: 'none'
-          }}
-        />
-      ))
-    }),
-    []
-  )
+  // Keep only the scroll range needed to place the latest question near the top.
+  const virtuosoComponents = useMemo(() => ({
+    Footer: React.memo(() => (
+      <div className="chat-virtuoso-footer-spacer" style={{ height: 'var(--chat-turn-spacer, 0px)', pointerEvents: 'none' }} />
+    ))
+  }), [])
 
   // 以实际加入的用户消息触发滚动，避免发送状态先变化时读到旧列表。
   // 虚拟列表包含协作卡片，因此不能用聊天消息数量计算最后一项。
@@ -1634,33 +1720,44 @@ function ChatPageImpl(): React.JSX.Element {
 
   const updateTurnSpacer = useCallback(() => {
     const container = messagesBoxRef.current
-    if (!container) return
-    if (!isSending || !latestUserMessageId) {
-      container.style.setProperty('--chat-turn-spacer', '0px')
-      return
+    const scroller = container?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+    const userRow = latestUserMessageId ? document.getElementById(`msg-${latestUserMessageId}`) : null
+    if (!container || !scroller || !userRow || !scroller.contains(userRow)) return
+    const rows = scroller.querySelectorAll<HTMLElement>('.message-row')
+    const lastRow = rows[rows.length - 1] || userRow
+    const turnHeight = Math.max(0, lastRow.getBoundingClientRect().bottom - userRow.getBoundingClientRect().top)
+    const topInset = 64
+    const spacer = Math.ceil(Math.min(320, Math.max(0, scroller.clientHeight - topInset - turnHeight)))
+    const value = `${spacer}px`
+    if (container.style.getPropertyValue('--chat-turn-spacer') !== value) {
+      container.style.setProperty('--chat-turn-spacer', value)
     }
-    const viewportHeight = container.clientHeight
-    if (viewportHeight <= 0) return
-    const userMsgEl = document.getElementById(`msg-${latestUserMessageId}`)
-    if (!userMsgEl) {
-      const estimatedSpacer = Math.max(0, viewportHeight - 100)
-      container.style.setProperty('--chat-turn-spacer', `${estimatedSpacer}px`)
-      return
-    }
-    const scroller = container.querySelector('[data-virtuoso-scroller="true"]')
-    const rows = scroller ? Array.from(scroller.querySelectorAll('.message-row')) : []
-    const lastRow = rows.length > 0 ? (rows[rows.length - 1] as HTMLElement) : userMsgEl
-    const turnTop = userMsgEl.getBoundingClientRect().top
-    const turnBottom = lastRow.getBoundingClientRect().bottom
-    const turnHeight = Math.max(0, turnBottom - turnTop)
-    // 补齐高度刚好等于视口剩余高度：提问在右上顶，滚动条正好贴底
-    const spacer = Math.max(0, viewportHeight - turnHeight)
-    container.style.setProperty('--chat-turn-spacer', `${spacer}px`)
-  }, [isSending, latestUserMessageId])
+  }, [latestUserMessageId])
+
+  useEffect(() => {
+    messagesBoxRef.current?.style.setProperty('--chat-turn-spacer', '0px')
+  }, [activeSessionId])
 
   useEffect(() => {
     updateTurnSpacer()
   }, [isSending, latestUserMessageId, updateTurnSpacer])
+
+  // 当前进行中的用户提问 ID（提问或重试时设置）
+  const activeTurnUserMsgIdRef = useRef<number | null>(null)
+  // 标记当前是否处于新提问/重试的置顶对齐动画阶段，防止被底部的 autoscroll 抢占导致先滑到底再滑回
+  const isAligningUserTurnRef = useRef(false)
+
+  const scrollToUserMessage = useCallback((userMsgId: number | null, behavior: 'smooth' | 'auto' = 'smooth') => {
+    if (!userMsgId) return
+    const targetKey = `message:${String(userMsgId)}`
+    const targetIndex = messageIdsRef.current.indexOf(targetKey)
+    if (targetIndex === -1) return
+    virtuosoRef.current?.scrollToIndex({
+      index: targetIndex,
+      align: 'start',
+      behavior
+    })
+  }, [])
 
   const lastScrollMessageRef = useRef({
     sessionId: activeSessionId,
@@ -1671,33 +1768,34 @@ function ChatPageImpl(): React.JSX.Element {
     const previous = lastScrollMessageRef.current
     if (previous.sessionId !== activeSessionId) {
       lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
+      activeTurnUserMsgIdRef.current = latestUserMessageId
       return
     }
     if (!latestUserMessageId || previous.messageId === latestUserMessageId) return
+    activeTurnUserMsgIdRef.current = latestUserMessageId
+    lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
+    isAligningUserTurnRef.current = true
+
     let timeoutId: number | null = null
+    let unsuppressId: number | null = null
     const frame = requestAnimationFrame(() => {
-      lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
       updateTurnSpacer()
-      const targetKey = `message:${String(latestUserMessageId)}`
-      const doScroll = (behavior: 'smooth' | 'auto') => {
+      scrollToUserMessage(latestUserMessageId, 'smooth')
+      // 保持平滑过渡动画，在高度与结构稳定后进行平滑校准，绝不粗暴截断动画
+      timeoutId = window.setTimeout(() => {
         updateTurnSpacer()
-        const targetIndex = messageIdsRef.current.indexOf(targetKey)
-        if (targetIndex !== -1) {
-          virtuosoRef.current?.scrollToIndex({
-            index: targetIndex,
-            align: 'start',
-            behavior
-          })
-        }
-      }
-      doScroll('smooth')
-      timeoutId = window.setTimeout(() => doScroll('auto'), 80)
+        scrollToUserMessage(latestUserMessageId, 'smooth')
+      }, 160)
+      unsuppressId = window.setTimeout(() => {
+        isAligningUserTurnRef.current = false
+      }, 600)
     })
     return () => {
       cancelAnimationFrame(frame)
       if (timeoutId) window.clearTimeout(timeoutId)
+      if (unsuppressId) window.clearTimeout(unsuppressId)
     }
-  }, [activeSessionId, latestUserMessageId, isSessionSwitching, updateTurnSpacer])
+  }, [activeSessionId, latestUserMessageId, isSessionSwitching, scrollToUserMessage, updateTurnSpacer])
 
   const handlePreviewFile = useCallback(
     (f: { name: string; path: string; size: number }) => {
@@ -1707,18 +1805,22 @@ function ChatPageImpl(): React.JSX.Element {
     [previewFile, setShowFilePanel]
   )
 
-  // 切换会话时重置滚动状态
+  // 切换会话时恢复已有 tag 的阅读位置，新 tag 从底部打开。
   useEffect(() => {
-    isAtBottomRef.current = true
-    setShowScrollToBottom(false)
-    messagesBoxRef.current?.style.setProperty('--chat-turn-spacer', '0px')
-  }, [activeSessionId])
+    isAtBottomRef.current = !visibleMessage
+    setShowScrollToBottom(Boolean(visibleMessage))
+    if (activeSessMessages.length === 0) {
+      setPositionedSessionId(activeSessionId)
+    }
+  }, [activeSessionId, activeSessMessages.length, visibleMessage])
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback((behavior?: 'smooth' | 'auto' | unknown) => {
     isAtBottomRef.current = true
     setShowScrollToBottom(false)
-    virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
-  }
+
+    const resolvedBehavior = behavior === 'auto' ? 'auto' : 'smooth'
+    virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: resolvedBehavior })
+  }, [])
 
   // 尺寸自适应贴底保持：监听聊天容器尺寸变化（打开/关闭抽屉、分栏拖拽、窗口缩放等）
   // 当宽度或高度变化且用户原本处于贴底状态时，自动重新校准滚动到底部，避免因文本折行导致内容增高而被顶出视口
@@ -1740,6 +1842,7 @@ function ChatPageImpl(): React.JSX.Element {
         const widthChanged = Math.abs(width - prev.width) > 1
         const heightChanged = Math.abs(height - prev.height) > 1
         lastContainerSizeRef.current = { width, height }
+        if (widthChanged || heightChanged) updateTurnSpacer()
 
         if ((widthChanged || heightChanged) && isAtBottomRef.current) {
           if (resizeScrollRafRef.current) {
@@ -1770,7 +1873,7 @@ function ChatPageImpl(): React.JSX.Element {
       if (resizeScrollRafRef.current) cancelAnimationFrame(resizeScrollRafRef.current)
       if (resizeScrollTimerRef.current) window.clearTimeout(resizeScrollTimerRef.current)
     }
-  }, [])
+  }, [updateTurnSpacer])
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
@@ -1849,7 +1952,68 @@ function ChatPageImpl(): React.JSX.Element {
     messageIdsRef.current = next
     return next
   }, [activeSessMessages, collaborationRuns])
+  const visibleMessageIndex = visibleMessage ? messageIds.indexOf(visibleMessage) : -1
+  const revealFrameRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (revealFrameRef.current !== null) cancelAnimationFrame(revealFrameRef.current)
+    revealFrameRef.current = null
+  }, [activeSessionId, positionedSessionId])
 
+  const revealWhenPositioned = useCallback((targetIndex: number) => {
+    if (positionedSessionId === activeSessionId || revealFrameRef.current !== null) return
+    let previousScrollTop: number | null = null
+    let stableFrames = 0
+    const checkPosition = (): void => {
+      revealFrameRef.current = requestAnimationFrame(() => {
+        const scroller = messagesBoxRef.current?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+        const item = scroller?.querySelector<HTMLElement>(`[data-index="${targetIndex}"]`)
+        if (!scroller) {
+          revealFrameRef.current = null
+          return
+        }
+        const viewport = scroller.getBoundingClientRect()
+        const itemRect = item?.getBoundingClientRect()
+        const itemVisible = Boolean(itemRect && itemRect.top < viewport.bottom && itemRect.bottom > viewport.top)
+        stableFrames = itemVisible && previousScrollTop !== null && Math.abs(scroller.scrollTop - previousScrollTop) < 1
+          ? stableFrames + 1
+          : 0
+        if (stableFrames >= 2) {
+          revealFrameRef.current = null
+          setPositionedSessionId(activeSessionId)
+          return
+        }
+        previousScrollTop = scroller.scrollTop
+        checkPosition()
+      })
+    }
+    checkPosition()
+  }, [activeSessionId, positionedSessionId])
+
+  // Virtuoso can omit the target from its first reported range. Keep the loading
+  // state bounded even if ranges change repeatedly while a reply is streaming.
+  const positionTargetRef = useRef({ index: visibleMessageIndex, count: messageIds.length })
+  positionTargetRef.current = { index: visibleMessageIndex, count: messageIds.length }
+  const hasMessages = messageIds.length > 0
+  useEffect(() => {
+    if (isSessionSwitching || !hasMessages || positionedSessionId === activeSessionId) return
+    let firstFrame = 0
+    let secondFrame = 0
+    const timeout = window.setTimeout(() => {
+      const { index, count } = positionTargetRef.current
+      const targetIndex = index >= 0 ? index : count <= 2 ? 0 : count - 1
+      const align = (index >= 0 || count <= 2) ? 'start' : 'end'
+      virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, behavior: 'auto' })
+      firstFrame = requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, behavior: 'auto' })
+        secondFrame = requestAnimationFrame(() => setPositionedSessionId(activeSessionId))
+      })
+    }, 400)
+    return () => {
+      window.clearTimeout(timeout)
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(secondFrame)
+    }
+  }, [activeSessionId, isSessionSwitching, hasMessages, positionedSessionId])
   // Build message and request relationships once per message update. This
   // replaces the previous slice(0, index).findLast(...) work performed by
   // every visible row during every streaming frame.
@@ -1902,11 +2066,33 @@ function ChatPageImpl(): React.JSX.Element {
 
   const handleRetryFailed = useCallback(async (messageId: number) => {
     try {
+      // 寻找此被重试的 assistant 回复对应的上一条用户提问
+      const replyIndex = activeSessMessages.findIndex((m) => m.id === messageId)
+      let userMsgId: number | null = null
+      if (replyIndex !== -1) {
+        for (let i = replyIndex - 1; i >= 0; i--) {
+          if (activeSessMessages[i].sender === 'user') {
+            userMsgId = activeSessMessages[i].id
+            break
+          }
+        }
+      }
+      if (userMsgId) {
+        isAligningUserTurnRef.current = true
+        activeTurnUserMsgIdRef.current = userMsgId
+        scrollToUserMessage(userMsgId, 'smooth')
+        window.setTimeout(() => {
+          scrollToUserMessage(userMsgId, 'smooth')
+        }, 160)
+        window.setTimeout(() => {
+          isAligningUserTurnRef.current = false
+        }, 600)
+      }
       await handleSendChat({ retryReplyId: messageId, sessionId: activeSessionId })
     } catch (error) {
       showToast(error instanceof Error ? error.message : '重试失败，请稍后再试。', 'error')
     }
-  }, [handleSendChat, activeSessionId, showToast])
+  }, [handleSendChat, activeSessionId, showToast, activeSessMessages, scrollToUserMessage])
 
   const itemContent = useCallback(
     (_index: number, timelineId: string) => {
@@ -1991,31 +2177,7 @@ function ChatPageImpl(): React.JSX.Element {
         {/* 消息滚动列表 */}
         {/* 消息滚动列表 */}
         <div className="chat-messages-box" ref={messagesBoxRef}>
-          {isSessionSwitching ? (
-            <div className="chat-skeleton-container">
-              <div className="skeleton-message agent">
-                <div className="skeleton-header">
-                  <div className="skeleton-avatar"></div>
-                  <div className="skeleton-name"></div>
-                </div>
-                <div className="skeleton-bubble long"></div>
-              </div>
-              <div className="skeleton-message user">
-                <div className="skeleton-header">
-                  <div className="skeleton-avatar"></div>
-                  <div className="skeleton-name"></div>
-                </div>
-                <div className="skeleton-bubble short"></div>
-              </div>
-              <div className="skeleton-message agent">
-                <div className="skeleton-header">
-                  <div className="skeleton-avatar"></div>
-                  <div className="skeleton-name"></div>
-                </div>
-                <div className="skeleton-bubble medium"></div>
-              </div>
-            </div>
-          ) : messageIds.length === 0 ? (
+          {!isSessionSwitching && (messageIds.length === 0 ? (
             <div className="chat-empty-state">
               <AgentPetMark key={activeSessionId} active drawOnce className="chat-empty-mark" />
               <h1 className="chat-empty-title">今天想一起完成什么？</h1>
@@ -2062,28 +2224,52 @@ function ChatPageImpl(): React.JSX.Element {
             <Virtuoso
               key={activeSessionId}
               ref={virtuosoRef}
-              style={{ height: '100%' }}
+              style={{ height: '100%', opacity: positionedSessionId === activeSessionId ? 1 : 0, pointerEvents: positionedSessionId === activeSessionId ? 'auto' : 'none' }}
               data={messageIds}
-              context={{ isSending }}
               components={virtuosoComponents}
               computeItemKey={computeMessageKey}
               // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
-              followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+              followOutput={(isAtBottom) => (!isAligningUserTurnRef.current && isAtBottom ? 'auto' : false)}
               // Follow height changes within an existing streaming message as well as new items.
               totalListHeightChanged={() => {
                 updateTurnSpacer()
-                if (isAtBottomRef.current) {
+                if (!isAligningUserTurnRef.current && isAtBottomRef.current) {
                   virtuosoRef.current?.autoscrollToBottom()
                 }
               }}
-              initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
+              initialTopMostItemIndex={visibleMessageIndex >= 0 ? { index: visibleMessageIndex, align: 'start' } : messageIds.length <= 2 ? { index: 0, align: 'start' } : { index: 'LAST', align: 'end' }}
+              rangeChanged={({ startIndex, endIndex }) => {
+                visibleStartIndexRef.current = startIndex
+                if (!isAtBottomRef.current) {
+                  const key = messageIds[startIndex]
+                  if (key) sessionVisibleMessages.set(activeSessionId, key)
+                }
+                const targetIndex = visibleMessageIndex >= 0 ? visibleMessageIndex : messageIds.length - 1
+                if (startIndex <= targetIndex && endIndex >= targetIndex) revealWhenPositioned(targetIndex)
+              }}
               atBottomThreshold={120}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}
             />
+          ))}
+          {(isSessionSwitching || (messageIds.length > 0 && positionedSessionId !== activeSessionId)) && (
+            <div className="chat-skeleton-container chat-skeleton-overlay" aria-label="正在加载会话">
+              <div className="skeleton-message agent">
+                <div className="skeleton-header"><div className="skeleton-avatar" /><div className="skeleton-name" /></div>
+                <div className="skeleton-bubble long" />
+              </div>
+              <div className="skeleton-message user">
+                <div className="skeleton-header"><div className="skeleton-avatar" /><div className="skeleton-name" /></div>
+                <div className="skeleton-bubble short" />
+              </div>
+              <div className="skeleton-message agent">
+                <div className="skeleton-header"><div className="skeleton-avatar" /><div className="skeleton-name" /></div>
+                <div className="skeleton-bubble medium" />
+              </div>
+            </div>
           )}
-          {showScrollToBottom && !isSending && (
-            <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
+          {showScrollToBottom && positionedSessionId === activeSessionId && (
+            <button className="scroll-to-bottom-btn" onClick={() => scrollToBottom('smooth')} title="回到最新">
               <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
               回到最新
             </button>
@@ -2496,6 +2682,48 @@ function ChatPageImpl(): React.JSX.Element {
             </div>
           )}
 
+          {pendingSteeringPrompt && (
+            <div className="steering-draft-bar" role="region" aria-label="追加内容方向缓存">
+              <div
+                className="steering-draft-left"
+                onClick={handleEditSteering}
+                title="点击将内容放回输入框继续编辑；若保持等待，当前回复完成后将自动发送"
+              >
+                <CornerDownRight size={14} strokeWidth={2.2} className="steering-draft-icon" aria-hidden="true" />
+                <span className="steering-draft-text">{pendingSteeringPrompt}</span>
+              </div>
+              <div className="steering-draft-actions">
+                <button
+                  type="button"
+                  className="steering-draft-confirm-btn"
+                  onClick={handleConfirmSteering}
+                  title="立即发送调整方向；若保持等待，当前回复完成后将自动发送"
+                >
+                  <CornerUpRight size={13} strokeWidth={2.2} aria-hidden="true" />
+                  <span>调整方向</span>
+                </button>
+                <button
+                  type="button"
+                  className="steering-draft-icon-btn danger"
+                  onClick={handleDiscardSteering}
+                  title="丢弃此内容（不自动发送）"
+                  aria-label="丢弃此追加方向"
+                >
+                  <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="steering-draft-icon-btn"
+                  onClick={handleEditSteering}
+                  title="放回输入框修改"
+                  aria-label="放回输入框修改"
+                >
+                  <MoreHorizontal size={14} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
+
           <textarea
             ref={chatTextareaRef}
             className="chat-textarea-field resize-none"
@@ -2504,8 +2732,12 @@ function ChatPageImpl(): React.JSX.Element {
               estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
                 ? '单次输入过大，请缩短输入或附件内容后继续。'
                 : isSending
-                  ? `${currentAvatarName} 正在思考中…可继续发送追加指引`
-                  : `输入指令并发送给 ${currentAvatarName} ...`
+                  ? pendingSteeringPrompt
+                    ? '随心输入，当前回复完成后将自动发送上方内容，或点击「调整方向」立即发送...'
+                    : `${currentAvatarName} 正在思考中…可继续发送追加指引`
+                  : pendingSteeringPrompt
+                    ? '已排队等待发送...'
+                    : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
             disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}

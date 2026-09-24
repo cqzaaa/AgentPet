@@ -63,6 +63,8 @@ type ContextCompactionPlan = {
   end: number
   reason: string
   beforeTokens: number
+  toolTokens: number
+  tokenScale: number
 }
 
 const LARGE_TOOL_RESULT_TOKENS = 6000
@@ -468,8 +470,8 @@ grep_content({"pattern":"关键词","scope":"${normalizedPath}","output_mode":"c
 read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
   }
 
-  private getContextCompactionPlan(chatHistory: ChatMessage[], contextWindow: number, tools: unknown[] = [], maxOutputTokens?: number): ContextCompactionPlan | null {
-    return planContextCompaction(chatHistory, contextWindow, tools, maxOutputTokens)
+  private getContextCompactionPlan(chatHistory: ChatMessage[], contextWindow: number, tools: unknown[] = [], maxOutputTokens?: number, tokenScale = 1): ContextCompactionPlan | null {
+    return planContextCompaction(chatHistory, contextWindow, tools, maxOutputTokens, tokenScale)
   }
 
   private async compactContext(
@@ -505,7 +507,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     return {
       archivePath: normalizedPath,
       removedMessages: removed.length,
-      afterTokens: countMessagesTokens(chatHistory),
+      afterTokens: Math.ceil((countMessagesTokens(chatHistory) + plan.toolTokens) * plan.tokenScale),
       activeToolContextTokens: chatHistory
         .slice(chatHistory.findLastIndex(message => message.role === 'user') + 1)
         .filter(message => message.role === 'tool')
@@ -937,6 +939,9 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     const resumedMessages = restoreContext(incomingMessages, config.sessionContext)
     const resumedContext = resumedMessages !== incomingMessages
     const chatHistory: ChatMessage[] = resumedMessages
+    const savedCalibration = resumedContext && config.sessionContext?.tokenCalibration?.model === model
+      ? Number(config.sessionContext.tokenCalibration.scale) : 1
+    let contextTokenScale = Number.isFinite(savedCalibration) ? Math.max(1, savedCalibration) : 1
     let webSourceCounter = 0
     const availableWebSourceIds = new Set<string>()
     const webSourceIdByUrl = new Map<string, string>()
@@ -1199,12 +1204,13 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       try {
         await config.onTraceEvent({ type: 'context/checkpoint', data: { checkpoint: {
           version: 1, userKeys: sourceUserKeys, messages: retained,
-          skills: skillRegistry.getSessionSkills(sessionId).map(skill => ({ id: skill.id, sections: skill.sections }))
+          skills: skillRegistry.getSessionSkills(sessionId).map(skill => ({ id: skill.id, sections: skill.sections })),
+          tokenCalibration: { model, scale: contextTokenScale }
         } } })
       } catch (error) { console.warn('[Context] 无法保存有效上下文检查点:', error) }
     }
     const sessionSkills = [...skillRegistry.getSessionSkills(sessionId), ...(resumedContext ? config.sessionContext?.skills || [] : [])]
-    const skillCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens)
+    const skillCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
     if (skillCompactionPlan) {
       yield { type: 'context_compaction', status: 'started', beforeTokens: skillCompactionPlan.beforeTokens }
       try {
@@ -1298,7 +1304,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     // Full-session mode can already be near the model limit before the first
     // request. Compact once up front so the provider never receives an
     // oversized initial payload; later tool cycles keep using the same guard.
-    const initialCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens)
+    const initialCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
     if (initialCompactionPlan) {
       yield { type: 'context_compaction', status: 'started', beforeTokens: initialCompactionPlan.beforeTokens }
       try {
@@ -1488,6 +1494,16 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         throw err
       }
 
+      // Calibrate the fast byte estimate against the same usage shown by the
+      // context meter so reaching 90% also triggers compaction across turns.
+      const estimatedPromptTokens = countMessagesTokens(chatHistory) + countTokens(effectiveTools)
+      if (responseMsg.usage && estimatedPromptTokens > 0) {
+        const observedTokens = responseMsg.usage.prompt_tokens + responseMsg.usage.completion_tokens
+        if (Number.isFinite(observedTokens) && observedTokens > 0) {
+          contextTokenScale = Math.max(1, observedTokens / estimatedPromptTokens)
+        }
+      }
+
       // 统计 Token 消耗并通知
       yield { type: 'context_usage', contextTokens: responseMsg.usage
         ? responseMsg.usage.prompt_tokens + responseMsg.usage.completion_tokens
@@ -1527,7 +1543,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       const toolCalls = responseMsg.tool_calls
       if (toolCalls && toolCalls.length > 0) {
         if (toolCalls.some(call => ['request_skill', 'wait_skill_ready'].includes(call.function.name))) {
-          const plan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens)
+          const plan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
           if (plan) {
             yield { type: 'context_compaction', status: 'started', beforeTokens: plan.beforeTokens }
             try {
@@ -2015,7 +2031,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         }
 
         await persistContext()
-        const compactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens)
+        const compactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
         if (compactionPlan) {
           yield { type: 'context_compaction', status: 'started', beforeTokens: compactionPlan.beforeTokens }
           try {
@@ -2077,6 +2093,16 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         }
 
         chatHistory.push({ role: 'assistant', content: finalResponse })
+        const finalCompactionPlan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
+        if (finalCompactionPlan) {
+          yield { type: 'context_compaction', status: 'started', beforeTokens: finalCompactionPlan.beforeTokens }
+          try {
+            const compacted = await this.compactContext(chatHistory, finalCompactionPlan, sessionId, modelProvider, model, abortSignal)
+            yield { type: 'context_compaction', status: 'completed', beforeTokens: finalCompactionPlan.beforeTokens, ...compacted }
+          } catch (error) {
+            yield { type: 'context_compaction', status: 'failed', beforeTokens: finalCompactionPlan.beforeTokens, detail: String(error) }
+          }
+        }
         await persistContext()
         yield { type: 'text', content: finalResponse }
 

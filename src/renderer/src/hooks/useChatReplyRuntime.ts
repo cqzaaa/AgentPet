@@ -136,7 +136,7 @@ export function useChatReplyRuntime({
           text: currentText + suffix,
           retryBaseText: undefined,
           isThinking: false,
-          isError: !isAbort
+          isError: true
         })
         return savedMessage
       })
@@ -164,7 +164,8 @@ export function useChatReplyRuntime({
           const updated = {
             ...message,
             text: message.text ? `${message.text}\n\n⚠️ 对话生成已被手动中断。` : '⚠️ 对话生成已被手动中断。',
-            isThinking: false
+            isThinking: false,
+            isError: true
           }
           const cleanedUpdated = withoutEphemeralInteractionSteps(updated)
           interrupted.push(cleanedUpdated)

@@ -134,6 +134,7 @@ function eventSummary(event: TraceEvent): string {
   if (event.type === 'assistant/message') return textFromContent(data.message?.content) || `${data.message?.tool_calls?.length || 0} 个工具调用`
   if (event.type === 'assistant/reasoning') return String(data.detail || '')
   if (event.type === 'assistant/reasoning_chunk') return String(data.detail || '')
+  if (event.type === 'tool/call' && data.name === 'context_compaction') return `上下文压缩 · ${data.arguments?.thresholdPercent || 90}% 阈值`
   if (event.type === 'tool/call') return `${data.name || '工具'}(${compactJson(data.arguments)})`
   if (event.type === 'tool/result') return String(data.displayResult || data.modelResult || '工具执行完成')
   if (event.type === 'mcp/connection') {

@@ -14,7 +14,7 @@ export interface FileChangeRecord {
 }
 
 /**
- * 经典 LCS 行对比算法计算增删行数
+ * 经典 LCS 行对比算法计算增删行数（带首尾剥离与 O(min(M,N)) 滚动数组优化）
  */
 export function computeLineDiff(oldText: string, newText: string): { additions: number; deletions: number } {
   const oldLines = oldText ? oldText.split('\n') : []
@@ -27,39 +27,62 @@ export function computeLineDiff(oldText: string, newText: string): { additions: 
   if (m === 0) return { additions: n, deletions: 0 }
   if (n === 0) return { additions: 0, deletions: m }
 
-  // 超过百万网格时使用首尾快速匹配，避免过大内存消耗
-  if (m * n > 1000000) {
-    let start = 0
-    while (start < m && start < n && oldLines[start] === newLines[start]) {
-      start++
-    }
-    let endOld = m - 1
-    let endNew = n - 1
-    while (endOld >= start && endNew >= start && oldLines[endOld] === newLines[endNew]) {
-      endOld--
-      endNew--
-    }
-    const deletions = Math.max(0, endOld - start + 1)
-    const additions = Math.max(0, endNew - start + 1)
-    return { additions, deletions }
+  // 1. 先快速剥离公共前缀与公共后缀
+  let start = 0
+  while (start < m && start < n && oldLines[start] === newLines[start]) {
+    start++
+  }
+  let endOld = m - 1
+  let endNew = n - 1
+  while (endOld >= start && endNew >= start && oldLines[endOld] === newLines[endNew]) {
+    endOld--
+    endNew--
   }
 
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) {
-      if (oldLines[i] === newLines[j]) {
-        dp[i + 1][j + 1] = dp[i][j] + 1
-      } else {
-        dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1])
+  const midOldCount = endOld - start + 1
+  const midNewCount = endNew - start + 1
+
+  if (midOldCount <= 0 && midNewCount <= 0) return { additions: 0, deletions: 0 }
+  if (midOldCount <= 0) return { additions: midNewCount, deletions: 0 }
+  if (midNewCount <= 0) return { additions: 0, deletions: midOldCount }
+
+  // 2. 对剥离首尾后的中间改动区间，使用一维滚动数组计算 LCS（内存开销仅为 O(min(M,N))，避免大矩阵撑爆内存）
+  if (midOldCount * midNewCount <= 16000000) {
+    const [shortLines, longLines] = midOldCount <= midNewCount
+      ? [oldLines.slice(start, endOld + 1), newLines.slice(start, endNew + 1)]
+      : [newLines.slice(start, endNew + 1), oldLines.slice(start, endOld + 1)]
+    const shortLen = shortLines.length
+    const longLen = longLines.length
+
+    let prev = new Int32Array(shortLen + 1)
+    let curr = new Int32Array(shortLen + 1)
+
+    for (let i = 0; i < longLen; i++) {
+      const longItem = longLines[i]
+      for (let j = 0; j < shortLen; j++) {
+        if (longItem === shortLines[j]) {
+          curr[j + 1] = prev[j] + 1
+        } else {
+          curr[j + 1] = curr[j] > prev[j + 1] ? curr[j] : prev[j + 1]
+        }
       }
+      const temp = prev
+      prev = curr
+      curr = temp
+      curr.fill(0)
+    }
+
+    const common = prev[shortLen]
+    return {
+      additions: midNewCount - common,
+      deletions: midOldCount - common
     }
   }
 
-  const common = dp[m][n]
-  return {
-    additions: n - common,
-    deletions: m - common
-  }
+  // 极端超大改动区间（如数十万行全量变化）时兜底
+  const deletions = midOldCount
+  const additions = midNewCount
+  return { additions, deletions }
 }
 
 export class FileChangeTracker {

@@ -63,7 +63,7 @@ export function isStandaloneLocalFilePath(value: string): boolean {
 }
 
 export function createMessageLinkRegex(): RegExp {
-  return /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/[^\s\])<>"'\x60*，。！？；：（）]+)|(?:(?:file|local-file):\/\/\/[^<>"|?*\r\n，。！？；：、'\x60\]]+)|(?:[A-Za-z]:[\\/][^<>:"|?*\r\n，。！？；：、'\x60\]]+))/g
+  return /(!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\))|((?:https?:\/\/[^\s\])<>"'\x60*，。！？；：（）]+)|(?:(?:file|local-file):\/\/\/[^<>"|?*\r\n，。！？；：、'\x60\]]+?|[A-Za-z]:[\\/][^<>:"|?*\r\n，。！？；：、'\x60\]]+?)\.[A-Za-z0-9]{1,12}(?=$|[\s\u3400-\u9fff，。！？；：、,;!?)]))/g
 }
 
 export function trimDetectedFileReference(value: string): { reference: string; suffix: string } {

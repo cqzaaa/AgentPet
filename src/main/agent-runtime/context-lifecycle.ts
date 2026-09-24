@@ -2,7 +2,13 @@ import { createHash } from 'crypto'
 import type { ChatMessage } from '../model-runtime'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
 
-export type ContextCheckpoint = { version: 1; userKeys: string[]; messages: ChatMessage[]; skills?: Array<{ id: string; sections?: string[] }> }
+export type ContextCheckpoint = {
+  version: 1
+  userKeys: string[]
+  messages: ChatMessage[]
+  skills?: Array<{ id: string; sections?: string[] }>
+  tokenCalibration?: { model: string; scale: number }
+}
 
 export function userContextKeys(messages: ChatMessage[]): string[] {
   return messages.filter(message => message.role === 'user')
@@ -30,11 +36,13 @@ export function restoreContext(messages: ChatMessage[], checkpoint?: ContextChec
 
 export function contextCompactionThreshold(window: number, output = 4096): number {
   const reserve = Math.max(4096, output) + Math.min(8192, Math.max(2048, window * 0.03))
-  return Math.max(4096, Math.min(window * 0.92, window - reserve))
+  return Math.max(4096, Math.min(window * 0.9, window - reserve))
 }
 
-export function planContextCompaction(messages: ChatMessage[], window: number, tools: unknown[] = [], output?: number): { start: number; end: number; reason: string; beforeTokens: number } | null {
-  const beforeTokens = countMessagesTokens(messages) + countTokens(tools)
+export function planContextCompaction(messages: ChatMessage[], window: number, tools: unknown[] = [], output?: number, tokenScale = 1): { start: number; end: number; reason: string; beforeTokens: number; toolTokens: number; tokenScale: number } | null {
+  const toolTokens = countTokens(tools)
+  const safeScale = Number.isFinite(tokenScale) ? Math.max(1, tokenScale) : 1
+  const beforeTokens = Math.ceil((countMessagesTokens(messages) + toolTokens) * safeScale)
   if (beforeTokens < contextCompactionThreshold(window, output)) return null
   let start = messages.findIndex(message => message.role !== 'system')
   const lastUser = messages.findLastIndex(message => message.role === 'user')
@@ -48,7 +56,7 @@ export function planContextCompaction(messages: ChatMessage[], window: number, t
     end = cycles[cycles.length - 2].index
   }
   if (end <= start) return null
-  return { start, end, reason: '有效上下文接近容量阈值，预留下一次回答空间', beforeTokens }
+  return { start, end, reason: '有效上下文接近容量阈值，预留下一次回答空间', beforeTokens, toolTokens, tokenScale: safeScale }
 }
 
 export const COMPACTION_PROMPT = `你负责为一个正在执行任务的助手生成可继续工作的上下文检查点，不执行任务，不调用工具。
