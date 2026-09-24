@@ -306,7 +306,12 @@ export function getInternalClipboard() {
 
 // ── Zustand Global Store ─────────────────────────────────────
 export const useAppStoreRaw = create<any>((set) => ({
-  activeTab: 'chat',
+  activeTab: (() => {
+    const saved = localStorage.getItem('agentpet_active_tab')
+    return saved && ['chat', 'control', 'agents', 'agent', 'skillhub', 'knowledge', 'workflow', 'logs', 'settings'].includes(saved)
+      ? saved
+      : 'chat'
+  })(),
   agentSubTab: 'skills',
   settingsSubTab: 'keys',
   isCollapsed: false,
@@ -1084,7 +1089,7 @@ export function useAppStore() {
     try {
       const currentActiveId = useAppStoreRaw.getState().activeSessionId
       const localSess = await window.api.getLocalSessions({
-        activeSessionId: clearThinking ? undefined : currentActiveId
+        activeSessionId: currentActiveId
       })
       if (requestId !== refreshSessionsRequestRef.current) return
       if (localSess && localSess.length > 0) {
@@ -1119,7 +1124,7 @@ export function useAppStore() {
             window.api.saveMessages(cleanedMessagesToSave.map(item => ({ ...item.msg, sessionId: item.sessionId }))).catch(console.error)
           }
 
-          // 重新打开应用时，默认选择最近创建的非置顶会话（若无非置顶会话，则选择最新的置顶会话）
+          // 优先恢复上次打开的会话；会话已删除时回退到最近创建的会话。
           if (cleaned.length > 0) {
             const unpinned = cleaned.filter((s: any) => !s.pinned && !s.id.startsWith('wechat:'))
             let latestSess: any = null
@@ -1142,8 +1147,9 @@ export function useAppStore() {
                 }
               }
             }
-            if (latestSess) {
-              setActiveSessionId(latestSess.id)
+            const savedSession = cleaned.find((session: Session) => session.id === currentActiveId)
+            if (savedSession || latestSess) {
+              setActiveSessionId(savedSession?.id || latestSess.id)
             }
           }
         } else {

@@ -103,6 +103,30 @@ const SETTINGS_SUB_TAB_LABELS: Record<string, string> = {
 const isFunctionPage = (tab: string): tab is FunctionPageId =>
   Object.prototype.hasOwnProperty.call(FUNCTION_PAGE_LABELS, tab)
 
+const restoreWorkspaceTabs = (): WorkspaceTab[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('agentpet_workspace_tabs') || '[]')
+    if (!Array.isArray(saved)) return []
+    const tabs: WorkspaceTab[] = []
+    const keys = new Set<string>()
+    for (const item of saved) {
+      let tab: WorkspaceTab | null = null
+      if (item?.kind === 'session' && typeof item.sessionId === 'string' && item.sessionId) {
+        tab = { key: `session:${item.sessionId}`, kind: 'session', sessionId: item.sessionId }
+      } else if (item?.kind === 'page' && isFunctionPage(item.pageId)) {
+        tab = { key: `page:${item.pageId}`, kind: 'page', pageId: item.pageId }
+      }
+      if (tab && !keys.has(tab.key)) {
+        tabs.push(tab)
+        keys.add(tab.key)
+      }
+    }
+    return tabs
+  } catch {
+    return []
+  }
+}
+
 const checkIsThinking = (s: Session | undefined): boolean => {
   if (!s || !s.messages) return false
   for (let i = s.messages.length - 1; i >= 0; i--) {
@@ -330,7 +354,7 @@ export function AgentWindow(): React.JSX.Element {
     return () => window.removeEventListener('resize', checkMaximized)
   }, [])
 
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([])
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(restoreWorkspaceTabs)
   const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null)
   const [workspaceToDeletePath, setWorkspaceToDeletePath] = useState<string | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -442,12 +466,21 @@ export function AgentWindow(): React.JSX.Element {
   }, [activeTab])
 
   useEffect(() => {
+    if (!isSessionsInitialized) return
     const validIds = new Set(sessions.map((s) => s.id))
     setWorkspaceTabs((prev) => {
       const next = prev.filter((tab) => tab.kind === 'page' || validIds.has(tab.sessionId))
       return next.length === prev.length ? prev : next
     })
-  }, [sessions])
+  }, [isSessionsInitialized, sessions])
+
+  useEffect(() => {
+    localStorage.setItem('agentpet_workspace_tabs', JSON.stringify(workspaceTabs))
+  }, [workspaceTabs])
+
+  useEffect(() => {
+    localStorage.setItem('agentpet_active_tab', activeTab)
+  }, [activeTab])
 
   const activateWorkspaceTab = (tab: WorkspaceTab): void => {
     if (tab.kind === 'session') {
