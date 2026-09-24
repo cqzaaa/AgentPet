@@ -254,9 +254,9 @@ body {
   --text-recent-active: #bfdbfe;
 
   --bg-titlebar: transparent;
-  --bg-titlebar-tab-active: rgba(255, 255, 255, 0.06);
-  --bg-titlebar-tab-hover: rgba(255, 255, 255, 0.02);
-  --text-titlebar-tab-active: #bfdbfe;
+  --bg-titlebar-tab-active: rgba(255, 255, 255, 0.08);
+  --bg-titlebar-tab-hover: rgba(255, 255, 255, 0.04);
+  --text-titlebar-tab-active: #f8fafc;
   --bg-titlebar-btn-hover: rgba(255, 255, 255, 0.06);
   --bg-titlebar-close-hover: #ef4444;
 
@@ -337,8 +337,8 @@ body {
 
   --bg-titlebar: transparent;
   --bg-titlebar-tab-active: #ffffff;
-  --bg-titlebar-tab-hover: rgba(0, 0, 0, 0.02);
-  --text-titlebar-tab-active: #3b82f6;
+  --bg-titlebar-tab-hover: rgba(0, 0, 0, 0.04);
+  --text-titlebar-tab-active: #0f172a;
   --bg-titlebar-btn-hover: rgba(0, 0, 0, 0.05);
   --bg-titlebar-close-hover: #ef4444;
 
@@ -419,20 +419,48 @@ body {
 .titlebar-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  height: 28px;
-  border-radius: 6px;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  height: 30px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
-  max-width: 150px;
-  min-width: 70px;
+  max-width: 160px;
+  min-width: 72px;
   position: relative;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
   box-sizing: border-box;
+  border: 1px solid transparent;
+}
+
+/* 标签之间的轻量细分割线（未激活状态时呈现） */
+.titlebar-tab::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 12px;
+  width: 1px;
+  background: var(--border-color);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.titlebar-tab.active::after,
+.titlebar-tab:hover::after,
+.titlebar-tab:last-of-type::after {
+  opacity: 0;
+}
+
+/* 当后一个 tab 处于 hover 或 active 时，隐藏前一个 tab 的分割线 */
+.titlebar-tab:has(+ .titlebar-tab:hover)::after,
+.titlebar-tab:has(+ .titlebar-tab.active)::after {
+  opacity: 0;
 }
 
 .titlebar-tab:hover {
@@ -444,12 +472,27 @@ body {
   background: var(--bg-titlebar-tab-active);
   color: var(--text-titlebar-tab-active);
   font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
   border: 1px solid var(--border-color);
 }
 
 .titlebar-tab.function-tab {
-  min-width: 82px;
+  min-width: 86px;
+}
+
+/* Tab 内微图标 */
+.titlebar-tab-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.titlebar-tab:hover .titlebar-tab-icon {
+  color: var(--text-secondary);
+}
+
+.titlebar-tab.active .titlebar-tab-icon {
+  color: var(--accent-primary, #3b82f6);
 }
 
 .titlebar-tab-overflow {
@@ -463,27 +506,29 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   letter-spacing: 1px;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .titlebar-tab-overflow-btn:hover,
 .titlebar-tab-overflow-btn.active {
   background: var(--bg-titlebar-tab-hover);
   color: var(--text-primary);
+  border-color: var(--border-color);
 }
 
 .titlebar-tab-overflow-menu {
   position: absolute;
-  top: 32px;
+  top: 34px;
   right: 0;
   width: 220px;
   max-height: 320px;
@@ -506,9 +551,24 @@ body {
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
+  transition: background-color 0.12s ease;
 }
 
-.titlebar-tab-overflow-item > span:first-child {
+.titlebar-tab-overflow-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.titlebar-tab-overflow-item:hover .titlebar-tab-overflow-icon,
+.titlebar-tab-overflow-item.active .titlebar-tab-overflow-icon {
+  color: var(--accent-primary, #3b82f6);
+}
+
+.titlebar-tab-overflow-item > span:nth-child(2) {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -528,9 +588,10 @@ body {
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: 4px;
   color: var(--text-muted);
   font-size: 10px;
+  transition: all 0.12s ease;
 }
 
 .titlebar-tab-overflow-close:hover {
@@ -584,6 +645,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0;
 }
 
 /* 关闭标签按钮 */
@@ -591,21 +653,31 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  font-size: 9px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
   color: var(--text-muted);
-  opacity: 0.6;
-  transition: all 0.15s ease;
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   line-height: 1;
-  margin-right: -4px;
+  margin-right: -2px;
+  flex-shrink: 0;
+}
+
+.titlebar-tab:hover .titlebar-tab-close,
+.titlebar-tab.active .titlebar-tab-close {
+  opacity: 0.65;
+  transform: scale(1);
+  pointer-events: auto;
 }
 
 .titlebar-tab-close:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  opacity: 1;
+  background: rgba(239, 68, 68, 0.14) !important;
+  color: #ef4444 !important;
+  opacity: 1 !important;
 }
 
 /* 新建会话按钮 '+' */
@@ -613,21 +685,28 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  margin-left: 2px;
 }
 
 .titlebar-new-tab-btn:hover {
   background: var(--bg-titlebar-tab-hover);
   color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.titlebar-new-tab-btn:active {
+  transform: scale(0.92);
 }
 
 /* 右侧控制按钮区域 */

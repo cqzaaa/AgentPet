@@ -6,6 +6,7 @@ import type { Session } from '../hooks/useAppStore'
 import { ChatControllerProvider } from '../hooks/useChatController'
 import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import {
+  Bot,
   CheckCircle2,
   ChevronRight,
   CircleX,
@@ -27,6 +28,7 @@ import {
   Plus,
   Route,
   ScrollText,
+  Settings as SettingsGlyph,
   Square,
   Store,
   Sun,
@@ -376,6 +378,35 @@ export function AgentWindow(): React.JSX.Element {
       return `设置-${SETTINGS_SUB_TAB_LABELS[settingsSubTab] || '模型配置'}`
     }
     return FUNCTION_PAGE_LABELS[tab.pageId]
+  }
+
+  const renderWorkspaceTabIcon = (tab: WorkspaceTab): React.JSX.Element => {
+    if (tab.kind === 'page') {
+      switch (tab.pageId) {
+        case 'workflow':
+          return <Workflow size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'knowledge':
+          return <Library size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'logs':
+          return <ScrollText size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'skillhub':
+          return <Store size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'control':
+          return <Route size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'agents':
+        case 'agent':
+          return <Bot size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        case 'settings':
+          return <SettingsGlyph size={13} className="titlebar-tab-icon" aria-hidden="true" />
+        default:
+          return <MessageSquareText size={13} className="titlebar-tab-icon" aria-hidden="true" />
+      }
+    }
+    const session = sessionsById.get(tab.sessionId)
+    if (session?.workspacePath) {
+      return <FolderOpen size={13} className="titlebar-tab-icon" aria-hidden="true" />
+    }
+    return <MessageSquareText size={13} className="titlebar-tab-icon" aria-hidden="true" />
   }
 
   const workspacePaths = useMemo(
@@ -934,7 +965,11 @@ export function AgentWindow(): React.JSX.Element {
                     className={`titlebar-tab ${tab.kind === 'page' ? 'function-tab' : ''} ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
                     onClick={() => activateWorkspaceTab(tab)}
                   >
-                    {isThinking && <span className="tab-status-dot-pulse"></span>}
+                    {isThinking ? (
+                      <span className="tab-status-dot-pulse" aria-hidden="true" />
+                    ) : (
+                      renderWorkspaceTabIcon(tab)
+                    )}
                     <span className="titlebar-tab-name">
                       {label}
                     </span>
@@ -982,6 +1017,7 @@ export function AgentWindow(): React.JSX.Element {
                           setShowTabOverflowMenu(false)
                         }}
                       >
+                        <span className="titlebar-tab-overflow-icon">{renderWorkspaceTabIcon(tab)}</span>
                         <span>{getWorkspaceTabLabel(tab)}</span>
                         <Tooltip content="关闭标签页" placement="left">
                           <span
