@@ -80,10 +80,9 @@ export class AuditPipeline {
         }
       }
 
-      // Match Codex's auto-review shape without pretending that AgentPet has an
-      // OS-enforced command sandbox: only positively classified workspace
-      // inspection/verification commands are auto-approved. Unknown commands
-      // fail closed and still ask the user.
+      // Only positively classified workspace inspection/verification commands
+      // are auto-approved without pretending that AgentPet has an OS-enforced
+      // command sandbox. Unknown commands fail closed and still ask the user.
       if (permissionMode === 'assist' && isRoutineWorkspaceCommand(command)) {
         return { blocked: false, requireApproval: false }
       }
@@ -118,7 +117,7 @@ export class AuditPipeline {
         return {
           blocked: false,
           requireApproval: true,
-          warning: '自动审核无法确认该命令只在授权工作区内执行常规检查。AgentPet 尚未提供 Codex 等价的操作系统级命令沙箱，请手动核对后允许。'
+          warning: '自动审核无法确认该命令只在授权工作区内执行常规检查。AgentPet 尚未提供操作系统级命令沙箱，请手动核对后允许。'
         }
       }
       return { blocked: false, requireApproval: false }

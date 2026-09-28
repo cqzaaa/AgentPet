@@ -2285,7 +2285,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
               gap: '8px',
               padding: '0 16px 8px',
               flexWrap: 'wrap',
-              overflowX: 'auto'
+              overflowX: 'auto',
+              width: 'min(calc(100% - 24px), 920px)',
+              margin: '0 auto',
+              boxSizing: 'border-box'
             }}
           >
             {attachedFiles.map((file, idx) => (

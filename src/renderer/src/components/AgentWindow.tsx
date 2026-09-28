@@ -272,6 +272,33 @@ export function AgentWindow(): React.JSX.Element {
   const historyMenuRef = useRef<HTMLDivElement>(null)
   const [historyMenuPosition, setHistoryMenuPosition] = useState({ top: 0, right: 0 })
 
+  // 视口响应式自适应：当屏幕宽度小于等于 900px 时自动收起侧边栏为 Mini Rail 模式，扩宽后自动恢复
+  const autoCollapsedByMediaRef = useRef(false)
+  const isCollapsedRef = useRef(isCollapsed)
+  isCollapsedRef.current = isCollapsed
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mql = window.matchMedia('(max-width: 900px)')
+    const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      if (e.matches) {
+        if (!isCollapsedRef.current) {
+          autoCollapsedByMediaRef.current = true
+          setIsCollapsed(true)
+        }
+      } else {
+        if (autoCollapsedByMediaRef.current) {
+          autoCollapsedByMediaRef.current = false
+          setIsCollapsed(false)
+        }
+      }
+    }
+
+    handleMediaChange(mql)
+    mql.addEventListener('change', handleMediaChange)
+    return () => mql.removeEventListener('change', handleMediaChange)
+  }, [setIsCollapsed])
+
   // 保护：一旦进入轨迹视图或切换非 chat 页面，立即清除编排全屏沉浸样式，防止标题栏控制按钮与内容区按钮重叠
   useEffect(() => {
     if (showTrajectory || activeTab !== 'chat') {
@@ -720,7 +747,13 @@ export function AgentWindow(): React.JSX.Element {
                 </div>
               )}
             </div>
-            <button className="brand-collapse-btn" onClick={() => setIsCollapsed(!isCollapsed)}>
+            <button
+              className="brand-collapse-btn"
+              onClick={() => {
+                autoCollapsedByMediaRef.current = false
+                setIsCollapsed(!isCollapsed)
+              }}
+            >
               {isCollapsed ? (
                 <PanelLeftOpen size={16} strokeWidth={2} aria-hidden="true" />
               ) : (

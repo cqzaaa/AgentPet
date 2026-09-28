@@ -2744,7 +2744,8 @@ body {
 .scroll-to-bottom-btn {
   position: absolute;
   bottom: 12px;
-  right: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 10;
   display: inline-flex;
   align-items: center;
@@ -2769,7 +2770,7 @@ body {
   /* background: var(--color-primary, #3b82f6); */
   /* color: #fff; */
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
-  transform: translateY(-1px);
+  transform: translateX(-50%) translateY(-1px);
 }
 
 .scroll-to-bottom-btn svg {
@@ -2779,12 +2780,12 @@ body {
 @keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateX(-50%) translateY(8px);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 
@@ -2808,6 +2809,9 @@ body {
   padding: 40px 24px 40px;
   overflow-y: auto;
   box-sizing: border-box;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
 }
 
 .chat-empty-mark {
@@ -2913,9 +2917,12 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
   padding-bottom: 20px;
-  padding-left: clamp(16px, 3vw, 56px);
-  padding-right: clamp(16px, 3vw, 56px);
+  padding-left: clamp(16px, 3vw, 40px);
+  padding-right: clamp(16px, 3vw, 40px);
   box-sizing: border-box;
 }
 
@@ -3754,7 +3761,8 @@ body {
 
 /* 现代卡片式输入控制面板 */
 .chat-control-card {
-  margin: 0 12px 12px 12px;
+  width: min(calc(100% - 24px), 920px);
+  margin: 0 auto 12px auto;
   background: var(--bg-composer, var(--bg-card));
   border: 1px solid var(--border-card);
   border-radius: 12px;
@@ -3762,6 +3770,7 @@ body {
   flex-direction: column;
   padding: 10px 14px;
   box-shadow: var(--shadow-composer);
+  box-sizing: border-box;
   transition:
     border-color 0.25s,
     box-shadow 0.25s;
@@ -9402,6 +9411,9 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .skeleton-message {

@@ -58,6 +58,18 @@ import {
   trimDetectedFileReference
 } from './localFileLinks'
 
+function readableWebSourceSnippet(source: { snippet?: string; sourceType?: string }): string {
+  const snippet = String(source.snippet || '').trim()
+  if (!snippet) return ''
+  if (source.sourceType === 'fetch' && /^[\[{]\s*(?:\{|"[^"\n]+"\s*:)/.test(snippet)) {
+    return '结构化数据（JSON），点击查看原文'
+  }
+  if (source.sourceType === 'fetch' && /[─━│┃┌┐└┘├┤┬┴┼╭╮╰╯]/.test(snippet)) {
+    return '页面包含终端排版内容，点击查看原文'
+  }
+  return snippet.replace(/\s+/g, ' ')
+}
+
 // 计算文本的 token 数（使用降级策略的估算方式：字符数 × 0.5）
 function estimateTokens(text: string): number {
   if (!text) return 0
@@ -257,15 +269,31 @@ function escapeHtml(text: string): string {
 
 function parseInlineMarkdown(text: string): string {
   let html = escapeHtml(text)
-  // 1. 粗体 **text**
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  // 2. 强调 *text*。用空白边界避免误伤 URL、文件名与代码内容。
-  html = html.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1<em>$2</em>')
-  // 3. 内联代码 `code`
-  html = html.replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
-  // 4. 图片 ![alt](url)
+
+  // 1. 保护内联代码 `code`，提取为临时标记，防止其内部符号被粗体、斜体或链接规则误伤
+  const inlineCodeMap = new Map<string, string>()
+  let codeIdx = 0
+  html = html.replace(/`([^`\n]+)`/g, (_match, code) => {
+    const token = `__INLINE_CODE_TOKEN_${codeIdx++}__`
+    inlineCodeMap.set(token, `<code class="inline-code">${code}</code>`)
+    return token
+  })
+
+  // 2. 允许 Markdown / 表格中常见的显式换行标签 <br> / <br/> / <br />（转义后为 &lt;br...&gt;）
+  html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br />')
+
+  // 3. 粗斜体 ***text*** 与 粗体 **text**
+  html = html.replace(/\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*/g, '<strong><em>$1</em></strong>')
+  html = html.replace(/\*\*(?!\s)(.+?)(?<!\s)\*\*/g, '<strong>$1</strong>')
+
+  // 4. 强调 *text*。匹配合法 Markdown 斜体，支持在换行标签、标点、括号及中文字符后正常生效，
+  // 同时排除纯乘法算式（如 2 * 3）、文件通配符（如 *.ts、*.*）等场景
+  html = html.replace(/(?<!\*)\*(?!\s|\*)([^*\n]*?[\w\u4e00-\u9fa5][^*\n]*?)(?<!\s|\*)\*(?!\*)/g, '<em>$1</em>')
+
+  // 5. 图片 ![alt](url)
   html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
-  // 5. 链接 [text](url)
+
+  // 6. 链接 [text](url)
   html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, (_match, label, rawHref) => {
     const cleanHref = rawHref.replace(/^&lt;/, '').replace(/&gt;$/, '').trim()
@@ -278,13 +306,23 @@ function parseInlineMarkdown(text: string): string {
     const tooltipText = '点击打开 / 预览文件 · 右键打开所在目录'
     return `<a href="${cleanHref}" target="_blank" class="markdown-link local-link local-file-pill" title="${tooltipText}">${displayIcon}<span class="file-pill-name">${label}</span><span class="file-pill-action">打开</span></a>`
   })
-  // 6. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
+
+  // 7. 知识库证据角标：由消息组件按引用 ID 打开原文浮层
   html = html.replace(/(?:\[KB(\d+)\]|【KB(\d+)】)/gi, (_match, squareId, bracketId) => {
     const id = squareId || bracketId
     return `<button type="button" class="knowledge-citation" data-citation-id="KB${id}" aria-label="查看知识库引用 KB${id}">【KB${id}】</button>`
   })
+
   // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
   html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">【S$1】</span>')
+
+  // 8. 还原受保护的内联代码
+  if (inlineCodeMap.size > 0) {
+    inlineCodeMap.forEach((rendered, key) => {
+      html = html.replaceAll(key, rendered)
+    })
+  }
+
   return html
 }
 
@@ -747,7 +785,7 @@ function parseMarkdownToHtml(markdown: string): string {
 
     // 5. 表格行 (| col1 | col2 |)
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      const isSeparator = /^\|[\s-|-|:|.]+$/.test(trimmed)
+      const isSeparator = /^\|[\s\-:|.]+$/.test(trimmed)
       if (isSeparator) {
         continue
       }
@@ -2574,7 +2612,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     <span className="web-citation">{source.id}</span>
                     <span style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.title}</span>
                   </div>
-                  {source.snippet && <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', marginTop: '4px', lineHeight: 1.45 }}>{source.snippet}</div>}
+                  {source.snippet && <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', marginTop: '4px', lineHeight: 1.45, overflowWrap: 'anywhere' }}>{readableWebSourceSnippet(source)}</div>}
                   <div style={{ fontSize: '10px', color: '#2563eb', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.url}</div>
                 </a>
               ))}
