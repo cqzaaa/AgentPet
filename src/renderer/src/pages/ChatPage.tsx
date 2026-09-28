@@ -1347,9 +1347,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     setPendingSteeringPrompt(null)
     isAligningUserTurnRef.current = true
     window.setTimeout(() => {
-      void handleSendChat({ text: textToSend, sessionId: activeSessionId })
+      void handleSendChat({ text: textToSend, sessionId: activeSessionId, attachedFiles })
     }, 0)
-  }, [pendingSteeringPrompt, handleSendChat, activeSessionId, setPendingSteeringPrompt])
+  }, [pendingSteeringPrompt, handleSendChat, activeSessionId, attachedFiles, setPendingSteeringPrompt])
 
   const handleDiscardSteering = useCallback(() => {
     setPendingSteeringPrompt(null)
@@ -1368,7 +1368,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       return
     }
     // 正在生成且输入框有追加内容时，优先进入方向缓存区，供确认后再次发送调整
-    if (isSending && inputValue.trim()) {
+    if (isSending && inputValue.trim() && attachedFiles.length === 0) {
       setPendingSteeringPrompt(inputValue.trim())
       setInputValue('')
       return
@@ -1422,7 +1422,13 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           }
           // 稍作延时（100ms），等待上一轮生成的消息完成本地持久化落库和 DOM 结算，再自动无缝开启新一轮对话
           window.setTimeout(() => {
-            void handleSendChat({ text: bufferedPrompt, sessionId: sessId })
+            void handleSendChat({
+              text: bufferedPrompt,
+              sessionId: sessId,
+              ...(sessId === useAppStoreRaw.getState().activeSessionId
+                ? { attachedFiles: useAppStoreRaw.getState().attachedFiles }
+                : {})
+            })
           }, 100)
         }
       }

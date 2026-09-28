@@ -121,7 +121,7 @@ function getDisplayTitle(session: Session): string {
 type RenderRow =
   | { type: 'header'; key: string; groupKey: GroupKey; label: string }
   | { type: 'workspace'; key: string; path: string; count: number }
-  | { type: 'showMore'; key: string; groupId: string; remaining: number }
+  | { type: 'showMore'; key: string; groupId: string; remaining: number; isWorkspace?: boolean }
   | { type: 'item'; key: string; session: Session }
 
 interface Props {
@@ -293,7 +293,11 @@ export function RecentSessionList(props: Props): React.JSX.Element {
       }
     }
     const out: RenderRow[] = []
-    const appendSessions = (groupId: string, groupedSessions: Session[]): void => {
+    const appendSessions = (
+      groupId: string,
+      groupedSessions: Session[],
+      isWorkspace = false
+    ): void => {
       const visibleSessions = expandedSessionGroups[groupId]
         ? groupedSessions
         : groupedSessions.slice(0, 5)
@@ -305,7 +309,8 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           type: 'showMore',
           key: `show-more-${groupId}`,
           groupId,
-          remaining: groupedSessions.length - 5
+          remaining: groupedSessions.length - 5,
+          isWorkspace
         })
       }
     }
@@ -334,7 +339,7 @@ export function RecentSessionList(props: Props): React.JSX.Element {
           count: workspaceSessions.length
         })
         if (!collapsedWorkspaces[path]) {
-          appendSessions(`workspace:${path}`, workspaceSessions)
+          appendSessions(`workspace:${path}`, workspaceSessions, true)
         }
       }
     }
@@ -426,10 +431,11 @@ export function RecentSessionList(props: Props): React.JSX.Element {
   const renderRow = (index: number): React.ReactNode => {
     const row = rows[index]
     if (row.type === 'showMore') {
+      const isWorkspace = row.isWorkspace ?? row.groupId.startsWith('workspace:')
       return (
         <button
           type="button"
-          className="recent-show-more"
+          className={`recent-show-more ${isWorkspace ? 'workspace-session' : ''}`}
           onClick={() =>
             setExpandedSessionGroups((previous) => ({ ...previous, [row.groupId]: true }))
           }

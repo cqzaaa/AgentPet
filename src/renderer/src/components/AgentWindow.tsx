@@ -8,6 +8,7 @@ import { OverviewIcon, SkillsIcon, SettingsIcon } from './icons/Icons'
 import {
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleX,
   Copy,
@@ -25,6 +26,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  PanelTopClose,
   Plus,
   Route,
   ScrollText,
@@ -390,6 +392,13 @@ export function AgentWindow(): React.JSX.Element {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [hiddenTabKeys, setHiddenTabKeys] = useState<string[]>([])
   const [showTabOverflowMenu, setShowTabOverflowMenu] = useState(false)
+  const [showTabActionsMenu, setShowTabActionsMenu] = useState(false)
+  const tabActionsMenuRef = useRef<HTMLDivElement>(null)
+  const [tabContextMenu, setTabContextMenu] = useState<{
+    x: number
+    y: number
+    tabKey: string
+  } | null>(null)
   const tabsViewportRef = useRef<HTMLDivElement>(null)
   const tabElementRefs = useRef(new Map<string, HTMLDivElement>())
   const tabOverflowMenuRef = useRef<HTMLDivElement>(null)
@@ -549,6 +558,19 @@ export function AgentWindow(): React.JSX.Element {
     }
   }
 
+  const handleCloseOtherTabs = (targetKey?: string): void => {
+    const keepKey = targetKey || activeWorkspaceKey
+    const targetTab = workspaceTabs.find((tab) => tab.key === keepKey)
+    if (!targetTab) return
+    setWorkspaceTabs([targetTab])
+    activateWorkspaceTab(targetTab)
+  }
+
+  const handleCloseAllTabs = async (): Promise<void> => {
+    setWorkspaceTabs([])
+    await handleCreateNewSession()
+  }
+
   const handleCloseTab = (keyToClose: string, e: React.MouseEvent): void => {
     e.stopPropagation()
     const currentIndex = workspaceTabs.findIndex((tab) => tab.key === keyToClose)
@@ -567,7 +589,7 @@ export function AgentWindow(): React.JSX.Element {
         setActiveSessionId(sessions[0].id)
         setActiveTab('chat')
       } else {
-        handleCreateNewSession()
+        void handleCreateNewSession()
       }
     }
   }
@@ -628,16 +650,26 @@ export function AgentWindow(): React.JSX.Element {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
+      const target = event.target as Node
       if (
         tabOverflowMenuRef.current &&
-        !tabOverflowMenuRef.current.contains(event.target as Node)
+        !tabOverflowMenuRef.current.contains(target)
       ) {
         setShowTabOverflowMenu(false)
+      }
+      if (
+        tabActionsMenuRef.current &&
+        !tabActionsMenuRef.current.contains(target)
+      ) {
+        setShowTabActionsMenu(false)
+      }
+      if (tabContextMenu) {
+        setTabContextMenu(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  }, [tabContextMenu])
 
   useEffect(() => {
     if (hiddenTabKeys.length === 0) setShowTabOverflowMenu(false)
@@ -997,6 +1029,15 @@ export function AgentWindow(): React.JSX.Element {
                     }}
                     className={`titlebar-tab ${tab.kind === 'page' ? 'function-tab' : ''} ${isActive ? 'active' : ''} ${isThinking ? 'thinking' : ''}`}
                     onClick={() => activateWorkspaceTab(tab)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setTabContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        tabKey: tab.key
+                      })
+                    }}
                   >
                     {isThinking ? (
                       <span className="tab-status-dot-pulse" aria-hidden="true" />
@@ -1026,6 +1067,49 @@ export function AgentWindow(): React.JSX.Element {
                   <Plus size={15} strokeWidth={2} aria-hidden="true" />
                 </button>
               </Tooltip>
+            </div>
+
+            {/* 标签栏操作菜单按钮：关闭其他页签 / 关闭全部页签 */}
+            <div className="titlebar-tab-actions" ref={tabActionsMenuRef}>
+              <Tooltip content="页签选项" placement="bottom">
+                <button
+                  className={`titlebar-tab-actions-btn ${showTabActionsMenu ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShowTabActionsMenu((prev) => !prev)
+                  }}
+                  aria-label="页签选项"
+                  aria-expanded={showTabActionsMenu}
+                >
+                  <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
+              {showTabActionsMenu && (
+                <div className="titlebar-tab-actions-menu">
+                  <div
+                    className={`titlebar-tab-actions-item ${workspaceTabs.length <= 1 ? 'disabled' : ''}`}
+                    onClick={() => {
+                      if (workspaceTabs.length > 1) {
+                        handleCloseOtherTabs()
+                        setShowTabActionsMenu(false)
+                      }
+                    }}
+                  >
+                    <PanelTopClose size={13} strokeWidth={1.8} aria-hidden="true" />
+                    <span>关闭其他页签</span>
+                  </div>
+                  <div
+                    className="titlebar-tab-actions-item danger"
+                    onClick={() => {
+                      void handleCloseAllTabs()
+                      setShowTabActionsMenu(false)
+                    }}
+                  >
+                    <CircleX size={13} strokeWidth={1.8} aria-hidden="true" />
+                    <span>关闭全部页签</span>
+                  </div>
+                </div>
+              )}
             </div>
             {hiddenTabs.length > 0 && (
               <div className="titlebar-tab-overflow" ref={tabOverflowMenuRef}>
@@ -1065,6 +1149,33 @@ export function AgentWindow(): React.JSX.Element {
                         </Tooltip>
                       </div>
                     ))}
+                    <div className="titlebar-tab-overflow-divider" />
+                    <div
+                      className={`titlebar-tab-overflow-item ${workspaceTabs.length <= 1 ? 'disabled' : ''}`}
+                      onClick={() => {
+                        if (workspaceTabs.length > 1) {
+                          handleCloseOtherTabs()
+                          setShowTabOverflowMenu(false)
+                        }
+                      }}
+                    >
+                      <span className="titlebar-tab-overflow-icon">
+                        <PanelTopClose size={13} strokeWidth={1.8} aria-hidden="true" />
+                      </span>
+                      <span>关闭其他页签</span>
+                    </div>
+                    <div
+                      className="titlebar-tab-overflow-item danger"
+                      onClick={() => {
+                        void handleCloseAllTabs()
+                        setShowTabOverflowMenu(false)
+                      }}
+                    >
+                      <span className="titlebar-tab-overflow-icon">
+                        <CircleX size={13} strokeWidth={1.8} aria-hidden="true" />
+                      </span>
+                      <span>关闭全部页签</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1571,6 +1682,51 @@ export function AgentWindow(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      {/* 标签页右键菜单 */}
+      {tabContextMenu &&
+        createPortal(
+          <div
+            className="titlebar-tab-context-menu"
+            style={{ top: tabContextMenu.y, left: tabContextMenu.x }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div
+              className="titlebar-tab-context-item"
+              onClick={(e) => {
+                handleCloseTab(tabContextMenu.tabKey, e)
+                setTabContextMenu(null)
+              }}
+            >
+              <X size={13} strokeWidth={1.8} aria-hidden="true" />
+              <span>关闭当前页签</span>
+            </div>
+            <div
+              className={`titlebar-tab-context-item ${workspaceTabs.length <= 1 ? 'disabled' : ''}`}
+              onClick={() => {
+                if (workspaceTabs.length > 1) {
+                  handleCloseOtherTabs(tabContextMenu.tabKey)
+                  setTabContextMenu(null)
+                }
+              }}
+            >
+              <PanelTopClose size={13} strokeWidth={1.8} aria-hidden="true" />
+              <span>关闭其他页签</span>
+            </div>
+            <div className="titlebar-tab-context-divider" />
+            <div
+              className="titlebar-tab-context-item danger"
+              onClick={() => {
+                void handleCloseAllTabs()
+                setTabContextMenu(null)
+              }}
+            >
+              <CircleX size={13} strokeWidth={1.8} aria-hidden="true" />
+              <span>关闭全部页签</span>
+            </div>
+          </div>,
+          document.querySelector<HTMLElement>('.agent-window-container') || document.body
+        )}
     </div>
   )
 }

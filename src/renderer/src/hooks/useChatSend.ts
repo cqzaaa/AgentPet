@@ -27,7 +27,7 @@ interface ChatSendState {
 type ChatSendRequest =
   | { messageId: number; text: string; sessionId: string }
   | { retryReplyId: number; sessionId: string }
-  | { text: string; sessionId?: string }
+  | { text: string; sessionId?: string; attachedFiles?: any[] }
 
 interface ChatSendOptions {
   getState: () => ChatSendState
@@ -151,9 +151,11 @@ export function useChatSend({
     const originalMessage = edit ? originalSession.messages[editIndex] : retry ? originalSession.messages[retryUserIndex] : null
     const attachedFiles = originalMessage
       ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))]
-      : customText !== undefined
-        ? []
-        : [...state.attachedFiles]
+      : request && 'attachedFiles' in request && request.attachedFiles
+        ? [...request.attachedFiles]
+        : customText !== undefined
+          ? []
+          : [...state.attachedFiles]
     if (edit || retry) {
       state.selectedKnowledgeBaseId = originalMessage.knowledgeBase?.id || ''
       state.selectedKnowledgeBaseName = originalMessage.knowledgeBase?.name || ''
@@ -252,6 +254,8 @@ export function useChatSend({
 
     if (!edit && !retry && customText === undefined) {
       setInputValue('')
+      setAttachedFiles([])
+    } else if (!edit && !retry && request && 'attachedFiles' in request && request.attachedFiles && sessionId === state.activeSessionId) {
       setAttachedFiles([])
     }
     setSendingSessionIds(previous => ({ ...previous, [sessionId]: true }))

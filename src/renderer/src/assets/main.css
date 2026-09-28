@@ -599,6 +599,134 @@ body {
   color: #ef4444;
 }
 
+/* 标签栏操作菜单按钮与下拉 */
+.titlebar-tab-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  margin-left: 2px;
+}
+
+.titlebar-tab-actions-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+
+.titlebar-tab-actions-btn:hover,
+.titlebar-tab-actions-btn.active {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.titlebar-tab-actions-menu {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  width: 148px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  z-index: 2200;
+  animation: fadeInDown 0.12s ease;
+}
+
+.titlebar-tab-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  user-select: none;
+}
+
+.titlebar-tab-actions-item:hover {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-titlebar-tab-active);
+}
+
+.titlebar-tab-actions-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.titlebar-tab-actions-item.danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* 标签页右键悬浮菜单 */
+.titlebar-tab-context-menu {
+  position: fixed;
+  width: 148px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  z-index: 99999;
+  animation: fadeInDown 0.1s ease;
+}
+
+.titlebar-tab-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  user-select: none;
+}
+
+.titlebar-tab-context-item:hover {
+  background: var(--bg-titlebar-tab-hover);
+  color: var(--text-titlebar-tab-active);
+}
+
+.titlebar-tab-context-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.titlebar-tab-context-item.danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.titlebar-tab-context-divider,
+.titlebar-tab-overflow-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 6px;
+  opacity: 0.6;
+}
+
 /* 标签页呼吸灯样式 */
 .tab-status-dot-pulse {
   display: inline-block;
@@ -1504,6 +1632,8 @@ body {
   font-size: 11.5px;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
+  margin-bottom: 2px;
 }
 
 .recent-show-more span {
@@ -1566,7 +1696,8 @@ body {
   color: var(--text-recent-active);
 }
 
-.recent-item.workspace-session {
+.recent-item.workspace-session,
+.recent-show-more.workspace-session {
   margin-left: 27px;
   width: calc(100% - 27px);
 }
