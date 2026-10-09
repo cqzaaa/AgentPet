@@ -231,6 +231,14 @@ export function FileDiffDrawer({
     }
   }, [initialIndex, changes.length])
 
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    closeButtonRef.current?.focus({ preventScroll: true })
+    return () => {
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+    }
+  }, [])
+
   // 支持键盘 Esc 快捷键关闭
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {

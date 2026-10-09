@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, react-hooks/set-state-in-effect */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../hooks/useAppStore'
 import { useChatController } from '../hooks/useChatController'
@@ -72,7 +72,7 @@ function formatQuotedPrompt(selection: QuotedSelection, prompt: string): string 
   return `> 引用自 ${selection.senderName}\n${quotedLines}\n\n${question}`
 }
 
-const sessionVisibleMessages = new Map<string, string>()
+const sessionVisibleMessages = new Map<string, { key: string; offset: number }>()
 
 function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition?: boolean }): React.JSX.Element {
   const {
@@ -157,7 +157,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   )
   const messagesBoxRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
-  const visibleMessage = restoreScrollPosition ? sessionVisibleMessages.get(activeSessionId) : undefined
+  // Freeze the restoration target for this visit.
+  const savedPosition = useMemo(() => restoreScrollPosition
+    ? sessionVisibleMessages.get(activeSessionId) : undefined, [activeSessionId, restoreScrollPosition])
+  const visibleMessage = savedPosition?.key
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null)
   const composerSelectionContextRef = useRef<HTMLDivElement>(null)
 
@@ -1345,7 +1348,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     if (!pendingSteeringPrompt?.trim()) return
     const textToSend = pendingSteeringPrompt.trim()
     setPendingSteeringPrompt(null)
-    isAligningUserTurnRef.current = true
     window.setTimeout(() => {
       void handleSendChat({ text: textToSend, sessionId: activeSessionId, attachedFiles })
     }, 0)
@@ -1378,7 +1380,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       handleConfirmSteering()
       return
     }
-    isAligningUserTurnRef.current = true
     if (!quotedSelection) {
       void handleSendChat()
       return
@@ -1417,9 +1418,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             delete next[sessId]
             return next
           })
-          if (sessId === activeSessionId) {
-            isAligningUserTurnRef.current = true
-          }
           // 稍作延时（100ms），等待上一轮生成的消息完成本地持久化落库和 DOM 结算，再自动无缝开启新一轮对话
           window.setTimeout(() => {
             void handleSendChat({
@@ -1438,11 +1436,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   const handleQuoteSelection = useCallback(
     (selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
       if (sendNow) {
-        isAligningUserTurnRef.current = true
         const payload = formatQuotedPrompt(selection, prompt)
         if (estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
           showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
-          isAligningUserTurnRef.current = false
           return
         }
         const draft = inputValue
@@ -1693,30 +1689,61 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     </div>
   )
 
-  // 记录是否处于底部附近（供抽屉分栏调整或窗口缩放时锚定保持）
+  // Explicit navigation and layout following share one cancellable frame.
   const isAtBottomRef = useRef(true)
-  const visibleStartIndexRef = useRef(0)
-  // 检测是否在底部附近（阈值 120px）
-  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
-    isAtBottomRef.current = atBottom
-    setShowScrollToBottom(!atBottom)
+  const isAligningUserTurnRef = useRef(false)
+  const turnSpacerEnabledRef = useRef(false)
+  const scrollFrameRef = useRef<number | null>(null)
+  const settleFrameRef = useRef<number | null>(null)
+  const userScrollingRef = useRef(false)
+
+  const cancelPendingScroll = useCallback(() => {
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
+    if (settleFrameRef.current !== null) cancelAnimationFrame(settleFrameRef.current)
+    scrollFrameRef.current = null
+    settleFrameRef.current = null
+    isAligningUserTurnRef.current = false
+  }, [])
+
+  const captureScrollPosition = useCallback(() => {
+    if (positionedSessionId !== activeSessionId || isAligningUserTurnRef.current) return
+    const scroller = messagesBoxRef.current?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+    if (!scroller || scroller.clientHeight === 0) return
+    const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 24
+    if (userScrollingRef.current) {
+      isAtBottomRef.current = atBottom
+      if (atBottom) userScrollingRef.current = false
+    }
     if (atBottom) {
       sessionVisibleMessages.delete(activeSessionId)
-    } else {
-      const key = messageIdsRef.current[visibleStartIndexRef.current]
-      if (key) sessionVisibleMessages.set(activeSessionId, key)
+      return
     }
-  }, [activeSessionId])
+    const top = scroller.getBoundingClientRect().top
+    const item = Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]'))
+      .find(row => row.getBoundingClientRect().bottom > top)
+    if (!item) return
+    const key = messageIdsRef.current[Number(item.dataset.index)]
+    if (key) {
+      sessionVisibleMessages.set(activeSessionId, { key, offset: top - item.getBoundingClientRect().top })
+      if (sessionVisibleMessages.size > 100) sessionVisibleMessages.delete(sessionVisibleMessages.keys().next().value!)
+    }
+  }, [activeSessionId, positionedSessionId])
 
-  // Keep only the scroll range needed to place the latest question near the top.
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    setShowScrollToBottom(!atBottom)
+    // Height growth must not disable following before the next layout frame.
+    if (atBottom && !isAligningUserTurnRef.current) {
+      isAtBottomRef.current = true
+      userScrollingRef.current = false
+    }
+  }, [])
+
   const virtuosoComponents = useMemo(() => ({
     Footer: React.memo(() => (
       <div className="chat-virtuoso-footer-spacer" style={{ height: 'var(--chat-turn-spacer, 0px)', pointerEvents: 'none' }} />
     ))
   }), [])
 
-  // 以实际加入的用户消息触发滚动，避免发送状态先变化时读到旧列表。
-  // 虚拟列表包含协作卡片，因此不能用聊天消息数量计算最后一项。
   const latestUserMessageId = useMemo(() => {
     for (let index = activeSessMessages.length - 1; index >= 0; index--) {
       if (activeSessMessages[index].sender === 'user') return activeSessMessages[index].id
@@ -1726,82 +1753,71 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
   const updateTurnSpacer = useCallback(() => {
     const container = messagesBoxRef.current
-    const scroller = container?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
-    const userRow = latestUserMessageId ? document.getElementById(`msg-${latestUserMessageId}`) : null
-    if (!container || !scroller || !userRow || !scroller.contains(userRow)) return
-    const rows = scroller.querySelectorAll<HTMLElement>('.message-row')
-    const lastRow = rows[rows.length - 1] || userRow
-    const turnHeight = Math.max(0, lastRow.getBoundingClientRect().bottom - userRow.getBoundingClientRect().top)
-    const topInset = 64
-    const spacer = Math.ceil(Math.min(320, Math.max(0, scroller.clientHeight - topInset - turnHeight)))
-    const value = `${spacer}px`
-    if (container.style.getPropertyValue('--chat-turn-spacer') !== value) {
-      container.style.setProperty('--chat-turn-spacer', value)
-    }
-  }, [latestUserMessageId])
-
-  useEffect(() => {
-    messagesBoxRef.current?.style.setProperty('--chat-turn-spacer', '0px')
-  }, [activeSessionId])
-
-  useEffect(() => {
-    updateTurnSpacer()
-  }, [isSending, latestUserMessageId, updateTurnSpacer])
-
-  // 当前进行中的用户提问 ID（提问或重试时设置）
-  const activeTurnUserMsgIdRef = useRef<number | null>(null)
-  // 标记当前是否处于新提问/重试的置顶对齐动画阶段，防止被底部的 autoscroll 抢占导致先滑到底再滑回
-  const isAligningUserTurnRef = useRef(false)
-
-  const scrollToUserMessage = useCallback((userMsgId: number | null, behavior: 'smooth' | 'auto' = 'smooth') => {
-    if (!userMsgId) return
-    const targetKey = `message:${String(userMsgId)}`
-    const targetIndex = messageIdsRef.current.indexOf(targetKey)
-    if (targetIndex === -1) return
-    virtuosoRef.current?.scrollToIndex({
-      index: targetIndex,
-      align: 'start',
-      behavior
-    })
-  }, [])
-
-  const lastScrollMessageRef = useRef({
-    sessionId: activeSessionId,
-    messageId: latestUserMessageId
-  })
-  useEffect(() => {
-    if (isSessionSwitching) return
-    const previous = lastScrollMessageRef.current
-    if (previous.sessionId !== activeSessionId) {
-      lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
-      activeTurnUserMsgIdRef.current = latestUserMessageId
+    if (!container) return
+    if (!turnSpacerEnabledRef.current) {
+      container.style.setProperty('--chat-turn-spacer', '0px')
       return
     }
-    if (!latestUserMessageId || previous.messageId === latestUserMessageId) return
-    activeTurnUserMsgIdRef.current = latestUserMessageId
-    lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
-    isAligningUserTurnRef.current = true
+    const scroller = container.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+    const userRow = latestUserMessageId ? document.getElementById(`msg-${latestUserMessageId}`) : null
+    if (!scroller || !userRow || !scroller.contains(userRow)) return
+    const rows = scroller.querySelectorAll<HTMLElement>('[data-index]')
+    const lastRow = rows[rows.length - 1] || userRow
+    const turnHeight = Math.max(0, lastRow.getBoundingClientRect().bottom - userRow.getBoundingClientRect().top)
+    const value = `${Math.ceil(Math.max(0, scroller.clientHeight - turnHeight))}px`
+    if (container.style.getPropertyValue('--chat-turn-spacer') !== value) container.style.setProperty('--chat-turn-spacer', value)
+  }, [latestUserMessageId])
 
-    let timeoutId: number | null = null
-    let unsuppressId: number | null = null
-    const frame = requestAnimationFrame(() => {
-      updateTurnSpacer()
-      scrollToUserMessage(latestUserMessageId, 'smooth')
-      // 保持平滑过渡动画，在高度与结构稳定后进行平滑校准，绝不粗暴截断动画
-      timeoutId = window.setTimeout(() => {
-        updateTurnSpacer()
-        scrollToUserMessage(latestUserMessageId, 'smooth')
-      }, 160)
-      unsuppressId = window.setTimeout(() => {
-        isAligningUserTurnRef.current = false
-      }, 600)
+  const scheduleBottomAlignment = useCallback(() => {
+    if (!isAtBottomRef.current || isAligningUserTurnRef.current || positionedSessionId !== activeSessionId || scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const scroller = messagesBoxRef.current?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+      if (scroller && scroller.clientHeight > 0 && isAtBottomRef.current && !isAligningUserTurnRef.current) {
+        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+      }
     })
-    return () => {
-      cancelAnimationFrame(frame)
-      if (timeoutId) window.clearTimeout(timeoutId)
-      if (unsuppressId) window.clearTimeout(unsuppressId)
-    }
-  }, [activeSessionId, latestUserMessageId, isSessionSwitching, scrollToUserMessage, updateTurnSpacer])
+  }, [activeSessionId, positionedSessionId])
+
+  const scrollToUserMessage = useCallback((userMsgId: number | null, align: 'start' | 'center' = 'start') => {
+    if (!userMsgId) return
+    const targetIndex = messageIdsRef.current.indexOf(`message:${String(userMsgId)}`)
+    if (targetIndex === -1) return
+    cancelPendingScroll()
+    userScrollingRef.current = false
+    isAtBottomRef.current = false
+    isAligningUserTurnRef.current = true
+    turnSpacerEnabledRef.current = align === 'start'
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      updateTurnSpacer()
+      virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, behavior: 'auto' })
+      settleFrameRef.current = requestAnimationFrame(() => {
+        settleFrameRef.current = null
+        isAligningUserTurnRef.current = false
+        captureScrollPosition()
+      })
+    })
+  }, [cancelPendingScroll, captureScrollPosition, updateTurnSpacer])
+
+  useLayoutEffect(() => {
+    cancelPendingScroll()
+    userScrollingRef.current = false
+    isAtBottomRef.current = !savedPosition
+    turnSpacerEnabledRef.current = false
+    messagesBoxRef.current?.style.setProperty('--chat-turn-spacer', '0px')
+    setShowScrollToBottom(Boolean(savedPosition))
+    return cancelPendingScroll
+  }, [activeSessionId, savedPosition, cancelPendingScroll])
+
+  const lastScrollMessageRef = useRef({ sessionId: activeSessionId, messageId: latestUserMessageId })
+  useLayoutEffect(() => {
+    if (isSessionSwitching) return
+    const previous = lastScrollMessageRef.current
+    lastScrollMessageRef.current = { sessionId: activeSessionId, messageId: latestUserMessageId }
+    if (previous.sessionId !== activeSessionId || previous.messageId === latestUserMessageId) return
+    scrollToUserMessage(latestUserMessageId)
+  }, [activeSessionId, latestUserMessageId, isSessionSwitching, scrollToUserMessage])
 
   const handlePreviewFile = useCallback(
     (f: { name: string; path: string; size: number }) => {
@@ -1811,75 +1827,35 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     [previewFile, setShowFilePanel]
   )
 
-  // 切换会话时恢复已有 tag 的阅读位置，新 tag 从底部打开。
   useEffect(() => {
-    isAtBottomRef.current = !visibleMessage
-    setShowScrollToBottom(Boolean(visibleMessage))
-    if (activeSessMessages.length === 0) {
-      setPositionedSessionId(activeSessionId)
-    }
-  }, [activeSessionId, activeSessMessages.length, visibleMessage])
+    if (activeSessMessages.length === 0) setPositionedSessionId(activeSessionId)
+  }, [activeSessionId, activeSessMessages.length])
 
-  const scrollToBottom = useCallback((behavior?: 'smooth' | 'auto' | unknown) => {
+  const scrollToBottom = useCallback(() => {
+    cancelPendingScroll()
+    userScrollingRef.current = false
+    turnSpacerEnabledRef.current = false
+    updateTurnSpacer()
     isAtBottomRef.current = true
-    setShowScrollToBottom(false)
+    scheduleBottomAlignment()
+  }, [cancelPendingScroll, scheduleBottomAlignment, updateTurnSpacer])
 
-    const resolvedBehavior = behavior === 'auto' ? 'auto' : 'smooth'
-    virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: resolvedBehavior })
-  }, [])
-
-  // 尺寸自适应贴底保持：监听聊天容器尺寸变化（打开/关闭抽屉、分栏拖拽、窗口缩放等）
-  // 当宽度或高度变化且用户原本处于贴底状态时，自动重新校准滚动到底部，避免因文本折行导致内容增高而被顶出视口
-  const lastContainerSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
-  const resizeScrollRafRef = useRef<number | null>(null)
-  const resizeScrollTimerRef = useRef<number | null>(null)
+  const handleManualScroll = useCallback(() => {
+    cancelPendingScroll()
+    userScrollingRef.current = true
+    isAtBottomRef.current = false
+  }, [cancelPendingScroll])
 
   useEffect(() => {
     const el = messagesBoxRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-
-    const rect = el.getBoundingClientRect()
-    lastContainerSizeRef.current = { width: rect.width, height: rect.height }
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect
-        const prev = lastContainerSizeRef.current
-        const widthChanged = Math.abs(width - prev.width) > 1
-        const heightChanged = Math.abs(height - prev.height) > 1
-        lastContainerSizeRef.current = { width, height }
-        if (widthChanged || heightChanged) updateTurnSpacer()
-
-        if ((widthChanged || heightChanged) && isAtBottomRef.current) {
-          if (resizeScrollRafRef.current) {
-            cancelAnimationFrame(resizeScrollRafRef.current)
-          }
-          if (resizeScrollTimerRef.current) {
-            window.clearTimeout(resizeScrollTimerRef.current)
-          }
-
-          resizeScrollRafRef.current = requestAnimationFrame(() => {
-            virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
-            setShowScrollToBottom(false)
-          })
-
-          resizeScrollTimerRef.current = window.setTimeout(() => {
-            if (isAtBottomRef.current) {
-              virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
-              setShowScrollToBottom(false)
-            }
-          }, 80)
-        }
-      }
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      updateTurnSpacer()
+      scheduleBottomAlignment()
     })
-
     observer.observe(el)
-    return () => {
-      observer.disconnect()
-      if (resizeScrollRafRef.current) cancelAnimationFrame(resizeScrollRafRef.current)
-      if (resizeScrollTimerRef.current) window.clearTimeout(resizeScrollTimerRef.current)
-    }
-  }, [updateTurnSpacer])
+    return () => observer.disconnect()
+  }, [updateTurnSpacer, scheduleBottomAlignment])
 
   const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
     e.preventDefault()
@@ -1888,39 +1864,12 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     }
   }
 
-  // 监听定位跳转事件，平滑滚动并高亮消息
   useEffect(() => {
-    if (highlightedMessageId == null) return () => {}
-    const messageIndex = [
-      ...activeSessMessages.map((message, index) => ({
-        key: `message:${String(message.id)}`,
-        createdAt: Number(message.id) || index
-      })),
-      ...collaborationRuns
-        .filter((snapshot) => String(snapshot.run.parentToolCallId || '').startsWith('orchestration-'))
-        .map((snapshot) => ({
-          key: `orchestration:${String(snapshot.run.id)}`,
-          createdAt: Number(snapshot.run.createdAt) || 0
-        }))
-    ].sort((left, right) => left.createdAt - right.createdAt)
-      .findIndex((item) => item.key === `message:${String(highlightedMessageId)}`)
-    if (messageIndex < 0) return () => {}
-
-    const scrollTimer = window.setTimeout(() => {
-      // Virtuoso may not have mounted an old message in the DOM yet, so locate
-      // by data index first instead of relying on document.getElementById().
-      virtuosoRef.current?.scrollToIndex({
-        index: messageIndex,
-        align: 'center',
-        behavior: 'smooth'
-      })
-    }, 80)
+    if (highlightedMessageId == null) return
+    scrollToUserMessage(Number(highlightedMessageId), 'center')
     const clearTimer = window.setTimeout(() => setHighlightedMessageId(null), 2600)
-    return () => {
-      window.clearTimeout(scrollTimer)
-      window.clearTimeout(clearTimer)
-    }
-  }, [activeSessMessages, collaborationRuns, highlightedMessageId, setHighlightedMessageId])
+    return () => window.clearTimeout(clearTimer)
+  }, [highlightedMessageId, scrollToUserMessage, setHighlightedMessageId])
 
   useEffect(() => {
     // 全局阻止浏览器默认的拖拽打开文件行为，防止不小心把文件拖到页面空白处导致应用跳转
@@ -2008,9 +1957,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       const { index, count } = positionTargetRef.current
       const targetIndex = index >= 0 ? index : count <= 2 ? 0 : count - 1
       const align = (index >= 0 || count <= 2) ? 'start' : 'end'
-      virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, behavior: 'auto' })
+      virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, offset: index >= 0 ? savedPosition?.offset || 0 : 0, behavior: 'auto' })
       firstFrame = requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, behavior: 'auto' })
+        virtuosoRef.current?.scrollToIndex({ index: targetIndex, align, offset: index >= 0 ? savedPosition?.offset || 0 : 0, behavior: 'auto' })
         secondFrame = requestAnimationFrame(() => setPositionedSessionId(activeSessionId))
       })
     }, 400)
@@ -2019,7 +1968,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       cancelAnimationFrame(firstFrame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [activeSessionId, isSessionSwitching, hasMessages, positionedSessionId])
+  }, [activeSessionId, isSessionSwitching, hasMessages, positionedSessionId, savedPosition])
   // Build message and request relationships once per message update. This
   // replaces the previous slice(0, index).findLast(...) work performed by
   // every visible row during every streaming frame.
@@ -2083,17 +2032,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           }
         }
       }
-      if (userMsgId) {
-        isAligningUserTurnRef.current = true
-        activeTurnUserMsgIdRef.current = userMsgId
-        scrollToUserMessage(userMsgId, 'smooth')
-        window.setTimeout(() => {
-          scrollToUserMessage(userMsgId, 'smooth')
-        }, 160)
-        window.setTimeout(() => {
-          isAligningUserTurnRef.current = false
-        }, 600)
-      }
+      if (userMsgId) scrollToUserMessage(userMsgId)
       await handleSendChat({ retryReplyId: messageId, sessionId: activeSessionId })
     } catch (error) {
       showToast(error instanceof Error ? error.message : '重试失败，请稍后再试。', 'error')
@@ -2181,8 +2120,13 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
         }}
       >
         {/* 消息滚动列表 */}
-        {/* 消息滚动列表 */}
-        <div className="chat-messages-box" ref={messagesBoxRef}>
+        <div className="chat-messages-box" ref={messagesBoxRef}
+          onWheelCapture={handleManualScroll}
+          onTouchStartCapture={handleManualScroll}
+          onPointerDownCapture={handleManualScroll}
+          onKeyDownCapture={(event) => {
+            if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) handleManualScroll()
+          }}>
           {!isSessionSwitching && (messageIds.length === 0 ? (
             <div className="chat-empty-state">
               <AgentPetMark key={activeSessionId} active drawOnce className="chat-empty-mark" />
@@ -2234,26 +2178,19 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
               data={messageIds}
               components={virtuosoComponents}
               computeItemKey={computeMessageKey}
-              // 流式 token 到达时使用即时跟随；反复启动 smooth 动画会让长回答滚动发飘。
-              followOutput={(isAtBottom) => (!isAligningUserTurnRef.current && isAtBottom ? 'auto' : false)}
-              // Follow height changes within an existing streaming message as well as new items.
+              followOutput={false}
+              onScroll={captureScrollPosition}
               totalListHeightChanged={() => {
                 updateTurnSpacer()
-                if (!isAligningUserTurnRef.current && isAtBottomRef.current) {
-                  virtuosoRef.current?.autoscrollToBottom()
-                }
+                scheduleBottomAlignment()
               }}
-              initialTopMostItemIndex={visibleMessageIndex >= 0 ? { index: visibleMessageIndex, align: 'start' } : messageIds.length <= 2 ? { index: 0, align: 'start' } : { index: 'LAST', align: 'end' }}
+              initialTopMostItemIndex={visibleMessageIndex >= 0 ? { index: visibleMessageIndex, align: 'start', offset: savedPosition?.offset || 0 } : messageIds.length <= 2 ? { index: 0, align: 'start' } : { index: 'LAST', align: 'end' }}
               rangeChanged={({ startIndex, endIndex }) => {
-                visibleStartIndexRef.current = startIndex
-                if (!isAtBottomRef.current) {
-                  const key = messageIds[startIndex]
-                  if (key) sessionVisibleMessages.set(activeSessionId, key)
-                }
+                captureScrollPosition()
                 const targetIndex = visibleMessageIndex >= 0 ? visibleMessageIndex : messageIds.length - 1
                 if (startIndex <= targetIndex && endIndex >= targetIndex) revealWhenPositioned(targetIndex)
               }}
-              atBottomThreshold={120}
+              atBottomThreshold={24}
               atBottomStateChange={handleAtBottomStateChange}
               itemContent={itemContent}
             />
@@ -2275,7 +2212,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             </div>
           )}
           {showScrollToBottom && positionedSessionId === activeSessionId && (
-            <button className="scroll-to-bottom-btn" onClick={() => scrollToBottom('smooth')} title="回到最新">
+            <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
               <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
               回到最新
             </button>

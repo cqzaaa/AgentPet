@@ -607,3 +607,23 @@ body > .file-diff-drawer-layer {
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.3);
 }
+
+/* Use the available chat width, including sidebar and other pane allocations. */
+@container chat-layout (max-width: 720px) {
+  .chat-main:has(~ .file-diff-drawer-layer),
+  .file-diff-drawer-layer .file-diff-resizer {
+    display: none !important;
+  }
+
+  .file-diff-drawer-layer {
+    width: 100% !important;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 0;
+  }
+
+  .file-diff-drawer {
+    border-left: 0;
+    box-shadow: none;
+  }
+}

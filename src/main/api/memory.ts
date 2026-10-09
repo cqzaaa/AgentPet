@@ -154,8 +154,22 @@ function parseMemoryEmbedding(value: unknown): number[] | null {
   }
 }
 
+const memoryEmbeddingBackfills = new WeakSet<object>()
+
+function scheduleMemoryEmbeddingBackfill(database: any, rows: any[]): void {
+  if (memoryEmbeddingBackfills.has(database)) return
+  memoryEmbeddingBackfills.add(database)
+  // Let the current recall use its existing snapshot. New vectors are available
+  // on subsequent recalls, without waiting for legacy batches on the send path.
+  setImmediate(() => {
+    void ensureMemoryEmbeddings(database, rows)
+      .catch(error => console.warn('[Memory] Background embedding backfill failed:', error))
+      .finally(() => memoryEmbeddingBackfills.delete(database))
+  })
+}
+
 async function ensureMemoryEmbeddings(database: any, rows: any[]): Promise<void> {
-  // Incremental backfill prevents a large legacy memory library from blocking one recall.
+  // Bound each background pass and allow only one pass per database at a time.
   const pending = rows.filter(row => !parseMemoryEmbedding(row.embedding)).slice(0, 64)
   for (let offset = 0; offset < pending.length; offset += 16) {
     const batch = pending.slice(offset, offset + 16)
@@ -168,11 +182,8 @@ async function ensureMemoryEmbeddings(database: any, rows: any[]): Promise<void>
       await database.run(`
         UPDATE persona_memories
         SET embedding = ?, embedding_model = ?, embedding_hash = ?
-        WHERE id = ?
-      `, JSON.stringify(vector), EMBEDDING_MODEL, hash, row.id)
-      row.embedding = JSON.stringify(vector)
-      row.embedding_model = EMBEDDING_MODEL
-      row.embedding_hash = hash
+        WHERE id = ? AND fact = ? AND embedding IS ?
+      `, JSON.stringify(vector), EMBEDDING_MODEL, hash, row.id, row.fact, row.embedding ?? null)
     }
   }
 }
@@ -234,8 +245,8 @@ export function registerMemoryAPIs(deps: MemoryDependencies) {
       // 1. 获取库中所有关联记录及实体映射（支持经验、习惯和偏好）
       const rows = await database.all("SELECT id, fact, strength, last_accessed_at, created_at, keywords, category, link, embedding, embedding_model, embedding_hash FROM persona_memories WHERE category IN ('experience', 'habit', 'preference')") as any[]
       if (rows.length === 0) return []
-      await ensureMemoryEmbeddings(database, rows)
       const queryEmbedding = await getEmbeddingInternal(deps.getSystemLlmConfig(), queryText)
+      scheduleMemoryEmbeddingBackfill(database, rows)
 
       const linkRows = await database.all(`
         SELECT memory_id, entity_name, entity_type, confidence

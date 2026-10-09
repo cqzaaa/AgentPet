@@ -32,9 +32,6 @@
   gap: 8px;
   margin-top: 6px;
   min-width: 0;
-  max-height: 260px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding-right: 4px;
 }
 .chat-tool-summary {
@@ -62,9 +59,6 @@
 .chat-turn-activity-content {
   min-width: 0;
   padding-top: 8px;
-  max-height: 280px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding-right: 4px;
 }
 .chat-activity-items::-webkit-scrollbar,

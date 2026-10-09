@@ -2840,6 +2840,7 @@ body {
 
 /* 2. 聊天 (Chat Panel) */
 .chat-split-container {
+  container: chat-layout / inline-size;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2850,6 +2851,11 @@ body {
   border: 1px solid transparent;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.chat-main {
+  min-width: 0;
+  min-height: 0;
 }
 
 .chat-messages-box {
