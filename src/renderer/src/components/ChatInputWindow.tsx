@@ -430,36 +430,17 @@ export function ChatInputWindow(): React.JSX.Element {
     }
     if (allFiles.length > 0) {
       payload.files = allFiles
-      payload.autoSend = true
     }
     if (userText) {
       payload.text = userText
     }
+    payload.autoSend = true
 
-    if (allFiles.length > 0) {
-      window.api.sendPendingInput(JSON.stringify(payload))
-      window.api.openAgentWindow()
-      window.api.closeInputWindow()
-    } else {
-      // 纯文本普通提问直接在小窗口内交互，不弹窗跳转
-      shouldScrollRef.current = 'smooth'
-      setMessages(prev => [...prev, { sender: 'user', text: userText }])
-      setIsThinking(true)
-      setShowChat(true)
-      if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
-      requestTimeoutRef.current = setTimeout(() => {
-        requestTimeoutRef.current = null
-        setIsThinking(false)
-        shouldScrollRef.current = 'smooth'
-        setMessages(prev => [...prev, {
-          sender: 'agent',
-          text: '请求等待时间过长，请检查模型配置或网络后重试。'
-        }])
-      }, 90_000)
-      if (window.api.sendChatToPet) {
-        window.api.sendChatToPet(userText)
-      }
-    }
+    // 快捷会话只负责收集输入；实际生成统一交给普通 Chat 流程，
+    // 以复用完整的流式文本、工具调用、停止按钮和失败恢复 UI。
+    window.api.sendPendingInput(JSON.stringify(payload))
+    window.api.openAgentWindow()
+    window.api.closeInputWindow()
 
     setText('')
     setScreenshotImages([])
