@@ -192,13 +192,13 @@ export const CollaborationRunCard = React.memo(function CollaborationRunCard({ s
 
   return <article className={`collaboration-chat-card status-${run.status || 'pending'}`} aria-label={`协作记录：${plan.title}`}>
     <header className="collaboration-chat-card-header">
-      <span className="collaboration-chat-card-icon"><Network size={16} /></span>
+      <span className="collaboration-chat-card-icon"><Network size={15} /></span>
       <span><small>多 Agent 协作</small><strong>{plan.title}</strong></span>
       <em>{running ? <Loader2 className="spin" size={13} /> : failed ? <XCircle size={13} /> : run.status === 'completed' ? <CheckCircle2 size={13} /> : <CircleDashed size={13} />}{running ? `${completed}/${steps.length} 执行中` : failed ? '未完成' : `${completed}/${steps.length} 已完成`}</em>
       {run.status === 'paused' && <em>已暂停 · 可从快照继续</em>}
       {onOpenDetails && <button type="button" onClick={() => onOpenDetails(String(run.id))}>{run.status === 'paused' ? '查看快照 / 继续' : '查看详情'}<ChevronRight size={13} /></button>}
     </header>
-    <TaskDagGraph plan={plan} />
+    <TaskDagGraph plan={plan} compact />
     {finalContent && <section className="collaboration-chat-result">
       <div className="collaboration-result-markdown">{renderAdvancedMessage(finalContent)}</div>
     </section>}

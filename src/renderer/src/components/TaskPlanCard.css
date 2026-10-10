@@ -1039,6 +1039,16 @@
 
 .task-dag-react-flow { display: flex; flex-direction: column; }
 .task-dag-flow-viewport { height: 280px; min-height: 280px; width: 100%; position: relative; flex: 1; }
+/* Compact mode for chat timeline cards and embedded views */
+.task-dag.is-compact .task-dag-flow-viewport { height: 130px; min-height: 110px; }
+.task-dag.is-compact .react-flow__controls {
+  transform: scale(0.72);
+  transform-origin: bottom left;
+  bottom: 5px;
+  left: 5px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.task-dag-react-flow .react-flow__attribution { display: none !important; }
 /* Give React Flow a definite containing height even when the flex viewport grows from min-height. */
 .task-dag-flow-surface { position: absolute; inset: 0; }
 .task-dag-flow-viewport:focus-visible { outline: 2px solid var(--collab-blue, #3157d5); outline-offset: -2px; }

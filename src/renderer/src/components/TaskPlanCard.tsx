@@ -418,29 +418,35 @@ export function TaskDagGraph({
   plan,
   onStepClick,
   selectedStepId,
-  showHeader = false
+  showHeader = false,
+  compact = false
 }: {
   plan: TaskPlan
   onStepClick?: (step: TaskPlanStep) => void
   selectedStepId?: string
   showHeader?: boolean
+  compact?: boolean
 }): React.JSX.Element {
   const flowRef = React.useRef<ReactFlowInstance<ReadonlyTaskNode> | null>(null)
   const hasSelection = Boolean(selectedStepId)
   useEffect(() => {
     // The details panel changes the available width after selecting a node.
     let nextFrame = 0
+    const padding = compact ? 0.16 : 0.25
     const frame = requestAnimationFrame(() => {
       nextFrame = requestAnimationFrame(() => {
-        void flowRef.current?.fitView({ padding: 0.25, maxZoom: 1.5 })
+        void flowRef.current?.fitView({ padding, maxZoom: compact ? 1.25 : 1.5 })
       })
     })
     return () => {
       cancelAnimationFrame(frame)
       cancelAnimationFrame(nextFrame)
     }
-  }, [hasSelection])
+  }, [hasSelection, compact])
   const layout = useMemo(() => layoutDag(plan.steps), [plan.steps])
+  const viewportHeight = compact
+    ? Math.min(210, Math.max(120, layout.height + 28))
+    : undefined
   const nodes = useMemo<ReadonlyTaskNode[]>(
     () =>
       layout.nodes.map((node) => ({
@@ -478,7 +484,7 @@ export function TaskDagGraph({
   const completed = plan.steps.filter((step) => step.status === 'completed').length
   return (
     <section
-      className={`task-dag task-dag-react-flow ${!showHeader ? 'is-bare' : ''}`}
+      className={`task-dag task-dag-react-flow ${!showHeader ? 'is-bare' : ''} ${compact ? 'is-compact' : ''}`}
       aria-label={`只读流程图：${plan.title}`}
     >
       {showHeader && (
@@ -494,6 +500,7 @@ export function TaskDagGraph({
       )}
       <div
         className="task-dag-flow-viewport"
+        style={viewportHeight ? { height: viewportHeight, minHeight: viewportHeight } : undefined}
         tabIndex={0}
         aria-label="流程图画布，滚轮缩放，拖动空白处移动；Ctrl 或 Command 加减键缩放，0 适应画布"
         onPointerDown={(event) => {
@@ -525,7 +532,7 @@ export function TaskDagGraph({
           if (!['+', '=', '-', '0'].includes(event.key) || !flowRef.current) return
           event.preventDefault()
           event.stopPropagation()
-          if (event.key === '0') void flowRef.current.fitView({ padding: 0.25, maxZoom: 1.5 })
+          if (event.key === '0') void flowRef.current.fitView({ padding: compact ? 0.16 : 0.25, maxZoom: compact ? 1.25 : 1.5 })
           else if (event.key === '-') void flowRef.current.zoomOut()
           else void flowRef.current.zoomIn()
         }}
@@ -551,7 +558,7 @@ export function TaskDagGraph({
             zoomOnScroll
             zoomOnPinch
             fitView
-            fitViewOptions={{ padding: 0.25, maxZoom: 1.5 }}
+            fitViewOptions={{ padding: compact ? 0.16 : 0.25, maxZoom: compact ? 1.25 : 1.5 }}
             minZoom={0.25}
             maxZoom={3}
           >

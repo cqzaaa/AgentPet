@@ -209,6 +209,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
 
     const rawRequest: ModelRawRequest = { method: 'POST', url, headers, body: requestBody }
+    const requestStartedAt = performance.now()
 
     const response = await this.fetchWithTransientRetry(url, {
       method: 'POST',
@@ -216,6 +217,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       body: JSON.stringify(requestBody),
       signal: options.signal
     })
+    const headersMs = Math.round(performance.now() - requestStartedAt)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -249,6 +251,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
 
     const data: any = await response.json()
+    const bodyMs = Math.round(performance.now() - requestStartedAt - headersMs)
     const choice = data.choices?.[0]
     const message = choice?.message
 
@@ -275,7 +278,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
         transport: 'json',
         status: response.status,
         contentType: response.headers.get('content-type') || undefined,
-        body: data
+        body: data,
+        timing: { headersMs, bodyMs, totalMs: Math.round(performance.now() - requestStartedAt) }
       }
     }
 
@@ -330,9 +334,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
     const url = `${cleanBaseUrl}/chat/completions`
     yield { type: 'raw_request', request: { method: 'POST', url, headers, body: requestBody } }
+    const requestStartedAt = performance.now()
     const response = await this.fetchWithTransientRetry(url, {
       method: 'POST', headers, body: JSON.stringify(requestBody), signal: options.signal
     })
+    const streamHeadersMs = Math.round(performance.now() - requestStartedAt)
     if (!response.ok) {
       const text = await response.text()
       // Older OpenAI-compatible gateways sometimes reject only the stream flag.
@@ -340,7 +346,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (response.status === 400 && /stream|unknown parameter|unsupported/i.test(text)) {
         const message = await this.chat(messages, options)
         if (message.raw_request) yield { type: 'raw_request', request: message.raw_request }
-        if (message.raw_response) yield { type: 'raw_response', response: message.raw_response }
+        if (message.raw_response) yield { type: 'raw_response', response: {
+          ...message.raw_response,
+          timing: { ...message.raw_response.timing, streamHeadersMs, fallbackStatus: response.status, totalMs: Math.round(performance.now() - requestStartedAt) }
+        } }
         yield { type: 'message', message }
         return
       }
@@ -350,6 +359,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     // Some compatible providers silently return ordinary JSON for stream requests.
     if (!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) {
       const data: any = await response.json()
+      const bodyMs = Math.round(performance.now() - requestStartedAt - streamHeadersMs)
       const message = data.choices?.[0]?.message
       if (!message) throw new Error('未获取到有效的模型回答结果')
       const tagged = extractTaggedThinking(message.content || '')
@@ -358,6 +368,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         transport: 'json',
         status: response.status,
         contentType: response.headers.get('content-type') || undefined,
+        timing: { headersMs: streamHeadersMs, bodyMs, totalMs: Math.round(performance.now() - requestStartedAt) },
         body: data
       } }
       if (reasoningContent) yield { type: 'reasoning_delta', content: reasoningContent }
@@ -376,6 +387,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const toolCalls: any[] = []
     const rawEvents: unknown[] = []
     let sawDone = false
+    let firstChunkMs: number | undefined
     let sawFinishReason = false
     let streamFailure: { message: string; code: string } | null = null
 
@@ -425,6 +437,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
     try {
       streamBody: for await (const chunk of response.body as any) {
+        firstChunkMs ??= Math.round(performance.now() - requestStartedAt)
         buffer += decoder.decode(chunk, { stream: true })
         const events = buffer.split(/\r?\n\r?\n/)
         buffer = events.pop() || ''
@@ -464,6 +477,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       transport: 'sse',
       status: response.status,
       contentType: response.headers.get('content-type') || undefined,
+      timing: { headersMs: streamHeadersMs, firstChunkMs, totalMs: Math.round(performance.now() - requestStartedAt) },
       events: rawEvents
     } }
     if (streamFailure) {

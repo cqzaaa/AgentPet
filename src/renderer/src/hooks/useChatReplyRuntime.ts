@@ -83,7 +83,7 @@ export function useChatReplyRuntime({
           })
         })
         const target = messages.find((message: any) => message.id === replyId)
-        hasAnotherActiveReply = messages.some((message: any) => message.id !== replyId && message.isThinking)
+        hasAnotherActiveReply = Boolean(messages.at(-1)?.isThinking)
         if (target && !wasAborted) savedMessage = target
         return { ...session, messages }
       })
@@ -140,7 +140,7 @@ export function useChatReplyRuntime({
         })
         return savedMessage
       })
-      hasAnotherActiveReply = messages.some((message: any) => message.id !== replyId && message.isThinking)
+      hasAnotherActiveReply = Boolean(messages.at(-1)?.isThinking)
       return { ...session, messages }
     }))
 

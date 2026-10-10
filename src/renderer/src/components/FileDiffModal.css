@@ -358,9 +358,10 @@ body > .file-diff-drawer-layer {
 }
 
 .file-diff-table {
-  display: table;
-  width: 100%;
-  border-collapse: collapse;
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  width: max-content;
 }
 
 .file-diff-empty {
@@ -379,13 +380,17 @@ body > .file-diff-drawer-layer {
   font-size: 11px;
   text-align: center;
   user-select: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .file-diff-row {
   display: flex;
   align-items: stretch;
+  min-width: 100%;
   width: 100%;
   min-height: 20px;
+  line-height: 20px;
 }
 
 .file-diff-row.diff-type-add {
@@ -413,8 +418,10 @@ body > .file-diff-drawer-layer {
   flex-shrink: 0;
   border-right: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
+  line-height: 20px;
+  box-sizing: border-box;
 }
 
 .diff-type-add .diff-num {
@@ -434,20 +441,30 @@ body > .file-diff-drawer-layer {
   user-select: none;
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  line-height: 20px;
+  box-sizing: border-box;
 }
 
 .diff-code {
   margin: 0;
-  padding: 0 8px;
+  padding: 0 12px 0 8px;
   flex: 1;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 20px;
+  box-sizing: border-box;
+}
+
+.diff-code code {
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
+  tab-size: 2;
 }
 
 /* 窄屏或移动端适配 */

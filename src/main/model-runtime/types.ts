@@ -22,6 +22,14 @@ export interface ModelRawResponse {
   transport: 'json' | 'sse'
   status: number
   contentType?: string
+  timing?: {
+    headersMs?: number
+    bodyMs?: number
+    firstChunkMs?: number
+    streamHeadersMs?: number
+    fallbackStatus?: number
+    totalMs?: number
+  }
   /** Parsed JSON body for ordinary responses. */
   body?: unknown
   /** Parsed SSE `data:` payloads in wire order; non-JSON frames remain strings. */
