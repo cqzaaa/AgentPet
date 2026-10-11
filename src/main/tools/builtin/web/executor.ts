@@ -8,6 +8,7 @@ import { IToolExecutor, ToolContext, ToolResult, WebSource } from '../../core/ty
 import { getActiveStorageDir } from '../../utils/paths'
 
 type SearchResult = { title: string; url: string; snippet: string }
+type BingRawSearch = { isFiltered: boolean; results: SearchResult[] }
 type ExtractedPage = { title: string; markdown: string }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -134,6 +135,24 @@ async function runInHiddenPage<T>(
     })()
   })
 
+  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    try {
+      const requested = new URL(details.url)
+      if (requested.hostname.endsWith('bing.com')) {
+        const existing = details.requestHeaders['Cookie'] || details.requestHeaders['cookie'] || ''
+        const internationalCookie = '_RwBf=r=0&ilt=2; _Rwho=u=d; SRCHUSR=POEX=W; _EDGE_S=mkt=zh-cn'
+        if (!existing.includes('ilt=2')) {
+          details.requestHeaders['Cookie'] = existing
+            ? `${existing}; ${internationalCookie}`
+            : internationalCookie
+        }
+      }
+    } catch {
+      // Ignore URL parse errors
+    }
+    callback({ requestHeaders: details.requestHeaders })
+  })
+
   let timer: NodeJS.Timeout | undefined
   let onAbort: (() => void) | undefined
   try {
@@ -162,7 +181,9 @@ const SEARCH_SCRIPT = String.raw`(() => {
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const seen = new Set();
   const results = [];
-  for (const item of document.querySelectorAll('#b_results .b_algo, main .b_algo, #b_results > li')) {
+  const msgEl = document.querySelector('.b_msg, #b_results .b_msg');
+  const isFiltered = Boolean(msgEl && /本地法律要求|未予显示/.test(msgEl.textContent || ''));
+  for (const item of document.querySelectorAll('#b_results .b_algo, main .b_algo, #b_results > li.b_algo, #b_results > li')) {
     const anchor = item.querySelector('h2 a, h3 a');
     if (!anchor) continue;
     const title = clean(anchor.textContent);
@@ -172,8 +193,68 @@ const SEARCH_SCRIPT = String.raw`(() => {
     seen.add(url);
     results.push({ title, url, snippet });
   }
-  return results;
+  return { isFiltered, results };
 })()`
+
+const BAIDU_SEARCH_SCRIPT = String.raw`(() => {
+  return new Promise(resolve => {
+    const clean = v => String(v || '').replace(/\s+/g, ' ').trim();
+    const extract = () => {
+      const seen = new Set();
+      const list = [];
+      for (const anchor of document.querySelectorAll('#content_left h3 a, #content_left .t a')) {
+        const title = clean(anchor.textContent);
+        const url = anchor.href || '';
+        if (!title || !/^https?:\/\//i.test(url) || seen.has(url) || url.includes('baidu.com/baidu.php')) continue;
+        const container = anchor.closest('.c-container, .result, [tpl]') || anchor.parentElement?.parentElement;
+        const snippet = clean(container?.textContent || '').slice(0, 150);
+        seen.add(url);
+        list.push({ title, url, snippet });
+      }
+      return list;
+    };
+    const start = Date.now();
+    const poll = () => {
+      const res = extract();
+      if (res.length > 0 || Date.now() - start > 3500) return resolve(res);
+      setTimeout(poll, 100);
+    };
+    poll();
+  });
+})()`
+
+function isBingSearchDegraded(query: string, results: SearchResult[], isFiltered: boolean): boolean {
+  if (!results.length) return false
+  const cleanQuery = query.replace(/^["'“‘\s]+/, '').trim()
+  if (cleanQuery.length <= 1) return false
+  const firstChar = cleanQuery[0]
+
+  const dictRegex = new RegExp(`^[<《]?\\s*${firstChar}\\s*(?:[（(:]|：|-\\s*|(?:汉语[文汉]字|学科概念|汉字|字典|词典|读音|意思|拼音|的解释|的意思))`, 'i')
+  const encoded = encodeURIComponent(firstChar)
+
+  const isDegradedItem = (r: SearchResult) => {
+    const isSingleCharUrl = r.url.endsWith(`/item/${encoded}`) || r.url.endsWith(`/${encoded}`) || r.url.includes(`%E${encoded.slice(1)}`)
+    return dictRegex.test(r.title) || isSingleCharUrl
+  }
+
+  // Top result or any of the top 3 results is a single-character dictionary/lexicon page
+  if (results.slice(0, 3).some(isDegradedItem)) {
+    return true
+  }
+
+  // Regulatory filter triggered AND none of top 3 results contain the query's primary keyword
+  if (isFiltered) {
+    const firstWord = cleanQuery.split(/[\s+]+/)[0].replace(/["'“‘”’]/g, '')
+    if (firstWord.length >= 2) {
+      const top3Text = results.slice(0, 3).map(r => `${r.title} ${r.snippet}`).join(' ')
+      if (!top3Text.includes(firstWord)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
 
 const FETCH_SCRIPT = String.raw`(() => {
   const clone = document.cloneNode(true);
@@ -234,13 +315,50 @@ export class WebExecutor implements IToolExecutor {
     const query = String(args.query || '').trim()
     if (!query) return { content: '错误：缺少必要参数 query', success: false }
     const maxResults = Math.min(Math.max(Number(args.max_results) || 8, 1), 15)
-    const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${maxResults}`
-    const results = (await runInHiddenPage<SearchResult[]>(
-      searchUrl,
-      normalizeTimeout(args.timeout_seconds),
-      context.abortSignal,
-      SEARCH_SCRIPT
-    )).slice(0, maxResults)
+    const timeout = normalizeTimeout(args.timeout_seconds)
+
+    let results: SearchResult[] = []
+
+    // 1. Primary search with Bing (international cookies injected)
+    const searchUrl = `https://cn.bing.com/search?q=${encodeURIComponent(query)}&count=${maxResults}`
+    try {
+      const bingData = await runInHiddenPage<BingRawSearch>(
+        searchUrl,
+        timeout,
+        context.abortSignal,
+        SEARCH_SCRIPT
+      )
+      if (bingData?.results && !isBingSearchDegraded(query, bingData.results, bingData.isFiltered)) {
+        results = bingData.results.slice(0, maxResults)
+      }
+    } catch {
+      // Bing error, fallback to Baidu below
+    }
+
+    // 2. If Bing degraded or returned 0 results, fall back to Baidu
+    if (!results.length && !context.abortSignal?.aborted) {
+      try {
+        const cleanBaiduQuery = query
+          .replace(/["'“‘”’]/g, ' ')
+          .replace(/\bOR\b/g, ' ')
+          .replace(/\bsite:[^\s]+/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim() || query
+        const baiduUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(cleanBaiduQuery)}&rn=${maxResults}`
+        const baiduResults = await runInHiddenPage<SearchResult[]>(
+          baiduUrl,
+          timeout,
+          context.abortSignal,
+          BAIDU_SEARCH_SCRIPT
+        )
+        if (baiduResults && baiduResults.length > 0) {
+          results = baiduResults.slice(0, maxResults)
+        }
+      } catch {
+        // Fallback error
+      }
+    }
+
     if (!results.length) return { content: `未找到与“${query}”相关的搜索结果。`, success: true }
 
     const fetchedAt = new Date().toISOString()

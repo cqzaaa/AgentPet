@@ -1405,16 +1405,20 @@ export function useAppStore() {
   const prevSessionIdRef = useRef<string | null>(null)
   const prevActiveTabRef = useRef<string | null>(null)
   const justSwitchedRef = useRef(false)
+  const skeletonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 统一的骨架屏触发函数
+  // 由下一次触发替换计时器；effect 清理不能取消它，否则 StrictMode 重放后骨架屏会一直显示。
   const triggerChatSkeleton = useCallback(() => {
+    if (skeletonTimerRef.current) clearTimeout(skeletonTimerRef.current)
     setIsSessionSwitching(true)
 
     // 切换会话时清空输入框和附件
     setInputValue('')
     setAttachedFiles([])
 
-    const skeletonTimer = setTimeout(() => {
+    skeletonTimerRef.current = setTimeout(() => {
+      skeletonTimerRef.current = null
       setIsSessionSwitching(false)
       justSwitchedRef.current = true
 
@@ -1424,8 +1428,6 @@ export function useAppStore() {
         justSwitchedRef.current = false
       }, 50)
     }, 400) // 显示 400ms 骨架屏
-
-    return skeletonTimer
   }, [chatEndRef])
 
   // 1. 处理会话切换时的骨架屏和定位
@@ -1435,8 +1437,7 @@ export function useAppStore() {
       // 仅在已经位于 chat 页面时由 session 变化触发骨架屏，
       // 避免与 tab 切换的骨架屏重复。
       if (activeTab === 'chat') {
-        const timer = triggerChatSkeleton()
-        return () => clearTimeout(timer)
+        triggerChatSkeleton()
       }
     }
     return undefined
@@ -1445,9 +1446,9 @@ export function useAppStore() {
   // 2. 处理从其他 tab 切换到 chat 页面时的骨架屏
   useEffect(() => {
     if (activeTab === 'chat' && prevActiveTabRef.current !== 'chat' && prevActiveTabRef.current !== null) {
-      const timer = triggerChatSkeleton()
+      triggerChatSkeleton()
       prevActiveTabRef.current = activeTab
-      return () => clearTimeout(timer)
+      return undefined
     }
     prevActiveTabRef.current = activeTab
     return undefined

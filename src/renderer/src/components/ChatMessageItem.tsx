@@ -291,11 +291,11 @@ function parseInlineMarkdown(text: string): string {
   html = html.replace(/(?<!\*)\*(?!\s|\*)([^*\n]*?[\w\u4e00-\u9fa5][^*\n]*?)(?<!\s|\*)\*(?!\*)/g, '<em>$1</em>')
 
   // 5. 图片 ![alt](url)
-  html = html.replace(/!\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
+  html = html.replace(/!\[(.*?)\]\(((?:[^()]|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
 
   // 6. 链接 [text](url)
-  html = html.replace(/\[S(\d+)\]\(((?:[^()]+|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
-  html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)/g, (_match, label, rawHref) => {
+  html = html.replace(/\[S(\d+)\]\(((?:[^()]|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
+  html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]|\([^()]*\))*)\)/g, (_match, label, rawHref) => {
     const cleanHref = rawHref.replace(/^&lt;/, '').replace(/&gt;$/, '').trim()
     const isLocal = isLocalFileReference(cleanHref)
     if (!isLocal) {
@@ -964,7 +964,7 @@ export function renderPlainOrImageText(
     processedText += cleanText.substring(lastIndex, match.index)
 
     if (match[1]) {
-      const mdMatch = match[1].match(/^(!?)\[(.*?)\]\(((?:[^()]+|\([^()]*\))*)\)$/)
+      const mdMatch = match[1].match(/^(!?)\[(.*?)\]\(((?:[^()]|\([^()]*\))*)\)$/)
       if (mdMatch) {
         const isExplicitImg = mdMatch[1] === '!'
         const alt = mdMatch[2]
