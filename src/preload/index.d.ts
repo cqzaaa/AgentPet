@@ -58,15 +58,21 @@ declare global {
       selectAttachmentFiles: () => Promise<string[]>
       parseFileContent: (filePath: string) => Promise<string>
       knowledgeListBases: () => Promise<any[]>
-      knowledgeCreateBase: (name: string, description?: string) => Promise<string>
-      knowledgeDeleteBase: (id: string) => Promise<boolean>
-      knowledgeListDocuments: (knowledgeBaseId: string) => Promise<any[]>
-      knowledgeImportDocuments: (knowledgeBaseId: string) => Promise<any[]>
-      knowledgeGetImportProgress: (knowledgeBaseId: string) => Promise<any | null>
-      onKnowledgeImportProgress: (callback: (progress: any) => void) => () => void
       knowledgeGetDocument: (documentId: string) => Promise<any | null>
-      knowledgeDeleteDocument: (documentId: string) => Promise<boolean>
       knowledgeSearch: (knowledgeBaseId: string, query: string) => Promise<any[]>
+      wikiListWorkspaces: () => Promise<any[]>
+      wikiOpenWorkspace: () => Promise<string | null>
+      wikiRemoveWorkspace: (workspaceId: string) => Promise<boolean>
+      wikiSyncWorkspace: (workspaceId: string) => Promise<any>
+      wikiGetSyncProgress: (workspaceId: string) => Promise<any | null>
+      onWikiSyncProgress: (callback: (progress: any) => void) => () => void
+      wikiListItems: (workspaceId: string) => Promise<any[]>
+      wikiReadItem: (itemId: string) => Promise<any | null>
+      wikiDeleteItem: (itemId: string) => Promise<boolean>
+      wikiCreatePage: (workspaceId: string, title: string, parentPath?: string) => Promise<string>
+      wikiSavePage: (itemId: string, content: string) => Promise<{ saved: boolean; itemId: string }>
+      wikiListRevisions: (itemId: string) => Promise<any[]>
+      wikiGetGraph: (workspaceId: string, focusItemId?: string) => Promise<any>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>

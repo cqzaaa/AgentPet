@@ -106,29 +106,39 @@ const api = {
     ipcRenderer.invoke('api:parse-file-content', filePath),
   knowledgeListBases: (): Promise<any[]> =>
     ipcRenderer.invoke('api:knowledge-list-bases'),
-  knowledgeCreateBase: (name: string, description?: string): Promise<string> =>
-    ipcRenderer.invoke('api:knowledge-create-base', name, description),
-  knowledgeDeleteBase: (id: string): Promise<boolean> =>
-    ipcRenderer.invoke('api:knowledge-delete-base', id),
-  knowledgeListDocuments: (knowledgeBaseId: string): Promise<any[]> =>
-    ipcRenderer.invoke('api:knowledge-list-documents', knowledgeBaseId),
-  knowledgeImportDocuments: (knowledgeBaseId: string): Promise<any[]> =>
-    ipcRenderer.invoke('api:knowledge-import-documents', knowledgeBaseId),
-  knowledgeGetImportProgress: (knowledgeBaseId: string): Promise<any | null> =>
-    ipcRenderer.invoke('api:knowledge-get-import-progress', knowledgeBaseId),
-  onKnowledgeImportProgress: (callback: (progress: any) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, progress: any): void => callback(progress)
-    ipcRenderer.on('api:knowledge-import-progress', handler)
-    return (): void => {
-      ipcRenderer.removeListener('api:knowledge-import-progress', handler)
-    }
-  },
   knowledgeGetDocument: (documentId: string): Promise<any | null> =>
     ipcRenderer.invoke('api:knowledge-get-document', documentId),
-  knowledgeDeleteDocument: (documentId: string): Promise<boolean> =>
-    ipcRenderer.invoke('api:knowledge-delete-document', documentId),
   knowledgeSearch: (knowledgeBaseId: string, query: string): Promise<any[]> =>
     ipcRenderer.invoke('api:knowledge-search', knowledgeBaseId, query),
+  wikiListWorkspaces: (): Promise<any[]> =>
+    ipcRenderer.invoke('api:wiki-list-workspaces'),
+  wikiOpenWorkspace: (): Promise<string | null> =>
+    ipcRenderer.invoke('api:wiki-open-workspace'),
+  wikiRemoveWorkspace: (workspaceId: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:wiki-remove-workspace', workspaceId),
+  wikiSyncWorkspace: (workspaceId: string): Promise<any> =>
+    ipcRenderer.invoke('api:wiki-sync-workspace', workspaceId),
+  wikiGetSyncProgress: (workspaceId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:wiki-get-sync-progress', workspaceId),
+  onWikiSyncProgress: (callback: (progress: any) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: any): void => callback(progress)
+    ipcRenderer.on('api:wiki-sync-progress', handler)
+    return (): void => { ipcRenderer.removeListener('api:wiki-sync-progress', handler) }
+  },
+  wikiListItems: (workspaceId: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:wiki-list-items', workspaceId),
+  wikiReadItem: (itemId: string): Promise<any | null> =>
+    ipcRenderer.invoke('api:wiki-read-item', itemId),
+  wikiDeleteItem: (itemId: string): Promise<boolean> =>
+    ipcRenderer.invoke('api:wiki-delete-item', itemId),
+  wikiCreatePage: (workspaceId: string, title: string, parentPath?: string): Promise<string> =>
+    ipcRenderer.invoke('api:wiki-create-page', workspaceId, title, parentPath),
+  wikiSavePage: (itemId: string, content: string): Promise<{ saved: boolean; itemId: string }> =>
+    ipcRenderer.invoke('api:wiki-save-page', itemId, content),
+  wikiListRevisions: (itemId: string): Promise<any[]> =>
+    ipcRenderer.invoke('api:wiki-list-revisions', itemId),
+  wikiGetGraph: (workspaceId: string, focusItemId?: string): Promise<any> =>
+    ipcRenderer.invoke('api:wiki-get-graph', workspaceId, focusItemId),
   parseFileHtml: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-html', filePath),
   readFileBase64: (filePath: string): Promise<string | null> =>

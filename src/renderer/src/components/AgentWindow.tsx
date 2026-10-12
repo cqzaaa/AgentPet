@@ -50,7 +50,7 @@ const AgentPage = lazy(() => import('../pages/AgentPage').then(module => ({ defa
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
 const LogsPage = lazy(() => import('../pages/LogsPage').then(module => ({ default: module.LogsPage })))
 const TrajectoryPage = lazy(() => import('../pages/TrajectoryPage').then(module => ({ default: module.TrajectoryPage })))
-const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(module => ({ default: module.KnowledgeBasePage })))
+const WikiPage = lazy(() => import('../pages/WikiPage').then(module => ({ default: module.WikiPage })))
 const WorkflowPage = lazy(() => import('../pages/WorkflowPage').then(module => ({ default: module.WorkflowPage })))
 const SkillHubPage = lazy(() => import('../pages/SkillHubPage').then(module => ({ default: module.SkillHubPage })))
 const FilePreviewPanel = lazy(() =>
@@ -84,7 +84,7 @@ const FUNCTION_PAGE_LABELS: Record<FunctionPageId, string> = {
   skillhub: '技能市场',
   control: '订阅频道',
   agent: '代理',
-  knowledge: '知识库',
+  knowledge: 'Wiki',
   workflow: '工作流',
   logs: '日志',
   settings: '设置'
@@ -730,7 +730,7 @@ export function AgentWindow(): React.JSX.Element {
         page = <SkillHubPage />
         break
       case 'knowledge':
-        page = <KnowledgeBasePage />
+        page = <WikiPage />
         break
       case 'logs':
         page = <LogsPage store={store} />
@@ -903,14 +903,14 @@ export function AgentWindow(): React.JSX.Element {
                 />
               </div>
             </Tooltip>
-            <Tooltip content="知识库" placement="right" disabled={!isCollapsed}>
+            <Tooltip content="Wiki" placement="right" disabled={!isCollapsed}>
               <div
                 className={`menu-item ${activeTab === 'knowledge' ? 'active' : ''}`}
                 onClick={() => { setActiveTab('knowledge'); if (!isCollapsed) setMenuCollapsed(true) }}
               >
                 <div className="menu-item-left">
                   <Library size={18} strokeWidth={2} aria-hidden="true" />
-                  <span>知识库</span>
+                  <span>Wiki</span>
                 </div>
                 <ChevronRight
                   className="menu-item-arrow"

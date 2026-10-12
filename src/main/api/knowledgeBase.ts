@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
+import { ipcMain, type WebContents } from 'electron'
 import * as fs from 'fs'
-import { basename, dirname, extname, join, resolve } from 'path'
+import { basename, dirname, extname, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import { PDFParse } from 'pdf-parse'
 import mammoth from 'mammoth'
@@ -38,43 +38,6 @@ import {
 interface KnowledgeBaseDependencies {
   getDB: () => Promise<any>
   getSystemLlmConfig?: () => any
-}
-
-type KnowledgeImportStage = 'queued' | 'parsing' | 'structuring' | 'saving' | 'embedding' | 'completed' | 'failed'
-
-interface KnowledgeImportFileProgress {
-  name: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  stage: KnowledgeImportStage
-  processedNodes: number
-  totalNodes: number
-  documentId?: string
-  error?: string
-}
-
-interface KnowledgeImportBatchProgress {
-  batchId: string
-  knowledgeBaseId: string
-  status: 'running' | 'completed'
-  total: number
-  completed: number
-  failed: number
-  currentIndex: number
-  startedAt: number
-  updatedAt: number
-  files: KnowledgeImportFileProgress[]
-}
-
-const latestKnowledgeImportByBase = new Map<string, KnowledgeImportBatchProgress>()
-
-function knowledgeImportSnapshot(batch: KnowledgeImportBatchProgress): KnowledgeImportBatchProgress {
-  return { ...batch, files: batch.files.map(file => ({ ...file })) }
-}
-
-function publishKnowledgeImportProgress(event: { sender: WebContents }, batch: KnowledgeImportBatchProgress): void {
-  batch.updatedAt = Date.now()
-  latestKnowledgeImportByBase.set(batch.knowledgeBaseId, batch)
-  event.sender.send('api:knowledge-import-progress', knowledgeImportSnapshot(batch))
 }
 
 type NodeType = KnowledgeNodeType
@@ -563,8 +526,6 @@ function extractTerms(query: string): string[] {
   return [...terms].slice(0, 24)
 }
 
-const SEARCHABLE_NODE_TYPES = new Set(['clause', 'item', 'paragraph', 'list', 'table', 'table_row', 'figure', 'caption'])
-
 function parseHeadingPath(value: unknown): string[] {
   try {
     const parsed = JSON.parse(String(value || '[]'))
@@ -635,33 +596,6 @@ async function ensureKnowledgeEmbeddings(
   }
 }
 
-async function indexKnowledgeDocument(
-  database: any,
-  documentId: string,
-  onProgress?: (processed: number, total: number) => void
-): Promise<void> {
-  const rows = await database.all(`
-    SELECT n.*, e.vector AS embedding_vector, e.model AS embedding_model, e.content_hash AS embedding_hash
-    FROM knowledge_nodes n
-    LEFT JOIN knowledge_embeddings e ON e.node_id = n.id
-    WHERE n.document_id = ?
-  `, documentId)
-  const searchable = rows.filter((row: any) => SEARCHABLE_NODE_TYPES.has(row.node_type)
-    || (row.node_type === 'article' && !rows.some((child: any) => child.parent_id === row.id && ['clause', 'item'].includes(child.node_type))))
-  try {
-    for (const row of searchable) {
-      await database.run('DELETE FROM knowledge_nodes_fts WHERE node_id = ?', row.id)
-      await database.run(
-        'INSERT INTO knowledge_nodes_fts (node_id, title, content, heading_path) VALUES (?, ?, ?, ?)',
-        row.id, row.title || '', row.content || '', parseHeadingPath(row.heading_path).slice(1).join(' / ')
-      )
-    }
-  } catch {
-    // Some SQLite builds omit FTS5. The in-process BM25 path below remains active.
-  }
-  await ensureKnowledgeEmbeddings(database, searchable, onProgress)
-}
-
 function countOccurrences(text: string, term: string): number {
   let count = 0
   let offset = 0
@@ -706,171 +640,6 @@ export function registerKnowledgeBaseAPIs(deps: KnowledgeBaseDependencies): void
     `)
   })
 
-  ipcMain.handle('api:knowledge-create-base', async (_, name: string, description = '') => {
-    const database = await deps.getDB()
-    const id = randomUUID()
-    const now = Date.now()
-    await database.run(
-      'INSERT INTO knowledge_bases (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      id,
-      (name || '未命名知识库').trim(),
-      description.trim(),
-      now,
-      now
-    )
-    return id
-  })
-
-  ipcMain.handle('api:knowledge-delete-base', async (_, id: string) => {
-    const database = await deps.getDB()
-    await database.run('DELETE FROM knowledge_bases WHERE id = ?', id)
-    return true
-  })
-
-  ipcMain.handle('api:knowledge-list-documents', async (_, knowledgeBaseId: string) => {
-    const database = await deps.getDB()
-    return database.all(`
-      SELECT id, knowledge_base_id AS knowledgeBaseId, name, source_path AS sourcePath,
-             file_type AS fileType, file_size AS fileSize, parser, parse_status AS parseStatus,
-             warning, quality_score AS qualityScore, profile_json AS profileJson,
-             character_count AS characterCount, node_count AS nodeCount,
-             created_at AS createdAt, updated_at AS updatedAt
-      FROM knowledge_documents
-      WHERE knowledge_base_id = ?
-      ORDER BY updated_at DESC
-    `, knowledgeBaseId)
-  })
-
-  ipcMain.handle('api:knowledge-get-import-progress', (_, knowledgeBaseId: string) => {
-    const batch = latestKnowledgeImportByBase.get(knowledgeBaseId)
-    return batch ? knowledgeImportSnapshot(batch) : null
-  })
-
-  ipcMain.handle('api:knowledge-import-documents', async (event, knowledgeBaseId: string) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) return []
-    const selection = await dialog.showOpenDialog(window, {
-      title: '导入知识库文档',
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        { name: '知识库文档', extensions: SUPPORTED_EXTENSIONS },
-        { name: '所有文件', extensions: ['*'] }
-      ]
-    })
-    if (selection.canceled) return []
-
-    const batch: KnowledgeImportBatchProgress = {
-      batchId: randomUUID(),
-      knowledgeBaseId,
-      status: 'running',
-      total: selection.filePaths.length,
-      completed: 0,
-      failed: 0,
-      currentIndex: 0,
-      startedAt: Date.now(),
-      updatedAt: Date.now(),
-      files: selection.filePaths.map(filePath => ({
-        name: basename(filePath),
-        status: 'queued',
-        stage: 'queued',
-        processedNodes: 0,
-        totalNodes: 0
-      }))
-    }
-    publishKnowledgeImportProgress(event, batch)
-
-    const database = await deps.getDB()
-    const imported: Array<{ id?: string; name: string; success: boolean; error?: string }> = []
-    for (let fileIndex = 0; fileIndex < selection.filePaths.length; fileIndex++) {
-      const filePath = selection.filePaths[fileIndex]
-      const name = basename(filePath)
-      const fileProgress = batch.files[fileIndex]
-      batch.currentIndex = fileIndex
-      fileProgress.status = 'running'
-      fileProgress.stage = 'parsing'
-      publishKnowledgeImportProgress(event, batch)
-      try {
-        const stat = await fs.promises.stat(filePath)
-        const parsed = await parseKnowledgeFile(filePath, event)
-        const documentId = randomUUID()
-        const nodes = parsed.nodes || buildKnowledgeNodes(name, parsed.blocks)
-        fileProgress.documentId = documentId
-        fileProgress.stage = 'structuring'
-        fileProgress.totalNodes = nodes.length
-        publishKnowledgeImportProgress(event, batch)
-        const now = Date.now()
-        const parseStatus = nodes.length <= 1 || parsed.characterCount < 80 || parsed.qualityScore < 0.6
-          ? 'needs_review'
-          : 'ready'
-
-        await database.exec('BEGIN TRANSACTION')
-        try {
-          await database.run(`
-            INSERT INTO knowledge_documents (
-              id, knowledge_base_id, name, source_path, file_type, file_size, parser,
-              parse_status, warning, quality_score, profile_json, character_count, node_count,
-              created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, documentId, knowledgeBaseId, name, filePath, extname(filePath).slice(1).toLowerCase(), stat.size,
-          parsed.parser, parseStatus, parsed.warning, parsed.qualityScore, JSON.stringify(parsed.profile),
-          parsed.characterCount, nodes.length, now, now)
-
-          fileProgress.stage = 'saving'
-          publishKnowledgeImportProgress(event, batch)
-          for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
-            const node = nodes[nodeIndex]
-            await database.run(`
-              INSERT INTO knowledge_nodes (
-                id, document_id, parent_id, node_type, level, title, heading_path,
-                content, order_index, page_start, page_end, token_count, confidence,
-                source_meta, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, node.id, documentId, node.parentId, node.type, node.level, node.title,
-            JSON.stringify(node.headingPath), node.content, node.orderIndex, node.pageStart,
-            node.pageEnd, node.tokenCount, node.confidence, JSON.stringify(node.sourceMeta), now)
-            if (nodeIndex === nodes.length - 1 || nodeIndex % 20 === 19) {
-              fileProgress.processedNodes = nodeIndex + 1
-              publishKnowledgeImportProgress(event, batch)
-            }
-          }
-          await database.run('UPDATE knowledge_bases SET updated_at = ? WHERE id = ?', now, knowledgeBaseId)
-          await database.exec('COMMIT')
-        } catch (error) {
-          await database.exec('ROLLBACK')
-          throw error
-        }
-        try {
-          fileProgress.stage = 'embedding'
-          fileProgress.processedNodes = 0
-          publishKnowledgeImportProgress(event, batch)
-          await indexKnowledgeDocument(database, documentId, (processed, total) => {
-            fileProgress.processedNodes = processed
-            fileProgress.totalNodes = total || nodes.length
-            publishKnowledgeImportProgress(event, batch)
-          })
-        } catch (error) {
-          console.warn(`[KnowledgeBase] Vector indexing failed for ${name}; lexical search remains available.`, error)
-        }
-        imported.push({ id: documentId, name, success: true })
-        fileProgress.status = 'completed'
-        fileProgress.stage = 'completed'
-        fileProgress.processedNodes = fileProgress.totalNodes
-        batch.completed += 1
-      } catch (error: any) {
-        const message = error.message || String(error)
-        imported.push({ name, success: false, error: message })
-        fileProgress.status = 'failed'
-        fileProgress.stage = 'failed'
-        fileProgress.error = message
-        batch.failed += 1
-      }
-      publishKnowledgeImportProgress(event, batch)
-    }
-    batch.status = 'completed'
-    publishKnowledgeImportProgress(event, batch)
-    return imported
-  })
-
   ipcMain.handle('api:knowledge-get-document', async (_, documentId: string) => {
     const database = await deps.getDB()
     const document = await database.get(`
@@ -897,24 +666,6 @@ export function registerKnowledgeBaseAPIs(deps: KnowledgeBaseDependencies): void
         sourceMeta: (() => { try { return JSON.parse(row.sourceMeta || '{}') } catch { return {} } })()
       }))
     }
-  })
-
-  ipcMain.handle('api:knowledge-delete-document', async (_, documentId: string) => {
-    const database = await deps.getDB()
-    const row = await database.get('SELECT knowledge_base_id AS knowledgeBaseId, profile_json AS profileJson FROM knowledge_documents WHERE id = ?', documentId)
-    await database.run('DELETE FROM knowledge_documents WHERE id = ?', documentId)
-    try {
-      const profile = JSON.parse(row?.profileJson || '{}')
-      const assetDir = typeof profile.imageAssetDir === 'string' ? resolve(profile.imageAssetDir) : ''
-      const assetRoot = resolve(join(app.getPath('userData'), 'knowledge-assets'))
-      if (assetDir && assetDir.startsWith(`${assetRoot}\\`)) {
-        await fs.promises.rm(assetDir, { recursive: true, force: true })
-      }
-    } catch {
-      // Legacy documents may not have an asset directory.
-    }
-    if (row?.knowledgeBaseId) await database.run('UPDATE knowledge_bases SET updated_at = ? WHERE id = ?', Date.now(), row.knowledgeBaseId)
-    return true
   })
 
   ipcMain.handle('api:knowledge-search', async (_, knowledgeBaseId: string, query: string) => {

@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, 
 import { join, basename, dirname, extname, isAbsolute, resolve, sep } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
 import { registerKnowledgeBaseAPIs } from './api/knowledgeBase'
+import { registerWikiAPIs } from './api/wiki'
 import { pathToFileURL } from 'url'
 import { isImageAttachment } from '../preload/attachment-types'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -4037,17 +4038,87 @@ app.whenReady().then(() => {
           updated_at INTEGER NOT NULL,
           FOREIGN KEY (node_id) REFERENCES knowledge_nodes(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS wiki_items (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          document_id TEXT,
+          relative_path TEXT NOT NULL,
+          absolute_path TEXT NOT NULL,
+          parent_path TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          item_kind TEXT NOT NULL DEFAULT 'document',
+          file_type TEXT DEFAULT '',
+          editable INTEGER NOT NULL DEFAULT 0,
+          content_hash TEXT NOT NULL,
+          file_size INTEGER DEFAULT 0,
+          modified_at INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(workspace_id, relative_path),
+          FOREIGN KEY (workspace_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          FOREIGN KEY (document_id) REFERENCES knowledge_documents(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS wiki_links (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          from_item_id TEXT NOT NULL,
+          to_item_id TEXT,
+          target_text TEXT NOT NULL,
+          link_type TEXT NOT NULL DEFAULT 'explicit',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          FOREIGN KEY (from_item_id) REFERENCES wiki_items(id) ON DELETE CASCADE,
+          FOREIGN KEY (to_item_id) REFERENCES wiki_items(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS wiki_revisions (
+          id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS wiki_entities (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          normalized_name TEXT NOT NULL,
+          entity_type TEXT NOT NULL DEFAULT 'concept',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(workspace_id, normalized_name),
+          FOREIGN KEY (workspace_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS wiki_item_entities (
+          item_id TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          mention_count INTEGER NOT NULL DEFAULT 1,
+          confidence REAL NOT NULL DEFAULT 0,
+          evidence_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (item_id, entity_id),
+          FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE,
+          FOREIGN KEY (entity_id) REFERENCES wiki_entities(id) ON DELETE CASCADE
+        );
         CREATE INDEX IF NOT EXISTS idx_knowledge_documents_base ON knowledge_documents(knowledge_base_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_document_order ON knowledge_nodes(document_id, order_index);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_parent ON knowledge_nodes(parent_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_model ON knowledge_embeddings(model);
+        CREATE INDEX IF NOT EXISTS idx_wiki_items_workspace_path ON wiki_items(workspace_id, relative_path);
+        CREATE INDEX IF NOT EXISTS idx_wiki_links_workspace_from ON wiki_links(workspace_id, from_item_id);
+        CREATE INDEX IF NOT EXISTS idx_wiki_links_workspace_to ON wiki_links(workspace_id, to_item_id);
+        CREATE INDEX IF NOT EXISTS idx_wiki_revisions_item_time ON wiki_revisions(item_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_wiki_entities_workspace_name ON wiki_entities(workspace_id, normalized_name);
+        CREATE INDEX IF NOT EXISTS idx_wiki_item_entities_entity ON wiki_item_entities(entity_id, item_id);
       `)
 
       for (const migration of [
         'ALTER TABLE knowledge_documents ADD COLUMN quality_score REAL DEFAULT 0',
         "ALTER TABLE knowledge_documents ADD COLUMN profile_json TEXT DEFAULT '{}'",
         'ALTER TABLE knowledge_nodes ADD COLUMN confidence REAL DEFAULT 0',
-        "ALTER TABLE knowledge_nodes ADD COLUMN source_meta TEXT DEFAULT '{}'"
+        "ALTER TABLE knowledge_nodes ADD COLUMN source_meta TEXT DEFAULT '{}'",
+        "ALTER TABLE knowledge_bases ADD COLUMN root_path TEXT DEFAULT ''"
       ]) {
         try {
           await db.exec(migration)
@@ -5301,6 +5372,7 @@ app.whenReady().then(() => {
     getDB,
     getSystemLlmConfig: () => systemLlmConfig
   })
+  registerWikiAPIs({ getDB })
 
   ipcMain.handle('api:parse-file-content', async (_, filePath: string) => {
     if (isImageAttachment(filePath)) return ''

@@ -426,7 +426,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
         setSelectedKnowledgeBase(null)
       }
     } catch (error) {
-      console.error('加载知识库列表失败:', error)
+      console.error('加载 Wiki 工作区列表失败:', error)
       setKnowledgeBases([])
     }
   }, [selectedKnowledgeBaseId, setSelectedKnowledgeBase])
@@ -2814,8 +2814,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                 <Tooltip
                   content={
                     selectedKnowledgeBaseId
-                      ? `当前知识库：${selectedKnowledgeBaseName}`
-                      : '选择本轮聊天使用的知识库'
+                      ? `当前 Wiki：${selectedKnowledgeBaseName}`
+                      : '选择本轮聊天使用的 Wiki 工作区'
                   }
                   placement="top"
                   disabled={showKnowledgePopover}
@@ -2831,8 +2831,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     }}
                     aria-label={
                       selectedKnowledgeBaseId
-                        ? `当前知识库：${selectedKnowledgeBaseName}`
-                        : '知识库'
+                        ? `当前 Wiki：${selectedKnowledgeBaseName}`
+                        : 'Wiki'
                     }
                   >
                     <BookOpen size={17} strokeWidth={1.9} aria-hidden="true" />
@@ -2844,7 +2844,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                   <div className="chat-knowledge-popover">
                     <div className="chat-knowledge-popover__header">
                       <div>
-                        <strong>对话知识库</strong>
+                        <strong>对话 Wiki</strong>
                         <small>发送时自动检索并附带引用</small>
                       </div>
                       <BookOpen size={17} strokeWidth={1.8} aria-hidden="true" />
@@ -2859,7 +2859,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     >
                       <span className="chat-knowledge-option__mark" />
                       <span>
-                        <strong>不使用知识库</strong>
+                        <strong>不使用 Wiki</strong>
                         <small>仅使用当前对话与记忆</small>
                       </span>
                       {!selectedKnowledgeBaseId && <Check size={14} aria-hidden="true" />}
@@ -2899,7 +2899,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                           setActiveTab('knowledge')
                         }}
                       >
-                        还没有知识库，前往创建
+                        还没有 Wiki 工作区，前往创建
                       </button>
                     )}
                   </div>
