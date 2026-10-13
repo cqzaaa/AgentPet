@@ -45,6 +45,7 @@ interface WikiGraphItemRow {
   title: string
   itemKind: 'page' | 'document'
   fileType: string
+  fileSize: number
 }
 
 interface WikiGraphLinkRow {
@@ -71,6 +72,33 @@ interface WikiGraphEntityLinkRow {
   mentionCount: number
   confidence: number
   evidenceJson: string
+}
+
+interface WikiSourceLinkRow {
+  id: string
+  itemId: string
+  resource: string
+  relativePath: string
+  startLine: number | null
+  endLine: number | null
+  claimId: string
+  statement: string
+  version: string
+  status: 'linked' | 'verified' | 'missing'
+}
+
+interface ParsedRepositoryResource {
+  resource: string
+  relativePath: string
+  startLine: number | null
+  endLine: number | null
+}
+
+interface WikiSourceCandidate extends ParsedRepositoryResource {
+  claimId: string
+  statement: string
+  version: string
+  status: 'linked' | 'verified' | 'missing'
 }
 
 interface EntityCandidate {
@@ -377,6 +405,159 @@ function normalizedLinkKey(value: string): string {
     .toLocaleLowerCase('zh-CN')
 }
 
+function parseRepositoryResource(value: string): ParsedRepositoryResource | null {
+  const raw = value.trim().replace(/^['"]|['"]$/g, '')
+  if (!raw.startsWith('repo://')) return null
+  const body = raw.slice('repo://'.length)
+  const hashIndex = body.indexOf('#')
+  const encodedPath = hashIndex < 0 ? body : body.slice(0, hashIndex)
+  const encodedFragment = hashIndex < 0 ? '' : body.slice(hashIndex + 1)
+  let decodedPath = ''
+  let decodedFragment = ''
+  try {
+    decodedPath = decodeURIComponent(encodedPath).replace(/\\/g, '/').replace(/^\.\//, '')
+    decodedFragment = encodedFragment ? decodeURIComponent(encodedFragment) : ''
+  } catch {
+    return null
+  }
+  const parts = decodedPath.split('/')
+  if (!decodedPath || decodedPath.startsWith('/') || /^[a-z]:\//i.test(decodedPath)
+    || parts.some(part => !part || part === '.' || part === '..'
+      || [...part].some(character => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127))) return null
+  const lowerPath = decodedPath.toLowerCase()
+  if (lowerPath === '.git' || lowerPath.startsWith('.git/') || lowerPath === 'openwiki' || lowerPath.startsWith('openwiki/')) return null
+  let startLine: number | null = null
+  let endLine: number | null = null
+  if (decodedFragment) {
+    const match = /^L([1-9]\d*)(?:-L([1-9]\d*))?$/.exec(decodedFragment)
+    if (!match) return null
+    startLine = Number(match[1])
+    endLine = Number(match[2] || match[1])
+    if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || endLine < startLine) return null
+  }
+  const encoded = parts.map(part => encodeURIComponent(part)).join('/')
+  return {
+    resource: `repo://${encoded}${startLine ? `#L${startLine}-L${endLine}` : ''}`,
+    relativePath: decodedPath,
+    startLine,
+    endLine
+  }
+}
+
+function frontmatterRepositoryResources(content: string): ParsedRepositoryResource[] {
+  if (!content.startsWith('---')) return []
+  const end = content.indexOf('\n---', 3)
+  if (end < 0) return []
+  const frontmatter = content.slice(3, end)
+  const resources: ParsedRepositoryResource[] = []
+  for (const match of frontmatter.matchAll(/^\s*(?:-\s*)?resource:\s*(.+?)\s*$/gm)) {
+    const resource = parseRepositoryResource(match[1])
+    if (resource) resources.push(resource)
+  }
+  return resources
+}
+
+function claimsSidecarPath(rootPath: string, pagePath: string): string | null {
+  const normalized = normalizeRelativePath(pagePath)
+  if (!/^openwiki\/.+\.md$/i.test(normalized)) return null
+  const relativePage = normalized.slice('openwiki/'.length).replace(/\.md$/i, '.json')
+  const candidate = resolve(rootPath, 'openwiki', '.claims', relativePage)
+  return isWithinRoot(rootPath, candidate) ? candidate : null
+}
+
+async function sourceFileAvailable(rootPath: string, relativePath: string): Promise<boolean> {
+  const candidate = resolve(rootPath, relativePath)
+  if (!isWithinRoot(rootPath, candidate)) return false
+  try {
+    const stat = await fs.promises.lstat(candidate)
+    if (!stat.isFile() || stat.isSymbolicLink()) return false
+    return isWithinRoot(await fs.promises.realpath(rootPath), await fs.promises.realpath(candidate))
+  } catch {
+    return false
+  }
+}
+
+async function rebuildWikiSources(database: Database, workspaceId: string, rootPath: string): Promise<void> {
+  const pages = await database.all<Array<{ id: string; relativePath: string; absolutePath: string }>>(`
+    SELECT id, relative_path AS relativePath, absolute_path AS absolutePath
+    FROM wiki_items WHERE workspace_id = ? AND file_type = 'md'
+    ORDER BY relative_path COLLATE NOCASE
+  `, workspaceId)
+  const collected: Array<WikiSourceCandidate & { itemId: string }> = []
+  for (const page of pages) {
+    let content = ''
+    try {
+      content = await fs.promises.readFile(page.absolutePath, 'utf8')
+    } catch {
+      continue
+    }
+    const candidates = new Map<string, WikiSourceCandidate>()
+    for (const source of frontmatterRepositoryResources(content)) {
+      candidates.set(source.resource, { ...source, claimId: '', statement: '', version: '', status: 'linked' })
+    }
+    const sidecarPath = claimsSidecarPath(rootPath, page.relativePath)
+    let verified = false
+    if (sidecarPath) {
+      try {
+        const parsed = JSON.parse(await fs.promises.readFile(sidecarPath, 'utf8')) as {
+          claims?: Array<{ id?: unknown; statement?: unknown; evidence?: Array<{ resource?: unknown; version?: unknown }> }>
+          verification?: unknown
+        }
+        verified = Boolean(parsed.verification)
+        for (const claim of Array.isArray(parsed.claims) ? parsed.claims : []) {
+          const claimId = typeof claim.id === 'string' ? claim.id : ''
+          const statement = typeof claim.statement === 'string' ? claim.statement.trim() : ''
+          for (const evidence of Array.isArray(claim.evidence) ? claim.evidence : []) {
+            if (typeof evidence.resource !== 'string') continue
+            const source = parseRepositoryResource(evidence.resource)
+            if (!source) continue
+            const key = `${source.resource}\n${claimId}`
+            candidates.set(key, {
+              ...source,
+              claimId,
+              statement,
+              version: typeof evidence.version === 'string' ? evidence.version : '',
+              status: verified ? 'verified' : 'linked'
+            })
+          }
+        }
+      } catch {
+        // A malformed or partially-written sidecar must not hide frontmatter sources.
+      }
+    }
+    const claimedPaths = new Set([...candidates.values()].filter(source => source.claimId).map(source => source.relativePath))
+    for (const [key, source] of candidates) {
+      if (!source.claimId && claimedPaths.has(source.relativePath)) {
+        candidates.delete(key)
+        continue
+      }
+      if (!await sourceFileAvailable(rootPath, source.relativePath)) source.status = 'missing'
+      collected.push({ ...source, itemId: page.id })
+    }
+  }
+
+  const now = Date.now()
+  await database.exec('BEGIN TRANSACTION')
+  try {
+    await database.run('DELETE FROM wiki_item_sources WHERE workspace_id = ?', workspaceId)
+    for (const source of collected) {
+      const id = `source-link:${createHash('sha256').update(`${source.itemId}:${source.resource}:${source.claimId}`).digest('hex').slice(0, 32)}`
+      await database.run(`
+        INSERT INTO wiki_item_sources (
+          id, workspace_id, item_id, resource, relative_path, start_line, end_line,
+          claim_id, statement, version, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, id, workspaceId, source.itemId, source.resource, source.relativePath,
+      source.startLine, source.endLine, source.claimId, source.statement, source.version,
+      source.status, now, now)
+    }
+    await database.exec('COMMIT')
+  } catch (error) {
+    await database.exec('ROLLBACK')
+    throw error
+  }
+}
+
 function normalizeEntityName(value: string): string {
   return value.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase('zh-CN')
 }
@@ -561,15 +742,36 @@ async function rebuildWikiLinks(database: Database, workspaceId: string): Promis
     } catch {
       continue
     }
-    const targets = [...content.matchAll(/\[\[([^\]]+)\]\]/g)]
-      .map(match => match[1].split('|')[0].split('#')[0].trim())
-      .filter(Boolean)
-    for (const targetText of new Set(targets)) {
+    const wikiTargets = [...content.matchAll(/\[\[([^\]]+)\]\]/g)]
+      .map(match => ({
+        targetText: match[1].split('|')[0].split('#')[0].trim(),
+        linkType: 'explicit'
+      }))
+      .filter(target => Boolean(target.targetText))
+    const markdownTargets = [...content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)]
+      .map(match => match[1].trim().replace(/^<|>$/g, '').split(/\s+["']/)[0])
+      .map(rawTarget => {
+        if (!rawTarget || rawTarget.startsWith('#') || rawTarget.startsWith('/') || /^[a-z][a-z\d+.-]*:/i.test(rawTarget)) return null
+        let decodedTarget = ''
+        try {
+          decodedTarget = decodeURIComponent(rawTarget.split(/[?#]/)[0]).replace(/\\/g, '/')
+        } catch {
+          return null
+        }
+        if (!decodedTarget) return null
+        const targetText = normalizeRelativePath(join(dirname(item.relativePath), decodedTarget))
+        if (!targetText || targetText === '..' || targetText.startsWith('../')) return null
+        return { targetText, linkType: 'markdown' }
+      })
+      .filter((target): target is { targetText: string; linkType: string } => target !== null)
+    const targets = new Map([...wikiTargets, ...markdownTargets]
+      .map(target => [`${target.linkType}:${target.targetText}`, target]))
+    for (const { targetText, linkType } of targets.values()) {
       const target = lookup.get(normalizedLinkKey(targetText))
       await database.run(`
         INSERT INTO wiki_links (id, workspace_id, from_item_id, to_item_id, target_text, link_type, created_at)
-        VALUES (?, ?, ?, ?, ?, 'explicit', ?)
-      `, randomUUID(), workspaceId, item.id, target?.id || null, targetText, Date.now())
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, randomUUID(), workspaceId, item.id, target?.id || null, targetText, linkType, Date.now())
     }
   }
 }
@@ -614,7 +816,11 @@ async function syncWorkspace(
   if (currentPaths.size === 0) {
     await database.run('DELETE FROM wiki_links WHERE workspace_id = ?', workspaceId)
     await database.run('DELETE FROM wiki_entities WHERE workspace_id = ?', workspaceId)
+    await database.run('DELETE FROM wiki_item_sources WHERE workspace_id = ?', workspaceId)
   } else {
+    progress.currentFile = '关联页面与源码依据'
+    publishSyncProgress(event, progress)
+    await rebuildWikiSources(database, workspaceId, rootPath)
     await rebuildWikiLinks(database, workspaceId)
     progress.currentFile = '提取正文实体关系'
     publishSyncProgress(event, progress)
@@ -648,7 +854,9 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       }
       state.watcher = fs.watch(rootPath, { recursive: true }, (_eventType, filename) => {
         const changedPath = normalizeRelativePath(String(filename || ''))
-        if (!changedPath || changedPath.split('/').some(part => IGNORED_DIRECTORIES.has(part) || part.startsWith('.'))) return
+        const isClaimsChange = /^openwiki\/\.claims\//i.test(changedPath)
+        if (!changedPath || changedPath.split('/').some(part => IGNORED_DIRECTORIES.has(part)
+          || (part.startsWith('.') && !(isClaimsChange && part === '.claims')))) return
         if (state.timer) clearTimeout(state.timer)
         state.timer = setTimeout(() => {
           state.timer = null
@@ -790,6 +998,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     await shell.trashItem(absolutePath)
     if (item.documentId) await removeIndexedDocument(database, item.documentId)
     await database.run('DELETE FROM wiki_items WHERE id = ?', itemId)
+    await rebuildWikiSources(database, item.workspaceId, item.rootPath)
     await rebuildWikiLinks(database, item.workspaceId)
     await rebuildWikiEntities(database, item.workspaceId)
     return true
@@ -820,6 +1029,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       contentHash: await hashFile(targetPath)
     }
     const indexed = await upsertWikiFile(database, workspaceId, entry, event)
+    await rebuildWikiSources(database, workspaceId, rootPath)
     await rebuildWikiLinks(database, workspaceId)
     await rebuildWikiEntities(database, workspaceId)
     return indexed.itemId
@@ -854,6 +1064,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       contentHash
     }
     await upsertWikiFile(database, item.workspace_id, entry, event)
+    await rebuildWikiSources(database, item.workspace_id, item.rootPath)
     await rebuildWikiLinks(database, item.workspace_id)
     await rebuildWikiEntities(database, item.workspace_id)
     return { saved: true, itemId }
@@ -868,10 +1079,49 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     `, itemId)
   })
 
+  ipcMain.handle('api:wiki-read-source', async (_, workspaceId: string, resource: string) => {
+    const database = await deps.getDB()
+    const source = await database.get<{
+      relativePath: string; startLine: number | null; endLine: number | null; rootPath: string
+    }>(`
+      SELECT wis.relative_path AS relativePath, wis.start_line AS startLine,
+        wis.end_line AS endLine, kb.root_path AS rootPath
+      FROM wiki_item_sources wis
+      JOIN knowledge_bases kb ON kb.id = wis.workspace_id
+      WHERE wis.workspace_id = ? AND wis.resource = ? LIMIT 1
+    `, workspaceId, resource)
+    if (!source?.rootPath || !source.relativePath) throw new Error('WIKI_SOURCE_NOT_FOUND')
+    const rootPath = await fs.promises.realpath(source.rootPath)
+    const absolutePath = resolve(rootPath, source.relativePath)
+    if (!isWithinRoot(rootPath, absolutePath)) throw new Error('WIKI_SOURCE_OUTSIDE_WORKSPACE')
+    const stat = await fs.promises.lstat(absolutePath)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) throw new Error('WIKI_SOURCE_UNREADABLE')
+    const physicalPath = await fs.promises.realpath(absolutePath)
+    if (!isWithinRoot(rootPath, physicalPath)) throw new Error('WIKI_SOURCE_OUTSIDE_WORKSPACE')
+    const lines = (await fs.promises.readFile(physicalPath, 'utf8')).replace(/\r/g, '').split('\n')
+    const excerptStart = source.startLine ? Math.max(1, source.startLine - 5) : 1
+    const excerptEnd = source.endLine
+      ? Math.min(lines.length, source.endLine + 5)
+      : Math.min(lines.length, 180)
+    return {
+      resource,
+      relativePath: source.relativePath,
+      absolutePath: physicalPath,
+      startLine: source.startLine,
+      endLine: source.endLine,
+      excerptStart,
+      excerptEnd,
+      totalLines: lines.length,
+      truncated: excerptEnd < lines.length,
+      lines: lines.slice(excerptStart - 1, excerptEnd).map((text, index) => ({ number: excerptStart + index, text }))
+    }
+  })
+
   ipcMain.handle('api:wiki-get-graph', async (_, workspaceId: string, focusItemId?: string) => {
     const database = await deps.getDB()
     const allItems = await database.all<WikiGraphItemRow[]>(`
-      SELECT id, relative_path AS relativePath, title, item_kind AS itemKind, file_type AS fileType
+      SELECT id, relative_path AS relativePath, title, item_kind AS itemKind,
+        file_type AS fileType, file_size AS fileSize
       FROM wiki_items WHERE workspace_id = ? ORDER BY relative_path COLLATE NOCASE LIMIT 400
     `, workspaceId)
     const explicitLinks = await database.all<WikiGraphLinkRow[]>(`
@@ -888,11 +1138,20 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       WHERE e.workspace_id = ?
       ORDER BY wie.confidence DESC, wie.mention_count DESC
     `, workspaceId)
+    const sourceLinks = await database.all<WikiSourceLinkRow[]>(`
+      SELECT id, item_id AS itemId, resource, relative_path AS relativePath,
+        start_line AS startLine, end_line AS endLine, claim_id AS claimId,
+        statement, version, status
+      FROM wiki_item_sources WHERE workspace_id = ?
+      ORDER BY relative_path COLLATE NOCASE, start_line
+    `, workspaceId)
 
     let selectedEntityIds = new Set<string>()
+    let selectedSourcePaths = new Set<string>()
     let includedItemIds = new Set<string>()
     let focusEntityLinks: WikiGraphEntityLinkRow[] = []
-    const relatedScores = new Map<string, { score: number; sharedEntities: Set<string> }>()
+    let focusSourceLinks: WikiSourceLinkRow[] = []
+    const relatedScores = new Map<string, { score: number; sharedEntities: Set<string>; sharedSources: Set<string>; directLink: boolean }>()
     if (focusItemId) {
       includedItemIds.add(focusItemId)
       focusEntityLinks = entityLinks
@@ -902,10 +1161,27 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       selectedEntityIds = new Set(focusEntityLinks.map(link => link.entityId))
       for (const link of entityLinks) {
         if (link.itemId === focusItemId || !selectedEntityIds.has(link.entityId)) continue
-        const current = relatedScores.get(link.itemId) || { score: 0, sharedEntities: new Set<string>() }
+        const current = relatedScores.get(link.itemId) || { score: 0, sharedEntities: new Set<string>(), sharedSources: new Set<string>(), directLink: false }
         current.score += link.confidence + Math.min(3, link.mentionCount) * 0.15
         current.sharedEntities.add(link.entityName)
         relatedScores.set(link.itemId, current)
+      }
+      focusSourceLinks = sourceLinks.filter(link => link.itemId === focusItemId).slice(0, 36)
+      selectedSourcePaths = new Set(focusSourceLinks.map(link => link.relativePath))
+      for (const link of sourceLinks) {
+        if (link.itemId === focusItemId || !selectedSourcePaths.has(link.relativePath)) continue
+        const current = relatedScores.get(link.itemId) || { score: 0, sharedEntities: new Set<string>(), sharedSources: new Set<string>(), directLink: false }
+        current.score += 2.4
+        current.sharedSources.add(link.relativePath)
+        relatedScores.set(link.itemId, current)
+      }
+      for (const link of explicitLinks) {
+        const linkedItemId = link.fromItemId === focusItemId ? link.toItemId : link.toItemId === focusItemId ? link.fromItemId : null
+        if (!linkedItemId || linkedItemId === focusItemId) continue
+        const current = relatedScores.get(linkedItemId) || { score: 0, sharedEntities: new Set<string>(), sharedSources: new Set<string>(), directLink: false }
+        current.score += 3.2
+        current.directLink = true
+        relatedScores.set(linkedItemId, current)
       }
       for (const [itemId] of [...relatedScores.entries()].sort((left, right) => right[1].score - left[1].score).slice(0, 10)) {
         includedItemIds.add(itemId)
@@ -931,11 +1207,42 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         .sort((left, right) => right[1] - left[1])
         .slice(0, 16)
         .map(([itemId]) => itemId))
+      const sourceScores = new Map<string, Set<string>>()
+      for (const link of sourceLinks) {
+        const itemIds = sourceScores.get(link.relativePath) || new Set<string>()
+        itemIds.add(link.itemId)
+        sourceScores.set(link.relativePath, itemIds)
+      }
+      selectedSourcePaths = new Set([...sourceScores.entries()]
+        .sort((left, right) => right[1].size - left[1].size)
+        .slice(0, 14)
+        .map(([relativePath]) => relativePath))
+      const sourceItemScores = new Map<string, number>()
+      for (const link of sourceLinks) {
+        if (!selectedSourcePaths.has(link.relativePath)) continue
+        sourceItemScores.set(link.itemId, (sourceItemScores.get(link.itemId) || 0) + 1)
+      }
+      for (const [itemId] of [...sourceItemScores.entries()].sort((left, right) => right[1] - left[1]).slice(0, 16)) {
+        includedItemIds.add(itemId)
+      }
+      const linkedItemScores = new Map<string, number>()
+      for (const link of explicitLinks) {
+        linkedItemScores.set(link.fromItemId, (linkedItemScores.get(link.fromItemId) || 0) + 1)
+        if (link.toItemId) linkedItemScores.set(link.toItemId, (linkedItemScores.get(link.toItemId) || 0) + 1)
+      }
+      for (const [itemId] of [...linkedItemScores.entries()].sort((left, right) => right[1] - left[1]).slice(0, 16)) {
+        includedItemIds.add(itemId)
+      }
     }
 
-    const items = allItems.filter(item => includedItemIds.has(item.id))
+    includedItemIds = new Set(allItems.map(item => item.id))
+    const items = allItems
     const visibleEntityLinks = entityLinks.filter(link => selectedEntityIds.has(link.entityId) && includedItemIds.has(link.itemId))
+    const visibleSourceLinks = sourceLinks.filter(link => selectedSourcePaths.has(link.relativePath) && includedItemIds.has(link.itemId))
     const entityById = new Map(visibleEntityLinks.map(link => [link.entityId, link]))
+    const sourceByPath = new Map(visibleSourceLinks.map(link => [link.relativePath, link]))
+    const visibleExplicitLinks = explicitLinks.filter(link => link.toItemId
+      && includedItemIds.has(link.fromItemId) && includedItemIds.has(link.toItemId))
     const nodes = [
       ...items.map(item => ({
         id: item.id,
@@ -943,7 +1250,8 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         label: item.title,
         kind: item.itemKind,
         fileType: item.fileType,
-        relativePath: item.relativePath
+        relativePath: item.relativePath,
+        size: item.fileSize
       })),
       ...[...entityById.values()].map(entity => ({
         id: entity.entityId,
@@ -953,15 +1261,42 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         entityType: entity.entityType,
         fileType: '',
         relativePath: ''
+      })),
+      ...[...sourceByPath.values()].map(source => ({
+        id: `source:${createHash('sha256').update(source.relativePath).digest('hex').slice(0, 24)}`,
+        itemId: null,
+        label: basename(source.relativePath),
+        kind: 'source',
+        fileType: extname(source.relativePath).slice(1).toLowerCase(),
+        relativePath: source.relativePath,
+        resource: source.resource
       }))
     ]
-    const edges = visibleEntityLinks.map(link => ({
-      id: `mention:${link.itemId}:${link.entityId}`,
-      source: link.itemId,
-      target: link.entityId,
-      kind: 'mention',
-      weight: link.mentionCount
-    }))
+    const evidenceEdges = new Map<string, { id: string; source: string; target: string; kind: string; weight: number }>()
+    for (const link of visibleSourceLinks) {
+      const target = `source:${createHash('sha256').update(link.relativePath).digest('hex').slice(0, 24)}`
+      const key = `${link.itemId}:${target}`
+      const current = evidenceEdges.get(key)
+      if (current) current.weight += 1
+      else evidenceEdges.set(key, { id: `evidence:${key}`, source: link.itemId, target, kind: 'evidence', weight: 1 })
+    }
+    const edges = [
+      ...visibleExplicitLinks.map(link => ({
+        id: link.id,
+        source: link.fromItemId,
+        target: link.toItemId as string,
+        kind: link.linkType,
+        weight: 1
+      })),
+      ...visibleEntityLinks.map(link => ({
+        id: `mention:${link.itemId}:${link.entityId}`,
+        source: link.itemId,
+        target: link.entityId,
+        kind: 'mention',
+        weight: link.mentionCount
+      })),
+      ...evidenceEdges.values()
+    ]
     const parseEvidence = (value: string): string[] => {
       try {
         const parsed = JSON.parse(value) as unknown
@@ -988,7 +1323,9 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
           title: related.title,
           relativePath: related.relativePath,
           fileType: related.fileType,
-          sharedEntities: [...relation.sharedEntities].slice(0, 5)
+          sharedEntities: [...relation.sharedEntities].slice(0, 5),
+          sharedSources: [...relation.sharedSources].slice(0, 4),
+          directLink: relation.directLink
         } : null
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)
@@ -998,8 +1335,8 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         .filter((item): item is WikiGraphItemRow => Boolean(item))
       : []
     const unresolved = focusItemId
-      ? explicitLinks.filter(link => link.fromItemId === focusItemId && !link.toItemId)
+      ? explicitLinks.filter(link => link.fromItemId === focusItemId && !link.toItemId && link.linkType === 'explicit')
       : []
-    return { nodes, edges, entities, relatedItems, backlinks, unresolved }
+    return { nodes, edges, entities, sources: focusSourceLinks, relatedItems, backlinks, unresolved }
   })
 }

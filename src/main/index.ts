@@ -4101,6 +4101,23 @@ app.whenReady().then(() => {
           FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE,
           FOREIGN KEY (entity_id) REFERENCES wiki_entities(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS wiki_item_sources (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          resource TEXT NOT NULL,
+          relative_path TEXT NOT NULL,
+          start_line INTEGER,
+          end_line INTEGER,
+          claim_id TEXT NOT NULL DEFAULT '',
+          statement TEXT NOT NULL DEFAULT '',
+          version TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'linked',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE
+        );
         CREATE INDEX IF NOT EXISTS idx_knowledge_documents_base ON knowledge_documents(knowledge_base_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_document_order ON knowledge_nodes(document_id, order_index);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_parent ON knowledge_nodes(parent_id);
@@ -4111,6 +4128,8 @@ app.whenReady().then(() => {
         CREATE INDEX IF NOT EXISTS idx_wiki_revisions_item_time ON wiki_revisions(item_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_wiki_entities_workspace_name ON wiki_entities(workspace_id, normalized_name);
         CREATE INDEX IF NOT EXISTS idx_wiki_item_entities_entity ON wiki_item_entities(entity_id, item_id);
+        CREATE INDEX IF NOT EXISTS idx_wiki_item_sources_item ON wiki_item_sources(item_id, relative_path);
+        CREATE INDEX IF NOT EXISTS idx_wiki_item_sources_workspace_path ON wiki_item_sources(workspace_id, relative_path);
       `)
 
       for (const migration of [
@@ -4523,7 +4542,7 @@ app.whenReady().then(() => {
               fileInfo = {
                 ...restFi,
                 content: typeof restFi.content === 'string'
-                  ? limitAttachmentTextPreview(restFi.content)
+                  ? (restFi.isPastedText ? restFi.content : limitAttachmentTextPreview(restFi.content))
                   : restFi.content
               }
             } catch (e) {
@@ -4539,7 +4558,7 @@ app.whenReady().then(() => {
                 return {
                   ...rest,
                   content: typeof rest.content === 'string'
-                    ? limitAttachmentTextPreview(rest.content)
+                    ? (rest.isPastedText ? rest.content : limitAttachmentTextPreview(rest.content))
                     : rest.content
                 }
               })
@@ -5507,6 +5526,16 @@ app.whenReady().then(() => {
       return buffer.toString('base64')
     } catch (e: any) {
       return null
+    }
+  })
+
+  // 完整读取纯文本文件（无截断，供粘贴的超长文本弹窗查看完整内容）
+  ipcMain.handle('api:read-text-file', async (_, filePath: string) => {
+    try {
+      return await fs.promises.readFile(filePath, 'utf-8')
+    } catch (e: any) {
+      console.error('读取文本文件失败', e)
+      throw new Error(`读取文本文件失败: ${e.message}`)
     }
   })
 

@@ -12,6 +12,7 @@ import { CollaborationComposer } from '../components/CollaborationComposer'
 import { CollaborationRunCard, type CollaborationSnapshot } from '../components/CollaborationRunCard'
 import { SubtaskCapsuleGroup, SubtaskDetailDrawer } from '../components/SubtaskCapsuleGroup'
 import { PermissionApprovalCard } from '../components/PermissionApprovalCard'
+import { PastedTextModal } from '../components/PastedTextModal'
 import { requestConfirmation } from '../components/confirmService'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
@@ -1468,6 +1469,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     ]
   )
 
+  // 粘贴文本预览弹窗状态
+  const [viewingPastedText, setViewingPastedText] = useState<{ title: string; content?: string; path?: string } | null>(null)
+
   // SSH 弹窗控制本地状态
   const [showSshModal, setShowSshModal] = useState(false)
   const [sshForm, setSshForm] = useState(() => {
@@ -2015,8 +2019,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       .catch(() => undefined)
   }, [])
 
-  const handleEditMessage = useCallback(async (messageId: number, text: string) => {
-    await handleSendChat({ messageId, text, sessionId: activeSessionId })
+  const handleEditMessage = useCallback(async (messageId: number, text: string, files: any[]) => {
+    await handleSendChat({ messageId, text, attachedFiles: files, sessionId: activeSessionId })
   }, [handleSendChat, activeSessionId])
 
   const handleRetryFailed = useCallback(async (messageId: number) => {
@@ -2065,6 +2069,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           requestMessage={requestMessageById.get(message.id)}
           highlightedMessageId={highlightedMessageId}
           onPreviewFile={handlePreviewFile}
+          onViewPastedText={setViewingPastedText}
           onQuoteSelection={handleQuoteSelection}
           onEditMessage={handleEditMessage}
           onRetryFailed={handleRetryFailed}
@@ -2218,94 +2223,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             </button>
           )}
         </div>
-
-        {/* 附件在输入框上方的实时预览 */}
-        {attachedFiles && attachedFiles.length > 0 && (
-          <div
-            className="input-files-preview-container"
-            style={{
-              display: 'flex',
-              gap: '8px',
-              padding: '0 16px 8px',
-              flexWrap: 'wrap',
-              overflowX: 'auto',
-              width: 'min(calc(100% - 24px), 920px)',
-              margin: '0 auto',
-              boxSizing: 'border-box'
-            }}
-          >
-            {attachedFiles.map((file, idx) => (
-              <div
-                key={idx}
-                className="input-file-preview"
-                style={{
-                  margin: 0,
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center',
-                  backgroundColor: 'var(--color-bg-secondary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '8px',
-                  padding: '6px 12px'
-                }}
-              >
-                {file.objectUrl ? (
-                  <img
-                    src={file.objectUrl}
-                    alt={file.name}
-                    style={{
-                      width: '24px',
-                      height: '24px',
-                      objectFit: 'cover',
-                      borderRadius: '4px',
-                      marginRight: '8px',
-                      cursor: 'pointer'
-                    }}
-                    onClick={() => setPreviewImageSrc(file.objectUrl || null)}
-                  />
-                ) : (
-                  <FileText
-                    size={17}
-                    strokeWidth={2}
-                    className="preview-icon"
-                    style={{ marginRight: '6px' }}
-                    aria-hidden="true"
-                  />
-                )}
-                <Tooltip content={file.name} placement="top">
-                  <span
-                    className="preview-name"
-                    style={{
-                      maxWidth: '120px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontSize: '13px'
-                    }}
-                  >
-                    {file.name}
-                  </span>
-                </Tooltip>
-                <Tooltip content="移除文件" placement="top">
-                  <button
-                    className="preview-remove-btn"
-                    onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                    style={{
-                      marginLeft: '8px',
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: 'var(--color-text-secondary)',
-                      padding: '2px'
-                    }}
-                  >
-                    <X size={14} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-              </div>
-            ))}
-          </div>
-        )}
 
         {false && activePermissionRequest && (
           <div
@@ -2670,6 +2587,134 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             </div>
           )}
 
+          {/* 附件在输入框内部的顶部预览 */}
+          {attachedFiles && attachedFiles.length > 0 && (
+            <div className="input-files-preview-container">
+              {attachedFiles.map((file, idx) =>
+                file.isPastedText ? (
+                  <div
+                    key={idx}
+                    className="input-file-preview is-pasted-text"
+                    onClick={() => {
+                      setViewingPastedText({
+                        title: file.name,
+                        content: file.content,
+                        path: file.path
+                      })
+                    }}
+                    style={{ cursor: 'pointer' }}
+                    title={file.content ? file.content.slice(0, 300) : file.name}
+                  >
+                    <div className="pasted-text-icon-box" aria-hidden="true">
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M7 4H5.6C4.71634 4 4 4.71634 4 5.6V7M13 4H14.4C15.2837 4 16 4.71634 16 5.6V7M4 13V14.4C4 15.2837 4.71634 16 5.6 16H7M16 13V14.4C16 15.2837 15.2837 16 14.4 16H13M8 8.75H11M8 11.25H12.2"
+                          stroke="currentColor"
+                          strokeWidth="1.65"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    <div className="pasted-text-info">
+                      <span className="pasted-text-title">{file.name}</span>
+                      <span className="pasted-text-subtitle">粘贴的文本</span>
+                    </div>
+                    <Tooltip content="移除粘贴的文本" placement="top">
+                      <button
+                        type="button"
+                        className="pasted-text-remove-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))
+                        }}
+                        aria-label="移除粘贴的文本"
+                      >
+                        <X size={11} strokeWidth={2.5} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <div
+                    key={idx}
+                    className="input-file-preview"
+                    style={{
+                      margin: 0,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      backgroundColor: 'var(--color-bg-secondary)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '8px',
+                      padding: '6px 12px'
+                    }}
+                  >
+                    {file.objectUrl ? (
+                      <img
+                        src={file.objectUrl}
+                        alt={file.name}
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          objectFit: 'cover',
+                          borderRadius: '4px',
+                          marginRight: '8px',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => setPreviewImageSrc(file.objectUrl || null)}
+                      />
+                    ) : (
+                      <FileText
+                        size={17}
+                        strokeWidth={2}
+                        className="preview-icon"
+                        style={{ marginRight: '6px' }}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Tooltip content={file.name} placement="top">
+                      <span
+                        className="preview-name"
+                        style={{
+                          maxWidth: '120px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          fontSize: '13px'
+                        }}
+                      >
+                        {file.name}
+                      </span>
+                    </Tooltip>
+                    <Tooltip content="移除文件" placement="top">
+                      <button
+                        type="button"
+                        className="preview-remove-btn"
+                        onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                        style={{
+                          marginLeft: '8px',
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--color-text-secondary)',
+                          padding: '2px'
+                        }}
+                      >
+                        <X size={14} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
           <textarea
             ref={chatTextareaRef}
             className="chat-textarea-field resize-none"
@@ -2689,14 +2734,61 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}
             onChange={(e) => setInputValue(e.target.value)}
             onPaste={async (e) => {
+              const attachLongPastedText = (rawText: string) => {
+                const firstLine = (
+                  rawText
+                    .split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .find((line) => line.length > 0) || rawText.trim()
+                ).replace(/\s+/g, ' ')
+                const displayTitle = firstLine.slice(0, 60) || '粘贴的文本'
+                const tempKey = `pasted_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+                setAttachedFiles((prev) => [
+                  ...prev,
+                  {
+                    name: displayTitle,
+                    path: '',
+                    content: rawText,
+                    safeName: tempKey,
+                    isPastedText: true
+                  }
+                ])
+                if (window.api?.saveChatFile) {
+                  const bytes = new TextEncoder().encode(rawText)
+                  const arrayBuffer = bytes.buffer.slice(
+                    bytes.byteOffset,
+                    bytes.byteOffset + bytes.byteLength
+                  ) as ArrayBuffer
+                  void window.api
+                    .saveChatFile(activeSessionId, 'pasted-text.txt', arrayBuffer)
+                    .then((res) => {
+                      if (!res?.path) return
+                      setAttachedFiles((prev) =>
+                        prev.map((item) =>
+                          item.safeName === tempKey
+                            ? { ...item, path: res.path, safeName: res.safeName || tempKey }
+                            : item
+                        )
+                      )
+                    })
+                    .catch(() => {
+                      /* 忽略落盘异常，content 已保存在内存中 */
+                    })
+                }
+              }
+
               // 优先检查内部剪贴板（从消息复制的文件+文本）
               const internalClip = getInternalClipboard()
               if (internalClip && internalClip.files.length > 0) {
                 e.preventDefault()
                 setInternalClipboard(null)
-                // 先同步插入文本，避免等待文件复制/解析 IPC 期间输入框看不到粘贴内容
+                // 先同步处理文本：超过 500 字转为粘贴文本附件，否则插入输入框
                 if (internalClip.text) {
-                  setInputValue((prev) => (prev ? prev + internalClip.text : internalClip.text))
+                  if (internalClip.text.length > 500) {
+                    attachLongPastedText(internalClip.text)
+                  } else {
+                    setInputValue((prev) => (prev ? prev + internalClip.text : internalClip.text))
+                  }
                 }
                 // 异步将内部剪贴板文件转为附件（复制到当前会话目录确保路径有效），完成后追加到附件列表
                 Promise.all(
@@ -2737,6 +2829,13 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
               if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                 e.preventDefault()
                 handlePasteFiles(e.clipboardData.files)
+                return
+              }
+              // 粘贴纯文本超过 500 字时，自动转为附件卡片展示
+              const pastedText = e.clipboardData.getData('text/plain')
+              if (pastedText && pastedText.length > 500) {
+                e.preventDefault()
+                attachLongPastedText(pastedText)
               }
             }}
             onKeyDown={(e) => {
@@ -3236,6 +3335,15 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             openTrajectory()
           }}
           showToast={showToast}
+        />
+      )}
+
+      {viewingPastedText && (
+        <PastedTextModal
+          title={viewingPastedText.title}
+          content={viewingPastedText.content}
+          path={viewingPastedText.path}
+          onClose={() => setViewingPastedText(null)}
         />
       )}
 

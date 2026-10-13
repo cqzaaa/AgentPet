@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, no-useless-escape, react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/rules-of-hooks */
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
-import { setInternalClipboard } from '../hooks/useAppStore'
+import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
 import { activityDurationMs } from '../hooks/chat-activity-duration'
@@ -35,6 +35,7 @@ import {
   LoaderCircle,
   MessageSquare,
   Package,
+  Plus,
   Quote,
   ArrowUp,
   Monitor,
@@ -1673,8 +1674,9 @@ interface MessageItemProps {
   requestMessage?: any
   highlightedMessageId?: number | null
   onPreviewFile?: (file: { name: string; path: string; size: number }) => void
+  onViewPastedText?: (target: { title: string; content?: string; path?: string }) => void
   onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
-  onEditMessage?: (messageId: number, text: string) => Promise<void>
+  onEditMessage?: (messageId: number, text: string, files: AttachedFile[]) => Promise<void>
   onRetryFailed?: (messageId: number) => Promise<void>
   retryDisabled?: boolean
   editDisabled?: boolean
@@ -1892,7 +1894,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onQuoteSelection, onEditMessage, onRetryFailed, retryDisabled = false, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onViewPastedText, onQuoteSelection, onEditMessage, onRetryFailed, retryDisabled = false, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -1906,21 +1908,106 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
+  const [editFiles, setEditFiles] = useState<AttachedFile[]>([])
+  const [editAdding, setEditAdding] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
   const [retryingFailed, setRetryingFailed] = useState(false)
   const editTriggerRef = useRef<HTMLButtonElement>(null)
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const editRevisionRef = useRef(0)
+  useEffect(() => {
+    if (!editing || !editTextareaRef.current) return
+    const textarea = editTextareaRef.current
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
+  }, [editing, editText])
   const cancelEdit = () => {
+    editRevisionRef.current += 1
     setEditing(false)
+    setEditAdding(false)
     setEditError('')
     requestAnimationFrame(() => editTriggerRef.current?.focus())
   }
+  const addEditFiles = async (files: FileList) => {
+    if (!sessionId || editAdding || files.length === 0) return
+    const revision = editRevisionRef.current
+    setEditAdding(true)
+    setEditError('')
+    try {
+      const additions: AttachedFile[] = []
+      for (const file of Array.from(files)) {
+        const saved = await window.api.saveChatFile(sessionId, file.name || 'image.png', await file.arrayBuffer())
+        const ext = file.name.split('.').pop()?.toLowerCase() || ''
+        const documentExts = ['pdf', 'docx', 'xlsx', 'xls', 'csv']
+        const textExts = ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'sh', 'bat', 'yml', 'yaml', 'ini', 'xml']
+        const content = documentExts.includes(ext)
+          ? await window.api.parseFileContent(saved.path)
+          : textExts.includes(ext) ? await file.text() : undefined
+        additions.push({ name: saved.name, path: saved.path, safeName: saved.safeName, content })
+      }
+      if (editRevisionRef.current === revision) setEditFiles(previous => [...previous, ...additions])
+    } catch (error) {
+      if (editRevisionRef.current === revision) setEditError(error instanceof Error ? error.message : '添加附件失败，请重试。')
+    } finally {
+      if (editRevisionRef.current === revision) setEditAdding(false)
+    }
+  }
+  const pasteEditText = async (rawText: string) => {
+    if (!sessionId || editAdding) return
+    const revision = editRevisionRef.current
+    const firstLine = rawText.split(/\r?\n/).map(line => line.trim()).find(Boolean) || rawText.trim()
+    const name = firstLine.replace(/\s+/g, ' ').slice(0, 60) || '粘贴的文本'
+    setEditAdding(true)
+    setEditError('')
+    try {
+      const bytes = new TextEncoder().encode(rawText)
+      const saved = await window.api.saveChatFile(sessionId, 'pasted-text.txt', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+      if (editRevisionRef.current === revision) setEditFiles(previous => [...previous, { name, path: saved.path, safeName: saved.safeName, content: rawText, isPastedText: true }])
+    } catch (error) {
+      if (editRevisionRef.current === revision) setEditError(error instanceof Error ? error.message : '粘贴文本失败，请重试。')
+    } finally {
+      if (editRevisionRef.current === revision) setEditAdding(false)
+    }
+  }
+  const pasteInternalFiles = async (files: { name: string; path: string; content?: string }[]) => {
+    if (!sessionId || editAdding) return
+    const revision = editRevisionRef.current
+    setEditAdding(true)
+    setEditError('')
+    try {
+      const additions = await Promise.all(files.map(async file => {
+        const saved = await window.api.copyToChatFile(sessionId, file.path)
+        const content = file.content || await window.api.parseFileContent(saved.path).catch(() => undefined)
+        return { name: file.name, path: saved.path, content }
+      }))
+      if (editRevisionRef.current === revision) setEditFiles(previous => [...previous, ...additions])
+    } catch (error) {
+      if (editRevisionRef.current === revision) setEditError(error instanceof Error ? error.message : '粘贴附件失败，请重试。')
+    } finally {
+      if (editRevisionRef.current === revision) setEditAdding(false)
+    }
+  }
+  const selectEditFile = async () => {
+    if (editAdding) return
+    const revision = editRevisionRef.current
+    setEditAdding(true)
+    setEditError('')
+    try {
+      const file = await window.api.selectFile()
+      if (file && editRevisionRef.current === revision) setEditFiles(previous => [...previous, file])
+    } catch (error) {
+      if (editRevisionRef.current === revision) setEditError(error instanceof Error ? error.message : '添加附件失败，请重试。')
+    } finally {
+      if (editRevisionRef.current === revision) setEditAdding(false)
+    }
+  }
   const saveEdit = async () => {
-    if (!onEditMessage || editSaving || editDisabled || !editText.trim()) return
+    if (!onEditMessage || editSaving || editAdding || editDisabled || (!editText.trim() && editFiles.length === 0)) return
     setEditSaving(true)
     setEditError('')
     try {
-      await onEditMessage(msg.id, editText)
+      await onEditMessage(msg.id, editText, editFiles)
       setEditing(false)
     } catch (error) {
       setEditError(error instanceof Error ? error.message : '保存失败，请重试。')
@@ -2294,7 +2381,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       </div>
 
       <div className={`message-bubble${editing ? ' message-bubble-editing' : ''}`} style={{ maxWidth: msg.isThinking ? '100%' : undefined }}>
-        {msg.fileInfo && !msg.fileInfos && (() => {
+        {!editing && msg.fileInfo && !msg.fileInfos && (() => {
           const f = msg.fileInfo
           const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
           return isImage ? (
@@ -2330,6 +2417,41 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 </div>
               </div>
             </div>
+          ) : f.isPastedText ? (
+            <div
+              className="input-file-preview is-pasted-text is-in-message"
+              style={{ marginBottom: '8px', cursor: 'pointer' }}
+              onClick={() => {
+                if (onViewPastedText) {
+                  onViewPastedText({ title: f.name, content: f.content, path: f.path })
+                } else if (f.path && onPreviewFile) {
+                  onPreviewFile({ name: f.name, path: f.path, size: f.size || 0 })
+                }
+              }}
+              title={f.content ? f.content.slice(0, 300) : f.name}
+            >
+              <div className="pasted-text-icon-box" aria-hidden="true">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M7 4H5.6C4.71634 4 4 4.71634 4 5.6V7M13 4H14.4C15.2837 4 16 4.71634 16 5.6V7M4 13V14.4C4 15.2837 4.71634 16 5.6 16H7M16 13V14.4C16 15.2837 15.2837 16 14.4 16H13M8 8.75H11M8 11.25H12.2"
+                    stroke="currentColor"
+                    strokeWidth="1.65"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div className="pasted-text-info">
+                <span className="pasted-text-title">{f.name}</span>
+                <span className="pasted-text-subtitle">粘贴的文本</span>
+              </div>
+            </div>
           ) : (
             <div
               className="message-file-badge"
@@ -2348,7 +2470,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           )
         })()}
 
-        {msg.fileInfos && msg.fileInfos.length > 0 && (
+        {!editing && msg.fileInfos && msg.fileInfos.length > 0 && (
           <div className="message-file-badges message-image-badges">
             {msg.fileInfos.map((f: any, i: number) => {
               const isImage = f.name && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
@@ -2382,6 +2504,42 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                   />
                   <div className="message-image-thumb-overlay" aria-hidden="true">
                     <Eye size={14} />
+                  </div>
+                </div>
+              ) : f.isPastedText ? (
+                <div
+                  key={i}
+                  className="input-file-preview is-pasted-text is-in-message"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    if (onViewPastedText) {
+                      onViewPastedText({ title: f.name, content: f.content, path: f.path })
+                    } else if (f.path && onPreviewFile) {
+                      onPreviewFile({ name: f.name, path: f.path, size: f.size || 0 })
+                    }
+                  }}
+                  title={f.content ? f.content.slice(0, 300) : f.name}
+                >
+                  <div className="pasted-text-icon-box" aria-hidden="true">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M7 4H5.6C4.71634 4 4 4.71634 4 5.6V7M13 4H14.4C15.2837 4 16 4.71634 16 5.6V7M4 13V14.4C4 15.2837 4.71634 16 5.6 16H7M16 13V14.4C16 15.2837 15.2837 16 14.4 16H13M8 8.75H11M8 11.25H12.2"
+                        stroke="currentColor"
+                        strokeWidth="1.65"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div className="pasted-text-info">
+                    <span className="pasted-text-title">{f.name}</span>
+                    <span className="pasted-text-subtitle">粘贴的文本</span>
                   </div>
                 </div>
               ) : (
@@ -2458,9 +2616,62 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         )}
 
         {editing && (
-          <div className="message-edit-panel">
-            <textarea autoFocus aria-label="编辑消息内容" aria-describedby={`message-edit-hint-${msg.id}`} value={editText} disabled={editSaving}
+          <div className="message-edit-panel" onDragOver={event => event.preventDefault()} onDrop={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (event.dataTransfer.files.length > 0) void addEditFiles(event.dataTransfer.files)
+          }}>
+            {editFiles.length > 0 && <div className="message-edit-attachments" aria-label="消息附件">
+              {editFiles.map((file, index) => {
+                const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)
+                const canPreview = file.isPastedText ? Boolean(onViewPastedText || (file.path && onPreviewFile))
+                  : isImage ? Boolean(file.path || file.objectUrl) : Boolean(file.path && onPreviewFile)
+                return <div className={`message-edit-attachment${file.isPastedText ? ' is-pasted-text' : ''}`} key={`${file.path}-${index}`}>
+                  <button type="button" className="message-edit-attachment-preview" disabled={!canPreview}
+                    aria-label={`查看附件 ${file.name}`} title={`查看 ${file.name}`} onClick={() => {
+                      if (file.isPastedText && onViewPastedText) {
+                        onViewPastedText({ title: file.name, content: file.content, path: file.path })
+                      } else if (isImage) {
+                        setPreviewImageSrc(file.path ? `local-file:///${file.path.replace(/\\/g, '/')}` : file.objectUrl || null)
+                      } else if (file.path && onPreviewFile) {
+                        onPreviewFile({ name: file.name, path: file.path, size: file.content?.length || 0 })
+                      }
+                    }}>
+                    <span className="message-edit-attachment-icon" aria-hidden="true"><FileText size={16} /></span>
+                    <span className="message-edit-attachment-name">{file.name}</span>
+                    {file.isPastedText && <span className="message-edit-attachment-kind">粘贴的文本</span>}
+                  </button>
+                  <button type="button" className="message-edit-attachment-remove" aria-label={`移除附件 ${file.name}`} title="移除附件" disabled={editSaving || editAdding}
+                    onClick={() => setEditFiles(previous => previous.filter((_, i) => i !== index))}><X size={14} aria-hidden="true" /></button>
+                </div>
+              })}
+            </div>}
+            <textarea ref={editTextareaRef} rows={1} autoFocus aria-label="编辑消息内容" aria-describedby={`message-edit-hint-${msg.id}`} value={editText} disabled={editSaving || editAdding}
               onChange={(event) => setEditText(event.target.value)}
+              onPaste={(event) => {
+                const internalClip = getInternalClipboard()
+                if (internalClip?.files.length) {
+                  event.preventDefault()
+                  setInternalClipboard(null)
+                  if (internalClip.text && internalClip.text.length <= 500) setEditText(previous => previous + internalClip.text)
+                  const revision = editRevisionRef.current
+                  void (async () => {
+                    if (internalClip.text.length > 500) await pasteEditText(internalClip.text)
+                    if (editRevisionRef.current === revision) await pasteInternalFiles(internalClip.files)
+                  })()
+                  return
+                }
+                if (event.clipboardData.files.length > 0) {
+                  event.preventDefault()
+                  void addEditFiles(event.clipboardData.files)
+                  return
+                }
+                const pastedText = event.clipboardData.getData('text/plain')
+                if (pastedText.length > 500) {
+                  event.preventDefault()
+                  void pasteEditText(pastedText)
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return
                 if (event.key === 'Escape' && !editSaving) { event.preventDefault(); cancelEdit() }
@@ -2468,8 +2679,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
               }} />
             <div className="message-edit-footer">
               <span id={`message-edit-hint-${msg.id}`} className="message-edit-hint">发送后，此消息之后的对话将重新生成</span>
+              <button type="button" className="message-edit-add" aria-label={editAdding ? '添加附件中' : '添加附件'} title="添加附件" disabled={editSaving || editAdding} onClick={() => void selectEditFile()}>{editAdding ? <LoaderCircle size={16} className="icon-spin" aria-hidden="true" /> : <Plus size={17} aria-hidden="true" />}</button>
               <button type="button" disabled={editSaving} onClick={cancelEdit}>取消</button>
-              <button type="button" className="message-edit-save" title="发送修改后的消息，并重新生成后续对话" disabled={editSaving || editDisabled || !editText.trim()} onClick={() => void saveEdit()}>{editSaving ? '发送中…' : '发送'}</button>
+              <button type="button" className="message-edit-save" title="发送修改后的消息，并重新生成后续对话" disabled={editSaving || editAdding || editDisabled || (!editText.trim() && editFiles.length === 0)} onClick={() => void saveEdit()}>{editSaving ? '发送中…' : '发送'}</button>
             </div>
             {editError && <div className="message-edit-error" role="alert">{editError}</div>}
           </div>
@@ -2625,7 +2837,13 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         <div className="message-action-row">
           {msg.sender === 'user' && onEditMessage && !editing && (
             <Tooltip content={editDisabled ? '请等待生成结束后编辑' : '编辑消息'} placement="top">
-              <button ref={editTriggerRef} type="button" className="msg-copy-btn" disabled={editDisabled} aria-label="编辑消息" onClick={() => { setEditText(msg.text || ''); setEditError(''); setEditing(true) }}>
+              <button ref={editTriggerRef} type="button" className="msg-copy-btn" disabled={editDisabled} aria-label="编辑消息" onClick={() => {
+                editRevisionRef.current += 1
+                setEditText(msg.text || '')
+                setEditFiles([...(msg.fileInfos || (msg.fileInfo ? [msg.fileInfo] : []))])
+                setEditError('')
+                setEditing(true)
+              }}>
                 <Pencil size={14} strokeWidth={2} aria-hidden="true" />
               </button>
             </Tooltip>

@@ -17,6 +17,7 @@
 ## Verification
 
 - Run the narrowest relevant check first. For TypeScript changes, use `npm run typecheck:node`, `npm run typecheck:web`, or `npm run typecheck` as appropriate.
+- Do not build the project (`npm run build`) unless strictly necessary or explicitly requested; prefer targeted `typecheck` for routine verification.
 - Run `git diff --check` and inspect the relevant diff before handoff.
 - Do not claim a test, typecheck, lint, or build passed unless the current session contains its successful result.
 - Report checks that were intentionally skipped and distinguish pre-existing failures from regressions caused by the change.

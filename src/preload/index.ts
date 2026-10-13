@@ -137,12 +137,16 @@ const api = {
     ipcRenderer.invoke('api:wiki-save-page', itemId, content),
   wikiListRevisions: (itemId: string): Promise<any[]> =>
     ipcRenderer.invoke('api:wiki-list-revisions', itemId),
+  wikiReadSource: (workspaceId: string, resource: string): Promise<any> =>
+    ipcRenderer.invoke('api:wiki-read-source', workspaceId, resource),
   wikiGetGraph: (workspaceId: string, focusItemId?: string): Promise<any> =>
     ipcRenderer.invoke('api:wiki-get-graph', workspaceId, focusItemId),
   parseFileHtml: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-html', filePath),
   readFileBase64: (filePath: string): Promise<string | null> =>
     ipcRenderer.invoke('api:read-file-base64', filePath),
+  readTextFile: (filePath: string): Promise<string> =>
+    ipcRenderer.invoke('api:read-text-file', filePath),
   saveClipboardImage: (dataUrl: string): Promise<{ path: string; name: string } | null> =>
     ipcRenderer.invoke('api:save-clipboard-image', dataUrl),
   getGeneratedFiles: (sessionId?: string): Promise<{ name: string; path: string; size: number; time: string }[]> =>

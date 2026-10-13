@@ -120,6 +120,7 @@ export interface AttachedFile {
   content?: string
   safeName?: string
   objectUrl?: string
+  isPastedText?: boolean
 }
 
 interface CachedContextMessage {

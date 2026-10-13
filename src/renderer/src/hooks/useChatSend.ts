@@ -25,7 +25,7 @@ interface ChatSendState {
 }
 
 type ChatSendRequest =
-  | { messageId: number; text: string; sessionId: string }
+  | { messageId: number; text: string; sessionId: string; attachedFiles: any[] }
   | { retryReplyId: number; sessionId: string }
   | { text: string; sessionId?: string; attachedFiles?: any[] }
 
@@ -149,8 +149,10 @@ export function useChatSend({
       throw new Error('当前会话无法编辑，请等待生成结束后重试。')
     }
     const originalMessage = edit ? originalSession.messages[editIndex] : retry ? originalSession.messages[retryUserIndex] : null
-    const attachedFiles = originalMessage
-      ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))]
+    const attachedFiles = edit
+      ? [...edit.attachedFiles]
+      : originalMessage
+        ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))]
       : request && 'attachedFiles' in request && request.attachedFiles
         ? [...request.attachedFiles]
         : customText !== undefined
@@ -175,10 +177,11 @@ export function useChatSend({
 
     const time = formatDateTime()
     const fileNames = attachedFiles.map(file => file.name).join(', ')
+    const allPastedText = attachedFiles.length > 0 && attachedFiles.every(file => file.isPastedText)
     const userMessage: any = retry ? originalMessage : {
       id: Date.now(),
       sender: 'user',
-      text: text || (fileNames ? `📄 上传了附件: ${fileNames}` : ''),
+      text: text || (fileNames && !allPastedText ? `📄 上传了附件: ${fileNames}` : ''),
       time,
       isSteering
     }
@@ -194,7 +197,8 @@ export function useChatSend({
         name: file.name,
         path: file.path,
         content: file.content,
-        safeName: file.safeName
+        safeName: file.safeName,
+        ...(file.isPastedText ? { isPastedText: true } : {})
       }))
     }
 

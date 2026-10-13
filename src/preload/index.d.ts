@@ -72,9 +72,11 @@ declare global {
       wikiCreatePage: (workspaceId: string, title: string, parentPath?: string) => Promise<string>
       wikiSavePage: (itemId: string, content: string) => Promise<{ saved: boolean; itemId: string }>
       wikiListRevisions: (itemId: string) => Promise<any[]>
+      wikiReadSource: (workspaceId: string, resource: string) => Promise<any>
       wikiGetGraph: (workspaceId: string, focusItemId?: string) => Promise<any>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
+      readTextFile: (filePath: string) => Promise<string>
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[]>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
