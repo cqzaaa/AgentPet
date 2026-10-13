@@ -1,3 +1,4 @@
+import type { WikiSyncProgress } from '../../preload/wiki-types'
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import * as fs from 'fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
@@ -5,6 +6,7 @@ import { createHash, randomUUID } from 'crypto'
 import type { Database } from 'sqlite'
 
 import { buildKnowledgeNodes, parseKnowledgeFile } from './knowledgeBase'
+import { officeRuntimeManager } from '../tools/interaction/office-runtime-manager'
 import {
   embedTexts,
   EMBEDDING_DIMENSIONS,
@@ -62,6 +64,7 @@ interface WikiEntityNodeRow {
   nodeType: string
   title: string
   content: string
+  pageStart: number | null
 }
 
 interface WikiGraphEntityLinkRow {
@@ -121,16 +124,6 @@ interface WikiFileEntry {
   contentHash: string
 }
 
-interface WikiSyncProgress {
-  workspaceId: string
-  status: 'running' | 'completed'
-  total: number
-  completed: number
-  failed: number
-  currentFile: string
-  updatedAt: number
-}
-
 const SUPPORTED_EXTENSIONS = new Set([
   'pdf', 'docx', 'pptx', 'xlsx', 'xls', 'csv', 'txt', 'md', 'json', 'html', 'htm',
   'xml', 'yaml', 'yml'
@@ -143,7 +136,7 @@ const IGNORED_DIRECTORIES = new Set(['.git', '.agentpet', 'node_modules', 'dist'
 const MAX_WORKSPACE_FILES = 2000
 const latestSyncByWorkspace = new Map<string, WikiSyncProgress>()
 const workspaceWatchers = new Map<string, { rootPath: string; watcher: fs.FSWatcher; timer: NodeJS.Timeout | null }>()
-const syncingWorkspaces = new Set<string>()
+const syncingWorkspaces = new Map<string, Promise<WikiSyncProgress>>()
 const ENTITY_STOP_WORDS = new Set([
   'about', 'after', 'and', 'async', 'await', 'before', 'click', 'code', 'const', 'content',
   'data', 'default', 'example', 'false', 'file', 'for', 'from', 'function', 'http',
@@ -162,10 +155,12 @@ const ENTITY_ACTION_PREFIXES = [
   '创建', '移除', '引入', '调用', '配置', '支持', '基于', '针对', '利用'
 ]
 
-function publishSyncProgress(event: { sender: WebContents } | undefined, progress: WikiSyncProgress): void {
+function publishSyncProgress(_event: { sender: WebContents } | undefined, progress: WikiSyncProgress): void {
   progress.updatedAt = Date.now()
   latestSyncByWorkspace.set(progress.workspaceId, { ...progress })
-  if (event && !event.sender.isDestroyed()) event.sender.send('api:wiki-sync-progress', { ...progress })
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('api:wiki-sync-progress', { ...progress })
+  }
 }
 
 function normalizeRelativePath(value: string): string {
@@ -303,17 +298,25 @@ async function upsertWikiFile(
   database: Database,
   workspaceId: string,
   entry: WikiFileEntry,
-  event?: { sender: WebContents }
+  event?: { sender: WebContents },
+  onProgress?: (detail: string) => void
 ): Promise<{ itemId: string; documentId: string; changed: boolean }> {
   const existing = await database.get<ExistingWikiItem>(`
     SELECT id, document_id AS documentId, content_hash AS contentHash
     FROM wiki_items WHERE workspace_id = ? AND relative_path = ?
   `, workspaceId, entry.relativePath)
   if (existing?.contentHash === entry.contentHash) {
-    return { itemId: existing.id, documentId: existing.documentId, changed: false }
+    const document = entry.fileType === 'pdf'
+      ? await database.get<{ parser: string; profileJson: string }>('SELECT parser, profile_json AS profileJson FROM knowledge_documents WHERE id = ?', existing.documentId)
+      : null
+    // Upgrade cached general PDFs once; retry degraded conversions on explicit sync.
+    if (entry.fileType !== 'pdf' || document?.parser === 'docling-2.60.0+rapidocr'
+      || (document?.parser === 'pymupdf-layout+legal-cn-v1' && !document.profileJson.includes('enhancedParseFailed'))) {
+      return { itemId: existing.id, documentId: existing.documentId, changed: false }
+    }
   }
 
-  const parsed = await parseKnowledgeFile(entry.absolutePath, event)
+  const parsed = await parseKnowledgeFile(entry.absolutePath, event, onProgress)
   const nodes = parsed.nodes || buildKnowledgeNodes(entry.title, parsed.blocks)
   const itemId = existing?.id || randomUUID()
   const documentId = existing?.documentId || randomUUID()
@@ -593,7 +596,8 @@ function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate[] {
     const normalizedName = normalizeEntityName(name)
     if (name.length < 2 || name.length > 40 || ENTITY_STOP_WORDS.has(normalizedName)) return
     if (/^\d+(?:[._-]\d+)*$/.test(name)) return
-    const evidence = entityEvidence(sourceText, name)
+    const quote = entityEvidence(sourceText, name)
+    const evidence = quote && row.pageStart ? `第 ${row.pageStart} 页：${quote}` : quote
     const existing = candidates.get(normalizedName)
     if (existing) {
       existing.mentionCount += 1
@@ -612,6 +616,12 @@ function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate[] {
   }
 
   for (const match of sourceText.matchAll(/`([^`\n]{2,40})`/g)) add(match[1], 0.98)
+
+  // Preserve named concepts in structured headings instead of splitting every phrase into words.
+  if (['section', 'heading', 'chapter'].includes(row.nodeType)) {
+    const heading = titleText.replace(/^(?:\d+[.\s]*)+/, '').trim()
+    if (!/^(abstract|introduction|conclusions?|references|acknowledg(?:e)?ments?|摘要|引言|结论|参考文献)$/i.test(heading)) add(heading, 0.9)
+  }
 
   const knownTechnologies = new Set([
     'api', 'css', 'electron', 'html', 'javascript', 'jquery', 'jsapi', 'markdown', 'node',
@@ -658,7 +668,7 @@ function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate[] {
 async function rebuildWikiEntities(database: Database, workspaceId: string): Promise<void> {
   const rows = await database.all<WikiEntityNodeRow[]>(`
     SELECT wi.id AS itemId, wi.title AS itemTitle, n.node_type AS nodeType,
-      COALESCE(n.title, '') AS title, COALESCE(n.content, '') AS content
+      COALESCE(n.title, '') AS title, COALESCE(n.content, '') AS content, n.page_start AS pageStart
     FROM wiki_items wi
     JOIN knowledge_nodes n ON n.document_id = wi.document_id
     WHERE wi.workspace_id = ? AND n.node_type <> 'document'
@@ -782,16 +792,18 @@ async function syncWorkspace(
   rootPath: string,
   event?: { sender: WebContents }
 ): Promise<WikiSyncProgress> {
-  const files = await collectWorkspaceFiles(rootPath)
   const progress: WikiSyncProgress = {
     workspaceId,
     status: 'running',
-    total: files.length,
+    total: 0,
     completed: 0,
     failed: 0,
     currentFile: '',
     updatedAt: Date.now()
   }
+  publishSyncProgress(event, progress)
+  const files = await collectWorkspaceFiles(rootPath)
+  progress.total = files.length
   publishSyncProgress(event, progress)
   const currentPaths = new Set(files.map(file => file.relativePath))
   const removed = await database.all<Array<{ documentId: string }>>(`
@@ -804,8 +816,12 @@ async function syncWorkspace(
 
   for (const file of files) {
     progress.currentFile = file.relativePath
+    publishSyncProgress(event, progress)
     try {
-      await upsertWikiFile(database, workspaceId, file, event)
+      await upsertWikiFile(database, workspaceId, file, event, detail => {
+        progress.currentFile = `${file.relativePath} · ${detail}`
+        publishSyncProgress(event, progress)
+      })
       progress.completed += 1
     } catch (error) {
       progress.failed += 1
@@ -842,6 +858,26 @@ function safePageName(value: string): string {
 }
 
 export function registerWikiAPIs(deps: WikiDependencies): void {
+  ipcMain.handle('api:wiki-get-parser-component', () => officeRuntimeManager.getDoclingStatus())
+  ipcMain.handle('api:wiki-install-parser-component', event => officeRuntimeManager.installDocling({ event }))
+  // Own the promise in main: every caller joins the same job, including after navigation.
+  const startSync = (workspaceId: string, rootPath: string, event?: { sender: WebContents }): Promise<WikiSyncProgress> => {
+    const current = syncingWorkspaces.get(workspaceId)
+    if (current) return current
+    const task = deps.getDB()
+      .then(database => syncWorkspace(database, workspaceId, rootPath, event))
+      .catch(error => {
+        const previous = latestSyncByWorkspace.get(workspaceId)
+        publishSyncProgress(event, {
+          workspaceId, total: 0, completed: 0, failed: 0, currentFile: '', updatedAt: Date.now(),
+          ...previous, status: 'failed', error: error instanceof Error ? error.message : String(error)
+        })
+        throw error
+      })
+      .finally(() => syncingWorkspaces.delete(workspaceId))
+    syncingWorkspaces.set(workspaceId, task)
+    return task
+  }
   const ensureWorkspaceWatcher = (workspaceId: string, rootPath: string, sender?: WebContents): void => {
     const current = workspaceWatchers.get(workspaceId)
     if (current?.rootPath === rootPath) return
@@ -861,11 +897,8 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         state.timer = setTimeout(() => {
           state.timer = null
           if (syncingWorkspaces.has(workspaceId)) return
-          syncingWorkspaces.add(workspaceId)
-          void deps.getDB()
-            .then(database => syncWorkspace(database, workspaceId, rootPath, sender ? { sender } : undefined))
+          void startSync(workspaceId, rootPath, sender ? { sender } : undefined)
             .catch(error => console.warn(`[Wiki] Background sync failed for ${workspaceId}:`, error))
-            .finally(() => syncingWorkspaces.delete(workspaceId))
         }, 900)
       })
       workspaceWatchers.set(workspaceId, state)
@@ -919,16 +952,11 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     const rootPath = resolve(String(workspace?.rootPath || ''))
     if (!workspace?.rootPath || !fs.existsSync(rootPath)) throw new Error('WIKI_WORKSPACE_NOT_FOUND')
     ensureWorkspaceWatcher(workspaceId, rootPath, event.sender)
-    if (syncingWorkspaces.has(workspaceId)) return latestSyncByWorkspace.get(workspaceId) || null
-    syncingWorkspaces.add(workspaceId)
-    try {
-      return await syncWorkspace(database, workspaceId, rootPath, event)
-    } finally {
-      syncingWorkspaces.delete(workspaceId)
-    }
+    return startSync(workspaceId, rootPath, event)
   })
 
   ipcMain.handle('api:wiki-remove-workspace', async (_, workspaceId: string) => {
+    if (syncingWorkspaces.has(workspaceId)) throw new Error('工作区正在同步，请等待完成后再移除。')
     const database = await deps.getDB()
     const watcher = workspaceWatchers.get(workspaceId)
     if (watcher?.timer) clearTimeout(watcher.timer)

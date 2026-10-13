@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { FileIcon } from './FileIcon'
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   Circle,
-  FileText,
   ListChecks,
   LoaderCircle,
   LocateFixed,
@@ -939,7 +939,7 @@ export const TaskPlanPanel = React.memo(function TaskPlanPanel({
                       void window.api.openLocalFile(url)
                     }}
                   >
-                    <FileText size={14} strokeWidth={1.9} aria-hidden="true" />
+                    <FileIcon fileName={artifact.path} size={15} />
                     <span>{artifactDisplayName(artifact.path)}</span>
                     <small>{artifact.stepTitle}</small>
                   </a>

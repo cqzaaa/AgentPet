@@ -559,7 +559,7 @@ export async function parseLegalPdf(
   fallbackTitle: string,
   context: { event?: { sender: WebContents } }
 ): Promise<StructuredPdfResult> {
-  const runtime = await officeRuntimeManager.ensure(context)
+  const runtime = await officeRuntimeManager.ensure({ ...context, allowInstall: false })
   const stat = await fs.promises.stat(filePath)
   const assetKey = createHash('sha1')
     .update(`${filePath}|${stat.size}|${stat.mtimeMs}`)

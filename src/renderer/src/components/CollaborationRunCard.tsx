@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import type { TaskEvent } from '../../../main/task-runtime/types'
-import { CheckCircle2, ChevronRight, CircleDashed, ExternalLink, FileText, Loader2, Network, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronRight, CircleDashed, ExternalLink, Loader2, Network, XCircle } from 'lucide-react'
+import { FileIcon } from './FileIcon'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { TaskDagGraph, type TaskPlan, type TaskPlanStep, type TaskStepStatus } from './TaskPlanCard'
 
@@ -81,7 +82,7 @@ export function CollaborationArtifactCards({
             else void window.api.openLocalFile(url)
           }}
         >
-          <span className="collab-artifact-icon"><FileText size={13} /></span>
+          <span className="collab-artifact-icon"><FileIcon fileName={fileName || path} size={15} /></span>
           <span className="collab-artifact-info">
             <span className="collab-artifact-name">{fileName}</span>
             {folderPath && <span className="collab-artifact-path">{folderPath}</span>}

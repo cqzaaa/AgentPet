@@ -308,7 +308,8 @@
 .wiki-tree-row:hover { color: var(--text-primary); background: var(--bg-menu-hover); }
 .wiki-tree-row.active { color: var(--text-primary); background: rgba(79,140,255,.1); }
 .wiki-tree-row.folder > svg { color: var(--wiki-amber); }
-.wiki-tree-row.file > svg { color: var(--text-muted); }
+.wiki-tree-row.file > svg { flex-shrink: 0; }
+.wiki-file-icon { flex-shrink: 0; vertical-align: middle; }
 .wiki-tree-row > span:nth-last-of-type(1) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
 .wiki-tree-row small, .wiki-tree-row i { color: var(--text-muted); font-size: 8px; font-style: normal; }
 .wiki-tree-row i { padding: 1px 3px; border: 1px solid rgba(79,140,255,.2); border-radius: 3px; color: var(--wiki-accent); }
@@ -433,3 +434,103 @@
 @media (max-width: 820px) { .wiki-workbench { grid-template-columns: 190px minmax(320px,1fr); }.wiki-context:not(.is-graph-expanded), .wiki-context-resizer { display: none; }.wiki-header { padding: 0 12px; }.wiki-header-actions button:not(.primary) { width: 32px; padding: 0; font-size: 0; } }
 @media (max-width: 620px) { .wiki-workspace-list-view { width: calc(100% - 28px); padding: 28px 0 56px; }.wiki-workspace-list-heading { align-items: flex-start; gap: 14px; }.wiki-workspace-list-heading h1 { font-size: 21px; }.wiki-page button.wiki-workspace-add { width: 34px; padding: 0; font-size: 0; } }
 @media (prefers-reduced-motion: reduce) { .wiki-spin { animation: none; }.wiki-sync > span, .wiki-folder-view > section button { transition: none; }.wiki-folder-view > section button:hover { transform: none; } }
+
+.wiki-parser-component {
+  position: absolute;
+  z-index: 50;
+  right: 20px;
+  bottom: 20px;
+  width: min(380px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, var(--wiki-accent) 20%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  box-shadow: 0 12px 36px rgba(4, 9, 18, 0.16);
+  backdrop-filter: blur(14px);
+  animation: wiki-parser-card-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes wiki-parser-card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.wiki-parser-card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.wiki-parser-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wiki-parser-card-header strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.wiki-parser-close {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+.wiki-parser-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-menu-hover);
+}
+.wiki-parser-card-body span {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.wiki-parser-card-body small {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.wiki-parser-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.wiki-parser-actions button.wiki-parser-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 29px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-content);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wiki-parser-actions button.wiki-parser-btn:hover:not(:disabled) {
+  border-color: var(--wiki-accent);
+  background: var(--bg-menu-hover);
+}
+.wiki-parser-actions button.wiki-parser-btn.ready {
+  border-color: color-mix(in srgb, var(--wiki-cyan) 60%, var(--border-color));
+  color: var(--wiki-cyan);
+  background: color-mix(in srgb, var(--wiki-cyan) 8%, var(--bg-card));
+}

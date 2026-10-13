@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, RotateCcw, FileCode2, Check } from 'lucide-react'
+import { X, RotateCcw, Check } from 'lucide-react'
+import { FileIcon } from './FileIcon'
 import './FileDiffModal.css'
 
 export interface FileChangeItem {
@@ -370,7 +371,7 @@ export function FileDiffDrawer({
         <header className="file-diff-drawer-header">
           <div className="file-diff-header-info">
             <span className="file-diff-header-icon-box" aria-hidden="true">
-              <FileCode2 size={18} />
+              <FileIcon fileName={currentFile.fileName || currentFile.filePath} size={18} />
             </span>
             <div className="file-diff-title-group">
               <div className="file-diff-filename-row">
@@ -444,6 +445,7 @@ export function FileDiffDrawer({
                   onClick={() => setActiveIndex(index)}
                   title={item.filePath}
                 >
+                  <FileIcon fileName={item.fileName || item.filePath} size={13} className="file-diff-tab-icon" />
                   <span className="file-diff-tab-name">{item.fileName}</span>
                   <span className="file-diff-tab-stat">
                     <span className="tab-add">+{item.additions}</span>

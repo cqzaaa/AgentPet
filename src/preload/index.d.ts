@@ -1,3 +1,4 @@
+import type { WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
 
@@ -60,12 +61,15 @@ declare global {
       knowledgeListBases: () => Promise<any[]>
       knowledgeGetDocument: (documentId: string) => Promise<any | null>
       knowledgeSearch: (knowledgeBaseId: string, query: string) => Promise<any[]>
+      wikiGetParserComponent: () => Promise<WikiParserComponentStatus>
+      wikiInstallParserComponent: () => Promise<WikiParserComponentStatus>
+      onWikiParserComponentStatus: (callback: (status: WikiParserComponentStatus) => void) => () => void
       wikiListWorkspaces: () => Promise<any[]>
       wikiOpenWorkspace: () => Promise<string | null>
       wikiRemoveWorkspace: (workspaceId: string) => Promise<boolean>
-      wikiSyncWorkspace: (workspaceId: string) => Promise<any>
-      wikiGetSyncProgress: (workspaceId: string) => Promise<any | null>
-      onWikiSyncProgress: (callback: (progress: any) => void) => () => void
+      wikiSyncWorkspace: (workspaceId: string) => Promise<WikiSyncProgress>
+      wikiGetSyncProgress: (workspaceId: string) => Promise<WikiSyncProgress | null>
+      onWikiSyncProgress: (callback: (progress: WikiSyncProgress) => void) => () => void
       wikiListItems: (workspaceId: string) => Promise<any[]>
       wikiReadItem: (itemId: string) => Promise<any | null>
       wikiDeleteItem: (itemId: string) => Promise<boolean>

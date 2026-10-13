@@ -3,9 +3,9 @@ import {
   FileCode2,
   RotateCcw,
   Check,
-  Eye,
-  FileText
+  Eye
 } from 'lucide-react'
+import { FileIcon } from './FileIcon'
 import { FileDiffDrawer, type FileChangeItem } from './FileDiffModal'
 import './FileChangesCard.css'
 
@@ -186,7 +186,11 @@ export function FileChangesCard({
                 title={`在右侧审核: ${item.relativePath || item.filePath}`}
               >
                 <div className="file-changes-item-left">
-                  <FileText size={14} className="file-item-icon" />
+                  <FileIcon
+                    fileName={item.relativePath || item.fileName || item.filePath}
+                    size={15}
+                    className="file-item-icon"
+                  />
                   <span className="file-item-path" title={item.filePath}>
                     {item.relativePath || item.fileName}
                   </span>

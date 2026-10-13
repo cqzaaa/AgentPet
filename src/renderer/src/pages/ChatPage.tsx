@@ -16,6 +16,7 @@ import { PastedTextModal } from '../components/PastedTextModal'
 import { requestConfirmation } from '../components/confirmService'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
+import { FileIcon } from '../components/FileIcon'
 import {
   ArrowDown,
   ArrowUp,
@@ -2670,12 +2671,11 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                         onClick={() => setPreviewImageSrc(file.objectUrl || null)}
                       />
                     ) : (
-                      <FileText
+                      <FileIcon
+                        fileName={file.name}
                         size={17}
-                        strokeWidth={2}
                         className="preview-icon"
                         style={{ marginRight: '6px' }}
-                        aria-hidden="true"
                       />
                     )}
                     <Tooltip content={file.name} placement="top">

@@ -1,29 +1,19 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { createSessionId, normalizeSearchCitations } from '../utils/helpers'
 import { Tooltip } from './Tooltip'
+import { FileIcon } from './FileIcon'
 import {
   Bot,
   Camera,
   ChevronDown,
   ExternalLink,
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode2,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
-  Globe2,
   GripVertical,
   History,
   Lightbulb,
   MessageSquare,
   Paperclip,
   Plus,
-  Presentation,
   Send,
-  Settings2,
   Trash2,
   User,
   X
@@ -495,20 +485,7 @@ export function ChatInputWindow(): React.JSX.Element {
 
   // 辅助：根据文件扩展名返回分类图标
   const getFileIcon = (name: string): React.JSX.Element => {
-    const ext = name.split('.').pop()?.toLowerCase() || ''
-    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']
-    const iconProps = { size: 18, strokeWidth: 2, 'aria-hidden': true } as const
-    if (imageExts.includes(ext)) return <FileImage {...iconProps} />
-    if (['pdf', 'doc', 'docx', 'txt', 'md', 'log'].includes(ext)) return <FileText {...iconProps} />
-    if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileSpreadsheet {...iconProps} />
-    if (['ppt', 'pptx'].includes(ext)) return <Presentation {...iconProps} />
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return <FileArchive {...iconProps} />
-    if (['mp3', 'wav', 'flac', 'ogg'].includes(ext)) return <FileAudio {...iconProps} />
-    if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return <FileVideo {...iconProps} />
-    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs'].includes(ext)) return <FileCode2 {...iconProps} />
-    if (['json', 'xml', 'yaml', 'yml', 'ini', 'toml'].includes(ext)) return <Settings2 {...iconProps} />
-    if (['html', 'css', 'scss'].includes(ext)) return <Globe2 {...iconProps} />
-    return <File {...iconProps} />
+    return <FileIcon fileName={name} size={18} />
   }
 
   // 辅助：将文件添加到粘贴文件预览列表（图片自动加载缩略图）

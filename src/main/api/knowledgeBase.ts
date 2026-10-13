@@ -15,6 +15,7 @@ import {
   embeddingContentHash
 } from '../embedding/embedding-client'
 import { ModelRuntimeFactory } from '../model-runtime'
+import { parseDoclingPdf } from '../document-parsing/docling-parser'
 import {
   createKnowledgeRetrievalPlan,
   definitionStructureScore,
@@ -261,14 +262,33 @@ interface ParsedFile {
   profile: Record<string, unknown>
 }
 
-export async function parseKnowledgeFile(filePath: string, event?: { sender: WebContents }): Promise<ParsedFile> {
+export async function parseKnowledgeFile(filePath: string, event?: { sender: WebContents }, onProgress?: (detail: string) => void): Promise<ParsedFile> {
   const ext = extname(filePath).slice(1).toLowerCase()
   if (!SUPPORTED_EXTENSIONS.includes(ext)) throw new Error(`暂不支持 .${ext || 'unknown'} 文件`)
 
   if (ext === 'pdf') {
     try {
       const structured = await parseLegalPdf(filePath, basename(filePath), { event })
-      return { ...structured, blocks: [] }
+      // Preserve the specialized legal parser; use layout/OCR models for general PDFs.
+      if (structured.profile.kind === 'legal-document' && structured.qualityScore >= 0.8) {
+        return { ...structured, blocks: [] }
+      }
+      try {
+        onProgress?.('正在使用 Docling 分析版面、表格和扫描文字')
+        const enhanced = await parseDoclingPdf(filePath, basename(filePath), { event })
+        // Keep extracted figures available for source preview alongside structured text.
+        const figures = structured.nodes.filter(node => node.type === 'figure')
+        for (const figure of figures) {
+          enhanced.nodes.push({ ...figure, parentId: enhanced.nodes[0].id, orderIndex: enhanced.nodes.length })
+        }
+        enhanced.profile.imageAssetDir = structured.profile.imageAssetDir
+        enhanced.profile.imageCount = figures.length
+        return { ...enhanced, blocks: [] }
+      } catch (error) {
+        return { ...structured, blocks: [], qualityScore: Math.min(structured.qualityScore, 0.55),
+          warning: `复杂版面解析失败，已保留基础解析结果；下次同步会重试。${error instanceof Error ? error.message : String(error)}`,
+          profile: { ...structured.profile, enhancedParseFailed: true } }
+      }
     } catch (structuredError) {
       const buffer = await fs.promises.readFile(filePath)
       const parser = new PDFParse({ data: buffer })
@@ -276,7 +296,7 @@ export async function parseKnowledgeFile(filePath: string, event?: { sender: Web
       await parser.destroy()
       const text = result.text || ''
       const warning = text.trim().length < 80
-        ? '本地未提取到足够文字，可能是扫描件；建议启用 Docling 或 MinerU。'
+        ? '本地未提取到足够文字，可能是扫描件；请下载 Wiki 文档解析组件后重新同步。'
         : `已降级为轻量文本解析：${structuredError instanceof Error ? structuredError.message : String(structuredError)}`
       return {
         blocks: parsePlainText(text), parser: 'local-pdf-text-fallback', warning,

@@ -1,3 +1,4 @@
+import type { WikiSyncProgress as SyncProgress, WikiParserComponentStatus } from '../../../preload/wiki-types'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Controls, Handle, MarkerType, Position, ReactFlow,
@@ -5,10 +6,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Clock3, ExternalLink, File,
-  FileCode2, FileSpreadsheet, FileText, Folder, FolderOpen, History, Link2, LoaderCircle,
-  Maximize2, Minimize2, Network, Pencil, Plus, RefreshCw, Save, Search, Trash2, X
+  AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Clock3, Download, ExternalLink, FileCode2, FileText, Folder,
+  FolderOpen, History, Link2, LoaderCircle, Maximize2, Minimize2, Network, Pencil,
+  Plus, RefreshCw, Save, Search, Trash2, X
 } from 'lucide-react'
+import { FileIcon } from '../components/FileIcon'
 import './WikiPage.css'
 
 type Workspace = { id: string; name: string; rootPath: string; itemCount: number; pageCount: number }
@@ -39,7 +41,6 @@ type GraphData = {
   backlinks: Array<{ id: string; title: string; relativePath: string; fileType: string }>
   unresolved: Array<{ id: string; fromItemId: string; targetText: string }>
 }
-type SyncProgress = { workspaceId: string; status: 'running' | 'completed'; total: number; completed: number; failed: number; currentFile: string }
 type TreeNode = { id: string; name: string; path: string; kind: 'folder' | 'file'; item?: WikiItem; children: TreeNode[] }
 type Revision = { id: string; createdAt: number; characterCount: number }
 type Dialog = { type: 'create'; parentPath: string }
@@ -72,10 +73,8 @@ function errorMessage(reason: unknown, fallback: string): string {
   return reason instanceof Error && reason.message ? reason.message : fallback
 }
 
-function icon(type: string, size = 15): React.JSX.Element {
-  if (['xlsx', 'xls', 'csv'].includes(type)) return <FileSpreadsheet size={size} />
-  if (['md', 'txt'].includes(type)) return <FileText size={size} />
-  return <File size={size} />
+function icon(type: string, size = 15, fileName = ''): React.JSX.Element {
+  return <FileIcon fileName={fileName || type} fileType={type} size={size} className="wiki-file-icon" />
 }
 
 function makeTree(items: WikiItem[]): TreeNode[] {
@@ -447,6 +446,14 @@ export function WikiPage(): React.JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<SyncProgress | null>(null)
+  const [parserComponent, setParserComponent] = useState<WikiParserComponentStatus | null>(null)
+  const [parserInstalling, setParserInstalling] = useState(false)
+  const [parserDismissed, setParserDismissed] = useState(false)
+  const [showReadyBriefly, setShowReadyBriefly] = useState(false)
+  const parserInstallRef = useRef(false)
+  const previousParserStatusRef = useRef<string | null>(null)
+  const visibleWorkspaceRef = useRef(workspaceId)
+  visibleWorkspaceRef.current = workspaceId
   const [error, setError] = useState('')
   const [mode, setMode] = useState<'read' | 'edit'>('read')
   const [draft, setDraft] = useState('')
@@ -473,6 +480,42 @@ export function WikiPage(): React.JSX.Element {
   const flowInstanceRef = useRef<ReactFlowInstance<WikiFlowNode, Edge> | null>(null)
   const renderedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   const resizeSessionRef = useRef({ startX: 0, startWidth: 330 })
+
+  useEffect(() => {
+    let active = true
+    let latest = 0
+    const receive = (status: WikiParserComponentStatus): void => {
+      if (!active || status.updatedAt < latest) return
+      latest = status.updatedAt
+      setParserComponent(status)
+    }
+    const unsubscribe = window.api.onWikiParserComponentStatus(receive)
+    void window.api.wikiGetParserComponent().then(receive)
+      .catch(reason => { if (active) setError(errorMessage(reason, '无法读取文档解析组件状态。')) })
+    return () => { active = false; unsubscribe() }
+  }, [])
+
+  useEffect(() => {
+    if (!parserComponent) return
+    let timer: number | undefined
+    if (previousParserStatusRef.current === 'installing' && parserComponent.status === 'ready') {
+      setShowReadyBriefly(true)
+      timer = window.setTimeout(() => setShowReadyBriefly(false), 2600)
+    }
+    previousParserStatusRef.current = parserComponent.status
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [parserComponent])
+
+  const installParser = async (): Promise<void> => {
+    if (parserInstallRef.current) return
+    parserInstallRef.current = true
+    setParserInstalling(true)
+    try { setParserComponent(await window.api.wikiInstallParserComponent()) }
+    catch (reason) { setError(errorMessage(reason, '组件下载失败，请重试。')) }
+    finally { parserInstallRef.current = false; setParserInstalling(false) }
+  }
 
   useEffect(() => {
     setFocusedGraphNodeId(selectedId)
@@ -633,12 +676,10 @@ export function WikiPage(): React.JSX.Element {
     try {
       setError('')
       await window.api.wikiSyncWorkspace(id)
-      await Promise.all([loadWorkspaces(id), loadItems(id)])
-      await loadGraph(id, selectedId || undefined)
     } catch (reason: unknown) {
-      setError(errorMessage(reason, '无法同步工作区，请确认文件夹仍然存在。'))
+      if (visibleWorkspaceRef.current === id) setError(errorMessage(reason, '无法同步工作区，请确认文件夹仍然存在。'))
     }
-  }, [loadGraph, loadItems, loadWorkspaces, selectedId])
+  }, [])
 
   useEffect(() => {
     document.title = 'Wiki 工作区 | AgentPet'
@@ -648,17 +689,43 @@ export function WikiPage(): React.JSX.Element {
         if (!active) return
         const rows = value as Workspace[]
         setWorkspaces(rows)
-        setWorkspaceId(rows[0]?.id || '')
+        const previous = sessionStorage.getItem('wiki.workspaceId')
+        setWorkspaceId(rows.find(row => row.id === previous)?.id || rows[0]?.id || '')
       })
       .catch(reason => { if (active) setError(errorMessage(reason, '无法读取 Wiki 工作区。')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [])
 
-  useEffect(() => window.api.onWikiSyncProgress(value => {
-    const next = value as SyncProgress
-    if (next.workspaceId === workspaceId) setProgress(next)
-  }), [workspaceId])
+  useEffect(() => {
+    setProgress(null)
+    if (!workspaceId) return
+    sessionStorage.setItem('wiki.workspaceId', workspaceId)
+    let active = true
+    let latestUpdate = 0
+    const receive = (value: SyncProgress | null): void => {
+      if (!active || !value || value.workspaceId !== workspaceId || value.updatedAt < latestUpdate) return
+      latestUpdate = value.updatedAt
+      setProgress(value)
+      if (value.status === 'failed') setError(value.error || '同步失败，请重试。')
+      if (value.status === 'completed') {
+        if (value.failed) setError(`${value.failed} 个文件解析失败，请重试同步。`)
+        void Promise.all([window.api.wikiListItems(workspaceId), window.api.wikiGetGraph(workspaceId), window.api.wikiListWorkspaces()])
+          .then(([rows, graphValue, workspacesValue]) => {
+            if (!active || latestUpdate !== value.updatedAt) return
+            setItems(rows as WikiItem[])
+            setSelectedId(current => rows.some(row => row.id === current) ? current : rows[0]?.id || '')
+            setGraph(normalizeGraphData(graphValue))
+            setWorkspaces(workspacesValue as Workspace[])
+          })
+          .catch(reason => { if (active) setError(errorMessage(reason, '同步完成，结果加载失败，请重试。')) })
+      }
+    }
+    const unsubscribe = window.api.onWikiSyncProgress(receive)
+    void window.api.wikiGetSyncProgress(workspaceId).then(receive)
+      .catch(reason => { if (active) setError(errorMessage(reason, '无法恢复同步进度。')) })
+    return () => { active = false; unsubscribe() }
+  }, [workspaceId])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -709,6 +776,15 @@ export function WikiPage(): React.JSX.Element {
     })
     return () => { stale = true }
   }, [selectedId, workspaceId])
+
+  useEffect(() => {
+    if (progress?.status !== 'completed' || !item?.documentId || item.editable) return
+    let active = true
+    void window.api.knowledgeGetDocument(item.documentId)
+      .then(value => { if (active) setDoc(value as DocDetail | null) })
+      .catch(reason => { if (active) setError(errorMessage(reason, '解析完成，文档加载失败，请重新打开。')) })
+    return () => { active = false }
+  }, [progress?.status, progress?.updatedAt, item?.documentId, item?.editable])
 
   useEffect(() => {
     if (sideTab === 'history' && selectedId) {
@@ -906,7 +982,7 @@ export function WikiPage(): React.JSX.Element {
   ) : (
     <div key={node.id} className={`wiki-tree-file${selectedId === node.item!.id ? ' active' : ''}`} style={{ '--wiki-depth': depth } as React.CSSProperties}>
       <button type="button" className="wiki-tree-row file" onClick={() => openItem(node.item!.id)} title={node.item!.relativePath}>
-        {icon(node.item!.fileType)}<span>{node.name}</span>{node.item!.itemKind === 'page' && <i>W</i>}
+        {icon(node.item!.fileType, 16, node.name)}<span>{node.name}</span>{node.item!.itemKind === 'page' && <i>W</i>}
       </button>
       <button type="button" className="wiki-item-remove" aria-label={`删除 ${node.name}`} title={`移入回收站：${node.name}`} onClick={(e) => { e.stopPropagation(); setDialog({ type: 'delete-item', item: node.item! }) }}><Trash2 size={13} /></button>
     </div>
@@ -919,8 +995,62 @@ export function WikiPage(): React.JSX.Element {
 
   const showWorkspaceList = workspaceListOpen && workspaces.length > 0
   const showOnboarding = !workspace && workspaces.length === 0
+  const shouldShowParserCard = !parserDismissed && Boolean(
+    parserComponent && (
+      parserInstalling ||
+      parserComponent.status === 'installing' ||
+      parserComponent.status === 'not-installed' ||
+      parserComponent.status === 'failed' ||
+      showReadyBriefly
+    )
+  )
 
   return <div className={`wiki-page${showOnboarding ? ' is-onboarding-view' : ''}${showWorkspaceList ? ' is-workspace-list-view' : ''}`}>
+    {shouldShowParserCard && (
+      <section className="wiki-parser-component" aria-label="文档解析组件" aria-busy={parserInstalling || parserComponent?.status === 'installing'}>
+        <div className="wiki-parser-card-body" aria-live="polite">
+          <div className="wiki-parser-card-header">
+            <strong>增强 PDF 解析</strong>
+            <button
+              type="button"
+              className="wiki-parser-close"
+              aria-label="关闭提示"
+              title="关闭提示"
+              onClick={() => setParserDismissed(true)}
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <span>{parserComponent?.detail || '正在检查文档解析组件…'}</span>
+          {parserComponent?.status === 'not-installed' && (
+            <small>首次下载包含 Python、Docling 和模型，需要网络连接及数 GB 可用磁盘空间。文档在本机处理。</small>
+          )}
+        </div>
+        <div className="wiki-parser-actions">
+          <button
+            type="button"
+            className={`wiki-parser-btn${parserComponent?.status === 'ready' ? ' ready' : ''}`}
+            disabled={!parserComponent || parserInstalling || ['installing', 'ready', 'unsupported'].includes(parserComponent.status)}
+            onClick={() => void installParser()}
+          >
+            {parserInstalling || parserComponent?.status === 'installing' ? (
+              <LoaderCircle className="wiki-spin" size={13} />
+            ) : parserComponent?.status === 'ready' ? (
+              <Check size={13} />
+            ) : (
+              <Download size={13} />
+            )}
+            {parserInstalling || parserComponent?.status === 'installing'
+              ? '正在下载组件'
+              : parserComponent?.status === 'ready'
+                ? '组件已就绪'
+                : parserComponent?.status === 'failed'
+                  ? '重试下载组件'
+                  : '下载文档解析组件'}
+          </button>
+        </div>
+      </section>
+    )}
     {!showWorkspaceList && <header className={`wiki-header ${showOnboarding ? 'is-onboarding' : ''}`}>
       {workspace ? (
         <div className="wiki-brand">
@@ -1024,13 +1154,13 @@ export function WikiPage(): React.JSX.Element {
       >
         <aside className="wiki-sidebar" aria-label="Wiki 文件树">
           <div className="wiki-search"><Search size={14} /><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索页面与文件" aria-label="搜索页面与文件" />{query && <button type="button" aria-label="清除搜索" onClick={() => { setQuery(''); searchRef.current?.focus() }}><X size={13} /></button>}</div>
-          <div className="wiki-tree">{query ? (matches.length ? matches.map(match => <div className="wiki-search-row" key={match.id}><button type="button" className="wiki-search-result" onClick={() => openItem(match.id)}>{icon(match.fileType)}<span><strong>{match.title}</strong><small>{match.relativePath}</small></span></button><button type="button" className="wiki-item-remove" aria-label={`删除 ${match.title}`} title={`移入回收站：${match.title}`} onClick={(e) => { e.stopPropagation(); setDialog({ type: 'delete-item', item: match }) }}><Trash2 size={13} /></button></div>) : <div className="wiki-empty-small">没有匹配结果</div>) : tree.length ? renderTree(tree) : <div className="wiki-empty-small">文件夹中还没有支持的文档</div>}</div>
+          <div className="wiki-tree">{query ? (matches.length ? matches.map(match => <div className="wiki-search-row" key={match.id}><button type="button" className="wiki-search-result" onClick={() => openItem(match.id)}>{icon(match.fileType, 16, match.relativePath || match.title)}<span><strong>{match.title}</strong><small>{match.relativePath}</small></span></button><button type="button" className="wiki-item-remove" aria-label={`删除 ${match.title}`} title={`移入回收站：${match.title}`} onClick={(e) => { e.stopPropagation(); setDialog({ type: 'delete-item', item: match }) }}><Trash2 size={13} /></button></div>) : <div className="wiki-empty-small">没有匹配结果</div>) : tree.length ? renderTree(tree) : <div className="wiki-empty-small">文件夹中还没有支持的文档</div>}</div>
         </aside>
         <main className="wiki-content">
           {progress?.status === 'running' && <div className="wiki-sync" role="status"><span style={{ width: `${percent}%` }} /><LoaderCircle className="wiki-spin" size={14} /><strong>正在建立索引</strong><small>{progress.currentFile || '准备文件'} · {progress.completed}/{progress.total}</small></div>}
           {displayedItem ? <><div className="wiki-toolbar"><div><strong title={displayedItem.relativePath}>{displayedItem.title}</strong></div><div><span className={dirty ? 'dirty' : ''}>{saving ? '保存中' : dirty ? '尚未保存' : <><Check size={12} />已保存</>}</span>{displayedItem.editable ? mode === 'read' ? <button type="button" onClick={() => setMode('edit')}><Pencil size={14} />编辑</button> : <><button type="button" onClick={() => { setDraft(saved); setMode('read') }}>取消</button><button type="button" className="primary" disabled={!dirty || saving} onClick={() => void savePage()}><Save size={14} />保存</button></> : <button type="button" onClick={() => void window.api.openLocalFile(`local-file:///${displayedItem.absolutePath.replace(/\\/g, '/')}`)}><ExternalLink size={14} />打开原文件</button>}</div></div>
             <div className="wiki-document"><section className="wiki-document-title"><h2>{displayedItem.title}</h2></section>{mode === 'edit' ? <textarea className="wiki-editor" value={draft} onChange={event => setDraft(event.target.value)} spellCheck={false} aria-label={`编辑 ${displayedItem.title}`} /> : displayedItem.editable ? <MarkdownView content={saved} currentPath={displayedItem.relativePath} items={items} open={openItem} /> : <section className="wiki-source">{doc?.document.warning && <div className="wiki-source-warning"><AlertTriangle size={15} />{doc.document.warning}</div>}<div className="wiki-source-meta"><span>解析器：{doc?.document.parser || '等待解析'}</span><span>{contentNodes.length} 个结构节点</span></div>{contentNodes.map(node => <article key={node.id}><div><span>{node.type}</span>{node.pageStart && <small>第 {node.pageStart} 页</small>}</div>{node.title && <h3>{node.title}</h3>}{node.content && node.content !== node.title && <p>{node.content}</p>}</article>)}</section>}</div></> :
-            <section className="wiki-folder-view"><div><FolderOpen size={22} /><span><small>FOLDER VIEW</small><h2>{folder || workspace.name}</h2><p>{folderItems.length} 个直接内容项</p></span></div><section>{folderItems.map(entry => <button type="button" key={entry.id} onClick={() => openItem(entry.id)}>{icon(entry.fileType, 18)}<span><strong>{entry.title}</strong><small>{entry.fileType.toUpperCase()} · {formatBytes(entry.fileSize)}</small></span><ChevronRight size={14} /></button>)}</section></section>}
+            <section className="wiki-folder-view"><div><FolderOpen size={22} /><span><small>FOLDER VIEW</small><h2>{folder || workspace.name}</h2><p>{folderItems.length} 个直接内容项</p></span></div><section>{folderItems.map(entry => <button type="button" key={entry.id} onClick={() => openItem(entry.id)}>{icon(entry.fileType, 18, entry.relativePath || entry.title)}<span><strong>{entry.title}</strong><small>{entry.fileType.toUpperCase()} · {formatBytes(entry.fileSize)}</small></span><ChevronRight size={14} /></button>)}</section></section>}
         </main>
         <div
           className="wiki-context-resizer"
@@ -1113,7 +1243,7 @@ export function WikiPage(): React.JSX.Element {
             <div className="wiki-link-list">
               <header><small>源码依据</small><strong>{sourceGroups.length}</strong></header>
               {sourceGroups.map(source => <button type="button" className={`wiki-evidence-row${visibleSourcePreview?.resource === source.resource ? ' active' : ''}`} key={source.resource} onClick={() => void openSource(source)} disabled={source.status === 'missing'}>
-                {sourceLoading === source.resource ? <LoaderCircle className="wiki-spin" size={15} /> : <FileCode2 size={15} />}
+                {sourceLoading === source.resource ? <LoaderCircle className="wiki-spin" size={15} /> : <FileIcon fileName={source.relativePath} size={15} />}
                 <span><strong>{source.relativePath}</strong><small>{source.startLine ? `第 ${source.startLine}-${source.endLine} 行` : '整个文件'}{source.claimCount ? ` · ${source.claimCount} 条事实` : ''}{source.status === 'verified' ? ' · 有验证记录' : source.status === 'missing' ? ' · 文件缺失' : ''}</small>{source.statements[0] && <p>{source.statements[0]}</p>}</span>
               </button>)}
               {!sourceGroups.length && <div className="wiki-evidence-empty"><FileCode2 size={17} /><span>当前页面没有 repo:// 源码依据。OpenWiki 项目请添加仓库根目录。</span></div>}
@@ -1126,8 +1256,8 @@ export function WikiPage(): React.JSX.Element {
               <header><small>正文实体</small><strong>{graph.entities.length}</strong></header>
               {graph.entities.map(entity => <div className="wiki-entity-row" key={entity.id}><span>{entity.type === 'technology' ? 'T' : 'C'}</span><div><strong>{entity.name}</strong><small>{entity.type === 'technology' ? '技术实体' : '概念'} · 提及 {entity.mentionCount} 次</small>{entity.evidence[0] && <p>{entity.evidence[0]}</p>}</div></div>)}
               {!graph.entities.length && <div className="wiki-context-empty compact"><Network size={20} /><span>当前文章尚未提取到可靠实体。</span></div>}
-              {graph.relatedItems.length > 0 && <><header><small>相关页面</small><strong>{graph.relatedItems.length}</strong></header>{graph.relatedItems.map(related => <button type="button" key={related.id} onClick={() => openItem(related.id)}>{icon(related.fileType)}<span><strong>{related.title}</strong><small>{related.directLink ? '直接文档链接' : related.sharedSources.length ? `共同来源：${related.sharedSources.join('、')}` : `共同实体：${related.sharedEntities.join('、')}`}</small></span></button>)}</>}
-              {graph.backlinks.length > 0 && <><header><small>反向链接</small><strong>{graph.backlinks.length}</strong></header>{graph.backlinks.map(backlink => <button type="button" key={backlink.id} onClick={() => openItem(backlink.id)}>{icon(backlink.fileType)}<span><strong>{backlink.title}</strong><small>{backlink.relativePath}</small></span></button>)}</>}
+              {graph.relatedItems.length > 0 && <><header><small>相关页面</small><strong>{graph.relatedItems.length}</strong></header>{graph.relatedItems.map(related => <button type="button" key={related.id} onClick={() => openItem(related.id)}>{icon(related.fileType, 15, related.relativePath || related.title)}<span><strong>{related.title}</strong><small>{related.directLink ? '直接文档链接' : related.sharedSources.length ? `共同来源：${related.sharedSources.join('、')}` : `共同实体：${related.sharedEntities.join('、')}`}</small></span></button>)}</>}
+              {graph.backlinks.length > 0 && <><header><small>反向链接</small><strong>{graph.backlinks.length}</strong></header>{graph.backlinks.map(backlink => <button type="button" key={backlink.id} onClick={() => openItem(backlink.id)}>{icon(backlink.fileType, 15, backlink.relativePath || backlink.title)}<span><strong>{backlink.title}</strong><small>{backlink.relativePath}</small></span></button>)}</>}
               {graph.unresolved.length > 0 && <><header><small>待创建人工链接</small><strong>{graph.unresolved.length}</strong></header>{graph.unresolved.map(link => <div className="wiki-unresolved" key={link.id}><span>[[{link.targetText}]]</span><button type="button" onClick={() => { setDialogValue(link.targetText); setDialog({ type: 'create', parentPath: displayedItem?.parentPath || '' }) }}><Plus size={12} />创建</button></div>)}</>}
             </div>
           ) : <div className="wiki-history"><header><small>保存记录</small><strong>{revisions.length}</strong></header>{revisions.map(revision => <div key={revision.id}><Clock3 size={14} /><span><strong>{new Date(revision.createdAt).toLocaleString('zh-CN')}</strong><small>{revision.characterCount} 字符</small></span></div>)}{!revisions.length && <div className="wiki-context-empty compact"><History size={20} /><span>保存页面后，这里会保留版本记录。</span></div>}</div>}

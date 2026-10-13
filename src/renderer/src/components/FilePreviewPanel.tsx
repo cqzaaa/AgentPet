@@ -4,19 +4,13 @@ import '@open-file-viewer/core/style.css'
 import JSZip from 'jszip'
 import { AppStore } from '../hooks/useAppStore'
 import { Tooltip } from './Tooltip'
+import { FileIcon } from './FileIcon'
 import {
   ChevronDown,
   ChevronRight,
-  File,
-  FileArchive,
-  FileCode2,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
   FolderOpen,
   Maximize2,
   Minimize2,
-  Presentation,
   RotateCw,
   Save,
   Trash2,
@@ -24,7 +18,6 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 
 interface FilePreviewPanelProps {
   store: AppStore
@@ -274,30 +267,7 @@ function enhanceSpreadsheetPreview(container: HTMLElement, metadata: Spreadsheet
 }
 
 function FileTypeIcon({ fileName, size = 18 }: { fileName: string; size?: number }): React.JSX.Element {
-  const ext = fileName.split('.').pop()?.toLowerCase() || ''
-  let Icon: LucideIcon = File
-  let color = '#6b7280'
-
-  if (['doc', 'docx', 'txt', 'md', 'pdf'].includes(ext)) {
-    Icon = FileText
-    color = ext === 'pdf' ? '#dc2626' : '#2563eb'
-  } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
-    Icon = FileSpreadsheet
-    color = '#15803d'
-  } else if (['ppt', 'pptx'].includes(ext)) {
-    Icon = Presentation
-    color = '#c2410c'
-  } else if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-    Icon = FileImage
-    color = '#7c3aed'
-  } else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
-    Icon = FileArchive
-  } else if (['html', 'css', 'scss', 'js', 'jsx', 'ts', 'tsx', 'py', 'json', 'xml'].includes(ext)) {
-    Icon = FileCode2
-    color = '#d97706'
-  }
-
-  return <Icon size={size} strokeWidth={2} color={color} aria-hidden="true" />
+  return <FileIcon fileName={fileName} size={size} />
 }
 
 export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPanelProps): React.JSX.Element {

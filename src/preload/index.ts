@@ -1,3 +1,4 @@
+import type { WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
@@ -110,18 +111,25 @@ const api = {
     ipcRenderer.invoke('api:knowledge-get-document', documentId),
   knowledgeSearch: (knowledgeBaseId: string, query: string): Promise<any[]> =>
     ipcRenderer.invoke('api:knowledge-search', knowledgeBaseId, query),
+  wikiGetParserComponent: (): Promise<WikiParserComponentStatus> => ipcRenderer.invoke('api:wiki-get-parser-component'),
+  wikiInstallParserComponent: (): Promise<WikiParserComponentStatus> => ipcRenderer.invoke('api:wiki-install-parser-component'),
+  onWikiParserComponentStatus: (callback: (status: WikiParserComponentStatus) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: WikiParserComponentStatus): void => callback(status)
+    ipcRenderer.on('api:wiki-parser-component-status', handler)
+    return () => { ipcRenderer.removeListener('api:wiki-parser-component-status', handler) }
+  },
   wikiListWorkspaces: (): Promise<any[]> =>
     ipcRenderer.invoke('api:wiki-list-workspaces'),
   wikiOpenWorkspace: (): Promise<string | null> =>
     ipcRenderer.invoke('api:wiki-open-workspace'),
   wikiRemoveWorkspace: (workspaceId: string): Promise<boolean> =>
     ipcRenderer.invoke('api:wiki-remove-workspace', workspaceId),
-  wikiSyncWorkspace: (workspaceId: string): Promise<any> =>
+  wikiSyncWorkspace: (workspaceId: string): Promise<WikiSyncProgress> =>
     ipcRenderer.invoke('api:wiki-sync-workspace', workspaceId),
-  wikiGetSyncProgress: (workspaceId: string): Promise<any | null> =>
+  wikiGetSyncProgress: (workspaceId: string): Promise<WikiSyncProgress | null> =>
     ipcRenderer.invoke('api:wiki-get-sync-progress', workspaceId),
-  onWikiSyncProgress: (callback: (progress: any) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, progress: any): void => callback(progress)
+  onWikiSyncProgress: (callback: (progress: WikiSyncProgress) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: WikiSyncProgress): void => callback(progress)
     ipcRenderer.on('api:wiki-sync-progress', handler)
     return (): void => { ipcRenderer.removeListener('api:wiki-sync-progress', handler) }
   },

@@ -1,3 +1,6 @@
+import type { WikiParserComponentStatus } from '../../../preload/wiki-types'
+import { DOCLING_SCRIPT } from '../../document-parsing/docling-script'
+import { doclingNetworkEnv } from '../../document-parsing/docling-network'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { WebContents } from 'electron'
 import { spawn } from 'child_process'
@@ -43,6 +46,7 @@ interface InstallEventContext {
   sessionId?: string
   messageId?: number
   target: BrowserWindow
+  onProgress?: (detail: string) => void
 }
 
 function runtimeRoot(): string {
@@ -91,6 +95,7 @@ function sendInstallEvent(
   detail: string,
   progress: number
 ): void {
+  eventContext.onProgress?.(detail)
   if (eventContext.target.isDestroyed()) return
   eventContext.target.webContents.send('api:llm-tool-event', {
     type,
@@ -106,7 +111,7 @@ function sendInstallEvent(
 async function runProcess(
   executable: string,
   args: string[],
-  options: { cwd: string; signal?: AbortSignal; timeoutMs?: number }
+  options: { cwd: string; signal?: AbortSignal; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ): Promise<string> {
   return await new Promise((resolvePromise, reject) => {
     const child = spawn(executable, args, {
@@ -115,6 +120,7 @@ async function runProcess(
       shell: false,
       env: {
         ...process.env,
+        ...options.env,
         PYTHONUTF8: '1',
         PYTHONNOUSERSITE: '1',
         PIP_DISABLE_PIP_VERSION_CHECK: '1',
@@ -555,7 +561,76 @@ class OfficeRuntimeManager {
   private nextRequestId = 1
   private installPromise: Promise<OfficeRuntimeInfo> | null = null
   private pptMasterInstallPromise: Promise<OfficeRuntimeInfo> | null = null
+  private doclingInstallPromise: Promise<WikiParserComponentStatus> | null = null
+  private doclingStatus: WikiParserComponentStatus | null = null
 
+  private doclingPaths(): { pythonPath: string; packagesPath: string; markerPath: string } {
+    const info = runtimeInfo()
+    const packagesPath = join(info.rootDir, 'components', 'docling-2.60.0')
+    return { pythonPath: info.pythonPath, packagesPath, markerPath: join(packagesPath, 'agentpet-ready.json') }
+  }
+
+  private publishDoclingStatus(status: WikiParserComponentStatus['status'], detail: string): WikiParserComponentStatus {
+    this.doclingStatus = { status, detail, updatedAt: Date.now() }
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('api:wiki-parser-component-status', this.doclingStatus)
+    }
+    return this.doclingStatus
+  }
+
+  public getDoclingStatus(): WikiParserComponentStatus {
+    if (process.platform !== 'win32' || process.arch !== 'x64') {
+      return { status: 'unsupported', detail: '文档解析组件暂仅支持 Windows x64', updatedAt: Date.now() }
+    }
+    if (this.doclingStatus?.status === 'installing' || this.doclingStatus?.status === 'failed') return this.doclingStatus
+    const paths = this.doclingPaths()
+    const ready = fs.existsSync(paths.pythonPath) && fs.existsSync(paths.markerPath)
+      && fs.existsSync(join(paths.packagesPath, 'docling')) && fs.existsSync(join(paths.packagesPath, 'model-cache', 'hub'))
+    return { status: ready ? 'ready' : 'not-installed', detail: ready ? 'Docling 文档解析组件已就绪' : '下载后可增强识别 PDF 多栏、表格和扫描文字', updatedAt: Date.now() }
+  }
+
+  public async ensureDocling(_context: { event?: { sender: WebContents } }): Promise<{ pythonPath: string; packagesPath: string }> {
+    if (this.getDoclingStatus().status !== 'ready') throw new Error('请先点击 Wiki 中的“下载文档解析组件”，完成安装后重新同步。')
+    return this.doclingPaths()
+  }
+
+  public installDocling(context: { event: { sender: WebContents } }): Promise<WikiParserComponentStatus> {
+    if (this.doclingInstallPromise) return this.doclingInstallPromise
+    const current = this.getDoclingStatus()
+    if (current.status === 'ready' || current.status === 'unsupported') return Promise.resolve(current)
+    this.publishDoclingStatus('installing', '正在准备独立 Python 运行环境')
+    this.doclingInstallPromise = (async () => {
+      const info = await this.ensure({ ...context, installApproved: true,
+        onProgress: detail => { this.publishDoclingStatus('installing', detail) } })
+      const { packagesPath, markerPath } = this.doclingPaths()
+      const networkEnv = await doclingNetworkEnv()
+      const validate = async (): Promise<void> => {
+        await runProcess(info.pythonPath, ['-c',
+          'import sys; sys.path.insert(0, sys.argv[1]); from docling.document_converter import DocumentConverter; import rapidocr, onnxruntime',
+          packagesPath], { cwd: info.rootDir, timeoutMs: 60_000 })
+      }
+      try { await validate() } catch {
+        this.publishDoclingStatus('installing', '正在下载并安装 Docling 和 OCR 组件，请保持网络连接')
+        await fs.promises.mkdir(packagesPath, { recursive: true })
+        await runProcess(info.pythonPath, ['-m', 'pip', 'install', '--upgrade', '--only-binary=:all:',
+          '--timeout', '120', '--target', packagesPath, 'docling==2.60.0', 'docling-core==2.48.2',
+          'docling-ibm-models==3.9.1', 'transformers==4.57.1', 'rapidocr==3.4.2', 'onnxruntime==1.23.2'],
+        { cwd: info.rootDir, env: networkEnv, timeoutMs: INSTALL_TIMEOUT_MS })
+        await validate()
+      }
+      this.publishDoclingStatus('installing', '正在下载并验证版面、表格及 OCR 模型，首次准备可能需要数分钟')
+      await runProcess(info.pythonPath, ['-c', DOCLING_SCRIPT, packagesPath, '--prepare'], {
+        cwd: info.rootDir, timeoutMs: 30 * 60_000,
+        env: { ...networkEnv, HF_HUB_OFFLINE: '0', HF_HUB_CACHE: join(packagesPath, 'model-cache', 'hub') }
+      })
+      await fs.promises.writeFile(markerPath, JSON.stringify({ version: '2.60.0', installedAt: Date.now() }), 'utf8')
+      return this.publishDoclingStatus('ready', 'Docling 已就绪，重新同步工作区即可增强解析 PDF')
+    })().catch(error => {
+      console.warn('[PythonRuntime] Docling installation failed:', error)
+      return this.publishDoclingStatus('failed', `组件下载或验证失败，可重试。${error instanceof Error ? error.message : String(error)}`)
+    }).finally(() => { this.doclingInstallPromise = null })
+    return this.doclingInstallPromise
+  }
   constructor() {
     ipcMain.on('api:office-runtime-response', (_event, data) => {
       const requestId = Number(data?.requestId)
@@ -568,7 +643,7 @@ class OfficeRuntimeManager {
   }
 
   public async ensure(
-    context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal }
+    context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal; allowInstall?: boolean; installApproved?: boolean; onProgress?: (detail: string) => void }
   ): Promise<OfficeRuntimeInfo> {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
       throw new Error('当前 AgentPet Python 运行环境暂仅支持 Windows x64')
@@ -580,13 +655,16 @@ class OfficeRuntimeManager {
       if (await validateRuntime(info)) return info
     }
 
+    if (context.allowInstall === false) throw new Error('PYTHON_RUNTIME_NOT_INSTALLED: 请先下载文档解析组件')
+    if (this.installPromise) return this.installPromise
+
     const target = context.event?.sender
       ? BrowserWindow.fromWebContents(context.event.sender)
       : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     if (!target || target.isDestroyed()) throw new Error('无法显示 AgentPet Python 运行环境安装卡片')
 
     const requestId = this.nextRequestId++
-    const approved = await new Promise<boolean>(resolvePromise => {
+    const approved = context.installApproved || await new Promise<boolean>(resolvePromise => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
         resolvePromise(false)
@@ -613,7 +691,8 @@ class OfficeRuntimeManager {
       requestId,
       sessionId: context.sessionId,
       messageId: context.messageId,
-      target
+      target,
+      onProgress: context.onProgress
     }
     if (!this.installPromise) {
       this.installPromise = this.install(info, eventContext, context.abortSignal).finally(() => {

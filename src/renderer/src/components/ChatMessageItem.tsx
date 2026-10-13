@@ -10,6 +10,7 @@ import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import { FileChangesCard } from './FileChangesCard'
 import { Tooltip } from './Tooltip'
+import { FileIcon } from './FileIcon'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -27,7 +28,6 @@ import {
   Download,
   ExternalLink,
   Eye,
-  FileSpreadsheet,
   FileText,
   FolderOpen,
   Hourglass,
@@ -376,7 +376,7 @@ function LocalFileButton({
         onClick={() => void handleOpen()}
         onContextMenu={handleContextMenu}
       >
-        <FileText size={18} strokeWidth={2} aria-hidden="true" />
+        <FileIcon fileName={fileName || normalizedPath} size={18} />
         <span>{fileName}</span>
         <span className="chat-local-file-action">
           {opening ? '打开中…' : onPreviewFile && isPreviewableLocalFile(normalizedPath) ? '点击预览' : '点击打开'}
@@ -457,18 +457,7 @@ function DeliverableFileCard({
     window.api.showFileContextMenu(normalizedPath)
   }
 
-  const isExcel = ['xlsx', 'xls', 'csv'].includes(ext)
-  const isWord = ['docx', 'doc'].includes(ext)
-  const isPdf = ext === 'pdf'
-
-  let iconElem = <FileText size={18} className="deliverable-type-icon generic" aria-hidden="true" />
-  if (isExcel) {
-    iconElem = <FileSpreadsheet size={18} className="deliverable-type-icon excel" aria-hidden="true" />
-  } else if (isWord) {
-    iconElem = <FileText size={18} className="deliverable-type-icon word" aria-hidden="true" />
-  } else if (isPdf) {
-    iconElem = <FileText size={18} className="deliverable-type-icon pdf" aria-hidden="true" />
-  }
+  const iconElem = <FileIcon fileName={fileName} size={20} className="deliverable-type-icon" />
 
   const canPreview = Boolean(onPreviewFile && isPreviewableLocalFile(normalizedPath))
 
@@ -2462,7 +2451,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 }
               }}
             >
-              <span className="file-badge-icon"><FileText size={17} strokeWidth={2} aria-hidden="true" /></span>
+              <span className="file-badge-icon"><FileIcon fileName={f.name || f.path} size={18} /></span>
               <div className="file-badge-info">
                 <span className="file-badge-name" title={f.name}>{f.name}</span>
               </div>
@@ -2553,7 +2542,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                     }
                   }}
                 >
-                  <span className="file-badge-icon"><FileText size={17} strokeWidth={2} aria-hidden="true" /></span>
+                  <span className="file-badge-icon"><FileIcon fileName={f.name || f.path} size={18} /></span>
                   <div className="file-badge-info">
                     <span className="file-badge-name" title={f.name}>{f.name}</span>
                   </div>
@@ -2637,7 +2626,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                         onPreviewFile({ name: file.name, path: file.path, size: file.content?.length || 0 })
                       }
                     }}>
-                    <span className="message-edit-attachment-icon" aria-hidden="true"><FileText size={16} /></span>
+                    <span className="message-edit-attachment-icon" aria-hidden="true"><FileIcon fileName={file.name || file.path} size={16} /></span>
                     <span className="message-edit-attachment-name">{file.name}</span>
                     {file.isPastedText && <span className="message-edit-attachment-kind">粘贴的文本</span>}
                   </button>
@@ -2800,7 +2789,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                   <span>匹配分 {Number(citationPopover.evidence.fusionScore || 0).toFixed(3)}</span>
                   {citationPopover.evidence.sourcePath && (
                     <button type="button" onClick={() => previewCitationSource(citationPopover.evidence)}>
-                      <FileText size={13} />打开来源文件
+                      <FileIcon fileName={citationPopover.evidence.sourcePath} size={13} />打开来源文件
                     </button>
                   )}
                 </footer>
