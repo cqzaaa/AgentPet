@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { FileIcon } from './FileIcon'
 import {
   AlertTriangle,
+  ArrowDown,
   Check,
   ChevronDown,
   Circle,
@@ -132,10 +133,16 @@ export function latestTaskPlan(toolSteps: any[]): TaskPlan | null {
 
 export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus({
   plan,
-  messageId
+  messageId,
+  showScrollToBottom,
+  onScrollToBottom,
+  onFloatingActiveChange
 }: {
   plan: TaskPlan
   messageId?: string | number
+  showScrollToBottom?: boolean
+  onScrollToBottom?: () => void
+  onFloatingActiveChange?: (active: boolean) => void
 }) {
   const [runtimePlan, setRuntimePlan] = useState<TaskPlan | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
@@ -197,7 +204,16 @@ export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus
 
   const displayPlan = runtimePlan || plan
   const currentStepIndex = displayPlan.steps.findIndex((step) => step.status === 'in_progress')
-  if (currentStepIndex < 0) return null
+  const isDisplayActive = currentStepIndex >= 0
+
+  useEffect(() => {
+    onFloatingActiveChange?.(isDisplayActive)
+    return () => {
+      onFloatingActiveChange?.(false)
+    }
+  }, [isDisplayActive, onFloatingActiveChange])
+
+  if (!isDisplayActive) return null
 
   const currentStep = displayPlan.steps[currentStepIndex]
   const completed = displayPlan.steps.filter((step) => step.status === 'completed').length
@@ -205,86 +221,106 @@ export const TaskPlanFloatingStatus = React.memo(function TaskPlanFloatingStatus
 
   return (
     <div
-      ref={containerRef}
-      className={`task-plan-floating-status ${isDetailsOpen ? 'is-expanded' : ''}`}
-      role="button"
-      tabIndex={0}
-      aria-expanded={isDetailsOpen}
-      aria-haspopup="dialog"
-      aria-live="polite"
-      aria-label={`正在执行第 ${currentStepIndex + 1} / ${displayPlan.steps.length} 步：${currentStep.title}，点击${isDetailsOpen ? '收起' : '展开'}任务详情`}
-      onClick={() => setIsDetailsOpen((prev) => !prev)}
-      onKeyDown={(e) => {
-        if (e.target === containerRef.current && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault()
-          setIsDetailsOpen((prev) => !prev)
-        }
-      }}
+      className={`task-plan-floating-wrapper ${showScrollToBottom && onScrollToBottom ? 'has-scroll-action' : ''}`}
     >
-      <svg className="task-plan-floating-progress" viewBox="0 0 36 36" aria-hidden="true">
-        <circle cx="18" cy="18" r="15.9155" fill="none" strokeWidth="4" />
-        <circle
-          className="task-plan-floating-progress-value"
-          cx="18"
-          cy="18"
-          r="15.9155"
-          fill="none"
-          strokeWidth="4"
-          strokeDasharray={`${progress} ${100 - progress}`}
-          strokeDashoffset="25"
-          strokeLinecap="round"
-        />
-      </svg>
-      <span className="task-plan-floating-count">
-        第 {currentStepIndex + 1} / {displayPlan.steps.length} 步
-      </span>
-      <span className="task-plan-floating-divider" aria-hidden="true">
-        ·
-      </span>
-      <span className="task-plan-floating-title">{currentStep.title}</span>
-
-      <section
-        className={`task-plan-floating-details ${isDetailsOpen ? 'is-open' : ''}`}
-        aria-label={`任务步骤：${displayPlan.title}`}
-        aria-hidden={!isDetailsOpen}
-        onClick={(e) => e.stopPropagation()}
+      <div
+        ref={containerRef}
+        className={`task-plan-floating-status ${isDetailsOpen ? 'is-expanded' : ''}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isDetailsOpen}
+        aria-haspopup="dialog"
+        aria-live="polite"
+        aria-label={`正在执行第 ${currentStepIndex + 1} / ${displayPlan.steps.length} 步：${currentStep.title}，点击${isDetailsOpen ? '收起' : '展开'}任务详情`}
+        onClick={() => setIsDetailsOpen((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.target === containerRef.current && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            setIsDetailsOpen((prev) => !prev)
+          }
+        }}
       >
-        <header>
-          <strong>{displayPlan.title}</strong>
-          <div className="task-plan-floating-header-actions">
-            <span>
-              {completed} / {displayPlan.steps.length}
-            </span>
-            <button
-              type="button"
-              className="task-plan-floating-close"
-              aria-label="关闭任务详情"
-              title="关闭任务详情"
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsDetailsOpen(false)
-              }}
-            >
-              <X size={14} strokeWidth={2.2} aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-        {displayPlan.explanation && <p>{displayPlan.explanation}</p>}
-        <ol>
-          {displayPlan.steps.map((step, index) => (
-            <li key={step.id} className={`is-${step.status}`}>
-              <span className="task-plan-floating-step-marker" aria-hidden="true">
-                {step.status === 'completed' ? <Check size={12} strokeWidth={2.7} /> : index + 1}
+        <svg className="task-plan-floating-progress" viewBox="0 0 36 36" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.9155" fill="none" strokeWidth="4" />
+          <circle
+            className="task-plan-floating-progress-value"
+            cx="18"
+            cy="18"
+            r="15.9155"
+            fill="none"
+            strokeWidth="4"
+            strokeDasharray={`${progress} ${100 - progress}`}
+            strokeDashoffset="25"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="task-plan-floating-count">
+          第 {currentStepIndex + 1} / {displayPlan.steps.length} 步
+        </span>
+        <span className="task-plan-floating-divider" aria-hidden="true">
+          ·
+        </span>
+        <span className="task-plan-floating-title">{currentStep.title}</span>
+
+        <section
+          className={`task-plan-floating-details ${isDetailsOpen ? 'is-open' : ''}`}
+          aria-label={`任务步骤：${displayPlan.title}`}
+          aria-hidden={!isDetailsOpen}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header>
+            <strong>{displayPlan.title}</strong>
+            <div className="task-plan-floating-header-actions">
+              <span>
+                {completed} / {displayPlan.steps.length}
               </span>
-              <span className="task-plan-floating-step-copy">
-                <strong>{step.title}</strong>
-                {step.detail && <small>{step.detail}</small>}
-              </span>
-              <small className="task-plan-floating-step-status">{STATUS_LABEL[step.status]}</small>
-            </li>
-          ))}
-        </ol>
-      </section>
+              <button
+                type="button"
+                className="task-plan-floating-close"
+                aria-label="关闭任务详情"
+                title="关闭任务详情"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setIsDetailsOpen(false)
+                }}
+              >
+                <X size={14} strokeWidth={2.2} aria-hidden="true" />
+              </button>
+            </div>
+          </header>
+          {displayPlan.explanation && <p>{displayPlan.explanation}</p>}
+          <ol>
+            {displayPlan.steps.map((step, index) => (
+              <li key={step.id} className={`is-${step.status}`}>
+                <span className="task-plan-floating-step-marker" aria-hidden="true">
+                  {step.status === 'completed' ? <Check size={12} strokeWidth={2.7} /> : index + 1}
+                </span>
+                <span className="task-plan-floating-step-copy">
+                  <strong>{step.title}</strong>
+                  {step.detail && <small>{step.detail}</small>}
+                </span>
+                <small className="task-plan-floating-step-status">{STATUS_LABEL[step.status]}</small>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
+
+      {showScrollToBottom && onScrollToBottom && (
+        <button
+          type="button"
+          className="scroll-to-bottom-btn task-plan-floating-scroll-btn"
+          onClick={(e) => {
+            e.stopPropagation()
+            onScrollToBottom()
+          }}
+          title="回到最新"
+          aria-label="回到最新"
+        >
+          <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
+          回到最新
+        </button>
+      )}
     </div>
   )
 })

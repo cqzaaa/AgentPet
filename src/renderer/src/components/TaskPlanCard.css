@@ -1,26 +1,40 @@
-.task-plan-floating-status {
+.task-plan-floating-wrapper {
   position: absolute;
   z-index: 45;
   top: -18px;
   left: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+  animation: task-plan-floating-in 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.task-plan-floating-status {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
-  max-width: min(520px, calc(100% - 48px));
+  max-width: min(520px, calc(100vw - 120px));
   height: 30px;
   padding: 0 15px;
   border: 1px solid color-mix(in srgb, var(--border-card, #dfe3ea) 82%, #2898f3 18%);
   border-radius: 999px;
   color: var(--color-text-secondary, #60646c);
   background: color-mix(in srgb, var(--bg-card, #fff) 96%, #2898f3 4%);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
   box-shadow: 0 8px 26px rgba(28, 45, 72, .11), 0 1px 3px rgba(28, 45, 72, .06);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
   user-select: none;
-  transform: translate(-50%, -50%);
-  animation: task-plan-floating-in 180ms cubic-bezier(.2, .8, .2, 1);
-  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+  pointer-events: auto;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease, max-width 200ms ease;
+}
+
+.task-plan-floating-wrapper.has-scroll-action .task-plan-floating-status {
+  max-width: min(420px, calc(100vw - 220px));
 }
 
 .task-plan-floating-status:hover {
@@ -36,6 +50,49 @@
 .task-plan-floating-status:focus-visible {
   outline: 2px solid #2898f3;
   outline-offset: 3px;
+}
+
+/* 伴随在胶囊右侧出现的滑动回底按钮 (继承原有经典白色按钮样式) */
+.scroll-to-bottom-btn.task-plan-floating-scroll-btn {
+  bottom: auto;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  animation: task-plan-scroll-btn-in 200ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.scroll-to-bottom-btn.task-plan-floating-scroll-btn:hover {
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+  transform: translateY(calc(-50% - 1px));
+}
+
+@keyframes task-plan-scroll-btn-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-6px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0) scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .task-plan-floating-wrapper.has-scroll-action {
+    display: flex;
+    gap: 6px;
+    max-width: calc(100vw - 24px);
+  }
+  .task-plan-floating-wrapper.has-scroll-action .scroll-to-bottom-btn.task-plan-floating-scroll-btn {
+    position: static;
+    transform: none;
+    flex-shrink: 0;
+  }
+  .task-plan-floating-wrapper.has-scroll-action .task-plan-floating-status {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 .task-plan-floating-progress {
@@ -498,7 +555,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .task-plan-floating-status {
+  .task-plan-floating-wrapper,
+  .task-plan-floating-status,
+  .task-plan-floating-scroll-btn {
     animation: none;
   }
 

@@ -134,6 +134,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [isTaskFloatingActive, setIsTaskFloatingActive] = useState(false)
   const [positionedSessionId, setPositionedSessionId] = useState('')
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
@@ -183,6 +184,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   useEffect(() => {
     setQuotedSelection(null)
     setShowQuotedSelectionPreview(false)
+    setIsTaskFloatingActive(false)
   }, [activeSessionId])
 
   useEffect(() => {
@@ -2217,7 +2219,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
               </div>
             </div>
           )}
-          {showScrollToBottom && positionedSessionId === activeSessionId && (
+          {showScrollToBottom && positionedSessionId === activeSessionId && !isTaskFloatingActive && (
             <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="回到最新">
               <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
               回到最新
@@ -2473,6 +2475,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
               key={latestOrdinaryTaskPlanInfo.messageId}
               plan={latestOrdinaryTaskPlanInfo.plan}
               messageId={latestOrdinaryTaskPlanInfo.messageId}
+              showScrollToBottom={showScrollToBottom && positionedSessionId === activeSessionId}
+              onScrollToBottom={scrollToBottom}
+              onFloatingActiveChange={setIsTaskFloatingActive}
             />
           )}
 
