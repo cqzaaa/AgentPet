@@ -23,6 +23,17 @@ export const fileManifest: ToolManifest = {
             type: 'number',
             description: '起始行号 (1-indexed)，可选'
           },
+          start_char: {
+            type: 'integer',
+            minimum: 0,
+            description: '从 0 开始的字符偏移，适用于超长单行 JSON 或文档提取文本；优先于行范围，按返回的后续位置继续读取'
+          },
+          max_chars: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 30000,
+            description: '字符分页大小，默认及上限为 30000；提供时启用字符分页'
+          },
           end_line: {
             type: 'number',
             description: '结束行号 (1-indexed)，可选'

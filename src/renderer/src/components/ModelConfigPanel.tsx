@@ -14,6 +14,7 @@ import type { AppStore } from '../hooks/useAppStore'
 import { DEFAULT_MODELS } from '../utils/helpers'
 import { getModelIcon, getProviderIcon } from '../utils/modelIcons'
 import './ModelConfigPanel.css'
+import { normalizeContextWindow, MIN_CONTEXT_WINDOW, MAX_CONTEXT_WINDOW } from '../../../preload/context-policy'
 
 type ModelProfile = {
   id: string
@@ -24,6 +25,7 @@ type ModelProfile = {
   model: string
   temperature: number
   maxTokens?: number
+  contextWindow?: number
   hasApiKey?: boolean
 }
 
@@ -60,6 +62,7 @@ function profileFromConfig(config: any): ModelProfile {
     model: config.model || '',
     temperature: typeof config.temperature === 'number' ? config.temperature : 0.7,
     ...(typeof config.maxTokens === 'number' ? { maxTokens: config.maxTokens } : {}),
+    contextWindow: normalizeContextWindow(config.contextWindow),
     hasApiKey: Boolean(config.apiKey)
   }
 }
@@ -365,6 +368,12 @@ export function ModelConfigPanel({ store }: ModelConfigPanelProps): React.JSX.El
                 <span className="model-field-label-row"><span>温度</span><output>{draft.temperature.toFixed(1)}</output></span>
                 <input className="form-slider" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={event => updateDraft({ temperature: Number(event.target.value) })} />
                 <span className="model-slider-scale"><span>稳定</span><span>创意</span></span>
+              </label>
+              <label className="model-field model-field-full">
+                <span className="model-field-label-row"><span>上下文窗口</span><output>{normalizeContextWindow(draft.contextWindow) / 1000}k</output></span>
+                <input className="form-slider" type="range" min={MIN_CONTEXT_WINDOW} max={MAX_CONTEXT_WINDOW} step="1000" value={normalizeContextWindow(draft.contextWindow)} onChange={event => updateDraft({ contextWindow: Number(event.target.value) })} aria-describedby="context-window-help" />
+                <span className="model-slider-scale"><span>32k</span><span>500k</span></span>
+                <span id="context-window-help">请按模型实际支持的窗口设置。单个附件全文最多占 5%，本次附件合计最多占 20%；超出时按需读取。</span>
               </label>
             </div>
 

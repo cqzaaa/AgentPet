@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
+import { normalizeContextWindow } from '../../preload/context-policy'
 import { SecretVault, writeTextAtomically } from './secret-vault-core'
 
 export const SYSTEM_LLM_API_KEY_SECRET_ID = 'system-llm-api-key'
@@ -13,6 +14,7 @@ export interface RuntimeLlmProfile {
   model: string
   temperature: number
   maxTokens?: number
+  contextWindow?: number
   hasApiKey: boolean
 }
 
@@ -59,6 +61,7 @@ function normalizeProfile(value: unknown, index: number): RuntimeLlmProfile | nu
     model,
     temperature: typeof value.temperature === 'number' ? value.temperature : DEFAULT_LLM_CONFIG.temperature,
     ...(typeof value.maxTokens === 'number' ? { maxTokens: value.maxTokens } : {}),
+    contextWindow: normalizeContextWindow(value.contextWindow),
     hasApiKey: apiKey.length > 0
   }
 }
@@ -102,10 +105,11 @@ export class LlmConfigStore {
       : profiles[0].id
     const activeIndex = profiles.findIndex(profile => profile.id === activeProfileId)
     const active = { ...profiles[activeIndex] }
-    for (const key of ['name', 'provider', 'apiKey', 'baseUrl', 'model', 'temperature', 'maxTokens'] as const) {
+    for (const key of ['name', 'provider', 'apiKey', 'baseUrl', 'model', 'temperature', 'maxTokens', 'contextWindow'] as const) {
       if (input[key] !== undefined) (active as any)[key] = input[key]
     }
     active.hasApiKey = Boolean(active.apiKey)
+    active.contextWindow = normalizeContextWindow(active.contextWindow)
     profiles[activeIndex] = active
 
     this.writeStoredConfig({ activeProfileId, profiles })
@@ -152,6 +156,7 @@ export class LlmConfigStore {
       model,
       temperature: typeof config.temperature === 'number' ? config.temperature : DEFAULT_LLM_CONFIG.temperature,
       ...(typeof config.maxTokens === 'number' ? { maxTokens: config.maxTokens } : {}),
+      contextWindow: normalizeContextWindow(config.contextWindow),
       hasApiKey: apiKey.length > 0
     }
   }

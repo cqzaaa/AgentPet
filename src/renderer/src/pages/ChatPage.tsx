@@ -16,6 +16,7 @@ import { PastedTextModal } from '../components/PastedTextModal'
 import { requestConfirmation } from '../components/confirmService'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
+import { normalizeContextWindow } from '../../../preload/context-policy'
 import { FileIcon } from '../components/FileIcon'
 import {
   ArrowDown,
@@ -1333,15 +1334,17 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
   // 上下文安全额度环机制
   const [showContextTooltip, setShowContextTooltip] = useState(false)
-  const contextLimit = Number((llmConfig as any).contextWindow) || 258000
+  const contextLimit = normalizeContextWindow(llmConfig.contextWindow)
+  const attachmentBudget = useMemo(() => ({
+    contextWindow: contextLimit,
+    usedTokens: currentContextTokens,
+    maxOutputTokens: llmConfig.maxTokens
+  }), [contextLimit, currentContextTokens, llmConfig.maxTokens])
+  const draftPrompt = quotedSelection ? formatQuotedPrompt(quotedSelection, inputValue) : inputValue
+  const draftTokens = useMemo(() => estimateDraftTokens(draftPrompt, attachedFiles, attachmentBudget), [draftPrompt, attachedFiles, attachmentBudget])
   const estimatedContextTokens = useMemo(
-    () =>
-      currentContextTokens +
-      estimateDraftTokens(
-        quotedSelection ? formatQuotedPrompt(quotedSelection, inputValue) : inputValue,
-        attachedFiles
-      ),
-    [attachedFiles, currentContextTokens, inputValue, quotedSelection]
+    () => currentContextTokens + draftTokens,
+    [currentContextTokens, draftTokens]
   )
 
   const contextPercent = useMemo(() => {
@@ -1369,7 +1372,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   }, [pendingSteeringPrompt, setInputValue, setPendingSteeringPrompt])
 
   const handleSendIntercept = () => {
-    if (estimateDraftTokens(inputValue, attachedFiles) >= contextLimit) {
+    if (draftTokens >= contextLimit) {
       showToast('单次输入过大，请缩短输入或附件内容后继续。', 'error')
       return
     }
@@ -1441,7 +1444,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     (selection: QuotedSelection, prompt: string, sendNow: boolean): void => {
       if (sendNow) {
         const payload = formatQuotedPrompt(selection, prompt)
-        if (estimateDraftTokens(payload, attachedFiles) >= contextLimit) {
+        if (estimateDraftTokens(payload, attachedFiles, attachmentBudget) >= contextLimit) {
           showToast('所选内容超出当前上下文额度，请缩短选区后重试。', 'error')
           return
         }
@@ -1463,6 +1466,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     },
     [
       attachedFiles,
+      attachmentBudget,
       contextLimit,
       currentContextTokens,
       handleSendChat,
@@ -2725,7 +2729,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             className="chat-textarea-field resize-none"
             rows={2}
             placeholder={
-              estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
+              draftTokens >= contextLimit
                 ? '单次输入过大，请缩短输入或附件内容后继续。'
                 : isSending
                   ? pendingSteeringPrompt
@@ -2736,7 +2740,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
-            disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}
             onChange={(e) => setInputValue(e.target.value)}
             onPaste={async (e) => {
               const attachLongPastedText = (rawText: string) => {
@@ -2777,7 +2780,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                       )
                     })
                     .catch(() => {
-                      /* 忽略落盘异常，content 已保存在内存中 */
+                      showToast('粘贴文本未能保存为文件，内容已保留，请重新粘贴后重试。', 'error')
                     })
                 }
               }
@@ -3242,11 +3245,11 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                   </div>
                 )}
               </div>
-              <Tooltip content={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit ? '单次输入过大' : '上传文件进行分析'} placement="top">
+              <Tooltip content={draftTokens >= contextLimit ? '单次输入过大' : '上传文件进行分析'} placement="top">
                 <button
                   className="toolbar-icon-btn toolbar-action-btn upload"
                   onClick={handleUploadFile}
-                  disabled={estimateDraftTokens(inputValue, attachedFiles) >= contextLimit}
+                  disabled={draftTokens >= contextLimit}
                 >
                   <Plus size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
@@ -3268,7 +3271,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                       onClick={handleSendIntercept}
                       disabled={
                         (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
-                        estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
+                        draftTokens >= contextLimit
                       }
                     >
                       <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />
@@ -3282,7 +3285,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     onClick={handleSendIntercept}
                     disabled={
                       (!inputValue.trim() && attachedFiles.length === 0 && !quotedSelection) ||
-                      estimateDraftTokens(inputValue, attachedFiles) >= contextLimit
+                      draftTokens >= contextLimit
                     }
                   >
                     <ArrowUp size={16} strokeWidth={2.5} aria-hidden="true" />

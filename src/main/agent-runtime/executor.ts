@@ -1,4 +1,5 @@
 import * as fs from 'fs'
+import { normalizeContextWindow } from '../../preload/context-policy'
 import { basename, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions, type ModelProvider } from '../model-runtime'
 import { COMPACTION_PROMPT, planContextCompaction, restoreContext, userContextKeys, type ContextCheckpoint } from './context-lifecycle'
@@ -22,6 +23,7 @@ import { taskRunner } from '../task-runtime/task-runner'
 import { ArtifactTracker } from './artifact-tracker'
 import { FileChangeTracker } from './file-change-tracker'
 import { CodingInspectionBudget } from './coding-inspection-budget'
+import { WebResearchProgress } from './web-research-progress'
 import { loadProjectGuidance } from './project-guidance'
 import {
   BOOTSTRAP_TOOL_NAMES,
@@ -197,12 +199,6 @@ function normalizeSearchCitations(text: string): string {
     .replace(/\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
     .replace(/\bnewsDetail_forward_[\w-]+\b/gi, '')
 }
-// Keep long-form source material (PDFs, manuals, code listings) in the active
-// context until the request is genuinely close to the provider limit. We still
-// leave headroom for the next assistant response and tool definitions, because
-// waiting for a hard overflow would make the API call fail before compaction.
-const DEFAULT_CONTEXT_WINDOW = 258000
-
 const MUTATING_TOOL_NAMES = new Set([
   'write_file',
   'edit_file',
@@ -931,7 +927,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     const { provider, apiKey, baseUrl, model, temperature, maxTokens, sessionId, sandboxMode, event } = config
     const effectiveSandboxMode: boolean | 'assist' =
       sandboxMode === 'assist' ? 'assist' : !!sandboxMode
-    const contextWindow = Math.max(32000, Number(config.contextWindow) || DEFAULT_CONTEXT_WINDOW)
+    const contextWindow = normalizeContextWindow(config.contextWindow)
     const isFrontend = !config.isBackground
 
     const sourceUserKeys = userContextKeys(messages)
@@ -1047,8 +1043,8 @@ Images in current or historical messages are provided directly to the model. Ins
             }
             extraContext += `\n[网页抓取与阅读硬约束原则]：
 1. 当主人的问题与上述已缓存的离线网页文件相关时，你【必须且只能】优先使用 \`read_file\` 工具读取，或使用 \`grep_content\` 检索对应的本地缓存文件。
-2. 当你调用 \`web_fetch\` 抓取新网页后，若因为网页过长被系统截断（提示被截断或预览不足），你【必须且立即】使用 \`read_file\` 工具传入刚才抓取生成的本地缓存相对路径来读取全文。
-3. 非必要【严禁】重复调用 \`web_fetch\` 或 \`web_search\` 去重复联网下载相同的网址或检索相同内容！\n`
+2. 抓取预览不足时，使用 \`read_file\` 按相关范围读取返回的缓存绝对路径；不要一次将全文塞进上下文。进入详情页可直接使用返回的 URL 或当前页 URL 加 link_id。
+3. 同页读取更多链接时允许使用 \`web_fetch\` 的 link_offset 并复用缓存；不要无理由刷新相同网址或重复相同查询。\n`
           }
         } catch (err) {
           console.error('[callLlmInternal] 扫描离线网页缓存失败:', err)
@@ -1168,6 +1164,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     let streamRecoveryUsed = false
     let resumedTextPrefix = ''
     const inspectionBudget = new CodingInspectionBudget(workspacePath)
+    const researchProgress = new WebResearchProgress(chatHistory.filter(message => message.role === 'user' || message.role === 'tool').map(messageText))
     let singleEditCalls = 0
     let nextEditNudgeAt = 3
     const successfulInputFingerprints = new Set<string>()
@@ -1707,12 +1704,16 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
             let imageFilePaths: string[] = []
             let generatedFiles: Array<{ name: string; path: string; size: number }> = []
             let toolState: any
+            const researchBlock = researchProgress.beforeCall(toolName, toolArgs)
             const inputFingerprint = toolName === 'type_text'
               ? `${currentInputTarget}\n${String(toolArgs.text ?? '')}`
               : ''
             if (!argumentsAreValid) {
               const required = Array.isArray(parameterSchema?.required) ? parameterSchema.required.join(', ') : ''
               toolResult = `[工具参数校验失败] ${toolName} 的参数不完整或类型错误${required ? `；必填字段：${required}` : ''}。请根据工具 Schema 重新生成完整参数后重试，不要重复发送空对象。`
+              toolSuccess = false
+            } else if (researchBlock) {
+              toolResult = researchBlock
               toolSuccess = false
             } else if (shouldBlockBasicOfficePptxCreate(activeSkillIds, toolName, toolArgs, requiresPptMaster)) {
               toolResult = '[PPT Master 路由保护] 当前任务要求 PPT 美化/专业设计，不能用 run_office_skill(create, pptx) 生成基础文本型演示文稿。若 ppt-master 尚未加载，请先调用 request_skill；随后严格执行其工作流，使用 read_file 读取路由文件并用 run_python 调用 Skill 脚本完成设计、SVG 构建和 PPTX 导出。run_office_skill 仅用于生成后的 inspect、render、validate 或 convert。'
@@ -1750,10 +1751,12 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
               }
 
               if (!toolResult!) {
-                if (executedWebSearchQueries.has(query)) {
-                  toolResult = `已跳过重复搜索：${query}`
+                const searchKey = `${toolArgs.engine || 'auto'}\u0000${query}`
+                if (executedWebSearchQueries.has(searchKey)) {
+                  toolResult = `已跳过重复搜索：${query}（${toolArgs.engine || 'auto'}）。请改写关键词、切换 engine，或打开已有来源页。`
+                  toolSuccess = false
                 } else {
-                  executedWebSearchQueries.add(query)
+                  executedWebSearchQueries.add(searchKey)
                   const ctx = {
                     workspacePath: workspacePath || '',
                     sessionId,
@@ -1881,6 +1884,10 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
               generatedFiles
             }
           }))
+          for (const result of batchResults) {
+            const reminder = researchProgress.observe(result)
+            if (reminder) result.contextToolResult += `\n\n${reminder}`
+          }
           toolExecutionResults.push(...batchResults)
           i += batchSize
         }

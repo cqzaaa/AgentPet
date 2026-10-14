@@ -5,6 +5,7 @@ import { registerKnowledgeBaseAPIs } from './api/knowledgeBase'
 import { registerWikiAPIs } from './api/wiki'
 import { pathToFileURL } from 'url'
 import { isImageAttachment } from '../preload/attachment-types'
+import { MAX_CONTEXT_WINDOW, SINGLE_ATTACHMENT_RATIO } from '../preload/context-policy'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import * as fs from 'fs'
@@ -23,7 +24,7 @@ import { randomUUID } from 'crypto'
 // Upload previews are only a navigation aid. The original file path remains
 // available to file/Office tools, so storing a large inline copy wastes the
 // context budget and causes the same payload to be replayed on later turns.
-const ATTACHMENT_TEXT_PREVIEW_LIMIT = 8000
+const ATTACHMENT_TEXT_PREVIEW_LIMIT = MAX_CONTEXT_WINDOW * SINGLE_ATTACHMENT_RATIO * 4
 
 function limitAttachmentTextPreview(content: string): string {
   if (content.length <= ATTACHMENT_TEXT_PREVIEW_LIMIT) return content
@@ -4542,7 +4543,7 @@ app.whenReady().then(() => {
               fileInfo = {
                 ...restFi,
                 content: typeof restFi.content === 'string'
-                  ? (restFi.isPastedText ? restFi.content : limitAttachmentTextPreview(restFi.content))
+                  ? (restFi.isPastedText || restFi.contextMode === 'inline' ? restFi.content : limitAttachmentTextPreview(restFi.content))
                   : restFi.content
               }
             } catch (e) {
@@ -4558,7 +4559,7 @@ app.whenReady().then(() => {
                 return {
                   ...rest,
                   content: typeof rest.content === 'string'
-                    ? (rest.isPastedText ? rest.content : limitAttachmentTextPreview(rest.content))
+                    ? (rest.isPastedText || rest.contextMode === 'inline' ? rest.content : limitAttachmentTextPreview(rest.content))
                     : rest.content
                 }
               })

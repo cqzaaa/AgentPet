@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import { dirname, basename, join, extname, relative } from 'path'
 import { app, shell } from 'electron'
 import { replaceExactText } from './text-edit'
+import { readTextPage, MAX_TEXT_PAGE_CHARS } from './text-page'
 import { fileReadCache, fileVersion, type ReadRange } from './read-cache'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { resolveLocalPath, resolveSessionPath, getActiveStorageDir, getAllowedFileRoots, getDefaultWorkingDirectory, getSessionFilesDir, isPathWithinRoots } from '../../utils/paths'
@@ -153,6 +154,10 @@ export class FileExecutor implements IToolExecutor {
           }
         }
 
+        if (args.start_char !== undefined || args.max_chars !== undefined) {
+          return { content: readTextPage(content, args.start_char, args.max_chars), success: true }
+        }
+
         let finalContent = content
         const { start_line, end_line } = args
 
@@ -219,10 +224,10 @@ export class FileExecutor implements IToolExecutor {
           }
         }
 
-        const MAX_READ_LEN = 30000
+        const MAX_READ_LEN = MAX_TEXT_PAGE_CHARS
         const truncated = finalContent.length > MAX_READ_LEN
         if (truncated) {
-          finalContent = finalContent.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。如需阅读后续部分，请在参数中使用 start_line 和 end_line 进行精确的分页读取。]`
+          finalContent = finalContent.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。请使用 start_line/end_line 缩小范围；单行过长时请使用 start_char=0 和 max_chars=${MAX_READ_LEN} 开始字符分页，再根据返回的后续位置继续。]`
         }
         const unchanged = plainText && version === fileVersion(await fs.promises.stat(file_path))
         const overlap = unchanged && !truncated

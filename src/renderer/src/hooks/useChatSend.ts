@@ -5,6 +5,8 @@ import type { MutableRefObject } from 'react'
 import { formatDateTime } from '../utils/helpers'
 import { mergeCollaborationHistory } from '../utils/collaborationContext'
 import { isImageAttachment } from '../../../preload/attachment-types'
+import { estimateDraftTokens, estimatePromptEnvelopeTokens, estimateContextMessageTokens, formatAttachmentContext, planAttachmentContext } from '../utils/contextBudget'
+import { normalizeContextWindow } from '../../../preload/context-policy'
 
 interface ChatSendState {
   sessions: any[]
@@ -16,6 +18,7 @@ interface ChatSendState {
   sendingSessionIds: Record<string, boolean>
   llmConfig: any
   contextRounds: number
+  contextTokenUsageBySession?: Record<string, number>
   skillsList: any[]
   disabledSkillNames: string[]
   avatarList: any[]
@@ -52,25 +55,20 @@ function getAvatar(state: ChatSendState): { name: string; style: string; voice: 
   }
 }
 
-function toLlmMessage(message: any): { role: string; content: any } {
+function toLlmMessage(message: any, contextWindow: number): { role: string; content: any } {
   let textContent = message.text || ''
   if (message.sender === 'user' && message.isSteering) {
     textContent = `【用户追加指引：请立即优先遵循，并据此调整当前任务】\n${textContent}`
   }
   const imageBlocks: any[] = []
 
-  const files = message.fileInfo ? [message.fileInfo] : message.fileInfos || []
+  const sourceFiles = message.fileInfo ? [message.fileInfo] : message.fileInfos || []
+  const plannedFiles = planAttachmentContext(textContent, sourceFiles, { contextWindow })
+  const files = sourceFiles.map((file: any, index: number) => file.contextMode === 'reference' ? file : plannedFiles[index])
   if (files.length) {
     const attachmentsText = files
       .filter((file: any) => file.content || file.path)
-      .map((file: any) => {
-        const pathNote = file.path ? `\n[源文件路径: ${file.path}]` : ''
-        const previewNotice = /\.pdf$/i.test(file.name || '') && file.content
-          ? '\n[附件文本预读：仅供检索、总结和理解内容；不包含可靠的字体、段落样式、坐标、分页、表格边界或图片布局，不能作为 PDF→DOCX/PPTX 转换源。]'
-          : ''
-        const content = !isImageAttachment(file.name || file.path || '') && file.content ? `\n${file.content}` : ''
-        return `--- [附带文件: ${file.name}]${pathNote}${previewNotice}${content}`
-      })
+      .map(formatAttachmentContext)
       .join('\n\n')
     if (attachmentsText) textContent = `${textContent}\n\n${attachmentsText}`
 
@@ -149,7 +147,7 @@ export function useChatSend({
       throw new Error('当前会话无法编辑，请等待生成结束后重试。')
     }
     const originalMessage = edit ? originalSession.messages[editIndex] : retry ? originalSession.messages[retryUserIndex] : null
-    const attachedFiles = edit
+    let attachedFiles = edit
       ? [...edit.attachedFiles]
       : originalMessage
         ? [...(originalMessage.fileInfos || (originalMessage.fileInfo ? [originalMessage.fileInfo] : []))]
@@ -175,6 +173,17 @@ export function useChatSend({
       return
     }
 
+    const contextWindow = normalizeContextWindow(llmConfig.contextWindow)
+    const priorMessages = (originalSession?.messages || []).slice(0, edit ? editIndex : retry ? retryUserIndex : undefined)
+    const usedTokens = edit || retry || state.contextTokenUsageBySession?.[sessionId] === undefined
+      ? estimatePromptEnvelopeTokens(originalSession) + priorMessages.reduce((sum: number, message: any) => sum + estimateContextMessageTokens(message), 0)
+      : state.contextTokenUsageBySession[sessionId]
+    const budgetOptions = { contextWindow, usedTokens, maxOutputTokens: llmConfig.maxTokens }
+    if (estimateDraftTokens(text, attachedFiles, budgetOptions) >= contextWindow) {
+      throw new Error('单次输入过大，请缩短正文后继续。')
+    }
+    attachedFiles = planAttachmentContext(text, attachedFiles, budgetOptions)
+
     const time = formatDateTime()
     const fileNames = attachedFiles.map(file => file.name).join(', ')
     const allPastedText = attachedFiles.length > 0 && attachedFiles.every(file => file.isPastedText)
@@ -198,6 +207,7 @@ export function useChatSend({
         path: file.path,
         content: file.content,
         safeName: file.safeName,
+        contextMode: file.contextMode,
         ...(file.isPastedText ? { isPastedText: true } : {})
       }))
     }
@@ -278,7 +288,7 @@ export function useChatSend({
       const historyMessages = retry ? activeSession.messages.slice(0, retryUserIndex + 1) : activeSession.messages
       const mergedHistory = mergeCollaborationHistory(historyMessages, eligibleSnapshots, sessionId, userMessage.id)
       const selectedHistory = mergedHistory
-      const chatMessages = selectedHistory.map(toLlmMessage)
+      const chatMessages = selectedHistory.map((message: any) => toLlmMessage(message, contextWindow))
 
       const retrievalQuery = [text, fileNames].filter(Boolean).join('\n')
       const [profileContent, recallResponse, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([
