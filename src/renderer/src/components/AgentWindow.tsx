@@ -1213,6 +1213,7 @@ export function AgentWindow(): React.JSX.Element {
 
           {/* 窗口控制按钮 */}
           <div className="titlebar-controls">
+            <div className="titlebar-controls-divider" style={{ width: '1px', height: '14px', background: 'var(--border-color)', opacity: 0.6, marginRight: '4px', alignSelf: 'center' }} />
             <Tooltip content="最小化" placement="bottom">
               <button
                 className="titlebar-control-btn"

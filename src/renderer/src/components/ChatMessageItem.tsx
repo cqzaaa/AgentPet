@@ -2365,7 +2365,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             <AgentPetMark className="msg-sender-avatar-mark" />
           </span>
         )}
-        <span className="msg-sender-name">{senderName}</span>
+        {msg.sender !== 'user' && <span className="msg-sender-name">{senderName}</span>}
         <span className="msg-send-time">{msg.time}</span>
       </div>
 

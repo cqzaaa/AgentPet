@@ -14,7 +14,8 @@ export interface FileChangeRecord {
 }
 
 /**
- * 经典 LCS 行对比算法计算增删行数（带首尾剥离与 O(min(M,N)) 滚动数组优化）
+ * 基于 LCS 与 Patience 分治锚点的行对比算法计算增删行数
+ * 优化首尾剥离与大文件稀疏锚点分治，杜绝单大文件两端修改时触发全量兜底导致虚高几千行的缺陷
  */
 export function computeLineDiff(oldText: string, newText: string): { additions: number; deletions: number } {
   const oldLines = oldText ? oldText.split('\n') : []
@@ -27,7 +28,129 @@ export function computeLineDiff(oldText: string, newText: string): { additions: 
   if (m === 0) return { additions: n, deletions: 0 }
   if (n === 0) return { additions: 0, deletions: m }
 
-  // 1. 先快速剥离公共前缀与公共后缀
+  function lcsRange(sOld: number, eOld: number, sNew: number, eNew: number): number {
+    // 1. 局部前缀剥离
+    while (sOld <= eOld && sNew <= eNew && oldLines[sOld] === newLines[sNew]) {
+      sOld++
+      sNew++
+    }
+    // 2. 局部后缀剥离
+    while (eOld >= sOld && eNew >= sNew && oldLines[eOld] === newLines[eNew]) {
+      eOld--
+      eNew--
+    }
+
+    if (sOld > eOld || sNew > eNew) {
+      return 0
+    }
+
+    const lenOld = eOld - sOld + 1
+    const lenNew = eNew - sNew + 1
+
+    // 规模适中（<= 2,000,000）直接一维滚动数组计算 LCS
+    if (lenOld * lenNew <= 2000000) {
+      const [shortLines, longLines] = lenOld <= lenNew
+        ? [oldLines.slice(sOld, eOld + 1), newLines.slice(sNew, eNew + 1)]
+        : [newLines.slice(sNew, eNew + 1), oldLines.slice(sOld, eOld + 1)]
+      const shortLen = shortLines.length
+      const longLen = longLines.length
+
+      let prev = new Int32Array(shortLen + 1)
+      let curr = new Int32Array(shortLen + 1)
+
+      for (let i = 0; i < longLen; i++) {
+        const longItem = longLines[i]
+        for (let j = 0; j < shortLen; j++) {
+          if (longItem === shortLines[j]) {
+            curr[j + 1] = prev[j] + 1
+          } else {
+            curr[j + 1] = curr[j] > prev[j + 1] ? curr[j] : prev[j + 1]
+          }
+        }
+        const temp = prev
+        prev = curr
+        curr = temp
+        curr.fill(0)
+      }
+
+      return prev[shortLen]
+    }
+
+    // 规模超大时：使用 Patience Diff 思想寻找区间内唯一出现的公共行（Unique Line Anchor）分治
+    const oldCounts = new Map<string, number>()
+    for (let i = sOld; i <= eOld; i++) {
+      const line = oldLines[i]
+      if (line.trim()) {
+        oldCounts.set(line, (oldCounts.get(line) || 0) + 1)
+      }
+    }
+
+    const newCounts = new Map<string, number>()
+    const newIdxMap = new Map<string, number>()
+    for (let i = sNew; i <= eNew; i++) {
+      const line = newLines[i]
+      if (line.trim()) {
+        const count = (newCounts.get(line) || 0) + 1
+        newCounts.set(line, count)
+        if (count === 1) {
+          newIdxMap.set(line, i)
+        } else {
+          newIdxMap.delete(line)
+        }
+      }
+    }
+
+    let bestOldIdx = -1
+    let bestNewIdx = -1
+    let minDistance = Infinity
+    const midOld = (sOld + eOld) / 2
+
+    for (let i = sOld; i <= eOld; i++) {
+      const line = oldLines[i]
+      if (oldCounts.get(line) === 1 && newIdxMap.has(line)) {
+        const dist = Math.abs(i - midOld)
+        if (dist < minDistance) {
+          minDistance = dist
+          bestOldIdx = i
+          bestNewIdx = newIdxMap.get(line)!
+        }
+      }
+    }
+
+    if (bestOldIdx !== -1) {
+      // 沿锚点前后延伸完全相同的行
+      let extStartOld = bestOldIdx
+      let extStartNew = bestNewIdx
+      while (
+        extStartOld > sOld &&
+        extStartNew > sNew &&
+        oldLines[extStartOld - 1] === newLines[extStartNew - 1]
+      ) {
+        extStartOld--
+        extStartNew--
+      }
+
+      let extEndOld = bestOldIdx
+      let extEndNew = bestNewIdx
+      while (
+        extEndOld < eOld &&
+        extEndNew < eNew &&
+        oldLines[extEndOld + 1] === newLines[extEndNew + 1]
+      ) {
+        extEndOld++
+        extEndNew++
+      }
+
+      const matchLen = extEndOld - extStartOld + 1
+      const leftCommon = lcsRange(sOld, extStartOld - 1, sNew, extStartNew - 1)
+      const rightCommon = lcsRange(extEndOld + 1, eOld, extEndNew + 1, eNew)
+      return leftCommon + matchLen + rightCommon
+    }
+
+    return 0
+  }
+
+  // 顶层首尾剥离
   let start = 0
   while (start < m && start < n && oldLines[start] === newLines[start]) {
     start++
@@ -39,50 +162,15 @@ export function computeLineDiff(oldText: string, newText: string): { additions: 
     endNew--
   }
 
-  const midOldCount = endOld - start + 1
-  const midNewCount = endNew - start + 1
+  const commonHead = start
+  const commonTail = m - 1 - endOld
+  const midCommon = lcsRange(start, endOld, start, endNew)
+  const totalCommon = commonHead + commonTail + midCommon
 
-  if (midOldCount <= 0 && midNewCount <= 0) return { additions: 0, deletions: 0 }
-  if (midOldCount <= 0) return { additions: midNewCount, deletions: 0 }
-  if (midNewCount <= 0) return { additions: 0, deletions: midOldCount }
-
-  // 2. 对剥离首尾后的中间改动区间，使用一维滚动数组计算 LCS（内存开销仅为 O(min(M,N))，避免大矩阵撑爆内存）
-  if (midOldCount * midNewCount <= 16000000) {
-    const [shortLines, longLines] = midOldCount <= midNewCount
-      ? [oldLines.slice(start, endOld + 1), newLines.slice(start, endNew + 1)]
-      : [newLines.slice(start, endNew + 1), oldLines.slice(start, endOld + 1)]
-    const shortLen = shortLines.length
-    const longLen = longLines.length
-
-    let prev = new Int32Array(shortLen + 1)
-    let curr = new Int32Array(shortLen + 1)
-
-    for (let i = 0; i < longLen; i++) {
-      const longItem = longLines[i]
-      for (let j = 0; j < shortLen; j++) {
-        if (longItem === shortLines[j]) {
-          curr[j + 1] = prev[j] + 1
-        } else {
-          curr[j + 1] = curr[j] > prev[j + 1] ? curr[j] : prev[j + 1]
-        }
-      }
-      const temp = prev
-      prev = curr
-      curr = temp
-      curr.fill(0)
-    }
-
-    const common = prev[shortLen]
-    return {
-      additions: midNewCount - common,
-      deletions: midOldCount - common
-    }
+  return {
+    additions: n - totalCommon,
+    deletions: m - totalCommon
   }
-
-  // 极端超大改动区间（如数十万行全量变化）时兜底
-  const deletions = midOldCount
-  const additions = midNewCount
-  return { additions, deletions }
 }
 
 export class FileChangeTracker {

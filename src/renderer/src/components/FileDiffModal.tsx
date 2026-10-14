@@ -52,7 +52,8 @@ export function compactDiffLines(lines: DiffLine[], context = 3): ReviewLine[] {
 }
 
 /**
- * 基于 LCS 算法生成精确的逐行 Diff
+ * 基于 LCS 与 Patience 分治锚点生成精确的逐行 Diff
+ * 支持大文件首尾剥离与稀疏唯一锚点递归分治，彻底解决大文件两端修改时导致中间几千行被误算为增删的问题
  */
 export function computeDiffLines(originalText: string, currentText: string): DiffLine[] {
   const oldLines = originalText ? originalText.split('\n') : []
@@ -76,99 +77,181 @@ export function computeDiffLines(originalText: string, currentText: string): Dif
     }))
   }
 
-  // 先剥离相同的首尾行，避免小修改触发整文件的二次方计算。
-  let prefix = 0
-  while (prefix < m && prefix < n && oldLines[prefix] === newLines[prefix]) prefix++
-  let oldEnd = m
-  let newEnd = n
-  while (oldEnd > prefix && newEnd > prefix && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
-    oldEnd--
-    newEnd--
-  }
-  const leading: DiffLine[] = oldLines.slice(0, prefix).map((content, index) => ({
-    type: 'normal', oldLine: index + 1, newLine: index + 1, content
-  }))
-  const trailing: DiffLine[] = oldLines.slice(oldEnd).map((content, index) => ({
-    type: 'normal', oldLine: oldEnd + index + 1, newLine: newEnd + index + 1, content
-  }))
-  if (prefix === m && prefix === n) return leading
-  const middleOld = oldLines.slice(prefix, oldEnd)
-  const middleNew = newLines.slice(prefix, newEnd)
-  const oldCount = middleOld.length
-  const newCount = middleNew.length
+  function diffRange(sOld: number, eOld: number, sNew: number, eNew: number): DiffLine[] {
+    const res: DiffLine[] = []
 
-  // 二维 DP 计算 LCS 矩阵（如果行数过大截断避免卡顿）
-  if (oldCount * newCount > 1200000) {
-    // 大文件简单对齐
-    const lines: DiffLine[] = []
-    let i = 0
-    let j = 0
-    while (i < oldCount && j < newCount) {
-      if (middleOld[i] === middleNew[j]) {
-        lines.push({ type: 'normal', oldLine: prefix + i + 1, newLine: prefix + j + 1, content: middleOld[i] })
-        i++
-        j++
-      } else {
-        lines.push({ type: 'del', oldLine: prefix + i + 1, content: middleOld[i] })
-        lines.push({ type: 'add', newLine: prefix + j + 1, content: middleNew[j] })
-        i++
-        j++
+    // 1. 局部前缀剥离
+    while (sOld <= eOld && sNew <= eNew && oldLines[sOld] === newLines[sNew]) {
+      res.push({ type: 'normal', oldLine: sOld + 1, newLine: sNew + 1, content: oldLines[sOld] })
+      sOld++
+      sNew++
+    }
+
+    const trailing: DiffLine[] = []
+    // 2. 局部后缀剥离
+    while (eOld >= sOld && eNew >= sNew && oldLines[eOld] === newLines[eNew]) {
+      trailing.push({ type: 'normal', oldLine: eOld + 1, newLine: eNew + 1, content: oldLines[eOld] })
+      eOld--
+      eNew--
+    }
+    trailing.reverse()
+
+    if (sOld > eOld && sNew > eNew) {
+      return [...res, ...trailing]
+    }
+
+    if (sOld > eOld) {
+      for (let j = sNew; j <= eNew; j++) {
+        res.push({ type: 'add', newLine: j + 1, content: newLines[j] })
+      }
+      return [...res, ...trailing]
+    }
+
+    if (sNew > eNew) {
+      for (let i = sOld; i <= eOld; i++) {
+        res.push({ type: 'del', oldLine: i + 1, content: oldLines[i] })
+      }
+      return [...res, ...trailing]
+    }
+
+    const lenOld = eOld - sOld + 1
+    const lenNew = eNew - sNew + 1
+
+    // 规模适中（<= 250,000）直接使用精确 DP 计算
+    if (lenOld * lenNew <= 250000) {
+      const dp: number[][] = Array.from({ length: lenOld + 1 }, () => new Array(lenNew + 1).fill(0))
+      for (let i = 0; i < lenOld; i++) {
+        for (let j = 0; j < lenNew; j++) {
+          if (oldLines[sOld + i] === newLines[sNew + j]) {
+            dp[i + 1][j + 1] = dp[i][j] + 1
+          } else {
+            dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1])
+          }
+        }
+      }
+
+      const midDiff: DiffLine[] = []
+      let i = lenOld
+      let j = lenNew
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldLines[sOld + i - 1] === newLines[sNew + j - 1]) {
+          midDiff.push({
+            type: 'normal',
+            oldLine: sOld + i,
+            newLine: sNew + j,
+            content: oldLines[sOld + i - 1]
+          })
+          i--
+          j--
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+          midDiff.push({
+            type: 'add',
+            newLine: sNew + j,
+            content: newLines[sNew + j - 1]
+          })
+          j--
+        } else {
+          midDiff.push({
+            type: 'del',
+            oldLine: sOld + i,
+            content: oldLines[sOld + i - 1]
+          })
+          i--
+        }
+      }
+      midDiff.reverse()
+      return [...res, ...midDiff, ...trailing]
+    }
+
+    // 规模超大时：使用 Patience Diff 寻找唯一公共行（Unique Line Anchor）递归分治
+    const oldCounts = new Map<string, number>()
+    for (let idx = sOld; idx <= eOld; idx++) {
+      const line = oldLines[idx]
+      if (line.trim()) {
+        oldCounts.set(line, (oldCounts.get(line) || 0) + 1)
       }
     }
-    while (i < oldCount) {
-      lines.push({ type: 'del', oldLine: prefix + i + 1, content: middleOld[i] })
-      i++
-    }
-    while (j < newCount) {
-      lines.push({ type: 'add', newLine: prefix + j + 1, content: middleNew[j] })
-      j++
-    }
-    return [...leading, ...lines, ...trailing]
-  }
 
-  const dp: number[][] = Array.from({ length: oldCount + 1 }, () => new Array(newCount + 1).fill(0))
-  for (let i = 0; i < oldCount; i++) {
-    for (let j = 0; j < newCount; j++) {
-      if (middleOld[i] === middleNew[j]) {
-        dp[i + 1][j + 1] = dp[i][j] + 1
-      } else {
-        dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1])
+    const newCounts = new Map<string, number>()
+    const newIdxMap = new Map<string, number>()
+    for (let idx = sNew; idx <= eNew; idx++) {
+      const line = newLines[idx]
+      if (line.trim()) {
+        const count = (newCounts.get(line) || 0) + 1
+        newCounts.set(line, count)
+        if (count === 1) {
+          newIdxMap.set(line, idx)
+        } else {
+          newIdxMap.delete(line)
+        }
       }
     }
-  }
 
-  // 回溯还原 diff 序列
-  const result: DiffLine[] = []
-  let i = oldCount
-  let j = newCount
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && middleOld[i - 1] === middleNew[j - 1]) {
-      result.push({
-        type: 'normal',
-        oldLine: prefix + i,
-        newLine: prefix + j,
-        content: middleOld[i - 1]
-      })
-      i--
-      j--
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      result.push({
-        type: 'add',
-        newLine: prefix + j,
-        content: middleNew[j - 1]
-      })
-      j--
-    } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-      result.push({
-        type: 'del',
-        oldLine: prefix + i,
-        content: middleOld[i - 1]
-      })
-      i--
+    let bestOldIdx = -1
+    let bestNewIdx = -1
+    let minDistance = Infinity
+    const midOld = (sOld + eOld) / 2
+
+    for (let idx = sOld; idx <= eOld; idx++) {
+      const line = oldLines[idx]
+      if (oldCounts.get(line) === 1 && newIdxMap.has(line)) {
+        const dist = Math.abs(idx - midOld)
+        if (dist < minDistance) {
+          minDistance = dist
+          bestOldIdx = idx
+          bestNewIdx = newIdxMap.get(line)!
+        }
+      }
     }
+
+    if (bestOldIdx !== -1) {
+      let extStartOld = bestOldIdx
+      let extStartNew = bestNewIdx
+      while (
+        extStartOld > sOld &&
+        extStartNew > sNew &&
+        oldLines[extStartOld - 1] === newLines[extStartNew - 1]
+      ) {
+        extStartOld--
+        extStartNew--
+      }
+
+      let extEndOld = bestOldIdx
+      let extEndNew = bestNewIdx
+      while (
+        extEndOld < eOld &&
+        extEndNew < eNew &&
+        oldLines[extEndOld + 1] === newLines[extEndNew + 1]
+      ) {
+        extEndOld++
+        extEndNew++
+      }
+
+      const leftPart = diffRange(sOld, extStartOld - 1, sNew, extStartNew - 1)
+      const midPart: DiffLine[] = []
+      for (let k = 0; k <= extEndOld - extStartOld; k++) {
+        midPart.push({
+          type: 'normal',
+          oldLine: extStartOld + k + 1,
+          newLine: extStartNew + k + 1,
+          content: oldLines[extStartOld + k]
+        })
+      }
+      const rightPart = diffRange(extEndOld + 1, eOld, extEndNew + 1, eNew)
+      return [...res, ...leftPart, ...midPart, ...rightPart, ...trailing]
+    }
+
+    // 实在无唯一行匹配时的保底线性对齐
+    for (let idx = sOld; idx <= eOld; idx++) {
+      res.push({ type: 'del', oldLine: idx + 1, content: oldLines[idx] })
+    }
+    for (let idx = sNew; idx <= eNew; idx++) {
+      res.push({ type: 'add', newLine: idx + 1, content: newLines[idx] })
+    }
+    return [...res, ...trailing]
   }
 
-  return [...leading, ...result.reverse(), ...trailing]
+  return diffRange(0, m - 1, 0, n - 1)
 }
 
 export interface FileDiffDrawerProps {
