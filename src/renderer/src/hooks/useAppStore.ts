@@ -78,13 +78,35 @@ export interface CronTask {
   workflowId?: string
   id: string
   name: string
-  interval: number
+  interval?: number
+  executeAt?: number
+  nextRunAt?: number
   lastTriggered: string
   triggerCount: number
   isActive: boolean
+  repeat?: boolean
   action?: string
   logs?: CronLog[]
   isSystem?: boolean
+  authorization?: {
+    scope: 'scheduled-task'
+    fingerprint: string
+    approvedAt: number
+  }
+}
+
+export type NotificationType = 'task' | 'system' | 'alert' | 'agent'
+export type NotificationStatus = 'success' | 'warning' | 'error' | 'info'
+
+export interface AppNotification {
+  id: string
+  type: NotificationType
+  title: string
+  content?: string
+  status?: NotificationStatus
+  createdAt: number
+  read: boolean
+  metadata?: Record<string, any>
 }
 
 export interface Session {
@@ -326,6 +348,74 @@ export const useAppStoreRaw = create<any>((set) => ({
   selectedCronLogDetails: null,
   pendingOpenTaskId: null,
   pendingOpenLogId: null,
+  notifications: (() => {
+    try {
+      const saved = localStorage.getItem('agentpet_notifications')
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })(),
+  addNotification: (notification: Omit<AppNotification, 'id' | 'createdAt' | 'read'> & Partial<AppNotification>) => {
+    const item: AppNotification = {
+      id: notification.id || `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: notification.createdAt || Date.now(),
+      read: notification.read ?? false,
+      ...notification
+    }
+    useAppStoreRaw.setState((state: any) => {
+      const next = [item, ...(state.notifications || [])].slice(0, 100)
+      try {
+        localStorage.setItem('agentpet_notifications', JSON.stringify(next))
+      } catch (e) {
+        console.error('保存通知失败', e)
+      }
+      return { notifications: next }
+    })
+  },
+  markNotificationRead: (id: string) => {
+    useAppStoreRaw.setState((state: any) => {
+      const next = (state.notifications || []).map((n: AppNotification) =>
+        n.id === id ? { ...n, read: true } : n
+      )
+      try {
+        localStorage.setItem('agentpet_notifications', JSON.stringify(next))
+      } catch (e) {
+        console.error('更新通知状态失败', e)
+      }
+      return { notifications: next }
+    })
+  },
+  markAllNotificationsRead: () => {
+    useAppStoreRaw.setState((state: any) => {
+      const next = (state.notifications || []).map((n: AppNotification) => ({ ...n, read: true }))
+      try {
+        localStorage.setItem('agentpet_notifications', JSON.stringify(next))
+      } catch (e) {
+        console.error('更新通知状态失败', e)
+      }
+      return { notifications: next }
+    })
+  },
+  removeNotification: (id: string) => {
+    useAppStoreRaw.setState((state: any) => {
+      const next = (state.notifications || []).filter((n: AppNotification) => n.id !== id)
+      try {
+        localStorage.setItem('agentpet_notifications', JSON.stringify(next))
+      } catch (e) {
+        console.error('删除通知失败', e)
+      }
+      return { notifications: next }
+    })
+  },
+  clearAllNotifications: () => {
+    try {
+      localStorage.removeItem('agentpet_notifications')
+    } catch (e) {
+      console.error('清空通知失败', e)
+    }
+    useAppStoreRaw.setState({ notifications: [] })
+  },
   theme: localStorage.getItem('agentself_theme') || localStorage.getItem('agentpet_theme') || 'light',
   sendingSessionIds: {},
   llmConfig: (() => {
@@ -659,7 +749,8 @@ export function useAppStore() {
     contextRounds, setContextRounds,
     testStatus, setTestStatus,
     isSessionSwitching, setIsSessionSwitching,
-    isSessionsInitialized, setIsSessionsInitialized
+    isSessionsInitialized, setIsSessionsInitialized,
+    notifications, addNotification, markNotificationRead, markAllNotificationsRead, removeNotification, clearAllNotifications
   } = store
   const workspacePath = useAppStoreRaw((state: any) => {
     const active = (state.sessions as Session[]).find(session => session.id === activeSessionId)
@@ -1011,8 +1102,8 @@ export function useAppStore() {
     const task = cronTasks.find(t => t.id === pendingOpenTaskId)
     if (task) {
       setSelectedTaskForLog(task)
-      if (pendingOpenLogId && task.logs) {
-        const log = task.logs.find(l => l.id === pendingOpenLogId)
+      if (task.logs && task.logs.length > 0) {
+        const log = pendingOpenLogId ? task.logs.find(l => l.id === pendingOpenLogId) : task.logs[task.logs.length - 1]
         if (log) {
           setSelectedCronLogDetails(log)
         }
@@ -1855,7 +1946,17 @@ export function useAppStore() {
   }
 
   const handleToggleCronTask = async (id: string): Promise<void> => {
-    const updated = cronTasks.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t)
+    const target = cronTasks.find(t => t.id === id)
+    if (!target) return
+    let authorization = target.authorization
+    if (!target.isActive && !authorization) {
+      authorization = await window.api.authorizeCronTask(target)
+      if (!authorization) {
+        showToast('未授权，任务仍保持暂停', 'error')
+        return
+      }
+    }
+    const updated = cronTasks.map(t => t.id === id ? { ...t, authorization, isActive: !t.isActive } : t)
     setCronTasks(updated)
     localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
     await window.api.saveCronTasks(updated)
@@ -1876,9 +1977,15 @@ export function useAppStore() {
     showToast('定时任务日志已清空', 'success')
   }
 
-  const handleAddCronTask = async (taskData: Omit<CronTask, 'id' | 'lastTriggered' | 'triggerCount' | 'logs'>): Promise<void> => {
+  const handleAddCronTask = async (taskData: Omit<CronTask, 'id' | 'lastTriggered' | 'triggerCount' | 'logs'>): Promise<boolean> => {
+    const authorization = await window.api.authorizeCronTask(taskData)
+    if (!authorization) {
+      showToast('未授权，定时任务未创建', 'error')
+      return false
+    }
     const newTask: CronTask = {
       ...taskData,
+      authorization,
       id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       lastTriggered: '从未执行',
       triggerCount: 0,
@@ -1889,14 +1996,24 @@ export function useAppStore() {
     localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
     await window.api.saveCronTasks(updated)
     showToast('定时任务添加成功', 'success')
+    return true
   }
 
-  const handleEditCronTask = async (id: string, updates: Partial<CronTask>): Promise<void> => {
-    const updated = cronTasks.map(t => t.id === id ? { ...t, ...updates } : t)
+  const handleEditCronTask = async (id: string, updates: Partial<CronTask>): Promise<boolean> => {
+    const existing = cronTasks.find(t => t.id === id)
+    if (!existing) return false
+    const nextTask = { ...existing, ...updates }
+    const authorization = await window.api.authorizeCronTask(nextTask)
+    if (!authorization) {
+      showToast('未授权，定时任务未更新', 'error')
+      return false
+    }
+    const updated = cronTasks.map(t => t.id === id ? { ...nextTask, authorization } : t)
     setCronTasks(updated)
     localStorage.setItem('agentpet_cron_tasks', JSON.stringify(updated))
     await window.api.saveCronTasks(updated)
     showToast('定时任务已更新', 'success')
+    return true
   }
 
   const handleClearTokenLogs = (): void => {
@@ -1965,7 +2082,13 @@ ${skillsContext}`
           const nextTasks = prevTasks.map(t => {
             if (t.id === taskToRun.id) {
               const updatedLogs = (t.logs || []).map(l => l.id === logId ? { ...runningLog } : l)
-              return { ...t, logs: updatedLogs }
+              const isSingleRun = t.repeat === false || taskToRun.repeat === false
+              return {
+                ...t,
+                isActive: isSingleRun ? false : t.isActive,
+                nextRunAt: isSingleRun ? undefined : t.nextRunAt,
+                logs: updatedLogs
+              }
             }
             return t
           })
@@ -1977,26 +2100,17 @@ ${skillsContext}`
         // 触发系统托盘通知与桌面挂件气泡
         window.api.showBubble(`任务 [${taskToRun.name}] 执行成功！`, response, taskToRun.id, logId)
 
-        // 在 Chat 会话中添加简化的完成提醒
-        const successTimeStr = formatDateTime()
-        const successTimeOnly = successTimeStr.split(' ')[1] || successTimeStr
-        setSessions(prevSessions => {
-          const updated = prevSessions.map(session => {
-            if (session.id === activeSessionId) {
-              return {
-                ...session,
-                messages: [...session.messages, {
-                  id: Date.now() + Math.random(),
-                  sender: 'system',
-                  text: `${successTimeOnly} - 完成【${taskToRun.name}】任务`,
-                  time: successTimeStr
-                }]
-              }
-            }
-            return session
-          })
-          if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-          return updated
+        // 记录到通知中心
+        addNotification({
+          type: 'task',
+          title: `完成【${taskToRun.name}】任务`,
+          content: response ? (response.length > 120 ? response.slice(0, 120) + '...' : response) : '定时自动化任务已执行完成。',
+          status: 'success',
+          metadata: {
+            taskId: taskToRun.id,
+            taskName: taskToRun.name,
+            logId
+          }
         })
       }
     } catch (err: any) {
@@ -2016,7 +2130,13 @@ ${skillsContext}`
           const nextTasks = prevTasks.map(t => {
             if (t.id === taskToRun.id) {
               const updatedLogs = (t.logs || []).map(l => l.id === logId ? { ...runningLog } : l)
-              return { ...t, logs: updatedLogs }
+              const isSingleRun = t.repeat === false || taskToRun.repeat === false
+              return {
+                ...t,
+                isActive: isSingleRun ? false : t.isActive,
+                nextRunAt: isSingleRun ? undefined : t.nextRunAt,
+                logs: updatedLogs
+              }
             }
             return t
           })
@@ -2027,26 +2147,18 @@ ${skillsContext}`
 
         window.api.showBubble(`任务 [${taskToRun.name}] 执行失败。`, err.message || err, taskToRun.id, logId)
 
-        // 在 Chat 会话中添加简化的失败提醒
-        const failTimeStr = formatDateTime()
-        const failTimeOnly = failTimeStr.split(' ')[1] || failTimeStr
-        setSessions(prevSessions => {
-          const updated = prevSessions.map(session => {
-            if (session.id === activeSessionId) {
-              return {
-                ...session,
-                messages: [...session.messages, {
-                  id: Date.now() + Math.random(),
-                  sender: 'system',
-                  text: `${failTimeOnly} - 【${taskToRun.name}】任务执行失败`,
-                  time: failTimeStr
-                }]
-              }
-            }
-            return session
-          })
-          if (autoSaveHistory) localStorage.setItem('agentpet_sessions', JSON.stringify(updated))
-          return updated
+        // 记录到通知中心
+        addNotification({
+          type: 'task',
+          title: `【${taskToRun.name}】任务执行失败`,
+          content: err.message || String(err),
+          status: 'error',
+          metadata: {
+            taskId: taskToRun.id,
+            taskName: taskToRun.name,
+            logId,
+            error: err.message || String(err)
+          }
         })
       }
     }
@@ -2089,6 +2201,8 @@ ${skillsContext}`
     handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs, handleAddCronTask, handleEditCronTask,
     selectedTaskForLog, setSelectedTaskForLog,
     selectedCronLogDetails, setSelectedCronLogDetails,
+    pendingOpenTaskId, setPendingOpenTaskId,
+    pendingOpenLogId, setPendingOpenLogId,
     // sessions
     setSessions,
     refreshSessions,
@@ -2164,6 +2278,13 @@ ${skillsContext}`
     // session switch
     isSessionSwitching,
     isSessionsInitialized,
+    // notifications
+    notifications,
+    addNotification,
+    markNotificationRead,
+    markAllNotificationsRead,
+    removeNotification,
+    clearAllNotifications,
     // avatar derived & handlers
     currentAvatarStyle,
     currentAvatarVoice
@@ -2187,6 +2308,7 @@ ${skillsContext}`
     customModelDir, customModelFile, avatarList,
     ttsEnabled, autoSaveHistory, contextRounds,
     testStatus, isSessionSwitching, isSessionsInitialized,
+    notifications,
     // ── 本地 React 状态 ──
     workspacePath, attachedFiles
   ])

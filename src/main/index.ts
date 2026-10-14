@@ -34,7 +34,11 @@ function limitAttachmentTextPreview(content: string): string {
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
 import { mcpManager } from './tools/mcp/mcp-manager'
-import { permissionManager } from './tools/security/permission-manager'
+import {
+  hasValidScheduledTaskAuthorization,
+  permissionManager,
+  type AuthorizableScheduledTask
+} from './tools/security/permission-manager'
 import { clarificationManager } from './tools/interaction/clarification-manager'
 import { credentialManager } from './tools/interaction/credential-manager'
 import { officeRuntimeManager } from './tools/interaction/office-runtime-manager'
@@ -369,6 +373,7 @@ let globalAssistantWindow: BrowserWindow | null = null
 let globalAssistantOpacity = 1
 let globalAssistantExpandedBounds: Electron.Rectangle | null = null
 const globalAssistantShortcut = 'CommandOrControl+Shift+Space'
+const automationEmergencyShortcut = 'CommandOrControl+Alt+S'
 let automationOverlayHideTimer: NodeJS.Timeout | null = null
 let rpaScheduleTimer: NodeJS.Timeout | null = null
 let isCheckingRpaSchedules = false
@@ -405,11 +410,55 @@ function getAutomationOverlayUrl(): string {
     : `${pathToFileURL(join(__dirname, '../renderer/index.html')).toString()}#/automation-overlay`
 }
 
+function triggerEmergencyAutomationStop(): void {
+  console.log('[EmergencyStop] 触发急停，立即中止所有正在运行的自动化与会话任务')
+  for (const controller of activeLlmAbortControllers.values()) {
+    try {
+      controller.abort()
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  activeLlmAbortControllers.clear()
+  permissionManager.clearPendingPermissions()
+  clarificationManager.cancelPending()
+  credentialManager.cancelPending()
+  officeRuntimeManager.cancelPending()
+  nodeRuntimeManager.cancelPending()
+  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
+  if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) {
+    automationOverlayWindow.hide()
+  }
+  unregisterAutomationEmergencyShortcut()
+}
+
+function registerAutomationEmergencyShortcut(): void {
+  try {
+    if (globalShortcut.isRegistered(automationEmergencyShortcut)) return
+    const ok = globalShortcut.register(automationEmergencyShortcut, triggerEmergencyAutomationStop)
+    if (ok) {
+      console.log(`[EmergencyStop] 自动化急停快捷键已就绪: ${automationEmergencyShortcut}`)
+    }
+  } catch (err) {
+    console.warn('[EmergencyStop] 注册急停快捷键失败', err)
+  }
+}
+
+function unregisterAutomationEmergencyShortcut(): void {
+  try {
+    if (globalShortcut.isRegistered(automationEmergencyShortcut)) {
+      globalShortcut.unregister(automationEmergencyShortcut)
+    }
+  } catch (_) {}
+}
+
 function ensureAutomationOverlay(): BrowserWindow {
-  if (automationOverlayWindow && !automationOverlayWindow.isDestroyed())
+  if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) {
+    registerAutomationEmergencyShortcut()
     return automationOverlayWindow
-  const overlayWidth = 318
-  const overlayHeight = 82
+  }
+  const overlayWidth = 368
+  const overlayHeight = 84
   const workArea = screen.getPrimaryDisplay().workArea
   automationOverlayWindow = new BrowserWindow({
     x: workArea.x + workArea.width - overlayWidth - 24,
@@ -428,13 +477,15 @@ function ensureAutomationOverlay(): BrowserWindow {
     webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false }
   })
   automationOverlayWindow.setMenu(null)
-  // The indicator must never intercept the agent's clicks on the controlled app.
-  automationOverlayWindow.setIgnoreMouseEvents(true)
+  // 默认启用穿透并在移动时转发，悬停在终止卡片上时通过 IPC 关闭穿透以接收点击
+  automationOverlayWindow.setIgnoreMouseEvents(true, { forward: true })
   automationOverlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   automationOverlayWindow.loadURL(getAutomationOverlayUrl())
   automationOverlayWindow.on('closed', () => {
     automationOverlayWindow = null
+    unregisterAutomationEmergencyShortcut()
   })
+  registerAutomationEmergencyShortcut()
   return automationOverlayWindow
 }
 
@@ -443,6 +494,7 @@ function publishAutomationProgress(payload: {
   name: string
   args?: any
   result?: string
+  sessionId?: string
 }): void {
   if (!automationToolNames.has(payload.name)) return
   if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
@@ -464,6 +516,7 @@ function dismissAutomationOverlay(): void {
   automationOverlayHideTimer = setTimeout(() => {
     if (automationOverlayWindow && !automationOverlayWindow.isDestroyed())
       automationOverlayWindow.hide()
+    unregisterAutomationEmergencyShortcut()
   }, 1800)
 }
 
@@ -1620,7 +1673,8 @@ app.whenReady().then(() => {
     })
   }
   const workflowCron = new WorkflowCron(
-    (id) => runSavedWorkflow(id),
+    (id, scheduledTaskId) =>
+      runSavedWorkflow(id, `cron:${scheduledTaskId}:workflow:${randomUUID()}`),
     () => {
       for (const window of BrowserWindow.getAllWindows())
         window.webContents.send('api:workflow-cron-updated')
@@ -3248,6 +3302,20 @@ app.whenReady().then(() => {
     return true
   })
 
+  ipcMain.on('api:set-automation-overlay-interactive', (_, interactive: boolean) => {
+    if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) {
+      if (interactive) {
+        automationOverlayWindow.setIgnoreMouseEvents(false)
+      } else {
+        automationOverlayWindow.setIgnoreMouseEvents(true, { forward: true })
+      }
+    }
+  })
+
+  ipcMain.on('api:dismiss-automation-overlay', () => {
+    triggerEmergencyAutomationStop()
+  })
+
   ipcMain.handle('api:show-notification', async (_, title: string, body: string) => {
     try {
       const notification = new Notification({
@@ -3340,6 +3408,11 @@ app.whenReady().then(() => {
       if (fs.existsSync(cronPath)) {
         const data = await fs.promises.readFile(cronPath, 'utf-8')
         tasks = JSON.parse(data)
+        tasks = tasks.map((task) =>
+          hasValidScheduledTaskAuthorization(task)
+            ? task
+            : { ...task, authorization: undefined, isActive: false }
+        )
       }
 
       // 混入系统内置只读定时任务
@@ -3384,6 +3457,10 @@ app.whenReady().then(() => {
       console.error('保存 cron_tasks.json 失败', e)
       return false
     }
+  })
+
+  ipcMain.handle('api:authorize-cron-task', async (event, task: AuthorizableScheduledTask) => {
+    return permissionManager.requestScheduledTaskAuthorization(task, event.sender)
   })
 
   // 通用选择文件夹
@@ -6525,7 +6602,7 @@ app.whenReady().then(() => {
             console.warn('[SessionEvents] Tool checkpoint failed', traceError)
           }
           if (!config.suppressAutomationOverlay) {
-            publishAutomationProgress({ type: 'tool_call', name: step.name, args: step.args })
+            publishAutomationProgress({ type: 'tool_call', name: step.name, args: step.args, sessionId: config.sessionId || sessionId })
           }
           if (event) {
             event.sender.send('api:llm-tool-event', {
@@ -6554,7 +6631,7 @@ app.whenReady().then(() => {
             { correlationId: step.callId }
           )
           if (!config.suppressAutomationOverlay) {
-            publishAutomationProgress({ type: 'tool_result', name: step.name, result: step.result })
+            publishAutomationProgress({ type: 'tool_result', name: step.name, result: step.result, sessionId: config.sessionId || sessionId })
           }
           if (event) {
             event.sender.send('api:llm-tool-event', {

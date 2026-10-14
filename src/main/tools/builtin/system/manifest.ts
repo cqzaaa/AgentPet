@@ -256,7 +256,7 @@ The available skill catalog contains metadata only. Call request_skill only with
     },
     {
       name: 'manage_cron_task',
-      description: '创建或删除后台自动触发的定时任务。',
+      description: '创建或删除后台自动触发的定时任务。支持循环周期任务（按时间间隔重复）与单次定时任务（指定具体时刻或延迟时间，触发一次后自动停用）。',
       parameters: {
         type: 'object',
         properties: {
@@ -269,13 +269,25 @@ The available skill catalog contains metadata only. Call request_skill only with
             type: 'string',
             description: '定时任务名称（创建时必填）'
           },
+          repeat: {
+            type: 'boolean',
+            description: '是否重复循环执行。默认 true（周期任务）；若为指定时间点仅执行一次的任务，请设为 false（单次任务）。'
+          },
+          execute_at: {
+            type: 'string',
+            description: '单次任务的具体执行时刻（如 "16:30"、"16:30:00" 或 "2026-10-14 16:30:00"）。仅在 repeat=false 时生效，与 delay_seconds 二选一。'
+          },
+          delay_seconds: {
+            type: 'number',
+            description: '单次任务的延迟秒数（如 10 分钟后填 600，30 秒后填 30）。仅在 repeat=false 时生效，与 execute_at 二选一。'
+          },
           interval: {
             type: 'number',
-            description: '执行时间周期（秒，最少2秒）'
+            description: '循环任务的执行周期/间隔时间（秒，最少 5 秒）。仅在 repeat=true 周期任务时必填；单次任务无需配置此项。'
           },
           action: {
             type: 'string',
-            description: '任务触发时需要执行的操作/指令'
+            description: '任务触发时需要执行的操作指令/提示词（创建提示词任务时必填）'
           },
           taskId: {
             type: 'string',

@@ -8,6 +8,7 @@ type PermissionRequest = {
   execCwd?: string
   warning?: string
   allowTurnScope?: boolean
+  permissionKind?: 'scheduled-task'
 }
 type Props = {
   request: PermissionRequest
@@ -32,6 +33,7 @@ export function PermissionApprovalCard({ request, onRespond }: Props): React.JSX
   const warning = request.warning || '这项操作需要你确认后才会继续执行。'
   const isDangerous = /删除|高危|rm\b|del\b|remove-item|delete/i.test(`${command}\n${warning}`)
   const title = useMemo(() => getApprovalTitle(command, warning), [command, warning])
+  const isScheduledTask = request.permissionKind === 'scheduled-task'
 
   const submitRejection = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
@@ -49,7 +51,7 @@ export function PermissionApprovalCard({ request, onRespond }: Props): React.JSX
           <ShieldAlert size={19} strokeWidth={1.8} />
         </span>
         <div className="consent-heading-copy">
-          <h2 id="consent-card-title">{title}</h2>
+          <h2 id="consent-card-title">{isScheduledTask ? '授权定时任务' : title}</h2>
           <p>{warning}</p>
         </div>
       </header>
@@ -89,7 +91,9 @@ export function PermissionApprovalCard({ request, onRespond }: Props): React.JSX
       <p className="consent-risk-note">
         <TriangleAlert size={15} strokeWidth={1.9} aria-hidden="true" />
         <span>
-          {isDangerous
+          {isScheduledTask
+            ? '授权仅绑定当前执行内容和频率；任务被修改后必须重新确认。'
+            : isDangerous
             ? '请核对目标和影响范围。高风险操作每次执行都需要单独确认。'
             : '本次授权只适用于上方操作，后续变更仍会再次询问。'}
         </span>
@@ -143,7 +147,7 @@ export function PermissionApprovalCard({ request, onRespond }: Props): React.JSX
             </button>
           )}
           <button type="button" className="consent-button primary" onClick={() => onRespond(true)}>
-            本次允许
+            {isScheduledTask ? '确认并授权' : '本次允许'}
           </button>
         </footer>
       )}

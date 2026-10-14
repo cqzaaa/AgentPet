@@ -2,7 +2,7 @@ import React from 'react'
 import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
 import type { WorkflowDefinition } from '../../../preload/workflow-types'
-import { ChatMessageItem, MarkdownText } from '../components/ChatMessageItem'
+import { MarkdownText } from '../components/ChatMessageItem'
 import { requestConfirmation } from '../components/confirmService'
 import {
   Brain,
@@ -58,7 +58,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     cronTasks,
     handleToggleCronTask, handleDeleteCronTask, handleClearCronLogs, handleAddCronTask, handleEditCronTask,
     selectedTaskForLog, setSelectedTaskForLog,
-    selectedCronLogDetails, setSelectedCronLogDetails,
+    setSelectedCronLogDetails,
     // mcp
     mcpConfig, saveMcpConfig, showToast
   } = store
@@ -164,8 +164,19 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [cronAction, setCronAction] = React.useState('')
   const [cronKind, setCronKind] = React.useState<'prompt' | 'workflow'>('prompt')
   const [cronWorkflowId, setCronWorkflowId] = React.useState('')
+  const [cronRepeat, setCronRepeat] = React.useState<boolean>(true)
+  const [cronExecuteAt, setCronExecuteAt] = React.useState<string>('')
   const [workflowChoices, setWorkflowChoices] = React.useState<WorkflowDefinition[]>([])
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null)
+
+  const formatDatetimeLocal = (timestamp: number) => {
+    const d = new Date(timestamp)
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const getTimeStringOffset = (minutes: number) => {
+    return formatDatetimeLocal(Date.now() + minutes * 60 * 1000)
+  }
 
   React.useEffect(() => {
     if (agentSubTab !== 'cron') return
@@ -460,9 +471,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   setCronHours(0)
                   setCronMinutes(1)
                   setCronSeconds(0)
+                  setCronExecuteAt(getTimeStringOffset(5))
                   setCronAction('')
                   setCronKind('prompt')
                   setCronWorkflowId('')
+                  setCronRepeat(true)
                   setShowCronModal(true)
                 }}
                 style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -473,32 +486,70 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
             </div>
 
             <div className="skills-table-wrapper" style={{ overflow: 'visible' }}>
-              <table className="cron-table" style={{ overflow: 'visible' }}>
+              <table className="cron-table" style={{ overflow: 'visible', width: '100%', tableLayout: 'auto' }}>
                 <thead>
                   <tr>
-                    <th>任务名称</th>
-                    <th>类型</th>
-                    <th>执行间隔</th>
-                    <th>最近触发时间</th>
-                    <th>触发次数</th>
-                    <th>状态</th>
-                    <th style={{ textAlign: 'right' }}>操作</th>
+                    <th style={{ minWidth: '160px' }}>任务名称</th>
+                    <th style={{ width: '135px', whiteSpace: 'nowrap' }}>类型</th>
+                    <th style={{ minWidth: '150px', whiteSpace: 'nowrap' }}>执行频率 / 计划时间</th>
+                    <th style={{ width: '150px', whiteSpace: 'nowrap' }}>最近触发时间</th>
+                    <th style={{ width: '85px', whiteSpace: 'nowrap', textAlign: 'center' }}>触发次数</th>
+                    <th style={{ width: '85px', whiteSpace: 'nowrap', textAlign: 'center' }}>状态</th>
+                    <th style={{ width: '140px', whiteSpace: 'nowrap', textAlign: 'right' }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cronTasks.map(task => (
                     <tr key={task.id}>
                       <td style={{ fontWeight: 600 }}>{task.name}</td>
-                      <td><span className="cron-badge-trigger">{task.kind === 'workflow' ? '工作流' : '提示词'}</span></td>
-                      <td>{formatInterval(task.interval)}</td>
-                      <td>{task.lastTriggered}</td>
-                      <td><span className="cron-badge-trigger">{task.triggerCount} 次</span></td>
-                      <td>
-                        <span style={{ color: task.isActive ? '#10b981' : '#f87171', fontWeight: 'bold' }}>
-                          {task.isActive ? '运行中' : '已暂停'}
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap' }}>
+                          <span className="cron-badge-trigger">
+                            {task.kind === 'workflow' ? '工作流' : '提示词'}
+                          </span>
+                          <span
+                            className="cron-badge-trigger"
+                            style={{
+                              background: task.repeat === false ? 'rgba(59, 130, 246, 0.15)' : undefined,
+                              color: task.repeat === false ? '#3b82f6' : undefined
+                            }}
+                          >
+                            {task.repeat === false ? '单次' : '循环'}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {task.repeat === false ? (
+                          task.isActive && (task.executeAt || task.nextRunAt) ? (
+                            <span style={{ fontSize: '12px', color: '#3b82f6', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                              计划: {new Date(task.executeAt || task.nextRunAt!).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                              单次执行（{task.triggerCount > 0 ? '已完成' : '已停用'}）
+                            </span>
+                          )
+                        ) : (
+                          <span style={{ whiteSpace: 'nowrap' }}>每 {formatInterval(task.interval || 60)}</span>
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{task.lastTriggered}</td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                        <span className="cron-badge-trigger">{task.triggerCount} 次</span>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                        <span
+                          style={{
+                            color: task.isActive && task.authorization ? '#10b981' : '#f87171',
+                            fontWeight: 600,
+                            display: 'inline-block',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {task.isActive && task.authorization ? '运行中' : task.authorization ? '已暂停' : '待授权'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right', position: 'relative' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap', position: 'relative' }}>
                         <button
                           type="button"
                           className="btn-secondary"
@@ -553,12 +604,16 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               onClick={() => {
                                 setEditingCron(task)
                                 setCronName(task.name)
-                                setCronHours(Math.floor(task.interval / 3600))
-                                setCronMinutes(Math.floor((task.interval % 3600) / 60))
-                                setCronSeconds(task.interval % 60)
+                                const totalSec = task.interval || 0
+                                setCronHours(Math.floor(totalSec / 3600))
+                                setCronMinutes(Math.floor((totalSec % 3600) / 60))
+                                setCronSeconds(totalSec % 60)
+                                const dueTime = task.executeAt || task.nextRunAt || (Date.now() + 5 * 60 * 1000)
+                                setCronExecuteAt(formatDatetimeLocal(dueTime))
                                 setCronAction(task.action || '')
                                 setCronKind(task.kind || 'prompt')
                                 setCronWorkflowId(task.workflowId || '')
+                                setCronRepeat(task.repeat !== false)
                                 setShowCronModal(true)
                                 setOpenDropdownId(null)
                               }}
@@ -755,79 +810,6 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               </div>
             )}
 
-            {/* 二级 Modal: 定时任务执行详情 Chat 页面 */}
-            {selectedCronLogDetails && (
-              <div className="cron-modal-overlay" style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                backdropFilter: 'blur(8px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 1001
-              }}>
-                <div className="cron-modal-content" style={{
-                  width: '650px',
-                  height: '80%',
-                  maxHeight: '650px',
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-card)',
-                  borderRadius: '12px',
-                  padding: '24px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-                }}>
-                  {/* Header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-card)', paddingBottom: '12px' }}>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                      <ClipboardList size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                      任务执行详情 ({selectedCronLogDetails.time})
-                    </h3>
-                    <button
-                      onClick={() => setSelectedCronLogDetails(null)}
-                      style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '18px' }}
-                    >
-                      <X size={18} strokeWidth={2} aria-hidden="true" />
-                    </button>
-                  </div>
-
-                  {/* Chat Content Body */}
-                  <div className="chat-messages-box" style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', paddingRight: '4px', background: 'var(--bg-content)', borderRadius: '8px', padding: '16px' }}>
-                    {selectedCronLogDetails.messages && selectedCronLogDetails.messages.map((msg: any) => (
-                      <ChatMessageItem
-                        key={msg.id}
-                        msg={msg}
-                        currentAvatarName={currentAvatarName}
-                        onPreviewFile={(f) => {
-                          store.handlePreviewFile(f)
-                          store.setShowFilePanel(true)
-                          store.setActiveTab('chat')
-                          setSelectedCronLogDetails(null)
-                          setSelectedTaskForLog(null)
-                        }}
-                      />
-                    ))}
-                  </div>
-
-                  {/* Footer */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-card)', paddingTop: '16px' }}>
-                    <button
-                      className="btn-primary"
-                      style={{ padding: '6px 20px', borderRadius: '6px', fontSize: '12.5px' }}
-                      onClick={() => setSelectedCronLogDetails(null)}
-                    >
-                      确定
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* 新增/编辑定时任务 Modal */}
             {showCronModal && (
               <div className="cron-modal-overlay" style={{
@@ -858,23 +840,62 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                         style={editingCron?.name === '系统画像提纯与经验沉淀' ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                       />
                     </div>
-                    <div style={{ marginBottom: '12px' }}>
-                      <label className="mcp-form-label">执行频率</label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
-                          <input type="number" min="0" className="mcp-input-fancy" placeholder="小时" value={cronHours || ''} onChange={e => setCronHours(Number(e.target.value) || 0)} />
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>时</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
-                          <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="分钟" value={cronMinutes || ''} onChange={e => setCronMinutes(Number(e.target.value) || 0)} />
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>分</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
-                          <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="秒" value={cronSeconds || ''} onChange={e => setCronSeconds(Number(e.target.value) || 0)} />
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>秒</span>
+                    {editingCron?.name !== '系统画像提纯与经验沉淀' && (
+                      <div style={{ marginBottom: '12px' }}>
+                        <label className="mcp-form-label" htmlFor="cron-task-repeat">执行模式</label>
+                        <select
+                          id="cron-task-repeat"
+                          className="mcp-input-fancy"
+                          value={cronRepeat ? 'repeat' : 'once'}
+                          onChange={event => {
+                            const isRepeat = event.target.value === 'repeat'
+                            setCronRepeat(isRepeat)
+                            if (!isRepeat && !cronExecuteAt) {
+                              setCronExecuteAt(getTimeStringOffset(5))
+                            }
+                          }}
+                        >
+                          <option value="repeat">循环执行（按间隔周期重复）</option>
+                          <option value="once">单次执行（到点触发一次后自动停用，无需配置间隔）</option>
+                        </select>
+                      </div>
+                    )}
+                    {cronRepeat ? (
+                      <div style={{ marginBottom: '12px' }}>
+                        <label className="mcp-form-label">执行频率（每隔多久执行一次）</label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                            <input type="number" min="0" className="mcp-input-fancy" placeholder="小时" value={cronHours || ''} onChange={e => setCronHours(Number(e.target.value) || 0)} />
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>时</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                            <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="分钟" value={cronMinutes || ''} onChange={e => setCronMinutes(Number(e.target.value) || 0)} />
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>分</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1 }}>
+                            <input type="number" min="0" max="59" className="mcp-input-fancy" placeholder="秒" value={cronSeconds || ''} onChange={e => setCronSeconds(Number(e.target.value) || 0)} />
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>秒</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div style={{ marginBottom: '12px' }}>
+                        <label className="mcp-form-label">执行时间（单次定时，到点自动触发并停止）</label>
+                        <input
+                          type="datetime-local"
+                          className="mcp-input-fancy"
+                          value={cronExecuteAt}
+                          onChange={e => setCronExecuteAt(e.target.value)}
+                        />
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                          <button type="button" className="btn-secondary" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => setCronExecuteAt(getTimeStringOffset(1))}>1分钟后</button>
+                          <button type="button" className="btn-secondary" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => setCronExecuteAt(getTimeStringOffset(5))}>5分钟后</button>
+                          <button type="button" className="btn-secondary" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => setCronExecuteAt(getTimeStringOffset(10))}>10分钟后</button>
+                          <button type="button" className="btn-secondary" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => setCronExecuteAt(getTimeStringOffset(30))}>半小时后</button>
+                          <button type="button" className="btn-secondary" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => setCronExecuteAt(getTimeStringOffset(60))}>1小时后</button>
+                        </div>
+                      </div>
+                    )}
                     {editingCron?.name !== '系统画像提纯与经验沉淀' && <div style={{ marginBottom: '12px' }}>
                       <label className="mcp-form-label" htmlFor="cron-task-kind">任务类型</label>
                       <select id="cron-task-kind" className="mcp-input-fancy" value={cronKind} onChange={event => setCronKind(event.target.value as 'prompt' | 'workflow')}>
@@ -926,31 +947,58 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           showToast('请选择要执行的工作流', 'error')
                           return
                         }
-                        const totalInterval = cronHours * 3600 + cronMinutes * 60 + cronSeconds
-                        if (totalInterval < 5) {
-                          showToast('执行频率不能少于 5 秒', 'error')
-                          return
-                        }
 
-                        if (editingCron) {
-                          await handleEditCronTask(editingCron.id, {
+                        let saved = false
+                        if (cronRepeat) {
+                          const totalInterval = cronHours * 3600 + cronMinutes * 60 + cronSeconds
+                          if (totalInterval < 5) {
+                            showToast('执行频率不能少于 5 秒', 'error')
+                            return
+                          }
+                          const taskPayload = {
                             name: cronName.trim(),
                             interval: totalInterval,
-                            kind: cronKind,
-                            workflowId: cronKind === 'workflow' ? cronWorkflowId : undefined,
-                            action: cronKind === 'prompt' ? cronAction.trim() : undefined
-                          })
-                        } else {
-                          await handleAddCronTask({
-                            name: cronName.trim(),
-                            interval: totalInterval,
+                            repeat: true,
+                            executeAt: undefined,
+                            nextRunAt: Date.now() + totalInterval * 1000,
                             kind: cronKind,
                             workflowId: cronKind === 'workflow' ? cronWorkflowId : undefined,
                             action: cronKind === 'prompt' ? cronAction.trim() : undefined,
                             isActive: true
-                          })
+                          }
+                          if (editingCron) {
+                            saved = await handleEditCronTask(editingCron.id, taskPayload)
+                          } else {
+                            saved = await handleAddCronTask(taskPayload)
+                          }
+                        } else {
+                          if (!cronExecuteAt) {
+                            showToast('请选择单次执行时间', 'error')
+                            return
+                          }
+                          const executeAtMs = new Date(cronExecuteAt).getTime()
+                          if (isNaN(executeAtMs)) {
+                            showToast('请填写有效的执行时间', 'error')
+                            return
+                          }
+                          const taskPayload = {
+                            name: cronName.trim(),
+                            repeat: false,
+                            interval: undefined,
+                            executeAt: executeAtMs,
+                            nextRunAt: executeAtMs,
+                            kind: cronKind,
+                            workflowId: cronKind === 'workflow' ? cronWorkflowId : undefined,
+                            action: cronKind === 'prompt' ? cronAction.trim() : undefined,
+                            isActive: true
+                          }
+                          if (editingCron) {
+                            saved = await handleEditCronTask(editingCron.id, taskPayload)
+                          } else {
+                            saved = await handleAddCronTask(taskPayload)
+                          }
                         }
-                        setShowCronModal(false)
+                        if (saved) setShowCronModal(false)
                       }}
                       style={{ fontSize: '12.5px', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}
                     >

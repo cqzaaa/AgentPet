@@ -2487,7 +2487,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
           {/* 人机协作安全核对面板：锚定在输入框上方 */}
           {activePermissionRequest &&
-            activePermissionRequest.interactionOrigin !== 'orchestration' && (
+            activePermissionRequest.interactionOrigin !== 'orchestration' &&
+            activePermissionRequest.permissionKind !== 'scheduled-task' && (
               <PermissionApprovalCard
                 key={activePermissionRequest.requestId}
                 request={activePermissionRequest}

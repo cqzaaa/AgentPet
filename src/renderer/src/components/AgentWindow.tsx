@@ -43,6 +43,9 @@ import { normalizeSearchCitations } from '../utils/helpers'
 import { AgentPetMark } from './AgentPetMark'
 import { Tooltip } from './Tooltip'
 import { ConfirmDialog } from './ConfirmDialog'
+import { PermissionApprovalCard } from './PermissionApprovalCard'
+import { NotificationCenter } from './NotificationCenter'
+import { CronLogDetailModal } from './CronLogDetailModal'
 
 const ChatPage = lazy(() => import('../pages/ChatPage').then(module => ({ default: module.ChatPage })))
 const ControlPage = lazy(() => import('../pages/ControlPage').then(module => ({ default: module.ControlPage })))
@@ -219,6 +222,18 @@ export function AgentWindow(): React.JSX.Element {
     () => new Set([...generatedFiles, ...openTabs].map((file) => file.path)).size,
     [generatedFiles, openTabs]
   )
+
+  useEffect(() => {
+    if (activePermissionRequest?.permissionKind !== 'scheduled-task') return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('.scheduled-permission-dialog button')?.focus()
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      previousFocus?.focus()
+    }
+  }, [activePermissionRequest?.permissionKind, activePermissionRequest?.requestId])
 
   // 派生状态从 Zustand 中获取
   const activeSession = sessionsById.get(activeSessionId) || sessions[0] || { messages: [] }
@@ -779,19 +794,32 @@ export function AgentWindow(): React.JSX.Element {
                 </div>
               )}
             </div>
-            <button
-              className="brand-collapse-btn"
-              onClick={() => {
-                autoCollapsedByMediaRef.current = false
-                setIsCollapsed(!isCollapsed)
-              }}
-            >
-              {isCollapsed ? (
+            {!isCollapsed ? (
+              <div className="brand-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <NotificationCenter />
+                <button
+                  className="brand-collapse-btn"
+                  onClick={() => {
+                    autoCollapsedByMediaRef.current = false
+                    setIsCollapsed(!isCollapsed)
+                  }}
+                  title="收起边栏"
+                >
+                  <PanelLeftClose size={16} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </div>
+            ) : (
+              <button
+                className="brand-collapse-btn"
+                onClick={() => {
+                  autoCollapsedByMediaRef.current = false
+                  setIsCollapsed(!isCollapsed)
+                }}
+                title="展开边栏"
+              >
                 <PanelLeftOpen size={16} strokeWidth={2} aria-hidden="true" />
-              ) : (
-                <PanelLeftClose size={16} strokeWidth={2} aria-hidden="true" />
-              )}
-            </button>
+              </button>
+            )}
           </div>
 
           {/* + 新会话 */}
@@ -1649,6 +1677,42 @@ export function AgentWindow(): React.JSX.Element {
       )}
 
       {/* Global Toast */}
+      {activePermissionRequest?.permissionKind === 'scheduled-task' &&
+        createPortal(
+          <div
+            className="scheduled-permission-overlay"
+            role="presentation"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                store.handleRespondPermission(false)
+                return
+              }
+              if (event.key !== 'Tab') return
+              const focusable = Array.from(
+                event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled)')
+              )
+              if (focusable.length === 0) return
+              const first = focusable[0]
+              const last = focusable[focusable.length - 1]
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault()
+                last.focus()
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault()
+                first.focus()
+              }
+            }}
+          >
+            <div className="scheduled-permission-dialog" role="alertdialog" aria-modal="true" aria-label="授权定时任务">
+              <PermissionApprovalCard
+                request={activePermissionRequest}
+                onRespond={store.handleRespondPermission}
+              />
+            </div>
+          </div>,
+          document.body
+        )}
+
       {toast && (
         <div
           className={`global-toast-notification ${toast.type} ${activePermissionRequest ? 'has-approval' : ''}`}
@@ -1682,6 +1746,9 @@ export function AgentWindow(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      {/* 全局任务执行详情弹窗 */}
+      <CronLogDetailModal />
 
       {/* 标签页右键菜单 */}
       {tabContextMenu &&

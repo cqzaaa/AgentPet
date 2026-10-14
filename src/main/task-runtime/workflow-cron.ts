@@ -3,6 +3,10 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { getActiveStorageDir } from '../tools/utils/paths'
 import { taskRunner } from './task-runner'
+import {
+  hasValidScheduledTaskAuthorization,
+  type ScheduledTaskAuthorization
+} from '../tools/security/permission-manager'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled'])
 
@@ -17,10 +21,12 @@ interface WorkflowCronLog {
 interface ScheduledTask {
   id: string
   name: string
-  interval: number
+  interval?: number
+  executeAt?: number
   lastTriggered: string
   triggerCount: number
   isActive: boolean
+  repeat?: boolean
   isSystem?: boolean
   kind?: 'prompt' | 'workflow'
   workflowId?: string
@@ -28,6 +34,7 @@ interface ScheduledTask {
   createdAt?: number
   nextRunAt?: number
   logs?: WorkflowCronLog[]
+  authorization?: ScheduledTaskAuthorization
 }
 
 function parseTasks(value: string): ScheduledTask[] {
@@ -70,7 +77,7 @@ export class WorkflowCron {
   private timer?: ReturnType<typeof setInterval>
   private readonly active = new Set<string>()
   constructor(
-    private readonly startRun: (id: string) => Promise<{ taskRunId: string }>,
+    private readonly startRun: (id: string, scheduledTaskId: string) => Promise<{ taskRunId: string }>,
     private readonly changed: () => void
   ) {}
 
@@ -110,19 +117,23 @@ export class WorkflowCron {
       tasks
         .filter((task) => !task.isSystem)
         .map((task) => {
-          if (task.kind !== 'workflow') return task
-          if (!task.workflowId || !Number.isFinite(task.interval) || task.interval < 5)
+          const authorizedTask = hasValidScheduledTaskAuthorization(task)
+            ? task
+            : { ...task, authorization: undefined, isActive: false }
+          if (authorizedTask.kind !== 'workflow') return authorizedTask
+          const interval = authorizedTask.interval
+          if (!authorizedTask.workflowId || typeof interval !== 'number' || !Number.isFinite(interval) || interval < 5)
             throw new Error('请选择工作流并设置至少 5 秒的间隔')
           const previous = current.find((item) => item.id === task.id)
           return {
-            ...task,
+            ...authorizedTask,
             createdAt: previous?.createdAt || Date.now(),
             nextRunAt:
               previous?.isActive &&
-              previous.interval === task.interval &&
-              previous.workflowId === task.workflowId
+              previous.interval === authorizedTask.interval &&
+              previous.workflowId === authorizedTask.workflowId
                 ? previous.nextRunAt
-                : Date.now() + task.interval * 1000,
+                : Date.now() + interval * 1000,
             ...(previous?.kind === 'workflow'
               ? {
                   logs: previous.logs,
@@ -156,6 +167,7 @@ export class WorkflowCron {
         if (
           task.kind !== 'workflow' ||
           !task.isActive ||
+          !hasValidScheduledTaskAuthorization(task) ||
           this.active.has(task.id) ||
           typeof dueAt !== 'number' ||
           !Number.isFinite(dueAt) ||
@@ -180,13 +192,15 @@ export class WorkflowCron {
         this.active.add(task.id)
         const logId = randomUUID()
         let claimed = false
+        const isSingleRun = task.repeat === false
         await this.update((current) =>
           current.map((item) => {
             if (item.id !== task.id || !item.isActive || item.nextRunAt !== dueAt) return item
             claimed = true
             return {
               ...item,
-              nextRunAt: now + item.interval * 1000,
+              isActive: isSingleRun ? false : item.isActive,
+              nextRunAt: isSingleRun ? undefined : now + (item.interval || 60) * 1000,
               lastTriggered: new Date(now).toLocaleString('zh-CN'),
               triggerCount: (item.triggerCount || 0) + 1,
               logs: [
@@ -236,7 +250,7 @@ export class WorkflowCron {
   private async execute(task: ScheduledTask, logId: string): Promise<void> {
     try {
       if (!task.workflowId) throw new Error('定时任务未选择工作流')
-      const { taskRunId } = await this.startRun(task.workflowId)
+      const { taskRunId } = await this.startRun(task.workflowId, task.id)
       await this.patchLog(task.id, logId, { taskRunId, message: '工作流正在执行' })
       const run = await waitForRun(taskRunId)
       await this.patchLog(task.id, logId, {

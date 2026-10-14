@@ -139,6 +139,8 @@ declare global {
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
       onToolEvent: (callback: (data: any) => void) => () => void
       onAutomationProgress: (callback: (data: any) => void) => () => void
+      setAutomationOverlayInteractive: (interactive: boolean) => void
+      dismissAutomationOverlay: () => void
       onLlmTextDelta: (callback: (data: ChatStreamUpdate) => void) => () => void
       onTokenUsage: (callback: (data: any) => void) => () => void
       listAgents: () => Promise<any[]>
@@ -216,6 +218,7 @@ declare global {
       abortLlm: (sessionId?: string) => Promise<boolean>
       getCronTasks: () => Promise<any[] | null>
       saveCronTasks: (tasks: any[]) => Promise<boolean>
+      authorizeCronTask: (task: unknown) => Promise<{ scope: 'scheduled-task'; fingerprint: string; approvedAt: number } | null>
       onCronUpdated: (callback: () => void) => () => void
       showNotification: (title: string, body: string) => Promise<boolean>
       onShowBubble: (callback: (text: string, details?: string, taskId?: string, logId?: string) => void) => () => void

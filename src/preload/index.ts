@@ -250,6 +250,12 @@ const api = {
     ipcRenderer.on('api:automation-progress', subscription)
     return () => ipcRenderer.removeListener('api:automation-progress', subscription)
   },
+  setAutomationOverlayInteractive: (interactive: boolean): void => {
+    ipcRenderer.send('api:set-automation-overlay-interactive', interactive)
+  },
+  dismissAutomationOverlay: (): void => {
+    ipcRenderer.send('api:dismiss-automation-overlay')
+  },
   onLlmTextDelta: (callback: (data: ChatStreamUpdate) => void): (() => void) => {
     const subscription = (_event: any, data: ChatStreamUpdate) => callback(data)
     ipcRenderer.on('api:llm-text-delta', subscription)
@@ -425,6 +431,8 @@ const api = {
     ipcRenderer.invoke('api:get-cron-tasks'),
   saveCronTasks: (tasks: any[]): Promise<boolean> =>
     ipcRenderer.invoke('api:save-cron-tasks', tasks),
+  authorizeCronTask: (task: unknown): Promise<{ scope: 'scheduled-task'; fingerprint: string; approvedAt: number } | null> =>
+    ipcRenderer.invoke('api:authorize-cron-task', task),
   onCronUpdated: (callback: () => void): (() => void) => {
     const subscription = () => callback()
     ipcRenderer.on('api:cron-updated', subscription)

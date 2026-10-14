@@ -1,0 +1,554 @@
+/* ── Notification Center Taste-Skill Design ───────────────────── */
+
+.notification-center-trigger {
+  position: relative;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  padding: 0;
+  outline: none;
+}
+
+.notification-center-trigger:hover,
+.notification-center-trigger.active {
+  background: var(--bg-menu-hover);
+  color: var(--text-primary);
+  border-color: var(--border-color-hover, rgba(140, 160, 200, 0.3));
+  transform: translateY(-1px);
+}
+
+.notification-center-trigger:active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* 浅色主题下触发按钮 */
+.agent-window-container.light .notification-center-trigger {
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #64748b;
+}
+
+.agent-window-container.light .notification-center-trigger:hover,
+.agent-window-container.light .notification-center-trigger.active {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f172a;
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+/* 徽标微动效与样式 */
+.notification-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--bg-primary, #ffffff), 0 2px 6px rgba(37, 99, 235, 0.45);
+  pointer-events: none;
+  animation: notif-badge-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.notification-badge-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 1.5px var(--bg-primary, #ffffff), 0 0 8px rgba(59, 130, 246, 0.8);
+  pointer-events: none;
+}
+
+.notification-badge-dot::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(59, 130, 246, 0.6);
+  animation: notif-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes notif-badge-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes notif-pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  60% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* ── 遮罩与弹出面板 ──────────────────────────────────────────────── */
+
+.notification-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+  background: transparent;
+}
+
+.notification-popover-panel {
+  position: fixed;
+  z-index: 99999;
+  width: 350px;
+  max-width: calc(100vw - 24px);
+  max-height: 500px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(26, 30, 42, 0.92);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.45), 0 0 1px 1px rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  animation: notif-panel-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: top left;
+}
+
+@keyframes notif-panel-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── 浅色主题专属优雅配色（Light Theme） ───────────────────────── */
+
+.notification-popover-panel.light,
+.agent-window-container.light .notification-popover-panel {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.notification-popover-panel.light .notification-panel-header,
+.agent-window-container.light .notification-panel-header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.notification-popover-panel.light .notification-header-title,
+.agent-window-container.light .notification-header-title {
+  color: #0f172a;
+}
+
+.notification-popover-panel.light .notification-action-btn,
+.agent-window-container.light .notification-action-btn {
+  color: #64748b;
+}
+
+.notification-popover-panel.light .notification-action-btn:hover,
+.agent-window-container.light .notification-action-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f172a;
+}
+
+.notification-popover-panel.light .notification-filter-tabs,
+.agent-window-container.light .notification-filter-tabs {
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.notification-popover-panel.light .notification-tab-btn,
+.agent-window-container.light .notification-tab-btn {
+  color: #64748b;
+}
+
+.notification-popover-panel.light .notification-tab-btn:hover,
+.agent-window-container.light .notification-tab-btn:hover {
+  color: #0f172a;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.notification-popover-panel.light .notification-tab-btn.active,
+.agent-window-container.light .notification-tab-btn.active {
+  background: rgba(0, 0, 0, 0.07);
+  color: #0f172a;
+}
+
+.notification-popover-panel.light .notification-item,
+.agent-window-container.light .notification-item {
+  background: transparent;
+}
+
+.notification-popover-panel.light .notification-item:hover,
+.agent-window-container.light .notification-item:hover {
+  background: rgba(0, 0, 0, 0.035);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+.notification-popover-panel.light .notification-item.unread,
+.agent-window-container.light .notification-item.unread {
+  background: rgba(59, 130, 246, 0.04);
+  border-color: rgba(59, 130, 246, 0.12);
+}
+
+.notification-popover-panel.light .notification-item-title,
+.agent-window-container.light .notification-item-title {
+  color: #1e293b;
+}
+
+.notification-popover-panel.light .notification-item-time,
+.agent-window-container.light .notification-item-time {
+  color: #94a3b8;
+}
+
+.notification-popover-panel.light .notification-item-desc,
+.agent-window-container.light .notification-item-desc {
+  color: #64748b;
+}
+
+.notification-popover-panel.light .notification-item.expanded .notification-item-desc,
+.agent-window-container.light .notification-item.expanded .notification-item-desc {
+  color: #1e293b;
+}
+
+.notification-popover-panel.light .notification-item-tag,
+.agent-window-container.light .notification-item-tag {
+  background: rgba(0, 0, 0, 0.05);
+  color: #64748b;
+}
+
+.notification-popover-panel.light .notification-empty-icon-wrap,
+.agent-window-container.light .notification-empty-icon-wrap {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: #94a3b8;
+}
+
+.notification-popover-panel.light .notification-empty-title,
+.agent-window-container.light .notification-empty-title {
+  color: #64748b;
+}
+
+/* 顶部 Header */
+.notification-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 8px;
+}
+
+.notification-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-header-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+  letter-spacing: -0.2px;
+}
+
+.notification-header-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.notification-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notification-action-btn {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.notification-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #ffffff);
+}
+
+.notification-action-btn.danger:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* 分类 Tabs */
+.notification-filter-tabs {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px 6px 12px;
+  gap: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.notification-tab-btn {
+  background: transparent;
+  border: none;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.notification-tab-btn:hover {
+  color: var(--text-primary, #ffffff);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.notification-tab-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary, #ffffff);
+  font-weight: 600;
+}
+
+/* 列表区 */
+.notification-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 380px;
+}
+
+.notification-list::-webkit-scrollbar {
+  width: 4px;
+}
+.notification-list::-webkit-scrollbar-thumb {
+  background: rgba(140, 160, 200, 0.2);
+  border-radius: 4px;
+}
+.notification-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 160, 200, 0.4);
+}
+
+/* 单条通知卡片 */
+.notification-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.notification-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.06);
+  transform: translateX(1px);
+}
+
+.notification-item.unread {
+  background: rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+.notification-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 10px;
+  bottom: 10px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+/* 图标容器 */
+.notification-item-icon-box {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.notification-item-icon-box.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.notification-item-icon-box.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.notification-item-icon-box.info,
+.notification-item-icon-box.system {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.notification-item-icon-box.warning,
+.notification-item-icon-box.alert {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+/* 内容区 */
+.notification-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  gap: 6px;
+}
+
+.notification-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-item-time {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.notification-item-desc {
+  font-size: 11.5px;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.notification-item.expanded .notification-item-desc {
+  -webkit-line-clamp: unset;
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.notification-item-tag {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted, #94a3b8);
+}
+
+/* 操作项（删除） */
+.notification-item-delete {
+  background: transparent;
+  border: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.notification-item:hover .notification-item-delete {
+  opacity: 0.8;
+}
+
+.notification-item-delete:hover {
+  opacity: 1 !important;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* 空状态：极简、通透、克制 */
+.notification-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 38px 20px 42px 20px;
+  text-align: center;
+}
+
+.notification-empty-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.notification-empty-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+}

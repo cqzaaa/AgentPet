@@ -228,10 +228,14 @@ After two failed approaches, change the source/query/navigation method. On repea
   staticSkill({
     id: 'scheduled-tasks',
     name: 'Scheduled tasks',
-    description: 'Create or delete recurring background tasks.',
-    triggers: ['schedule', 'cron', 'recurring', 'reminder', '定时', '周期任务', '提醒'],
+    description: 'Create or delete recurring background tasks or one-time scheduled tasks.',
+    triggers: ['schedule', 'cron', 'recurring', 'reminder', '定时', '周期任务', '提醒', '闹钟', '单次定时'],
     allowedTools: ['manage_cron_task'],
-    instructions: `# Scheduled tasks\nConfirm the intended action, interval, and task content. Use create only with a meaningful name and action. Delete only the exact task id the user intends to remove.`
+    instructions: `# Scheduled tasks
+- Confirm the intended action, timing, and task content.
+- For recurring periodic tasks (周期循环任务，如“每隔1小时执行一次”): set repeat: true, provide interval in seconds (minimum 5 seconds).
+- For one-time tasks (单次定时任务，如“下午3点22分执行”, “10分钟后给微信发消息”): set repeat: false. Do NOT configure interval. Instead, provide execute_at (e.g. "16:30:00" or "2026-10-14 16:30:00") or delay_seconds (e.g. 600 for 10 minutes later). The task will execute once when the time comes and automatically stop without repeating.
+- Use create only with a meaningful name and action. Delete only the exact task id the user intends to remove.`
   }),
   staticSkill({
     id: 'memory-management',

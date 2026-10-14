@@ -580,7 +580,7 @@ if (-not $task.Wait(15000)) {
 
       // 3. manage_cron_task
       if (api === 'manage_cron_task') {
-        const { action_type, name: taskName, interval, action, taskId } = args
+        const { action_type, name: taskName, interval, action, taskId, repeat, execute_at, delay_seconds } = args
         const cronPath = join(getActiveStorageDir(), 'cron_tasks.json')
         let tasks: any[] = []
         if (fs.existsSync(cronPath)) {
@@ -589,19 +589,86 @@ if (-not $task.Wait(15000)) {
         }
 
         if (action_type === 'create') {
-          if (!taskName || !interval || !action) {
-            return { content: '创建失败：缺少必要参数（name, interval, action）', success: false }
+          if (!taskName || !action) {
+            return { content: '创建失败：缺少必要参数（name, action）', success: false }
           }
-          const newTask = {
-            id: Date.now().toString(),
-            name: taskName,
-            interval: Math.max(2, interval),
-            action: action,
-            isActive: true,
-            triggerCount: 0,
-            lastTriggered: '未触发',
-            logs: []
+          const isRecurring = repeat !== false
+          let taskDraft: any
+
+          if (isRecurring) {
+            if (!interval || interval < 5) {
+              return { content: '创建失败：周期循环任务必须配置时间间隔 interval（最少 5 秒）', success: false }
+            }
+            const intervalSec = Math.max(5, Number(interval))
+            taskDraft = {
+              id: Date.now().toString(),
+              name: taskName,
+              interval: intervalSec,
+              nextRunAt: Date.now() + intervalSec * 1000,
+              action: action,
+              repeat: true,
+              kind: 'prompt' as const,
+              isActive: true,
+              triggerCount: 0,
+              lastTriggered: '未触发',
+              logs: []
+            }
+          } else {
+            // 单次任务：不需要配置时间间隔 interval，根据 execute_at 或 delay_seconds 确定执行时刻
+            let targetMs: number | undefined
+            if (typeof execute_at === 'string' && execute_at.trim()) {
+              const clean = execute_at.trim()
+              const timeMatch = clean.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+              if (timeMatch) {
+                const hours = parseInt(timeMatch[1], 10)
+                const minutes = parseInt(timeMatch[2], 10)
+                const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
+                const d = new Date()
+                d.setHours(hours, minutes, seconds, 0)
+                if (d.getTime() < Date.now() - 60000) {
+                  d.setDate(d.getDate() + 1)
+                }
+                targetMs = d.getTime()
+              } else {
+                const parsed = Date.parse(clean)
+                if (Number.isFinite(parsed)) {
+                  targetMs = parsed
+                }
+              }
+            }
+            if (!targetMs && typeof delay_seconds === 'number' && Number.isFinite(delay_seconds)) {
+              targetMs = Date.now() + Math.max(2, delay_seconds) * 1000
+            }
+            if (!targetMs && typeof interval === 'number' && Number.isFinite(interval)) {
+              targetMs = Date.now() + Math.max(2, interval) * 1000
+            }
+            if (!targetMs) {
+              return { content: '创建失败：单次任务无需配置时间间隔，但必须提供执行时间 execute_at（如 "16:30" 或 "2026-10-14 16:30:00"）或延迟执行秒数 delay_seconds（如 300）', success: false }
+            }
+
+            taskDraft = {
+              id: Date.now().toString(),
+              name: taskName,
+              executeAt: targetMs,
+              nextRunAt: targetMs,
+              action: action,
+              repeat: false,
+              kind: 'prompt' as const,
+              isActive: true,
+              triggerCount: 0,
+              lastTriggered: '未触发',
+              logs: []
+            }
           }
+
+          const authorization = await permissionManager.requestScheduledTaskAuthorization(
+            taskDraft,
+            context.event?.sender
+          )
+          if (!authorization) {
+            return { content: '创建已取消：用户未授权该定时任务进行无人值守执行。', success: false }
+          }
+          const newTask = { ...taskDraft, authorization }
           tasks.push(newTask)
           await fs.promises.writeFile(cronPath, JSON.stringify(tasks, null, 2), 'utf-8')
 
@@ -610,7 +677,9 @@ if (-not $task.Wait(15000)) {
             content: JSON.stringify({
               status: 'success',
               message: `成功创建定时任务："${taskName}"`,
-              details: `执行周期为每 ${interval} 秒一次，操作指令: "${action}"`
+              details: isRecurring
+                ? `执行周期为每 ${taskDraft.interval} 秒一次，操作指令: "${action}"`
+                : `单次定时任务，将于 ${new Date(taskDraft.executeAt).toLocaleString('zh-CN')} 执行一次，执行完毕后自动停止。操作指令: "${action}"`
             }),
             success: true
           }
