@@ -12,7 +12,8 @@ import {
   Sparkles,
   X
 } from 'lucide-react'
-import { useAppStore, type AppNotification } from '../hooks/useAppStore'
+import { useShallow } from 'zustand/react/shallow'
+import { useAppStoreRaw, type AppNotification } from '../hooks/useAppStore'
 import { Tooltip } from './Tooltip'
 import './NotificationCenter.css'
 
@@ -41,7 +42,16 @@ export function NotificationCenter(): React.JSX.Element {
     cronTasks = [],
     setSelectedCronLogDetails,
     theme = 'light'
-  } = useAppStore()
+  } = useAppStoreRaw(useShallow(state => ({
+    notifications: state.notifications,
+    markNotificationRead: state.markNotificationRead,
+    markAllNotificationsRead: state.markAllNotificationsRead,
+    removeNotification: state.removeNotification,
+    clearAllNotifications: state.clearAllNotifications,
+    cronTasks: state.cronTasks,
+    setSelectedCronLogDetails: state.setSelectedCronLogDetails,
+    theme: state.theme
+  })))
 
   const [isOpen, setIsOpen] = useState(false)
   const [activeFilter, setActiveFilter] = useState<'all' | 'task' | 'system'>('all')

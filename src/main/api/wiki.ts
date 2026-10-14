@@ -1,4 +1,5 @@
-import type { WikiSyncProgress } from '../../preload/wiki-types'
+import { extractEntityCandidates, parseEntityEvidence, type WikiEntityNodeRow, type EntityCandidate } from './wiki-entities'
+import type { WikiGraphData, WikiSyncProgress } from '../../preload/wiki-types'
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import * as fs from 'fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
@@ -58,15 +59,6 @@ interface WikiGraphLinkRow {
   linkType: string
 }
 
-interface WikiEntityNodeRow {
-  itemId: string
-  itemTitle: string
-  nodeType: string
-  title: string
-  content: string
-  pageStart: number | null
-}
-
 interface WikiGraphEntityLinkRow {
   entityId: string
   entityName: string
@@ -104,15 +96,6 @@ interface WikiSourceCandidate extends ParsedRepositoryResource {
   status: 'linked' | 'verified' | 'missing'
 }
 
-interface EntityCandidate {
-  name: string
-  normalizedName: string
-  entityType: string
-  mentionCount: number
-  confidence: number
-  evidence: string[]
-}
-
 interface WikiFileEntry {
   absolutePath: string
   relativePath: string
@@ -137,24 +120,6 @@ const MAX_WORKSPACE_FILES = 2000
 const latestSyncByWorkspace = new Map<string, WikiSyncProgress>()
 const workspaceWatchers = new Map<string, { rootPath: string; watcher: fs.FSWatcher; timer: NodeJS.Timeout | null }>()
 const syncingWorkspaces = new Map<string, Promise<WikiSyncProgress>>()
-const ENTITY_STOP_WORDS = new Set([
-  'about', 'after', 'and', 'async', 'await', 'before', 'click', 'code', 'const', 'content',
-  'data', 'default', 'example', 'false', 'file', 'for', 'from', 'function', 'http',
-  'https', 'info', 'into', 'item', 'let', 'link', 'name', 'new', 'null', 'page', 'result',
-  'return', 'source', 'text', 'that', 'the', 'this', 'true', 'type', 'undefined', 'value',
-  'var', 'when', 'where', 'wiki', 'with', 'www',
-  '内容', '功能', '代码', '信息', '问题', '方案', '文章', '文件', '页面', '数据', '系统',
-  '用户', '工作区', '示例', '默认', '方法', '属性', '结果', '来源'
-])
-const ENTITY_SUFFIXES = [
-  '自定义控件', '组件', '控件', '框架', '插件', '数据库', '浏览器', '地图', '接口',
-  '协议', '模型', '算法', '脚本', '模块', '平台', '服务', '工具', '终端', '应用'
-]
-const ENTITY_ACTION_PREFIXES = [
-  '如何', '通过', '使用', '实现', '开发', '解决', '关于', '集成', '监听', '获取',
-  '创建', '移除', '引入', '调用', '配置', '支持', '基于', '针对', '利用'
-]
-
 function publishSyncProgress(_event: { sender: WebContents } | undefined, progress: WikiSyncProgress): void {
   progress.updatedAt = Date.now()
   latestSyncByWorkspace.set(progress.workspaceId, { ...progress })
@@ -306,17 +271,19 @@ async function upsertWikiFile(
     FROM wiki_items WHERE workspace_id = ? AND relative_path = ?
   `, workspaceId, entry.relativePath)
   if (existing?.contentHash === entry.contentHash) {
-    const document = entry.fileType === 'pdf'
+    const document = ['pdf', 'md'].includes(entry.fileType)
       ? await database.get<{ parser: string; profileJson: string }>('SELECT parser, profile_json AS profileJson FROM knowledge_documents WHERE id = ?', existing.documentId)
       : null
     // Upgrade cached general PDFs once; retry degraded conversions on explicit sync.
-    if (entry.fileType !== 'pdf' || document?.parser === 'docling-2.60.0+rapidocr'
-      || (document?.parser === 'pymupdf-layout+legal-cn-v1' && !document.profileJson.includes('enhancedParseFailed'))) {
+    const currentMarkdownIndex = entry.fileType !== 'md' || document?.profileJson.includes('"wikiMarkdownVersion":2')
+    if (currentMarkdownIndex && (entry.fileType !== 'pdf' || document?.parser === 'docling-2.60.0+rapidocr'
+      || (document?.parser === 'pymupdf-layout+legal-cn-v1' && !document.profileJson.includes('enhancedParseFailed')))) {
       return { itemId: existing.id, documentId: existing.documentId, changed: false }
     }
   }
 
   const parsed = await parseKnowledgeFile(entry.absolutePath, event, onProgress)
+  if (entry.fileType === 'md') parsed.profile = { ...parsed.profile, wikiMarkdownVersion: 2 }
   const nodes = parsed.nodes || buildKnowledgeNodes(entry.title, parsed.blocks)
   const itemId = existing?.id || randomUUID()
   const documentId = existing?.documentId || randomUUID()
@@ -561,113 +528,9 @@ async function rebuildWikiSources(database: Database, workspaceId: string, rootP
   }
 }
 
-function normalizeEntityName(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase('zh-CN')
-}
-
-function cleanEntityName(value: string): string {
-  return value
-    .replace(/^[`*_#\s'"“”‘’《》「」【】()[\]{}<>，。！？；：、,.!?;:/\\|-]+/u, '')
-    .replace(/[`*_#\s'"“”‘’《》「」【】()[\]{}<>，。！？；：、,.!?;:/\\|-]+$/u, '')
-    .trim()
-}
-
-function entityEvidence(text: string, name: string): string {
-  const compact = text.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim()
-  const index = compact.toLocaleLowerCase('zh-CN').indexOf(name.toLocaleLowerCase('zh-CN'))
-  if (index < 0) return compact.slice(0, 96)
-  const start = Math.max(0, index - 34)
-  return compact.slice(start, Math.min(compact.length, index + name.length + 54)).trim()
-}
-
-function inferEntityType(name: string): string {
-  if (/[A-Za-z]/.test(name)) return 'technology'
-  if (/(?:框架|组件|控件|插件|数据库|浏览器|接口|协议|脚本|模块|平台|工具|终端|应用)$/.test(name)) return 'technology'
-  if (/(?:地图|模型|算法|服务)$/.test(name)) return 'concept'
-  return 'concept'
-}
-
-function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate[] {
-  const candidates = new Map<string, EntityCandidate>()
-  const sourceText = `${row.title || ''}\n${row.content || ''}`.replace(/https?:\/\/\S+/gi, ' ')
-  const titleText = row.title || ''
-  const add = (rawName: string, confidence: number): void => {
-    const name = cleanEntityName(rawName)
-    const normalizedName = normalizeEntityName(name)
-    if (name.length < 2 || name.length > 40 || ENTITY_STOP_WORDS.has(normalizedName)) return
-    if (/^\d+(?:[._-]\d+)*$/.test(name)) return
-    const quote = entityEvidence(sourceText, name)
-    const evidence = quote && row.pageStart ? `第 ${row.pageStart} 页：${quote}` : quote
-    const existing = candidates.get(normalizedName)
-    if (existing) {
-      existing.mentionCount += 1
-      existing.confidence = Math.max(existing.confidence, confidence)
-      if (evidence && !existing.evidence.includes(evidence) && existing.evidence.length < 3) existing.evidence.push(evidence)
-      return
-    }
-    candidates.set(normalizedName, {
-      name,
-      normalizedName,
-      entityType: inferEntityType(name),
-      mentionCount: 1,
-      confidence,
-      evidence: evidence ? [evidence] : []
-    })
-  }
-
-  for (const match of sourceText.matchAll(/`([^`\n]{2,40})`/g)) add(match[1], 0.98)
-
-  // Preserve named concepts in structured headings instead of splitting every phrase into words.
-  if (['section', 'heading', 'chapter'].includes(row.nodeType)) {
-    const heading = titleText.replace(/^(?:\d+[.\s]*)+/, '').trim()
-    if (!/^(abstract|introduction|conclusions?|references|acknowledg(?:e)?ments?|摘要|引言|结论|参考文献)$/i.test(heading)) add(heading, 0.9)
-  }
-
-  const knownTechnologies = new Set([
-    'api', 'css', 'electron', 'html', 'javascript', 'jquery', 'jsapi', 'markdown', 'node',
-    'nodejs', 'react', 'sdk', 'sql', 'sqlite', 'typescript', 'vue'
-  ])
-  for (const match of sourceText.matchAll(/\b[A-Za-z][A-Za-z0-9]*(?:[.+#_-][A-Za-z0-9]+)*\b/g)) {
-    const name = match[0]
-    const normalized = name.toLowerCase()
-    const looksNamed = knownTechnologies.has(normalized)
-      || /[A-Z]/.test(name.slice(1))
-      || /^[A-Z][A-Z0-9.+#_-]+$/.test(name)
-      || titleText.toLowerCase().includes(normalized)
-    add(name, looksNamed ? 0.94 : 0.76)
-  }
-
-  const segments = sourceText.split(/[\n，。！？；：、()[\]{}<>“”‘’"'`]+/u).map(value => value.trim()).filter(Boolean)
-  for (const segment of segments) {
-    const segmentCandidates = new Set<string>()
-    for (const suffix of ENTITY_SUFFIXES) {
-      let offset = 0
-      while (offset < segment.length) {
-        const suffixIndex = segment.indexOf(suffix, offset)
-        if (suffixIndex < 0) break
-        const end = suffixIndex + suffix.length
-        let candidate = segment.slice(Math.max(0, end - 18), end)
-        let actionEnd = -1
-        for (const prefix of ENTITY_ACTION_PREFIXES) {
-          const prefixIndex = candidate.lastIndexOf(prefix)
-          if (prefixIndex >= 0) actionEnd = Math.max(actionEnd, prefixIndex + prefix.length)
-        }
-        if (actionEnd >= 0) candidate = candidate.slice(actionEnd)
-        candidate = candidate.replace(/^(?:在|将|与|和|及|用|对|把|由|从|的|该)+/u, '')
-        if (candidate.includes('自定义')) candidate = candidate.slice(candidate.lastIndexOf('自定义'))
-        candidate = cleanEntityName(candidate).slice(-16)
-        if (candidate.length >= 2) segmentCandidates.add(candidate)
-        offset = end
-      }
-    }
-    for (const candidate of segmentCandidates) add(candidate, row.nodeType === 'section' ? 0.96 : 0.9)
-  }
-  return [...candidates.values()]
-}
-
 async function rebuildWikiEntities(database: Database, workspaceId: string): Promise<void> {
   const rows = await database.all<WikiEntityNodeRow[]>(`
-    SELECT wi.id AS itemId, wi.title AS itemTitle, n.node_type AS nodeType,
+    SELECT n.id AS nodeId, n.heading_path AS headingPath, wi.id AS itemId, wi.title AS itemTitle, n.node_type AS nodeType,
       COALESCE(n.title, '') AS title, COALESCE(n.content, '') AS content, n.page_start AS pageStart
     FROM wiki_items wi
     JOIN knowledge_nodes n ON n.document_id = wi.document_id
@@ -682,13 +545,12 @@ async function rebuildWikiEntities(database: Database, workspaceId: string): Pro
       byItem.set(row.itemId, itemEntities)
     }
     for (const candidate of extractEntityCandidates(row)) {
-      if (candidate.normalizedName === normalizeEntityName(row.itemTitle)) continue
       const existing = itemEntities.get(candidate.normalizedName)
       if (existing) {
         existing.mentionCount += candidate.mentionCount
         existing.confidence = Math.max(existing.confidence, candidate.confidence)
         for (const evidence of candidate.evidence) {
-          if (!existing.evidence.includes(evidence) && existing.evidence.length < 3) existing.evidence.push(evidence)
+          if (!existing.evidence.some(value => value.nodeId === evidence.nodeId) && existing.evidence.length < 8) existing.evidence.push(evidence)
         }
       } else {
         itemEntities.set(candidate.normalizedName, candidate)
@@ -702,7 +564,7 @@ async function rebuildWikiEntities(database: Database, workspaceId: string): Pro
     await database.run('DELETE FROM wiki_entities WHERE workspace_id = ?', workspaceId)
     for (const [itemId, entityMap] of byItem) {
       const ranked = [...entityMap.values()]
-        .filter(entity => entity.confidence >= 0.84 || entity.mentionCount >= 2)
+        .filter(entity => entity.confidence >= 0.84)
         .sort((left, right) => (right.confidence * 4 + Math.log2(right.mentionCount + 1)) - (left.confidence * 4 + Math.log2(left.mentionCount + 1)))
         .slice(0, 20)
       for (const entity of ranked) {
@@ -1145,12 +1007,12 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     }
   })
 
-  ipcMain.handle('api:wiki-get-graph', async (_, workspaceId: string, focusItemId?: string) => {
+  ipcMain.handle('api:wiki-get-graph', async (_, workspaceId: string, focusItemId?: string, focusEntityId?: string): Promise<WikiGraphData> => {
     const database = await deps.getDB()
     const allItems = await database.all<WikiGraphItemRow[]>(`
       SELECT id, relative_path AS relativePath, title, item_kind AS itemKind,
         file_type AS fileType, file_size AS fileSize
-      FROM wiki_items WHERE workspace_id = ? ORDER BY relative_path COLLATE NOCASE LIMIT 400
+      FROM wiki_items WHERE workspace_id = ? ORDER BY relative_path COLLATE NOCASE
     `, workspaceId)
     const explicitLinks = await database.all<WikiGraphLinkRow[]>(`
       SELECT id, from_item_id AS fromItemId, to_item_id AS toItemId,
@@ -1263,15 +1125,24 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       }
     }
 
-    includedItemIds = new Set(allItems.map(item => item.id))
-    const items = allItems
+    // Entity exploration must include its documents even outside the overview window.
+    if (focusEntityId) {
+      selectedEntityIds = new Set([focusEntityId])
+      includedItemIds = new Set(entityLinks.filter(link => link.entityId === focusEntityId).map(link => link.itemId))
+      selectedSourcePaths = new Set(sourceLinks.filter(link => includedItemIds.has(link.itemId)).map(link => link.relativePath))
+    } else if (!focusItemId) {
+      if (!includedItemIds.size) includedItemIds = new Set(allItems.slice(0, 80).map(item => item.id))
+    }
+    const matchingItems = allItems.filter(item => includedItemIds.has(item.id))
+    const items = matchingItems.slice(0, 80)
+    includedItemIds = new Set(items.map(item => item.id))
     const visibleEntityLinks = entityLinks.filter(link => selectedEntityIds.has(link.entityId) && includedItemIds.has(link.itemId))
     const visibleSourceLinks = sourceLinks.filter(link => selectedSourcePaths.has(link.relativePath) && includedItemIds.has(link.itemId))
     const entityById = new Map(visibleEntityLinks.map(link => [link.entityId, link]))
     const sourceByPath = new Map(visibleSourceLinks.map(link => [link.relativePath, link]))
     const visibleExplicitLinks = explicitLinks.filter(link => link.toItemId
       && includedItemIds.has(link.fromItemId) && includedItemIds.has(link.toItemId))
-    const nodes = [
+    const nodes: WikiGraphData['nodes'] = [
       ...items.map(item => ({
         id: item.id,
         itemId: item.id,
@@ -1325,12 +1196,16 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       })),
       ...evidenceEdges.values()
     ]
-    const parseEvidence = (value: string): string[] => {
-      try {
-        const parsed = JSON.parse(value) as unknown
-        return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
-      } catch {
-        return []
+    if (focusEntityId) {
+      for (const link of visibleEntityLinks) {
+        const item = items.find(item => item.id === link.itemId)!
+        for (const [index, evidence] of parseEntityEvidence(link.evidenceJson).entries()) {
+          const id = `fragment:${link.itemId}:${evidence.nodeId || index}`
+          nodes.push({ id, itemId: item.id, label: evidence.title, kind: 'fragment',
+            fileType: item.fileType, relativePath: item.relativePath, evidence })
+          edges.push({ id: `mentions:${id}`, source: link.entityId, target: id, kind: 'mention', weight: 1 })
+          edges.push({ id: `belongs:${id}`, source: id, target: item.id, kind: 'contains', weight: 1 })
+        }
       }
     }
     const entities = focusEntityLinks.map(link => ({
@@ -1339,7 +1214,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
       type: link.entityType,
       mentionCount: link.mentionCount,
       confidence: link.confidence,
-      evidence: parseEvidence(link.evidenceJson)
+      evidence: parseEntityEvidence(link.evidenceJson)
     }))
     const relatedItems = [...relatedScores.entries()]
       .sort((left, right) => right[1].score - left[1].score)
@@ -1365,6 +1240,6 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     const unresolved = focusItemId
       ? explicitLinks.filter(link => link.fromItemId === focusItemId && !link.toItemId && link.linkType === 'explicit')
       : []
-    return { nodes, edges, entities, sources: focusSourceLinks, relatedItems, backlinks, unresolved }
+    return { nodes, edges, entities, sources: focusSourceLinks, relatedItems, backlinks, unresolved, truncated: matchingItems.length > items.length }
   })
 }

@@ -681,6 +681,8 @@ export function useAppSelector<T>(selector: (state: any) => T): T {
 }
 
 // ── useAppStore hook ─────────────────────────────────────────
+// Mount only in AgentWindow: this hook owns IPC subscriptions and schedulers.
+// Child components must use selectors and receive runtime commands from the owner.
 export function useAppStore() {
   // Message text and its derived token count are high-frequency fields. The
   // aggregate compatibility hook must not execute for every streaming frame.

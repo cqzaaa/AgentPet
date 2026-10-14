@@ -346,18 +346,40 @@ export class OfficeExecutor implements IToolExecutor {
             const pdf = new PDFDocument({ size: 'A4', margin: 50 })
             const stream = fs.createWriteStream(filePath)
             pdf.pipe(stream)
-            try {
-              const fontPath =
-                process.platform === 'win32'
-                  ? 'C:/Windows/Fonts/msyh.ttc'
-                  : process.platform === 'darwin'
-                    ? '/System/Library/Fonts/PingFang.ttc'
-                    : '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc'
-              if (fs.existsSync(fontPath)) {
-                pdf.registerFont('CJK', fontPath)
-                pdf.font('CJK')
+            const fontCandidates: Array<{ path: string; subfont?: string }> =
+              process.platform === 'win32'
+                ? [
+                    { path: 'C:/Windows/Fonts/msyh.ttc', subfont: 'MicrosoftYaHei' },
+                    { path: 'C:/Windows/Fonts/simhei.ttf' },
+                    { path: 'C:/Windows/Fonts/simsun.ttc', subfont: 'SimSun' }
+                  ]
+                : process.platform === 'darwin'
+                  ? [
+                      { path: '/System/Library/Fonts/PingFang.ttc', subfont: 'PingFangSC-Regular' },
+                      { path: '/Library/Fonts/Songti.ttc', subfont: 'SongtiSC-Regular' },
+                      { path: '/System/Library/Fonts/STHeiti Light.ttc' }
+                    ]
+                  : [
+                      { path: '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc' },
+                      { path: '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc' },
+                      { path: '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc' },
+                      { path: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc' }
+                    ]
+            for (const candidate of fontCandidates) {
+              if (fs.existsSync(candidate.path)) {
+                try {
+                  if (candidate.subfont) {
+                    pdf.registerFont('CJK', candidate.path, candidate.subfont)
+                  } else {
+                    pdf.registerFont('CJK', candidate.path)
+                  }
+                  pdf.font('CJK')
+                  break
+                } catch {
+                  // 继续尝试下一个候选字体
+                }
               }
-            } catch (e) {}
+            }
             const lines = content.split('\n')
             for (const line of lines) {
               if (line.startsWith('# ')) {

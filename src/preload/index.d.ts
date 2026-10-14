@@ -1,4 +1,4 @@
-import type { WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
+import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
 
@@ -77,7 +77,7 @@ declare global {
       wikiSavePage: (itemId: string, content: string) => Promise<{ saved: boolean; itemId: string }>
       wikiListRevisions: (itemId: string) => Promise<any[]>
       wikiReadSource: (workspaceId: string, resource: string) => Promise<any>
-      wikiGetGraph: (workspaceId: string, focusItemId?: string) => Promise<any>
+      wikiGetGraph: (workspaceId: string, focusItemId?: string, focusEntityId?: string) => Promise<WikiGraphData>
       parseFileHtml: (filePath: string) => Promise<string>
       readFileBase64: (filePath: string) => Promise<string | null>
       readTextFile: (filePath: string) => Promise<string>

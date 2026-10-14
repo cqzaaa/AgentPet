@@ -229,6 +229,19 @@ async function parseHtmlWithMedia(filePath: string, html: string): Promise<{ blo
 }
 
 async function parseMarkdownWithMedia(filePath: string, markdown: string): Promise<{ blocks: ParsedBlock[]; assetDir?: string; imageCount: number }> {
+  // Front matter is provenance, not document prose. Keep headings as independent
+  // blocks even when authors do not put blank lines around them.
+  markdown = markdown.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '')
+  let fence = ''
+  markdown = markdown.split(/\r?\n/).map(line => {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1]
+    if (marker) {
+      if (!fence) fence = marker
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = ''
+      return line
+    }
+    return !fence && /^#{1,6}\s+/.test(line) ? `\n${line}\n` : line
+  }).join('\n')
   const imagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g
   const matches = [...markdown.matchAll(imagePattern)]
   if (matches.length === 0) return { blocks: parsePlainText(markdown), imageCount: 0 }

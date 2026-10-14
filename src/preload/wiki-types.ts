@@ -14,3 +14,38 @@ export interface WikiParserComponentStatus {
   detail: string
   updatedAt: number
 }
+
+export interface WikiEntityEvidence {
+  nodeId: string | null
+  title: string
+  pageStart: number | null
+  quote: string
+}
+
+export interface WikiGraphNode {
+  id: string
+  itemId: string | null
+  label: string
+  kind: string
+  entityType?: string
+  fileType: string
+  relativePath: string
+  resource?: string
+  size?: number
+  evidence?: WikiEntityEvidence
+}
+
+export interface WikiGraphData {
+  nodes: WikiGraphNode[]
+  edges: Array<{ id: string; source: string; target: string; kind: string; weight?: number }>
+  entities: Array<{ id: string; name: string; type: string; mentionCount: number; confidence: number; evidence: WikiEntityEvidence[] }>
+  sources: Array<{
+    id: string; itemId: string; resource: string; relativePath: string
+    startLine: number | null; endLine: number | null; claimId: string
+    statement: string; version: string; status: 'linked' | 'verified' | 'missing'
+  }>
+  relatedItems: Array<{ id: string; title: string; relativePath: string; fileType: string; sharedEntities: string[]; sharedSources: string[]; directLink: boolean }>
+  backlinks: Array<{ id: string; title: string; relativePath: string; fileType: string }>
+  unresolved: Array<{ id: string; fromItemId: string; targetText: string }>
+  truncated?: boolean
+}

@@ -1,4 +1,4 @@
-import type { WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
+import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
@@ -147,8 +147,8 @@ const api = {
     ipcRenderer.invoke('api:wiki-list-revisions', itemId),
   wikiReadSource: (workspaceId: string, resource: string): Promise<any> =>
     ipcRenderer.invoke('api:wiki-read-source', workspaceId, resource),
-  wikiGetGraph: (workspaceId: string, focusItemId?: string): Promise<any> =>
-    ipcRenderer.invoke('api:wiki-get-graph', workspaceId, focusItemId),
+  wikiGetGraph: (workspaceId: string, focusItemId?: string, focusEntityId?: string): Promise<WikiGraphData> =>
+    ipcRenderer.invoke('api:wiki-get-graph', workspaceId, focusItemId, focusEntityId),
   parseFileHtml: (filePath: string): Promise<string> =>
     ipcRenderer.invoke('api:parse-file-html', filePath),
   readFileBase64: (filePath: string): Promise<string | null> =>

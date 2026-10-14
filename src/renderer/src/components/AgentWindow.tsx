@@ -1748,7 +1748,7 @@ export function AgentWindow(): React.JSX.Element {
       )}
 
       {/* 全局任务执行详情弹窗 */}
-      <CronLogDetailModal />
+      <CronLogDetailModal currentAvatarName={store.currentAvatarName} handlePreviewFile={store.handlePreviewFile} />
 
       {/* 标签页右键菜单 */}
       {tabContextMenu &&

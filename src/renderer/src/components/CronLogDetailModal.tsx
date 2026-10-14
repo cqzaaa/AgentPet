@@ -1,19 +1,29 @@
 import React, { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { ClipboardList, X } from 'lucide-react'
-import { useAppStore } from '../hooks/useAppStore'
+import { useShallow } from 'zustand/react/shallow'
+import { useAppStoreRaw } from '../hooks/useAppStore'
 import { ChatMessageItem } from './ChatMessageItem'
 
-export function CronLogDetailModal(): React.JSX.Element | null {
+interface CronLogDetailModalProps {
+  currentAvatarName: string
+  handlePreviewFile: (file: { name: string; path: string; size: number }) => void
+}
+
+export function CronLogDetailModal({ currentAvatarName, handlePreviewFile }: CronLogDetailModalProps): React.JSX.Element | null {
   const {
     selectedCronLogDetails,
     setSelectedCronLogDetails,
     setSelectedTaskForLog,
-    currentAvatarName,
-    handlePreviewFile,
     setShowFilePanel,
     setActiveTab
-  } = useAppStore()
+  } = useAppStoreRaw(useShallow(state => ({
+    selectedCronLogDetails: state.selectedCronLogDetails,
+    setSelectedCronLogDetails: state.setSelectedCronLogDetails,
+    setSelectedTaskForLog: state.setSelectedTaskForLog,
+    setShowFilePanel: state.setShowFilePanel,
+    setActiveTab: state.setActiveTab
+  })))
 
   useEffect(() => {
     if (!selectedCronLogDetails) return
