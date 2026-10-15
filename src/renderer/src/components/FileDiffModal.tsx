@@ -56,8 +56,10 @@ export function compactDiffLines(lines: DiffLine[], context = 3): ReviewLine[] {
  * 支持大文件首尾剥离与稀疏唯一锚点递归分治，彻底解决大文件两端修改时导致中间几千行被误算为增删的问题
  */
 export function computeDiffLines(originalText: string, currentText: string): DiffLine[] {
-  const oldLines = originalText ? originalText.split('\n') : []
-  const newLines = currentText ? currentText.split('\n') : []
+  const normalizedOld = originalText ? originalText.replace(/\r\n|\r/g, '\n') : ''
+  const normalizedNew = currentText ? currentText.replace(/\r\n|\r/g, '\n') : ''
+  const oldLines = normalizedOld ? normalizedOld.split('\n') : []
+  const newLines = normalizedNew ? normalizedNew.split('\n') : []
   const m = oldLines.length
   const n = newLines.length
 

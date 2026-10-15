@@ -4,7 +4,9 @@ import { createPortal } from 'react-dom'
 import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
+import { uniqueToolSteps } from '../hooks/tool-step-identity'
 import { activityDurationMs } from '../hooks/chat-activity-duration'
+import { getModelIcon } from '../utils/modelIcons'
 import { ClarificationCard } from './ClarificationCard'
 import { PaddleOcrCredentialCard } from './PaddleOcrCredentialCard'
 import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
@@ -1520,7 +1522,7 @@ function describeActivity(step: any, messageRunning: boolean): string {
 function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
   const combined: any[] = []
 
-  toolSteps.forEach((step: any) => {
+  uniqueToolSteps(toolSteps).forEach((step: any) => {
     if (step.type === 'think') {
       combined.push({
         id: step.id,
@@ -1534,6 +1536,7 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
       combined.push({
         id: step.id,
         type: 'tool',
+        callId: step.callId,
         name: step.name,
         callDetail: step.detail,
         liveDetail: step.liveDetail,
@@ -1543,7 +1546,8 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
       let matched = false
       for (let i = combined.length - 1; i >= 0; i--) {
         const item = combined[i]
-        if (item.type === 'tool' && item.name === step.name && !item.resultDetail) {
+        const sameCall = step.callId ? item.callId === step.callId : !item.callId && item.name === step.name
+        if (item.type === 'tool' && sameCall && item.resultDetail === undefined) {
           item.resultDetail = step.detail
           matched = true
           break
@@ -1562,7 +1566,7 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
   })
 
   combined.forEach((item) => {
-    if (item.type === 'tool' && !item.resultDetail && isThinking) {
+    if (item.type === 'tool' && item.resultDetail === undefined && isThinking) {
       item.isWaiting = true
     }
   })
@@ -2020,8 +2024,43 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const promptModalRef = useRef<HTMLDivElement>(null)
   const promptModalCloseRef = useRef<HTMLButtonElement>(null)
   const promptModalTriggerRef = useRef<HTMLButtonElement>(null)
-  const promptInfo = msg.promptInfo || loadedPromptInfo
+  const [inferredModelInfo, setInferredModelInfo] = useState<{ model?: string; provider?: string } | null>(null)
+  const promptInfo = msg.promptInfo || loadedPromptInfo || requestMessage?.promptInfo
+  const resolvedModel =
+    msg.model ||
+    msg.promptInfo?.model ||
+    requestMessage?.promptInfo?.model ||
+    loadedPromptInfo?.model ||
+    inferredModelInfo?.model ||
+    null
+  const resolvedProvider =
+    msg.provider ||
+    msg.promptInfo?.provider ||
+    requestMessage?.promptInfo?.provider ||
+    loadedPromptInfo?.provider ||
+    inferredModelInfo?.provider ||
+    ''
   const selectionHighlightOwner = String(msg.id)
+
+  useEffect(() => {
+    if (msg.sender !== 'agent' || resolvedModel || !requestMessage?.id) return
+    let active = true
+    const fetchPrompt = async () => {
+      try {
+        const prompt = requestMessage.promptInfo || (await window.api?.getMessagePromptInfo(requestMessage.id))
+        if (active && prompt?.model) {
+          setInferredModelInfo({ model: prompt.model, provider: prompt.provider || '' })
+          if (window.api?.saveMessage) {
+            window.api.saveMessage({ ...msg, model: prompt.model, provider: prompt.provider || '', sessionId }).catch(() => {})
+          }
+        }
+      } catch (_) {}
+    }
+    fetchPrompt()
+    return () => {
+      active = false
+    }
+  }, [msg.id, msg.sender, resolvedModel, requestMessage, sessionId])
 
   useEffect(() => {
     if (!selectionPopover) return undefined
@@ -2898,6 +2937,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 )}
               </button>
             </Tooltip>
+          )}
+          {msg.sender === 'agent' && resolvedModel && (
+            <div
+              className="msg-action-model-tag"
+              title={`本次回复由 ${resolvedModel}${resolvedProvider ? ` (${resolvedProvider})` : ''} 生成`}
+            >
+              <img
+                src={getModelIcon(resolvedModel, resolvedProvider)}
+                alt=""
+                className="msg-model-icon"
+              />
+              <span className="msg-model-name">{resolvedModel}</span>
+            </div>
           )}
           {msg.sender === 'user' && (msg.promptInfo || msg.hasPromptInfo) && (
             <Tooltip content="查看传给 Agent 的完整内容" placement="top">

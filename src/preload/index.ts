@@ -238,8 +238,8 @@ const api = {
     ipcRenderer.invoke('api:copy-to-chat-file', sessionId, sourcePath),
   attachFileFromPath: (filePath: string, sessionId: string): Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null> =>
     ipcRenderer.invoke('api:attach-file-from-path', filePath, sessionId),
-  onToolEvent: (callback: (data: any) => void): (() => void) => {
-    const subscription = (_event: any, data: any) => callback(data)
+  onToolEvent: (callback: (data: import('./chat-tool-event').ChatToolEvent) => void): (() => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, data: import('./chat-tool-event').ChatToolEvent) => callback(data)
     ipcRenderer.on('api:llm-tool-event', subscription)
     return () => {
       ipcRenderer.removeListener('api:llm-tool-event', subscription)

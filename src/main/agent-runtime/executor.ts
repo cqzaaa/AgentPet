@@ -5,7 +5,7 @@ import { ModelRuntimeFactory, ChatMessage, ChatOptions, type ModelProvider } fro
 import { COMPACTION_PROMPT, planContextCompaction, restoreContext, userContextKeys, type ContextCheckpoint } from './context-lifecycle'
 import { ModelStreamInterruptedError } from '../model-runtime/providers'
 import { mergeStreamContinuation } from './stream-recovery'
-import { inspectionEvidence, formatInspectionEvidence, type InspectionEvidence } from './inspection-evidence'
+import { inspectionEvidence, inspectionReads, formatInspectionEvidence, type InspectionEvidence } from './inspection-evidence'
 import { fileVersion, fileReadCache } from '../tools/builtin/file/read-cache'
 import { AgentStepEvent } from './types'
 import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
@@ -102,7 +102,8 @@ function summarizeReusableToolCall(
       file_path: args.file_path,
       start_line: args.start_line,
       end_line: args.end_line,
-      line_ranges: args.line_ranges
+      line_ranges: args.line_ranges,
+      files: args.files
     }
   } else if (toolName === 'get_file_metadata') summary = { file_path: args.file_path }
   else if (toolName === 'edit_files') {
@@ -974,9 +975,9 @@ Images in current or historical messages are provided directly to the model. Ins
     const activitySummaries = await Promise.all(priorSessionActivity.map(async item => {
       if (!item.evidence) return item.summary
       const evidence = item.evidence
-      if (evidence.read) {
+      for (const read of inspectionReads(evidence)) {
         try {
-          if (fileVersion(await fs.promises.stat(evidence.read.path)) !== evidence.read.version) {
+          if (fileVersion(await fs.promises.stat(read.path)) !== read.version) {
             return `${item.summary} [文件版本已变化；此前已读区间仅供定位，必须重新检查相关代码]`
           }
         } catch { return `${item.summary} [文件已不可用；此前证据失效]` }
@@ -1859,14 +1860,17 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
               }
             }
 
-            if (evidence?.read && contextToolResult !== toolResult) {
+            if (evidence && inspectionReads(evidence).length && contextToolResult !== toolResult) {
               // A tool may return a full range that the context budget subsequently shortens.
               // Do not tell later turns that the model has already seen all of those lines.
-              evidence.read.truncated = true
-              evidence.read.ranges = []
-              evidence.read.unresolved = '模型上下文仅保留摘要；完整输出在缓存中，按需要读取缺失范围'
-              toolState.readEvidence = { ...toolState.readEvidence, ...evidence.read }
-              fileReadCache.forgetRanges(sessionId || `workspace:${workspacePath}`, evidence.read.path, evidence.read.version)
+              for (const read of inspectionReads(evidence)) {
+                read.truncated = true
+                read.ranges = []
+                read.unresolved = '模型上下文仅保留摘要；完整输出在缓存中，按需要读取缺失范围'
+                fileReadCache.forgetRanges(sessionId || `workspace:${workspacePath}`, read.path, read.version)
+              }
+              if (evidence.read) toolState.readEvidence = { ...toolState.readEvidence, ...evidence.read }
+              if (evidence.reads) toolState.readEvidences = evidence.reads
             }
             if (evidence) contextToolResult = `${formatInspectionEvidence(evidence)}\n${contextToolResult}`
             return {

@@ -79,7 +79,9 @@ export function useChatReplyRuntime({
             text: replyTextWithRetryBase(message, fullText),
             retryBaseText: undefined,
             isThinking: false,
-            isError: fullText.startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复')
+            isError: fullText.startsWith('⚠️ [系统提示] 大模型在执行完工具链后返回了空回复'),
+            model: message.model,
+            provider: message.provider
           })
         })
         const target = messages.find((message: any) => message.id === replyId)

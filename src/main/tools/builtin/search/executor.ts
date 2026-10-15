@@ -42,7 +42,7 @@ export class SearchExecutor implements IToolExecutor {
       if (args.glob !== undefined && typeof args.glob !== 'string') return failure('错误：glob 必须是字符串')
       const outputMode = args.output_mode || 'content'
       if (!['content', 'files_with_matches', 'count'].includes(outputMode)) return failure('错误：无效的 output_mode')
-      for (const [key, max] of [['context_lines', 20], ['max_results', 300]] as const) {
+      for (const [key, max] of [['context_lines', 80], ['max_results', 300]] as const) {
         if (args[key] !== undefined && (!Number.isInteger(args[key]) || args[key] < (key === 'context_lines' ? 0 : 1) || args[key] > max)) {
           return failure(`错误：${key} 超出允许范围`)
         }
@@ -52,13 +52,14 @@ export class SearchExecutor implements IToolExecutor {
       if (!isPathWithinRoots(searchDir, roots)) return failure('错误：搜索范围不在当前会话已授权的文件夹内。')
       const realSearchDir = await fs.promises.realpath(searchDir)
       if (!isPathWithinRoots(realSearchDir, roots)) return failure('错误：搜索范围经真实路径解析后不在已授权文件夹内。')
+      const singleFile = (await fs.promises.stat(realSearchDir)).isFile()
       const execArgs = ['--color', 'never']
       if (args.case_insensitive) execArgs.push('-i')
       if (args.fixed_strings) execArgs.push('-F')
       if (args.glob) execArgs.push('-g', args.glob)
       if (outputMode === 'files_with_matches') execArgs.push('-l')
       else if (outputMode === 'count') execArgs.push('--count', '-H')
-      else execArgs.push('--json', '-m', '200', '-C', String(args.context_lines ?? 3))
+      else execArgs.push('--json', '-m', '200', '-C', String(args.context_lines ?? (singleFile ? 12 : 3)))
       execArgs.push('-e', pattern, '--', realSearchDir)
       const timeout = Math.min(Math.max(Number(args.timeout_seconds) || 30, 1), 120) * 1000
       const stdout = await new Promise<string>((resolve, reject) => {
@@ -70,7 +71,7 @@ export class SearchExecutor implements IToolExecutor {
       const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
       const paths = new Set<string>()
       let rows: string[] = []
-      const locations: string[] = []
+      const contentRows: Array<{ file: string; line: number; text: string; match: boolean }> = []
       let matchCount = 0
       let limited = false
       if (outputMode === 'content') {
@@ -81,9 +82,10 @@ export class SearchExecutor implements IToolExecutor {
           const file = event.data.path.text || '[非 UTF-8 文件名]'
           const body = event.data.lines.text || '[非 UTF-8 内容]'
           paths.add(file)
-          rows.push(`${file}:${event.data.line_number}:${event.type === 'match' ? '>' : ' '} ${body.replace(/\r?\n$/, '')}`)
+          const text = body.replace(/\r?\n$/, '')
+          contentRows.push({ file, line: event.data.line_number, text, match: event.type === 'match' })
+          rows.push(`${file}:${event.data.line_number}:${event.type === 'match' ? '>' : ' '} ${text}`)
           if (event.type === 'match') {
-            if (locations.length < 6) locations.push(rows[rows.length - 1].slice(0, 250))
             matchCount++
             counts.set(file, (counts.get(file) || 0) + 1)
           }
@@ -101,9 +103,27 @@ export class SearchExecutor implements IToolExecutor {
           matchCount += Number(match[2])
         }
       }
-      const maxRows = args.max_results ?? 100
-      const selected = rows.slice(0, maxRows).join('\n')
-      const truncated = limited || rows.length > maxRows || selected.length > maxChars
+      const maxRows = args.max_results ?? (singleFile ? 200 : 100)
+      let selected = ''
+      let delivered = 0
+      let previousFile = ''
+      let previousLine = 0
+      const deliveredLocations: string[] = []
+      for (let index = 0; index < Math.min(rows.length, maxRows); index++) {
+        const row = contentRows[index]
+        const section = outputMode === 'content'
+          ? `${row.file !== previousFile ? `${selected ? '\n' : ''}[文件: ${row.file}]\n` : row.line > previousLine + 1 ? '...\n' : ''}${row.line}:${row.match ? '>' : ' '} ${row.text}\n`
+          : `${rows[index]}\n`
+        if (selected.length + section.length > maxChars) break
+        selected += section
+        delivered++
+        if (row) {
+          previousFile = row.file
+          previousLine = row.line
+          if (row.match && deliveredLocations.length < 6) deliveredLocations.push(`${row.file}:${row.line}: ${row.text}`.slice(0, 250))
+        }
+      }
+      const truncated = limited || delivered < rows.length
       const status = paths.size === 0 ? 'no_matches' : truncated ? 'truncated' : 'complete'
       const heading = outputMode === 'count'
         ? `共 ${matchCount} 个匹配行，分布在 ${paths.size} 个文件（按行计数）`
@@ -111,10 +131,10 @@ export class SearchExecutor implements IToolExecutor {
       const notice = truncated ? '\n[结果已截断或达到单文件 200 个匹配行上限；请按已知文件、符号缩小范围。未展示部分不能视为无匹配。]' : ''
       return {
         success: true,
-        content: `[搜索结果] ${heading}\n${selected.slice(0, maxChars) || '(无匹配)'}${notice}`,
+        content: `[搜索结果] ${heading}\n${selected || (paths.size ? '(匹配内容超过输出预算，请缩小范围或使用字符分页读取对应文件)' : '(无匹配)')}${notice}`,
         state: { searchEvidence: [{
           question, pattern: pattern.slice(0, 300), scope: realSearchDir, status,
-          files: [...paths].slice(0, 12), locations: outputMode === 'content' ? locations : rows.slice(0, 6).map(row => row.slice(0, 250)),
+          files: [...paths].slice(0, 12), locations: outputMode === 'content' ? deliveredLocations : rows.slice(0, Math.min(delivered, 6)).map(row => row.slice(0, 250)),
           unresolved: truncated ? '缩小范围查看未展示的匹配' : paths.size === 0 ? '此范围无匹配；检查关键词或逐级扩大范围' : undefined
         }] }
       }

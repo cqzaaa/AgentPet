@@ -137,7 +137,7 @@ declare global {
       onLocalMeetingEvent: (callback: (event: any) => void) => () => void
       copyToChatFile: (sessionId: string, sourcePath: string) => Promise<{ path: string; exists: boolean }>
       attachFileFromPath: (filePath: string, sessionId: string) => Promise<{ name: string; path: string; safeName: string; isImage: boolean; content?: string } | null>
-      onToolEvent: (callback: (data: any) => void) => () => void
+      onToolEvent: (callback: (data: import('./chat-tool-event').ChatToolEvent) => void) => () => void
       onAutomationProgress: (callback: (data: any) => void) => () => void
       setAutomationOverlayInteractive: (interactive: boolean) => void
       dismissAutomationOverlay: () => void

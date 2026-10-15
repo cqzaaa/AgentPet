@@ -18,8 +18,10 @@ export interface FileChangeRecord {
  * 优化首尾剥离与大文件稀疏锚点分治，杜绝单大文件两端修改时触发全量兜底导致虚高几千行的缺陷
  */
 export function computeLineDiff(oldText: string, newText: string): { additions: number; deletions: number } {
-  const oldLines = oldText ? oldText.split('\n') : []
-  const newLines = newText ? newText.split('\n') : []
+  const normalizedOld = oldText ? oldText.replace(/\r\n|\r/g, '\n') : ''
+  const normalizedNew = newText ? newText.replace(/\r\n|\r/g, '\n') : ''
+  const oldLines = normalizedOld ? normalizedOld.split('\n') : []
+  const newLines = normalizedNew ? normalizedNew.split('\n') : []
 
   const m = oldLines.length
   const n = newLines.length

@@ -9248,6 +9248,52 @@ body {
   max-width: 900px;
 }
 
+/* --- 消息操作栏中的模型标识与图标 --- */
+.msg-action-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted, #777);
+  margin-left: 4px;
+  user-select: none;
+  line-height: 1.4;
+  min-height: 22px;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.msg-action-model-tag:hover {
+  background: var(--bg-menu-hover, rgba(0, 0, 0, 0.04));
+  color: var(--text-primary, #333);
+}
+
+.msg-action-model-tag .msg-model-icon {
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.msg-action-model-tag .msg-model-name {
+  color: var(--text-muted, #666);
+  font-weight: 500;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+  padding: 1px 0;
+}
+
+.msg-action-model-tag:hover .msg-model-name {
+  color: var(--text-primary, #333);
+}
+
 .msg-copy-btn {
   background: transparent;
   border: none;

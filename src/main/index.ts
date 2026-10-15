@@ -51,7 +51,7 @@ import {
 } from './agent-runtime'
 import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { clearProjectGuidanceCache } from './agent-runtime/project-guidance'
-import { parseInspectionEvidence } from './agent-runtime/inspection-evidence'
+import { parseInspectionEvidence, inspectionReads } from './agent-runtime/inspection-evidence'
 import { fileVersion, canonicalReadPath } from './tools/builtin/file/read-cache'
 import { userContextKeys, type ContextCheckpoint } from './agent-runtime/context-lifecycle'
 import { ModelRuntimeFactory } from './model-runtime'
@@ -321,25 +321,28 @@ async function buildSessionToolEvidence(sessionId: string, workspacePath?: strin
     if (!result.trim() || /^(?:错误|终端执行异常|文件操作异常|\[工具参数校验失败\])/i.test(result.trim())) continue
     const inspection = ['read_file', 'grep_content'].includes(call.name) ? parseInspectionEvidence(result) : undefined
 
+    const reads = inspectionReads(inspection)
     if (call.name === 'read_file') {
-      const rawPath = inspection?.read?.path || String(call.args.file_path || '')
-      if (!rawPath) continue
-      const filePath = isAbsolute(rawPath) ? rawPath : resolve(workspacePath || '', rawPath)
-      try {
-        const stat = await fs.promises.stat(filePath)
-        if (!stat.isFile()) continue
-        if (inspection?.read) {
-          if (!inspection.read.unchanged || fileVersion(stat) !== inspection.read.version) continue
-        } else if (stat.mtimeMs > event.time + 1000) continue
-      } catch {
-        continue
+      const candidates = reads.length ? reads : [{ path: String(call.args.file_path || ''), version: '', unchanged: true }]
+      let valid = true
+      for (const read of candidates) {
+        if (!read.path) { valid = false; break }
+        const filePath = isAbsolute(read.path) ? read.path : resolve(workspacePath || '', read.path)
+        try {
+          const stat = await fs.promises.stat(filePath)
+          if (!stat.isFile() || (read.version
+            ? !read.unchanged || fileVersion(stat) !== read.version
+            : stat.mtimeMs > event.time + 1000)) { valid = false; break }
+        } catch { valid = false; break }
       }
+      // Never replay a batch containing stale file contents as current evidence.
+      if (!valid) continue
     } else if (!inspection?.searches && event.time < lastMutationTime) {
       continue
     }
 
-    const key = inspection?.read
-      ? `read_file:${canonicalReadPath(inspection.read.path)}:${inspection.read.version}:${JSON.stringify(inspection.read.ranges)}`
+    const key = reads.length
+      ? `read_file:${JSON.stringify(reads.map(read => [canonicalReadPath(read.path), read.version, read.ranges]))}`
       : `${call.name}:${JSON.stringify(call.args)}`
     const item = [
       `工具: ${call.name}`,
@@ -4037,6 +4040,8 @@ app.whenReady().then(() => {
           user_id TEXT DEFAULT 'system',
           is_summarized INTEGER DEFAULT 0,
           prompt_info TEXT,
+          model TEXT,
+          provider TEXT,
           FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS persona_memories (
@@ -4305,6 +4310,27 @@ app.whenReady().then(() => {
           console.error('升级 messages 表结构添加 prompt_info 失败', alterErr)
         }
       }
+      // 动态升级：为老数据库添加 model 与 provider 列（模型名称与服务商）
+      try {
+        await db.get('SELECT model FROM messages LIMIT 1')
+      } catch (e) {
+        try {
+          await db.exec('ALTER TABLE messages ADD COLUMN model TEXT')
+          console.log('成功升级 SQLite messages 表结构，加入 model 列')
+        } catch (alterErr) {
+          console.error('升级 messages 表结构添加 model 失败', alterErr)
+        }
+      }
+      try {
+        await db.get('SELECT provider FROM messages LIMIT 1')
+      } catch (e) {
+        try {
+          await db.exec('ALTER TABLE messages ADD COLUMN provider TEXT')
+          console.log('成功升级 SQLite messages 表结构，加入 provider 列')
+        } catch (alterErr) {
+          console.error('升级 messages 表结构添加 provider 失败', alterErr)
+        }
+      }
       // 动态升级：为老数据库 sessions 表添加 context_summary 列（用于上下文摘要回注）
       try {
         await db.get('SELECT context_summary FROM sessions LIMIT 1')
@@ -4559,12 +4585,13 @@ app.whenReady().then(() => {
           const activeMessageColumns = `
           m.rowid AS msg_rowid, m.id, m.session_id, m.sender, m.text, m.time,
           m.is_thinking, m.tool_steps, m.file_info, m.file_infos, m.is_error,
-          m.user_id, m.is_summarized,
+          m.user_id, m.is_summarized, m.model, m.provider,
           CASE WHEN m.prompt_info IS NOT NULL THEN 1 ELSE 0 END AS has_prompt_info
         `
           const previewMessageColumns = `
           m.rowid AS msg_rowid, m.id, m.session_id, m.sender, m.text, m.time,
           m.is_thinking, m.file_info, m.file_infos, m.is_error, m.user_id, m.is_summarized,
+          m.model, m.provider,
           CASE WHEN m.prompt_info IS NOT NULL THEN 1 ELSE 0 END AS has_prompt_info
         `
           const activeMessages = activeSessionId
@@ -4665,7 +4692,9 @@ app.whenReady().then(() => {
             isError: m.is_error === 1,
             userId: m.user_id || 'system',
             isSummarized: m.is_summarized === 1,
-            hasPromptInfo: m.has_prompt_info === 1
+            hasPromptInfo: m.has_prompt_info === 1,
+            model: m.model || undefined,
+            provider: m.provider || undefined
           }
 
           if (!messagesBySession[m.session_id]) {
@@ -4904,8 +4933,8 @@ app.whenReady().then(() => {
 
   const messageUpsertSql = `
     INSERT INTO messages
-      (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, session_id, sender, text, time, is_thinking, tool_steps, file_info, file_infos, is_error, user_id, is_summarized, prompt_info, model, provider)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       session_id = excluded.session_id,
       sender = excluded.sender,
@@ -4918,7 +4947,9 @@ app.whenReady().then(() => {
       is_error = excluded.is_error,
       user_id = excluded.user_id,
       is_summarized = excluded.is_summarized,
-      prompt_info = COALESCE(excluded.prompt_info, messages.prompt_info)
+      prompt_info = COALESCE(excluded.prompt_info, messages.prompt_info),
+      model = COALESCE(excluded.model, messages.model),
+      provider = COALESCE(excluded.provider, messages.provider)
   `
 
   const serializeMessageForDb = (m: any) => {
@@ -4941,6 +4972,8 @@ app.whenReady().then(() => {
     const userId = m.userId || 'system'
     const isSummarized = m.isSummarized ? 1 : 0
     const promptInfo = m.promptInfo ? JSON.stringify(m.promptInfo) : null
+    const model = m.model ? String(m.model) : null
+    const provider = m.provider ? String(m.provider) : null
     return {
       msgId,
       sender,
@@ -4960,7 +4993,9 @@ app.whenReady().then(() => {
         isError,
         userId,
         isSummarized,
-        promptInfo
+        promptInfo,
+        model,
+        provider
       ]
     }
   }
@@ -6193,6 +6228,7 @@ app.whenReady().then(() => {
     workspacePath?: string,
     event?: Electron.IpcMainInvokeEvent,
     onToolEvent?: (evt: {
+      callId?: string
       type: string
       name: string
       args?: any
@@ -6607,6 +6643,7 @@ app.whenReady().then(() => {
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'tool_call',
+              callId: `${traceRequestId}:${step.id}`,
               name: step.name,
               args: step.args,
               timestamp: Date.now(),
@@ -6615,7 +6652,7 @@ app.whenReady().then(() => {
             })
           }
           if (onToolEvent) {
-            onToolEvent({ type: 'tool_call', name: step.name, args: step.args })
+            onToolEvent({ type: 'tool_call', callId: `${traceRequestId}:${step.id}`, name: step.name, args: step.args })
           }
         } else if (step.type === 'tool_result') {
           await appendTrace(
@@ -6636,6 +6673,7 @@ app.whenReady().then(() => {
           if (event) {
             event.sender.send('api:llm-tool-event', {
               type: 'tool_result',
+              callId: `${traceRequestId}:${step.callId}`,
               name: step.name,
               result: step.result,
               contextTokens: step.contextTokens,
@@ -6647,6 +6685,7 @@ app.whenReady().then(() => {
           if (onToolEvent) {
             onToolEvent({
               type: 'tool_result',
+              callId: `${traceRequestId}:${step.callId}`,
               name: step.name,
               result: step.result,
               contextTokens: step.contextTokens

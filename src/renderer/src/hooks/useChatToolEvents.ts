@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type */
 import { useCallback, useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
+import type { ChatToolEvent } from '../../../preload/chat-tool-event'
+import { toolStepKey, uniqueToolSteps } from './tool-step-identity'
 import { computeDiffLines, type FileChangeItem } from '../components/FileDiffModal'
 
 function mergeFileChanges(previous: FileChangeItem[] = [], incoming: FileChangeItem[] = []): FileChangeItem[] {
@@ -34,11 +36,15 @@ interface UseChatToolEventsOptions {
   onFinalArtifacts?: (files: any[], sessionId?: string) => void
 }
 
-function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[] {
-  const toolSteps = existingSteps ? [...existingSteps] : []
-  for (const { type, name, args, result, contextTokens, detail, progress, sources, files, changes, requestId, questions, request, status, beforeTokens, afterTokens, activeToolContextTokens, archivePath, removedMessages, timestamp: eventTimestamp } of events) {
+export function appendToolSteps(existingSteps: any[] | undefined, events: ChatToolEvent[]): any[] {
+  const toolSteps = uniqueToolSteps(existingSteps || [])
+  const seen = new Set(toolSteps.map(toolStepKey).filter(Boolean))
+  for (const { type, callId, name, args, result, contextTokens, detail, progress, sources, files, changes, requestId, questions, request, status, beforeTokens, afterTokens, activeToolContextTokens, archivePath, removedMessages, timestamp: eventTimestamp } of events) {
     const timestamp = Number(eventTimestamp) || Date.now()
-    const id = `step-${timestamp}-${Math.random()}`
+    const key = toolStepKey({ type: type === 'tool_call' ? 'call' : type === 'tool_result' ? 'result' : type, callId, name, timestamp, detail: type === 'tool_call' ? args : result })
+    if (key && seen.has(key)) continue
+    if (key) seen.add(key)
+    const id = callId ? `${type}:${callId}` : `step-${timestamp}-${Math.random()}`
     const sequence = toolSteps.length + 1
     if (type === 'context_usage') {
       const previous = toolSteps.findIndex(step => step.type === 'context_usage')
@@ -46,8 +52,8 @@ function appendToolSteps(existingSteps: any[] | undefined, events: any[]): any[]
       if (previous >= 0) toolSteps[previous] = snapshot
       else toolSteps.push(snapshot)
     }
-    else if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', name, detail: args })
-    else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', name, detail: result, contextTokens })
+    else if (type === 'tool_call') toolSteps.push({ id, sequence, timestamp, type: 'call', callId, name, detail: args })
+    else if (type === 'tool_result') toolSteps.push({ id, sequence, timestamp, type: 'result', callId, name, detail: result, contextTokens })
     else if (type === 'think') toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail })
     else if (type === 'context_compaction') {
       const existing = status === 'started' ? -1 : toolSteps.findLastIndex(step => step.type === 'compaction' && step.status === 'started')
@@ -266,7 +272,7 @@ export function useChatToolEvents({
       }
     }
 
-    const unsubscribe = window.api.onToolEvent((event: any) => {
+    const unsubscribe = window.api.onToolEvent((event: ChatToolEvent) => {
       const notice = toolNoticeForEvent(event)
       if (notice && (!event.sessionId || event.sessionId === activeSessionIdRef.current)) {
         showToast?.(notice.message, notice.type)

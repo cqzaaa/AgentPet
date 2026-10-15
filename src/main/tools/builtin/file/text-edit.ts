@@ -44,12 +44,14 @@ export function replaceExactText(content: string, oldString: string, newString: 
   if (!oldString) throw new Error('old_string 不能为空')
   const index = content.indexOf(oldString)
   if (index >= 0) {
-    if (replaceAll) return content.split(oldString).join(newString)
+    const fileNewline = content.includes('\r\n') ? '\r\n' : '\n'
+    const targetNewString = newString.replace(/\r\n|\r|\n/g, fileNewline)
+    if (replaceAll) return content.split(oldString).join(targetNewString)
     if (content.indexOf(oldString, index + 1) >= 0) {
       throw new Error('old_string 匹配多处；请补充唯一上下文，或明确设置 replace_all')
     }
     // Preserve literal replacement text, including JavaScript replacement patterns.
-    return content.slice(0, index) + newString + content.slice(index + oldString.length)
+    return content.slice(0, index) + targetNewString + content.slice(index + oldString.length)
   }
 
   // Tool arguments often use LF while Windows workspace files use CRLF (or vice

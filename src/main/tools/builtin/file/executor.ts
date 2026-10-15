@@ -53,13 +53,39 @@ export class FileExecutor implements IToolExecutor {
   public async execute(
     api: string,
     args: Record<string, any>,
-    context: ToolContext
+    context: ToolContext,
+    readLimit = MAX_TEXT_PAGE_CHARS
   ): Promise<ToolResult> {
     try {
       // 1. read_file
       if (api === 'read_file') {
+        if (context.abortSignal?.aborted) return { content: '读取已取消', success: false }
+        if (args.files !== undefined) {
+          if (!Array.isArray(args.files) || args.files.length < 1 || args.files.length > 6 || Object.keys(args).some(key => key !== 'files')) {
+            return { content: '错误：files 必须包含 1–6 项独立读取请求，不能与顶层单文件参数混用。', success: false }
+          }
+          const results: ToolResult[] = new Array(args.files.length)
+          let next = 0
+          await Promise.all(Array.from({ length: Math.min(3, args.files.length) }, async () => {
+            while (next < args.files.length) {
+              const index = next++
+              const item = args.files[index]
+              results[index] = !item || typeof item !== 'object' || Array.isArray(item) || item.files !== undefined
+                ? { content: '错误：每项必须是单文件读取参数，不能嵌套 files。', success: false }
+                : await this.execute(api, item, context, Math.floor(readLimit / args.files.length))
+            }
+          }))
+          return {
+            success: results.every(result => result.success),
+            content: results.map((result, index) => `[文件 ${index + 1}: ${String(args.files[index]?.file_path || '').slice(0, 500)} | ${result.success ? '成功' : '失败'}]\n${result.content}`).join('\n\n'),
+            state: {
+              readEvidences: results.flatMap(result => result.state?.readEvidence ? [result.state.readEvidence] : []),
+              imagePaths: results.flatMap(result => result.state?.imagePaths || [])
+            }
+          }
+        }
         let { file_path } = args
-        if (!file_path) return { content: '错误：缺少必要参数 file_path', success: false }
+        if (typeof file_path !== 'string' || !file_path.trim()) return { content: '错误：缺少有效的 file_path', success: false }
         file_path = resolveFilePath(file_path, context)
 
         // 兼容记忆提纯重命名：如果原 md 文件不存在，检查是否存在带 '_已更新.md' 后缀的同名文件
@@ -155,7 +181,9 @@ export class FileExecutor implements IToolExecutor {
         }
 
         if (args.start_char !== undefined || args.max_chars !== undefined) {
-          return { content: readTextPage(content, args.start_char, args.max_chars), success: true }
+          const requestedChars = args.max_chars === undefined ? readLimit : Number(args.max_chars)
+          if (!Number.isSafeInteger(requestedChars) || requestedChars < 1) throw new Error('max_chars 必须是正整数')
+          return { content: readTextPage(content, args.start_char, Math.min(requestedChars, readLimit)), success: true }
         }
 
         let finalContent = content
@@ -170,7 +198,6 @@ export class FileExecutor implements IToolExecutor {
             return { content: '错误：line_ranges 最多支持 12 个区间', success: false }
           }
           const normalizedRanges: Array<{ start: number; end: number }> = []
-          let requestedLineCount = 0
           for (const [index, range] of requestedRanges.entries()) {
             const start = Number(range?.start_line)
             const end = Number(range?.end_line)
@@ -181,15 +208,20 @@ export class FileExecutor implements IToolExecutor {
             if (start > lines.length) {
               return { content: `错误：line_ranges[${index}] 起始行号 ${start} 超出文件总行数 ${lines.length}`, success: false }
             }
-            requestedLineCount += boundedEnd - start + 1
             normalizedRanges.push({ start, end: boundedEnd })
           }
+          normalizedRanges.sort((a, b) => a.start - b.start)
+          for (const range of normalizedRanges) {
+            const last = deliveredRanges.at(-1)
+            if (last && range.start <= last.end + 1) last.end = Math.max(last.end, range.end)
+            else deliveredRanges.push({ ...range })
+          }
+          const requestedLineCount = deliveredRanges.reduce((sum, range) => sum + range.end - range.start + 1, 0)
           if (requestedLineCount > 1600) {
             return { content: `错误：line_ranges 合计请求 ${requestedLineCount} 行，超过 1600 行上限；请缩小到与当前任务相关的上下文`, success: false }
           }
-          deliveredRanges.push(...normalizedRanges)
-          finalContent = `[读取文件 ${basename(file_path)}，共 ${normalizedRanges.length} 个区间，总行数: ${lines.length}]\n` +
-            normalizedRanges.map(({ start, end }) => {
+          finalContent = `[读取文件 ${basename(file_path)}，共 ${deliveredRanges.length} 个区间，总行数: ${lines.length}]\n` +
+            deliveredRanges.map(({ start, end }) => {
               const body = lines.slice(start - 1, end)
                 .map((line, index) => `${start + index}: ${line}`)
                 .join('\n')
@@ -224,7 +256,7 @@ export class FileExecutor implements IToolExecutor {
           }
         }
 
-        const MAX_READ_LEN = MAX_TEXT_PAGE_CHARS
+        const MAX_READ_LEN = readLimit
         const truncated = finalContent.length > MAX_READ_LEN
         if (truncated) {
           finalContent = finalContent.slice(0, MAX_READ_LEN) + `\n\n... [警告：内容过长已自动截断，仅展示前 ${MAX_READ_LEN} 个字符。请使用 start_line/end_line 缩小范围；单行过长时请使用 start_char=0 和 max_chars=${MAX_READ_LEN} 开始字符分页，再根据返回的后续位置继续。]`

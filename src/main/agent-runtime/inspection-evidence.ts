@@ -1,11 +1,22 @@
+type ReadEvidence = { path: string; version: string; ranges: Array<{ start: number; end: number }>; truncated: boolean; unchanged: boolean; unresolved?: string }
 export type InspectionEvidence = {
-  read?: { path: string; version: string; ranges: Array<{ start: number; end: number }>; truncated: boolean; unchanged: boolean; unresolved?: string }
+  read?: ReadEvidence
+  reads?: ReadEvidence[]
   searches?: Array<{ question?: string; pattern: string; scope?: string; status: string; files?: string[]; locations?: string[]; unresolved?: string }>
 }
 
 const MARKER = '[代码检索检查点] '
 
+export function inspectionReads(evidence: InspectionEvidence | undefined): ReadEvidence[] {
+  return evidence?.reads || (evidence?.read ? [evidence.read] : [])
+}
+
 export function inspectionEvidence(state: any): InspectionEvidence | undefined {
+  if (Array.isArray(state?.readEvidences)) {
+    return { reads: state.readEvidences.slice(0, 6).map((item: ReadEvidence) => ({
+      path: item.path, version: item.version, ranges: item.ranges, truncated: item.truncated, unchanged: item.unchanged, unresolved: item.unresolved
+    })) }
+  }
   if (state?.readEvidence) {
     const { path, version, ranges, truncated, unchanged, unresolved } = state.readEvidence
     return { read: { path, version, ranges, truncated, unchanged, unresolved } }
@@ -30,6 +41,7 @@ export function parseInspectionEvidence(result: string): InspectionEvidence | un
   try {
     const value = JSON.parse(line.slice(MARKER.length))
     if (value?.read && typeof value.read.path === 'string' && typeof value.read.version === 'string') return value
+    if (Array.isArray(value?.reads) && value.reads.every((item: ReadEvidence) => typeof item?.path === 'string' && typeof item?.version === 'string')) return value
     if (Array.isArray(value?.searches)) return value
   } catch { /* Legacy tool outputs do not contain structured evidence. */ }
   return undefined

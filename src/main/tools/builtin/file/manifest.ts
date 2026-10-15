@@ -11,10 +11,36 @@ export const fileManifest: ToolManifest = {
   api: [
     {
       name: 'read_file',
-      description: '读取文件。PNG、JPEG、WebP、GIF、BMP 图片通过多模态通道返回，可直接查看历史附件或本地截图，无需 Python/OCR；文本分页参数不适用于图片。代码调查时通常一次读取约 150–300 行上下文；同一文件有多个离散命中时优先用 line_ranges 一次读取，避免连续调用许多十几行的小片段。支持 PDF、Word、Excel、CSV 及文本文件的语义文本，但不保留 Office/PDF 的字体、颜色、坐标和版式；格式或版式任务应加载 office Skill。默认最多返回 30000 字符。',
+      description: '读取文件。已知多个文件时用 files 一次批量读取（最多 6 项，按输入顺序返回，各项失败独立）；同文件的离散区间用 line_ranges，重叠区间自动合并。单文件用 file_path，不能与 files 混用。代码调查一次读取完整相关代码块，避免连续读取十几行。批量文本共享 30000 字符预算。图片通过多模态通道返回，无需 Python/OCR。支持 PDF、Word、Excel、CSV 语义文本；版式任务加载 office Skill。',
       parameters: {
         type: 'object',
         properties: {
+          files: {
+            type: 'array', minItems: 1, maxItems: 6,
+            description: '优先用于多个已知文件的独立读取。每项单独指定路径和范围，不继承顶层参数；文本预算在各项间均分。',
+            items: {
+              type: 'object',
+              properties: {
+                file_path: { type: 'string' },
+                start_line: { type: 'integer', minimum: 1 },
+                end_line: { type: 'integer', minimum: 1 },
+                line_ranges: {
+                  type: 'array', minItems: 1, maxItems: 12,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      start_line: { type: 'integer', minimum: 1 },
+                      end_line: { type: 'integer', minimum: 1 }
+                    },
+                    required: ['start_line', 'end_line']
+                  }
+                },
+                start_char: { type: 'integer', minimum: 0 },
+                max_chars: { type: 'integer', minimum: 1, maximum: 30000 }
+              },
+              required: ['file_path']
+            }
+          },
           file_path: {
             type: 'string',
             description: '文件路径；可使用绝对路径，或相对于当前工作区的路径'
@@ -64,7 +90,7 @@ export const fileManifest: ToolManifest = {
             description: 'CSV 或 Excel 最多读取行数（默认 500，上限 2000）'
           }
         },
-        required: ['file_path']
+        anyOf: [{ required: ['file_path'] }, { required: ['files'] }]
       }
     },
     {

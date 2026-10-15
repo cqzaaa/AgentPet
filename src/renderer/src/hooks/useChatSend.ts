@@ -222,8 +222,25 @@ export function useChatSend({
           .trimEnd()
       : ''
     const placeholder: any = failedReply
-      ? resumeActivityDuration({ ...failedReply, text: retryBaseText, retryBaseText, isThinking: true, isError: false })
-      : { id: replyId, sender: 'agent', text: '', isThinking: true, toolSteps: [], time }
+      ? resumeActivityDuration({
+          ...failedReply,
+          text: retryBaseText,
+          retryBaseText,
+          isThinking: true,
+          isError: false,
+          model: failedReply.model || llmConfig.model,
+          provider: failedReply.provider || llmConfig.provider
+        })
+      : {
+          id: replyId,
+          sender: 'agent',
+          text: '',
+          isThinking: true,
+          toolSteps: [],
+          time,
+          model: llmConfig.model,
+          provider: llmConfig.provider
+        }
 
     if (edit) {
       const removedIds = originalSession.messages.slice(editIndex).map((message: any) => String(message.id))

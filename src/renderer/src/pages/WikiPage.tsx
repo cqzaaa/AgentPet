@@ -6,9 +6,9 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Clock3, Download, ExternalLink, FileText, Folder,
-  FolderOpen, History, Link2, LoaderCircle, Maximize2, Minimize2, Network, Pencil,
-  Plus, RefreshCw, Save, Search, Trash2, X
+  AlertTriangle, ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, Clock3, Download, ExternalLink, FileText, Folder,
+  FolderOpen, History, Layers, Link2, LoaderCircle, LocateFixed, Maximize2, Minimize2, Network, PanelLeftClose, PanelLeftOpen, Pencil,
+  Plus, RefreshCw, Save, Search, Sparkles, Trash2, X
 } from 'lucide-react'
 import { FileIcon } from '../components/FileIcon'
 import './WikiPage.css'
@@ -63,6 +63,79 @@ function errorMessage(reason: unknown, fallback: string): string {
 
 function icon(type: string, size = 15, fileName = ''): React.JSX.Element {
   return <FileIcon fileName={fileName || type} fileType={type} size={size} className="wiki-file-icon" />
+}
+
+const NODE_TYPE_INFO: Record<string, { label: string; badgeClass: string }> = {
+  section: { label: '章节目录', badgeClass: 'badge-section' },
+  heading: { label: '小节标题', badgeClass: 'badge-heading' },
+  title: { label: '文档主标', badgeClass: 'badge-heading' },
+  paragraph: { label: '正文段落', badgeClass: 'badge-paragraph' },
+  text: { label: '文本内容', badgeClass: 'badge-paragraph' },
+  table: { label: '数据表格', badgeClass: 'badge-table' },
+  picture: { label: '插图图片', badgeClass: 'badge-image' },
+  image: { label: '插图图片', badgeClass: 'badge-image' },
+  figure: { label: '示意图表', badgeClass: 'badge-image' },
+  list: { label: '列表清单', badgeClass: 'badge-list' },
+  list_item: { label: '列表项目', badgeClass: 'badge-list' },
+  code: { label: '程序代码', badgeClass: 'badge-code' },
+  formula: { label: '数学公式', badgeClass: 'badge-formula' },
+  equation: { label: '数学公式', badgeClass: 'badge-formula' },
+  caption: { label: '题注说明', badgeClass: 'badge-caption' },
+  footnote: { label: '文献脚注', badgeClass: 'badge-footnote' },
+  header: { label: '页面页眉', badgeClass: 'badge-header' },
+  footer: { label: '页面页脚', badgeClass: 'badge-footer' },
+  reference: { label: '参考文献', badgeClass: 'badge-reference' },
+  bibliography: { label: '参考文献', badgeClass: 'badge-reference' }
+}
+
+function getNodeTypeMeta(rawType: string): { label: string; badgeClass: string } {
+  const key = (rawType || '').toLowerCase().replace(/[\s-]+/g, '_')
+  if (NODE_TYPE_INFO[key]) return NODE_TYPE_INFO[key]
+  return {
+    label: rawType ? `${rawType} 结构块` : '结构节点',
+    badgeClass: 'badge-default'
+  }
+}
+
+type NodeCategory = 'section' | 'special' | 'paragraph'
+
+function getNodeCategory(rawType: string): NodeCategory {
+  const key = (rawType || '').toLowerCase().replace(/[\s-]+/g, '_')
+  if (key === 'section' || key === 'heading' || key === 'title') return 'section'
+  if (['table', 'picture', 'image', 'figure', 'code', 'formula', 'equation'].includes(key)) return 'special'
+  return 'paragraph'
+}
+
+function formatDocParser(parser?: string): string {
+  if (!parser) return '等待解析'
+  const p = parser.toLowerCase()
+  if (p.includes('docling')) {
+    if (p.includes('rapidocr') || p.includes('ocr')) {
+      return 'Docling 深度文档解析（含 OCR 增强）'
+    }
+    return 'Docling 深度文档结构解析'
+  }
+  if (p.includes('pdf')) return 'PDF 文档解析器'
+  if (p.includes('markdown') || p.includes('md')) return 'Markdown 文档解析器'
+  return parser
+}
+
+function getFileTypeChineseLabel(fileType: string): string {
+  const ft = (fileType || '').toLowerCase()
+  switch (ft) {
+    case 'pdf': return 'PDF 文档'
+    case 'md':
+    case 'markdown': return 'Markdown 笔记'
+    case 'docx':
+    case 'doc': return 'Word 文档'
+    case 'txt': return '纯文本文件'
+    case 'xlsx':
+    case 'xls': return 'Excel 表格'
+    case 'pptx':
+    case 'ppt': return 'PPT 演示文稿'
+    case 'html': return '网页文档'
+    default: return `${fileType ? fileType.toUpperCase() : '未知'} 格式`
+  }
 }
 
 function makeTree(items: WikiItem[]): TreeNode[] {
@@ -505,6 +578,7 @@ export function WikiPage(): React.JSX.Element {
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [dialogValue, setDialogValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLFormElement>(null)
   const graphExpandButtonRef = useRef<HTMLButtonElement>(null)
@@ -636,18 +710,22 @@ export function WikiPage(): React.JSX.Element {
       maxY = Math.max(maxY, node.position.y + size + 34)
     }
     const narrow = window.innerWidth <= 820
-    const readerWidth = readerOpen && !narrow ? Math.min(460, (container.clientWidth + 220) * .45) + 24 : 0
-    const width = Math.max(240, container.clientWidth - readerWidth)
-    const height = Math.max(220, container.clientHeight * (readerOpen && narrow ? .55 : 1))
-    const padding = focusedEntityId ? 0.08 : graphExpanded ? 0.16 : 0.22
-    const spanX = Math.max(220, maxX - minX)
-    const spanY = Math.max(220, maxY - minY)
-    const maxZoom = graphExpanded ? 1.15 : 1.05
-    const zoom = Math.max(0.22, Math.min(maxZoom, Math.min((width * (1 - padding * 2)) / spanX, (height * (1 - padding * 2)) / spanY)))
+    // 右侧小框宽度 350px，右侧预留少量间隙，图谱中心始终居中在开阔的中央舞台
+    const drawerOffset = readerOpen && !narrow ? 360 : 0
+    const availableWidth = Math.max(320, container.clientWidth - drawerOffset)
+    const height = Math.max(260, container.clientHeight * (readerOpen && narrow ? 0.52 : 1))
+    const padding = focusedEntityId ? 0.08 : graphExpanded ? 0.10 : 0.14
+    const spanX = Math.max(240, maxX - minX)
+    const spanY = Math.max(240, maxY - minY)
+    const maxZoom = graphExpanded ? 1.25 : 1.15
+    const minZoom = 0.45
+    const zoom = Math.max(minZoom, Math.min(maxZoom, Math.min((availableWidth * (1 - padding * 2)) / spanX, (height * (1 - padding * 2)) / spanY)))
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
+    const targetX = availableWidth / 2 - centerX * zoom
+    const targetY = height / 2 - centerY * zoom
     const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    void instance.setViewport({ x: width / 2 - centerX * zoom, y: height / 2 - centerY * zoom, zoom }, { duration: animate && !reducedMotion ? 380 : 0 })
+    void instance.setViewport({ x: targetX, y: targetY, zoom }, { duration: animate && !reducedMotion ? 380 : 0 })
   }, [activeGraphFocusId, focusedEntityId, graphExpanded, readerOpen])
 
   useEffect(() => {
@@ -1154,18 +1232,172 @@ export function WikiPage(): React.JSX.Element {
       </main>
     ) : workspace ? (
       <div
-        className={`wiki-workbench wiki-graph-workbench${graphExpanded ? ' is-graph-expanded' : ''}`}
+        className={`wiki-workbench wiki-graph-workbench${graphExpanded ? ' is-graph-expanded' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}
       >
-        <aside className="wiki-sidebar" aria-label="Wiki 文件树">
+        <aside className={`wiki-sidebar${sidebarCollapsed ? ' is-collapsed' : ''}`} aria-label="Wiki 文件树">
           <div className="wiki-search"><Search size={14} /><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索页面与文件" aria-label="搜索页面与文件" />{query && <button type="button" aria-label="清除搜索" onClick={() => { setQuery(''); searchRef.current?.focus() }}><X size={13} /></button>}</div>
           <div className="wiki-tree">{query ? (matches.length ? matches.map(match => <div className="wiki-search-row" key={match.id}><button type="button" className="wiki-search-result" onClick={() => openItem(match.id)}>{icon(match.fileType, 16, match.relativePath || match.title)}<span><strong>{match.title}</strong><small>{match.relativePath}</small></span></button><button type="button" className="wiki-item-remove" aria-label={`删除 ${match.title}`} title={`移入回收站：${match.title}`} onClick={(e) => { e.stopPropagation(); setDialog({ type: 'delete-item', item: match }) }}><Trash2 size={13} /></button></div>) : <div className="wiki-empty-small">没有匹配结果</div>) : tree.length ? renderTree(tree) : <div className="wiki-empty-small">文件夹中还没有支持的文档</div>}</div>
         </aside>
         <main className={`wiki-content wiki-graph-reader${readerOpen ? ' is-open' : ''}`} aria-label="图谱文档详情">
-          <div className="wiki-reader-head"><span>图谱中的文档</span><button type="button" aria-label="收起文档详情" disabled={dirty} title={dirty ? '请先保存或取消编辑' : '收起文档详情'} onClick={() => setReaderOpen(false)}><X size={16} /></button></div>
+          <div className="wiki-reader-head">
+            <div className="wiki-reader-head-left" title={displayedItem ? displayedItem.title : '文档详情'}>
+              <BookOpen size={14} />
+              <span className="wiki-reader-title-text">{displayedItem ? displayedItem.title : '文档详情'}</span>
+            </div>
+            <div className="wiki-reader-head-actions">
+              {displayedItem && (
+                <>
+                  <span className={`wiki-reader-status${dirty ? ' dirty' : ''}`}>
+                    {saving ? '保存中' : dirty ? '未保存' : <><Check size={11} />已保存</>}
+                  </span>
+                  {displayedItem.editable ? (
+                    mode === 'read' ? (
+                      <button type="button" className="wiki-reader-icon-btn" title="编辑文档" onClick={() => setMode('edit')}>
+                        <Pencil size={12} />
+                        <span>编辑</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button type="button" className="wiki-reader-icon-btn" onClick={() => { setDraft(saved); setMode('read') }}>取消</button>
+                        <button type="button" className="wiki-reader-icon-btn primary" disabled={!dirty || saving} onClick={() => void savePage()}><Save size={12} />保存</button>
+                      </>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      className="wiki-reader-icon-btn"
+                      title="在系统默认应用中打开原始文件"
+                      onClick={() => void window.api.openLocalFile(`local-file:///${displayedItem.absolutePath.replace(/\\/g, '/')}`)}
+                    >
+                      <ExternalLink size={12} />
+                      <span>原文件</span>
+                    </button>
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                className="wiki-reader-close-btn"
+                aria-label="收起文档详情"
+                disabled={dirty}
+                title={dirty ? '请先保存或取消编辑' : '收起文档详情'}
+                onClick={() => setReaderOpen(false)}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
           {progress?.status === 'running' && <div className="wiki-sync" role="status"><span style={{ width: `${percent}%` }} /><LoaderCircle className="wiki-spin" size={14} /><strong>正在建立索引</strong><small>{progress.currentFile || '准备文件'} · {progress.completed}/{progress.total}</small></div>}
-          {displayedItem ? <><div className="wiki-toolbar"><div><strong title={displayedItem.relativePath}>{displayedItem.title}</strong></div><div><span className={dirty ? 'dirty' : ''}>{saving ? '保存中' : dirty ? '尚未保存' : <><Check size={12} />已保存</>}</span>{displayedItem.editable ? mode === 'read' ? <button type="button" onClick={() => setMode('edit')}><Pencil size={14} />编辑</button> : <><button type="button" onClick={() => { setDraft(saved); setMode('read') }}>取消</button><button type="button" className="primary" disabled={!dirty || saving} onClick={() => void savePage()}><Save size={14} />保存</button></> : <button type="button" onClick={() => void window.api.openLocalFile(`local-file:///${displayedItem.absolutePath.replace(/\\/g, '/')}`)}><ExternalLink size={14} />打开原文件</button>}</div></div>
-            <div className="wiki-document"><section className="wiki-document-title"><h2>{displayedItem.title}</h2></section>{mode === 'edit' ? <textarea className="wiki-editor resize-none" value={draft} onChange={event => setDraft(event.target.value)} spellCheck={false} aria-label={`编辑 ${displayedItem.title}`} /> : displayedItem.editable && selectedEvidence?.itemId !== displayedItem.id ? <MarkdownView content={saved} currentPath={displayedItem.relativePath} items={items} open={openItem} /> : <section className="wiki-source">{doc?.document.warning && <div className="wiki-source-warning"><AlertTriangle size={15} />{doc.document.warning}</div>}<div className="wiki-source-meta"><span>解析器：{doc?.document.parser || '等待解析'}</span><span>{contentNodes.length} 个结构节点</span></div>{contentNodes.map(node => <article id={`wiki-content-${node.id}`} className={selectedEvidence?.itemId === displayedItem.id && selectedEvidence.evidence.nodeId === node.id ? 'is-evidence' : ''} key={node.id}><div><span>{node.type}</span>{node.pageStart && <small>第 {node.pageStart} 页</small>}</div>{node.title && <h3>{node.title}</h3>}{node.content && node.content !== node.title && <p>{node.content}</p>}</article>)}</section>}</div></> :
-            <section className="wiki-folder-view"><div><FolderOpen size={22} /><span><small>FOLDER VIEW</small><h2>{folder || workspace.name}</h2><p>{folderItems.length} 个直接内容项</p></span></div><section>{folderItems.map(entry => <button type="button" key={entry.id} onClick={() => openItem(entry.id)}>{icon(entry.fileType, 18, entry.relativePath || entry.title)}<span><strong>{entry.title}</strong><small>{entry.fileType.toUpperCase()} · {formatBytes(entry.fileSize)}</small></span><ChevronRight size={14} /></button>)}</section></section>}
+          {displayedItem ? <>
+            <div className="wiki-document">
+              <section className="wiki-document-title">
+                <div className="wiki-document-badge-row">
+                  <span className="wiki-document-badge">
+                    <BookOpen size={11} />
+                    {getFileTypeChineseLabel(displayedItem.fileType)}
+                  </span>
+                  <small className="wiki-document-path" title={displayedItem.relativePath}>
+                    {displayedItem.relativePath}
+                  </small>
+                </div>
+                <h2>{displayedItem.title}</h2>
+              </section>
+              {mode === 'edit' ? (
+                <textarea
+                  className="wiki-editor resize-none"
+                  value={draft}
+                  onChange={event => setDraft(event.target.value)}
+                  spellCheck={false}
+                  aria-label={`编辑 ${displayedItem.title}`}
+                />
+              ) : displayedItem.editable && selectedEvidence?.itemId !== displayedItem.id ? (
+                <MarkdownView content={saved} currentPath={displayedItem.relativePath} items={items} open={openItem} />
+              ) : (
+                <section className="wiki-source">
+                  {doc?.document.warning && (
+                    <div className="wiki-source-warning">
+                      <AlertTriangle size={14} />
+                      {doc.document.warning}
+                    </div>
+                  )}
+                  <div className="wiki-source-meta">
+                    <span className="wiki-meta-pill parser" title={formatDocParser(doc?.document.parser)}>
+                      <Sparkles size={12} />
+                      {formatDocParser(doc?.document.parser)}
+                    </span>
+                    <span className="wiki-meta-pill count">
+                      <Layers size={12} />
+                      {contentNodes.length} 节点
+                    </span>
+                  </div>
+                  {contentNodes.map((node, index) => {
+                    const meta = getNodeTypeMeta(node.type)
+                    const category = getNodeCategory(node.type)
+                    const isSelected = selectedEvidence?.itemId === displayedItem.id && selectedEvidence.evidence.nodeId === node.id
+                    const prevNode = index > 0 ? contentNodes[index - 1] : null
+                    const isPageBreak = Boolean(node.pageStart && (!prevNode || prevNode.pageStart !== node.pageStart))
+
+                    if (category === 'section') {
+                      return (
+                        <div
+                          id={`wiki-content-${node.id}`}
+                          className={`wiki-source-section-header${isSelected ? ' is-evidence' : ''}`}
+                          key={node.id}
+                        >
+                          <div className="wiki-section-heading-inner">
+                            <span className="wiki-section-pill">章节</span>
+                            <h3 className="wiki-section-title">{node.title || node.content}</h3>
+                            {node.pageStart && (
+                              <span className="wiki-node-page-inline">
+                                第 {node.pageStart} 页
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    if (category === 'special') {
+                      return (
+                        <article
+                          id={`wiki-content-${node.id}`}
+                          className={`wiki-source-special-card ${meta.badgeClass}${isSelected ? ' is-evidence' : ''}`}
+                          key={node.id}
+                        >
+                          <div className="wiki-card-header">
+                            <span className={`wiki-node-badge ${meta.badgeClass}`}>{meta.label}</span>
+                            {node.pageStart && (
+                              <span className="wiki-node-page-inline">
+                                第 {node.pageStart} 页
+                              </span>
+                            )}
+                          </div>
+                          {node.title && <h4 className="wiki-card-title">{node.title}</h4>}
+                          {node.content && node.content !== node.title && <div className="wiki-card-body">{node.content}</div>}
+                        </article>
+                      )
+                    }
+
+                    return (
+                      <article
+                        id={`wiki-content-${node.id}`}
+                        className={`wiki-source-para-flow${isSelected ? ' is-evidence' : ''}`}
+                        key={node.id}
+                      >
+                        {isPageBreak && node.pageStart && (
+                          <div className="wiki-para-page-tag">
+                            <span>第 {node.pageStart} 页</span>
+                          </div>
+                        )}
+                        <p className="wiki-para-text">{node.content || node.title}</p>
+                      </article>
+                    )
+                  })}
+                </section>
+              )}
+            </div>
+          </> :
+          <section className="wiki-folder-view"><div><FolderOpen size={22} /><span><small>目录浏览</small><h2>{folder || workspace.name}</h2><p>{folderItems.length} 个直接内容项</p></span></div><section>{folderItems.map(entry => <button type="button" key={entry.id} onClick={() => openItem(entry.id)}>{icon(entry.fileType, 18, entry.relativePath || entry.title)}<span><strong>{entry.title}</strong><small>{getFileTypeChineseLabel(entry.fileType)} · {formatBytes(entry.fileSize)}</small></span><ChevronRight size={14} /></button>)}</section></section>}
         </main>
         <aside className={`wiki-context${graphExpanded ? ' is-graph-expanded' : ''}`} aria-label={graphExpanded ? '放大的 Wiki 图谱' : 'Wiki 关系面板'}>
           <div className="wiki-tabs" role="tablist">
@@ -1174,10 +1406,59 @@ export function WikiPage(): React.JSX.Element {
           </div>
           {sideTab === 'graph' ? (
             <div className="wiki-graph" ref={graphContainerRef}>
-              <div className="wiki-graph-path">
-                <button type="button" onClick={() => { setFocusedEntityId(''); setFocusedGraphNodeId('') }} disabled={!activeGraphFocusId}>全部实体</button>
-                {focusedEntityId && <><ChevronRight size={13} /><strong>{graph.nodes.find(node => node.id === focusedEntityId)?.label || '实体'}</strong><span>→ 内容片段 → 文档 · 每篇最多展示 8 处摘录，可拖动画布继续浏览</span></>}
-                {!focusedEntityId && <span>点击实体，展开内容与文档的连线</span>}
+              <div className="wiki-graph-floating-island">
+                <button
+                  type="button"
+                  className="wiki-pill-btn sidebar-toggle"
+                  onClick={() => setSidebarCollapsed(c => !c)}
+                  title={sidebarCollapsed ? '展开文件目录' : '收起文件目录'}
+                  aria-label={sidebarCollapsed ? '展开文件目录' : '收起文件目录'}
+                >
+                  {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+                </button>
+                <div className="wiki-pill-divider" />
+                <button
+                  type="button"
+                  className={`wiki-pill-btn all-entities${!activeGraphFocusId ? ' is-active' : ''}`}
+                  onClick={() => { setFocusedEntityId(''); setFocusedGraphNodeId('') }}
+                  disabled={!activeGraphFocusId}
+                >
+                  全部实体
+                </button>
+                {focusedEntityId && (
+                  <>
+                    <ChevronRight size={12} className="wiki-pill-arrow" />
+                    <span className="wiki-pill-current">
+                      <strong>{graph.nodes.find(node => node.id === focusedEntityId)?.label || '实体'}</strong>
+                    </span>
+                  </>
+                )}
+                {!focusedEntityId && (
+                  <span className="wiki-pill-hint">点击实体展开网络</span>
+                )}
+                <div className="wiki-pill-divider" />
+                <button
+                  type="button"
+                  className="wiki-pill-btn fit-view"
+                  title="居中重置视图"
+                  aria-label="居中重置视图"
+                  onClick={() => centerGraphViewport(viewportNodes, true)}
+                >
+                  <LocateFixed size={14} />
+                  <span>居中</span>
+                </button>
+                {!readerOpen && displayedItem && (
+                  <button
+                    type="button"
+                    className="wiki-pill-btn open-reader"
+                    title="展开文档详情"
+                    aria-label="展开文档详情"
+                    onClick={() => setReaderOpen(true)}
+                  >
+                    <BookOpen size={14} />
+                    <span>文档</span>
+                  </button>
+                )}
               </div>
               {graphLoading && <div className="wiki-graph-status" role="status"><LoaderCircle className="wiki-spin" size={16} />正在加载关联内容</div>}
               {!graphLoading && graphError && <div className="wiki-graph-status" role="alert">{graphError}<button type="button" onClick={() => setGraphRevision(value => value + 1)}>重试</button></div>}
