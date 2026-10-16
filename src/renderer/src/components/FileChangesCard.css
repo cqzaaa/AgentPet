@@ -226,6 +226,28 @@
   flex-shrink: 0;
 }
 
+.file-item-subtask-tag {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dark .file-item-subtask-tag,
+.agent-window-container.dark .file-item-subtask-tag {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
 .file-changes-item.is-item-reverted {
   opacity: 0.65;
 }

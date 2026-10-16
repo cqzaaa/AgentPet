@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { ChevronRight, LoaderCircle, Terminal } from 'lucide-react'
 import './ChatActivityGroup.css'
 import { formatActivityDuration } from '../hooks/chat-activity-duration'
@@ -20,15 +20,22 @@ export function ChatTurnActivity({ running, durationMs, children }: {
   )
 }
 
-export function ChatActivityGroup({ count, running, isThinking, activityLabel, children }: {
+export function ChatActivityGroup({ count, running, isThinking, activityLabel, defaultOpen = false, children }: {
   count: number
   running: boolean
   isThinking?: boolean
   activityLabel?: string
+  defaultOpen?: boolean
   children: ReactNode
 }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+
   return (
-    <details className="chat-activity-group">
+    <details
+      className="chat-activity-group"
+      open={isOpen}
+      onToggle={(e) => setIsOpen((e.target as HTMLDetailsElement).open)}
+    >
       <summary className="chat-activity-summary">
         {running ? <LoaderCircle size={14} className="icon-spin" aria-hidden="true" /> : <Terminal size={14} aria-hidden="true" />}
         <span className={`chat-activity-label${isThinking ? ' chat-activity-shimmer-text' : ''}`} title={activityLabel}>

@@ -5,6 +5,7 @@ import type { WorkflowDefinition } from '../../../preload/workflow-types'
 import { MarkdownText } from '../components/ChatMessageItem'
 import { requestConfirmation } from '../components/confirmService'
 import {
+  Activity,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -19,8 +20,11 @@ import {
   FileText,
   FolderOpen,
   Ghost,
-  Lightbulb,
+  Globe,
   KeyRound,
+  LayoutGrid,
+  Lightbulb,
+  List,
   LoaderCircle,
   Network,
   Pause,
@@ -30,9 +34,12 @@ import {
   Plus,
   Save,
   Search,
+  Server,
   Settings2,
+  ShieldCheck,
   Siren,
   Store,
+  Terminal,
   Trash2,
   Upload,
   Wrench,
@@ -94,6 +101,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [paddleToken, setPaddleToken] = React.useState('')
   const [paddleTokenConfigured, setPaddleTokenConfigured] = React.useState(false)
 
+  // MCP 面板交互状态与双视图
+  const [mcpViewMode, setMcpViewMode] = React.useState<'grid' | 'table'>('grid')
+  const [mcpSearchQuery, setMcpSearchQuery] = React.useState('')
+
   // 编辑弹窗相关状态
   const [showEditModal, setShowEditModal] = React.useState(false)
   const [editingServer, setEditingServer] = React.useState<any>(null)
@@ -140,6 +151,104 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     setEditApiKey('')
     setEditShowApiKey(false)
     setEditEnv('')
+  }
+
+  // MCP 统计指标计算
+  const mcpStats = React.useMemo(() => {
+    const servers = mcpConfig?.servers || []
+    return {
+      totalCount: servers.length,
+      enabledCount: servers.filter((s: any) => s.enabled).length,
+      httpCount: servers.filter((s: any) => s.type !== 'stdio').length,
+      stdioCount: servers.filter((s: any) => s.type === 'stdio').length
+    }
+  }, [mcpConfig?.servers])
+
+  // MCP 过滤列表
+  const filteredMcpServers = React.useMemo(() => {
+    const list = mcpConfig?.servers || []
+    const q = mcpSearchQuery.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((s: any) => {
+      const name = (s.name || '').toLowerCase()
+      const target = (s.type === 'stdio' ? s.command : s.url) || ''
+      return name.includes(q) || target.toLowerCase().includes(q)
+    })
+  }, [mcpConfig?.servers, mcpSearchQuery])
+
+  // 根据服务名生成动态渐变色徽章背景
+  const getBadgeGradient = (name: string) => {
+    const gradients = [
+      'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+      'linear-gradient(135deg, #8b5cf6, #6d28d9)',
+      'linear-gradient(135deg, #06b6d4, #0e7490)',
+      'linear-gradient(135deg, #10b981, #047857)',
+      'linear-gradient(135deg, #f59e0b, #d97706)',
+      'linear-gradient(135deg, #ec4899, #be185d)'
+    ]
+    let hash = 0
+    for (let i = 0; i < (name || '').length; i++) {
+      hash = (hash << 5) - hash + name.charCodeAt(i)
+      hash |= 0
+    }
+    const index = Math.abs(hash) % gradients.length
+    return gradients[index]
+  }
+
+  // MCP 服务通用操作
+  const handleTestMcpServer = async (server: any) => {
+    try {
+      showToast(`正在测试连接 [${server.name}]...`, 'info')
+      const res = await window.api.testMcpServer({
+        id: server.id,
+        url: server.url,
+        command: server.command,
+        args: server.args,
+        cwd: server.cwd,
+        type: server.type || 'stream',
+        preset: server.preset,
+        model: server.model
+      })
+      setTestResultData(res)
+      setTestResultServerName(server.name)
+      setShowTestResultModal(true)
+    } catch (err: any) {
+      alert(`测试异常：\n${err.message || err}`)
+    }
+  }
+
+  const handleEditMcpServer = (server: any) => {
+    setEditingServer(server)
+    setEditName(server.name)
+    setEditUrl(server.url)
+    setEditCommand(server.command || '')
+    setEditArgs(JSON.stringify(server.args || []))
+    setEditCwd(server.cwd || '')
+    setEditEnv('')
+    setEditClearEnv(false)
+    setEditApiKey('')
+    setEditShowApiKey(false)
+    setEditClearApiKey(false)
+    setEditType(server.type === 'stdio' ? 'stdio' : 'stream')
+    setShowEditModal(true)
+  }
+
+  const handleDeleteMcpServer = async (server: any) => {
+    if (await requestConfirmation({
+      title: `删除 [${server.name}] 服务？`,
+      description: '删除后该 MCP 服务提供的工具将不再可用。',
+      confirmLabel: '确认删除',
+      tone: 'danger'
+    })) {
+      const newServers = (mcpConfig?.servers || []).filter((s: any) => s.id !== server.id)
+      saveMcpConfig({ servers: newServers })
+      showToast(`已删除 [${server.name}] 服务。`, 'success')
+    }
+  }
+
+  const handleToggleMcpServer = (server: any, enabled: boolean) => {
+    const newServers = (mcpConfig?.servers || []).map((s: any) => s.id === server.id ? { ...s, enabled } : s)
+    saveMcpConfig({ servers: newServers })
   }
 
   React.useEffect(() => {
@@ -1041,12 +1150,293 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               </div>
             </div>
 
-            {/* MCP 服务列表区 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div className="settings-section-title" style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>
-                已连接的服务列表 ({(mcpConfig?.servers || []).length})
+            {/* 概览统计条 */}
+            <div
+              className="mcp-stats-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '12px',
+                marginBottom: '16px'
+              }}
+            >
+              {/* 总配置服务 */}
+              <div
+                className="mcp-stat-card"
+                style={{
+                  background: 'var(--bg-card, rgba(128,128,128,0.03))',
+                  border: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                  borderRadius: '10px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>总配置服务</span>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(59, 130, 246, 0.12)',
+                      color: '#3b82f6'
+                    }}
+                  >
+                    <Server size={14} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color-strong)' }}>
+                  {mcpStats.totalCount}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+
+              {/* 生效运行中（带脉冲绿点） */}
+              <div
+                className="mcp-stat-card"
+                style={{
+                  background: 'var(--bg-card, rgba(128,128,128,0.03))',
+                  border: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                  borderRadius: '10px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>生效运行中</span>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        backgroundColor: '#10b981',
+                        boxShadow: '0 0 6px rgba(16, 185, 129, 0.8)'
+                      }}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(16, 185, 129, 0.12)',
+                      color: '#10b981'
+                    }}
+                  >
+                    <Activity size={14} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color-strong)' }}>
+                  {mcpStats.enabledCount}
+                </div>
+              </div>
+
+              {/* HTTP 远程服务 */}
+              <div
+                className="mcp-stat-card"
+                style={{
+                  background: 'var(--bg-card, rgba(128,128,128,0.03))',
+                  border: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                  borderRadius: '10px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>HTTP 远程服务</span>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(6, 182, 212, 0.12)',
+                      color: '#06b6d4'
+                    }}
+                  >
+                    <Globe size={14} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color-strong)' }}>
+                  {mcpStats.httpCount}
+                </div>
+              </div>
+
+              {/* 本地 stdio 服务 */}
+              <div
+                className="mcp-stat-card"
+                style={{
+                  background: 'var(--bg-card, rgba(128,128,128,0.03))',
+                  border: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                  borderRadius: '10px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>本地 stdio 服务</span>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(139, 92, 246, 0.12)',
+                      color: '#8b5cf6'
+                    }}
+                  >
+                    <Terminal size={14} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color-strong)' }}>
+                  {mcpStats.stdioCount}
+                </div>
+              </div>
+            </div>
+
+            {/* 控制工具栏 */}
+            <div
+              className="mcp-toolbar"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px',
+                marginBottom: '14px'
+              }}
+            >
+              {/* 左侧：搜索输入框 */}
+              <div style={{ position: 'relative', minWidth: '220px', maxWidth: '340px', flex: 1 }}>
+                <Search
+                  size={14}
+                  style={{
+                    position: 'absolute',
+                    left: 10,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                    pointerEvents: 'none'
+                  }}
+                  aria-hidden="true"
+                />
+                <input
+                  type="text"
+                  placeholder="搜索服务名称、URL 或命令..."
+                  value={mcpSearchQuery}
+                  onChange={e => setMcpSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '30px',
+                    paddingLeft: '32px',
+                    paddingRight: mcpSearchQuery ? '28px' : '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+                    background: 'var(--bg-input, #ffffff)',
+                    fontSize: '12px',
+                    color: 'var(--text-color, inherit)',
+                    outline: 'none'
+                  }}
+                />
+                {mcpSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setMcpSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: 6,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      padding: 2,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                    title="清空搜索"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              {/* 右侧：视图切换按钮 + PaddleOCR + 添加自定义 */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {/* 视图切换按钮组 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    background: 'var(--bg-card-sub, rgba(128,128,128,0.06))',
+                    border: '1px solid var(--border-color, rgba(128,128,128,0.15))',
+                    borderRadius: '6px',
+                    padding: '2px'
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setMcpViewMode('grid')}
+                    title="网格视图"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: mcpViewMode === 'grid' ? 'var(--bg-card, #ffffff)' : 'transparent',
+                      color: mcpViewMode === 'grid' ? '#3b82f6' : 'var(--text-muted)',
+                      boxShadow: mcpViewMode === 'grid' ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <LayoutGrid size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMcpViewMode('table')}
+                    title="列表表格视图"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: mcpViewMode === 'table' ? 'var(--bg-card, #ffffff)' : 'transparent',
+                      color: mcpViewMode === 'table' ? '#3b82f6' : 'var(--text-muted)',
+                      boxShadow: mcpViewMode === 'table' ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <List size={14} />
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   className="btn-secondary"
@@ -1054,7 +1444,16 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     setPaddleToken('')
                     setShowPaddleTokenModal(true)
                   }}
-                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  style={{
+                    height: '28px',
+                    padding: '0 12px',
+                    fontSize: '12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
                 >
                   <KeyRound size={14} strokeWidth={2} aria-hidden="true" />
                   {paddleTokenConfigured ? '更换 PaddleOCR Token' : '配置 PaddleOCR Token'}
@@ -1063,7 +1462,16 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                   type="button"
                   className="btn-primary"
                   onClick={() => setShowAddMcpForm(true)}
-                  style={{ height: '28px', padding: '0 12px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  style={{
+                    height: '28px',
+                    padding: '0 12px',
+                    fontSize: '12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
                 >
                   <Plus size={15} strokeWidth={2} aria-hidden="true" />
                   添加自定义
@@ -1071,13 +1479,254 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               </div>
             </div>
 
-            <div className="mcp-glass-card">
-              {(mcpConfig?.servers || []).length === 0 ? (
-                <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: '13px' }}>
-                  <Ghost size={18} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                  暂无已添加的服务，请通过右上角“添加自定义”按钮添加。
+            {/* 双视图列表展示 */}
+            {filteredMcpServers.length === 0 ? (
+              <div
+                className="mcp-glass-card"
+                style={{
+                  padding: '36px 24px',
+                  textAlign: 'center',
+                  color: 'var(--text-muted, #888)',
+                  fontSize: '13px'
+                }}
+              >
+                <Ghost size={24} strokeWidth={1.8} style={{ display: 'block', margin: '0 auto 10px auto', opacity: 0.6 }} />
+                <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-color-strong)', marginBottom: '4px' }}>
+                  {mcpSearchQuery ? '未找到匹配的 MCP 服务' : '暂无已配置的 MCP 服务'}
                 </div>
-              ) : (
+                <div style={{ fontSize: '12px' }}>
+                  {mcpSearchQuery ? (
+                    <>
+                      没有找到与 “<span style={{ color: '#3b82f6' }}>{mcpSearchQuery}</span>” 相关的服务，
+                      <button
+                        type="button"
+                        onClick={() => setMcpSearchQuery('')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#3b82f6',
+                          cursor: 'pointer',
+                          padding: '0 4px',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        清空搜索
+                      </button>
+                    </>
+                  ) : (
+                    '请通过右上角“添加自定义”按钮添加第一个服务。'
+                  )}
+                </div>
+              </div>
+            ) : mcpViewMode === 'grid' ? (
+              /* 网格视图 */
+              <div
+                className="mcp-cards-grid"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))',
+                  gap: '14px',
+                  marginBottom: '24px'
+                }}
+              >
+                {filteredMcpServers.map((server: any) => {
+                  const isStdio = server.type === 'stdio'
+                  const targetAddress = isStdio ? server.command : server.url
+                  return (
+                    <div
+                      key={server.id}
+                      className="mcp-card"
+                      style={{
+                        background: 'var(--bg-card, rgba(20, 20, 20, 0.6))',
+                        border: '1px solid var(--border-color, rgba(128, 128, 128, 0.15))',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                      }}
+                    >
+                      {/* 卡片头部 */}
+                      <div
+                        className="mcp-card-header"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                          {/* 动态首字母徽章 */}
+                          <div
+                            style={{
+                              width: '34px',
+                              height: '34px',
+                              borderRadius: '8px',
+                              background: getBadgeGradient(server.name),
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '14px',
+                              flexShrink: 0,
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
+                            }}
+                          >
+                            {(server.name || 'M').trim().slice(0, 1).toUpperCase()}
+                          </div>
+                          {/* 服务名称与状态指示 */}
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: '13.5px',
+                                fontWeight: 600,
+                                color: 'var(--text-color-strong)',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}
+                              title={server.name}
+                            >
+                              {server.name}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                              <span
+                                style={{
+                                  width: '6px',
+                                  height: '6px',
+                                  borderRadius: '50%',
+                                  backgroundColor: server.enabled ? '#10b981' : 'rgba(128,128,128,0.4)',
+                                  boxShadow: server.enabled ? '0 0 5px rgba(16, 185, 129, 0.6)' : 'none'
+                                }}
+                              />
+                              <span style={{ fontSize: '11px', color: server.enabled ? '#10b981' : 'var(--text-muted)' }}>
+                                {server.enabled ? '已启用' : '已停用'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 启用 Switch 开关 */}
+                        <div className="mcp-switch-container">
+                          <label className="mcp-switch-label">
+                            <input
+                              type="checkbox"
+                              checked={server.enabled}
+                              onChange={e => handleToggleMcpServer(server, e.target.checked)}
+                            />
+                            <span className="mcp-switch-slider" />
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* 卡片主体 */}
+                      <div
+                        className="mcp-card-body"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px'
+                        }}
+                      >
+                        {/* 协议与密钥标签 */}
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span
+                            className="mcp-badge"
+                            style={{
+                              background: isStdio ? 'rgba(139, 92, 246, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                              color: isStdio ? '#8b5cf6' : '#3b82f6',
+                              border: isStdio ? '1px solid rgba(139, 92, 246, 0.25)' : '1px solid rgba(59, 130, 246, 0.25)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                          >
+                            {isStdio ? <Terminal size={11} /> : <Globe size={11} />}
+                            {isStdio ? 'stdio' : server.type === 'sse' || server.type === 'auto' ? '需迁移' : 'HTTP'}
+                          </span>
+
+                          <span
+                            className={`mcp-badge ${server.hasApiKey ? 'configured' : 'none'}`}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                          >
+                            {server.hasApiKey && <ShieldCheck size={11} />}
+                            {server.hasApiKey ? '密钥已配' : '无密钥'}
+                          </span>
+                        </div>
+
+                        {/* URL / 命令代码预览框 */}
+                        <div
+                          style={{
+                            background: 'var(--bg-input, rgba(128,128,128,0.04))',
+                            border: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+                            borderRadius: '6px',
+                            padding: '6px 9px',
+                            fontSize: '11.5px',
+                            fontFamily: 'Consolas, Monaco, monospace',
+                            color: 'var(--text-muted, #888)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={targetAddress}
+                        >
+                          {targetAddress || '未配置地址'}
+                        </div>
+                      </div>
+
+                      {/* 卡片底部操作栏 */}
+                      <div
+                        className="mcp-card-footer"
+                        style={{
+                          borderTop: '1px solid var(--border-color, rgba(128, 128, 128, 0.1))',
+                          paddingTop: '10px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div className="mcp-btn-action-group" style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <button
+                            type="button"
+                            className="mcp-btn-action test"
+                            onClick={() => handleTestMcpServer(server)}
+                          >
+                            <Plug size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            测试
+                          </button>
+                          <button
+                            type="button"
+                            className="mcp-btn-action edit"
+                            onClick={() => handleEditMcpServer(server)}
+                          >
+                            <Pencil size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            className="mcp-btn-action delete"
+                            onClick={() => handleDeleteMcpServer(server)}
+                          >
+                            <Trash2 size={13} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              /* 表格视图 */
+              <div className="mcp-glass-card">
                 <div className="mcp-table-container">
                   <table className="mcp-table">
                     <thead>
@@ -1091,7 +1740,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                       </tr>
                     </thead>
                     <tbody>
-                      {(mcpConfig.servers).map((server: any) => (
+                      {filteredMcpServers.map((server: any) => (
                         <tr key={server.id} className="mcp-table-row">
                           <td style={{ fontWeight: 600, color: 'var(--text-color-strong)' }}>
                             {server.name}
@@ -1117,10 +1766,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 <input
                                   type="checkbox"
                                   checked={server.enabled}
-                                  onChange={e => {
-                                    const newServers = mcpConfig.servers.map((s: any) => s.id === server.id ? { ...s, enabled: e.target.checked } : s)
-                                    saveMcpConfig({ servers: newServers })
-                                  }}
+                                  onChange={e => handleToggleMcpServer(server, e.target.checked)}
                                 />
                                 <span className="mcp-switch-slider" />
                               </label>
@@ -1131,26 +1777,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               <button
                                 type="button"
                                 className="mcp-btn-action test"
-                                onClick={async () => {
-                                  try {
-                                    showToast(`正在测试连接 [${server.name}]...`, 'info')
-                                    const res = await window.api.testMcpServer({
-                                      id: server.id,
-                                      url: server.url,
-                                      command: server.command,
-                                      args: server.args,
-                                      cwd: server.cwd,
-                                      type: server.type || 'stream',
-                                      preset: server.preset,
-                                      model: server.model
-                                    })
-                                    setTestResultData(res)
-                                    setTestResultServerName(server.name)
-                                    setShowTestResultModal(true)
-                                  } catch (err: any) {
-                                    alert(`测试异常：\n${err.message || err}`)
-                                  }
-                                }}
+                                onClick={() => handleTestMcpServer(server)}
                               >
                                 <Plug size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                                 测试
@@ -1158,21 +1785,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               <button
                                 type="button"
                                 className="mcp-btn-action edit"
-                                onClick={() => {
-                                  setEditingServer(server)
-                                  setEditName(server.name)
-                                  setEditUrl(server.url)
-                                  setEditCommand(server.command || '')
-                                  setEditArgs(JSON.stringify(server.args || []))
-                                  setEditCwd(server.cwd || '')
-                                  setEditEnv('')
-                                  setEditClearEnv(false)
-                                  setEditApiKey('')
-                                  setEditShowApiKey(false)
-                                  setEditClearApiKey(false)
-                                  setEditType(server.type === 'stdio' ? 'stdio' : 'stream')
-                                  setShowEditModal(true)
-                                }}
+                                onClick={() => handleEditMcpServer(server)}
                               >
                                 <Pencil size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                                 编辑
@@ -1180,18 +1793,7 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                               <button
                                 type="button"
                                 className="mcp-btn-action delete"
-                                onClick={async () => {
-                                  if (await requestConfirmation({
-                                    title: `删除 [${server.name}] 服务？`,
-                                    description: '删除后该 MCP 服务提供的工具将不再可用。',
-                                    confirmLabel: '确认删除',
-                                    tone: 'danger'
-                                  })) {
-                                    const newServers = mcpConfig.servers.filter((s: any) => s.id !== server.id)
-                                    saveMcpConfig({ servers: newServers })
-                                    showToast(`已删除 [${server.name}] 服务。`, 'success')
-                                  }
-                                }}
+                                onClick={() => handleDeleteMcpServer(server)}
                               >
                                 <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
                                 删除
@@ -1203,8 +1805,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                     </tbody>
                   </table>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>

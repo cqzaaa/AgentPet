@@ -1,13 +1,32 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TaskEvent, TaskStep } from '../../../main/task-runtime/types'
-import { AlertTriangle, Check, ChevronRight, Circle, Clock3, Loader2, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Circle,
+  Clock3,
+  Copy,
+  Loader2,
+  X
+} from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import {
   cleanResultSummary,
   CollaborationArtifactCards,
   type CollaborationSnapshot
 } from './CollaborationRunCard'
-import { renderAdvancedMessage, ToolStepItem, ToolThinkItem } from './ChatMessageItem'
+import {
+  describeActivity,
+  renderAdvancedMessage,
+  ToolStepItem,
+  ToolThinkItem
+} from './ChatMessageItem'
+import { ChatActivityGroup } from './ChatActivityGroup'
+import { FileChangesCard } from './FileChangesCard'
+import type { FileChangeItem } from './FileDiffModal'
 import './SubtaskCapsuleGroup.css'
 
 type OpenSubtask = (taskRunId: string, taskStepId: string) => void
@@ -131,6 +150,131 @@ function buildSubtaskTrace(events: TaskEvent[], stepId: string): SubtaskTraceIte
   return trace
 }
 
+function cleanProgressMessage(text: string): string {
+  return text
+    .replace(/^子 Agent\s*/, '')
+    .replace(/\brun_terminal_command\b/g, '终端命令')
+    .replace(/\brun_command\b/g, '终端命令')
+    .replace(/\blist_directory\b/g, '列出目录')
+    .replace(/\blist_dir\b/g, '列出目录')
+    .replace(/\bread_file\b/g, '读取文件')
+    .replace(/\bwrite_file\b/g, '写入文件')
+    .replace(/\bedit_file\b/g, '修改文件')
+    .replace(/\bedit_files\b/g, '批量修改文件')
+    .replace(/\bgrep_content\b/g, '代码检索')
+    .replace(/\bfind_files\b/g, '查找文件')
+    .replace(/\brequest_skill\b/g, '加载能力')
+    .replace(/\bdelegate_tasks\b/g, '分派子任务')
+}
+
+function extractSubtaskFileChanges(events: TaskEvent[], stepId: string): FileChangeItem[] {
+  const changesMap = new Map<string, FileChangeItem>()
+  for (const event of events) {
+    if (event.taskStepId && String(event.taskStepId) !== stepId) continue
+    if (event.type === 'file_changes') {
+      const payload = recordOf(event.payload)
+      const list = Array.isArray(payload.changes) ? (payload.changes as FileChangeItem[]) : []
+      for (const item of list) {
+        if (item?.filePath) {
+          changesMap.set(item.filePath, item)
+        }
+      }
+    }
+  }
+  return [...changesMap.values()]
+}
+
+/**
+ * 下发任务提示词卡片（基于 taste-skill 极简高质感设计）：
+ * - 长文本时默认折叠，带平滑渐变遮罩与“展开全部/收起”控制
+ * - 顶部展示目标 Agent 胶囊与字数统计，支持一键便捷复制
+ */
+function SubtaskPromptCard({
+  prompt,
+  agentId
+}: {
+  prompt: string
+  agentId: string
+}): React.JSX.Element {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // 当指令文本较长（> 140 字符或 > 4 行）时默认折叠
+  const isLongText = useMemo(() => {
+    return prompt.length > 140 || prompt.split('\n').length > 4
+  }, [prompt])
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      // 忽略无法访问剪贴板的边缘错误
+    }
+  }, [prompt])
+
+  return (
+    <article
+      className={`subtask-prompt-card ${isLongText ? (isExpanded ? 'is-expanded' : 'is-collapsed') : 'is-short'}`}
+    >
+      <header className="subtask-prompt-header">
+        <div className="subtask-prompt-meta">
+          <span className="subtask-prompt-agent-tag">
+            <span className="subtask-prompt-brand-icon" aria-hidden="true">
+              <AgentBrandIcon agentId={agentId} />
+            </span>
+            <span>下发给 {agentId}</span>
+          </span>
+          <span className="subtask-prompt-length-badge">{prompt.length} 字</span>
+        </div>
+        <button
+          type="button"
+          className={`subtask-prompt-copy-btn ${copied ? 'is-copied' : ''}`}
+          onClick={handleCopy}
+          aria-label={copied ? '已复制完整指令' : '复制完整指令'}
+          title="复制指令内容"
+        >
+          {copied ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </header>
+
+      <div className="subtask-prompt-body-wrap">
+        <div className="subtask-prompt-body message-text">
+          {renderAdvancedMessage(prompt)}
+        </div>
+        {isLongText && !isExpanded && (
+          <div className="subtask-prompt-mask" aria-hidden="true" />
+        )}
+      </div>
+
+      {isLongText && (
+        <footer className="subtask-prompt-footer">
+          <button
+            type="button"
+            className="subtask-prompt-toggle-btn"
+            onClick={() => setIsExpanded((prev) => !prev)}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp size={13} strokeWidth={2} aria-hidden="true" />
+                <span>收起完整指令</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+                <span>展开完整指令（共 {prompt.length} 字）</span>
+              </>
+            )}
+          </button>
+        </footer>
+      )}
+    </article>
+  )
+}
+
 export const SubtaskCapsuleGroup = React.memo(function SubtaskCapsuleGroup({
   snapshot,
   selectedStepId,
@@ -235,6 +379,25 @@ export function SubtaskDetailDrawer({
   const result = String(step.resultSummary || '').trim()
   const trace = buildSubtaskTrace(snapshot.events || [], stepId)
 
+  const isRunning = status === 'running'
+  const isBlockedOrFailed = ['failed', 'blocked', 'cancelled'].includes(status)
+  const lastTraceStep = trace[trace.length - 1]
+
+  // 动态活动摘要：优先反映当前具体执行步骤，若处于等待模型继续阶段且有后端进度日志，平滑融入活动摘要
+  const activityLabel = useMemo(() => {
+    if (isRunning && progress && trace.length > 0 && !lastTraceStep?.isWaiting) {
+      const cleanProgress = cleanProgressMessage(progress)
+      if (cleanProgress.length <= 40) return cleanProgress
+    }
+    return describeActivity(lastTraceStep, isRunning) || (isRunning ? '正在处理' : '执行记录')
+  }, [isRunning, progress, trace.length, lastTraceStep])
+
+  const toolCount = trace.filter((item) => item.type === 'tool').length
+  const subtaskFileChanges = useMemo(
+    () => extractSubtaskFileChanges(snapshot.events || [], stepId),
+    [snapshot.events, stepId]
+  )
+
   return (
     <div className="subtask-detail-layer">
       <aside className="subtask-detail-drawer" aria-labelledby="subtask-detail-title">
@@ -256,57 +419,73 @@ export function SubtaskDetailDrawer({
         </header>
 
         <div className="subtask-conversation" role="log" aria-live="polite">
-          <article className="subtask-message is-request">
-            <small>下发给 {agentId}</small>
-            <div>{renderAdvancedMessage(prompt)}</div>
-          </article>
+          {/* 下发子任务卡片（长文本默认不全部展开，微毛玻璃渐变遮罩 + 展开/收起） */}
+          <SubtaskPromptCard prompt={prompt} agentId={agentId} />
 
-          {progress && progress !== result && (
-            <article className="subtask-message is-progress">
+          {/* 异常终止或受阻时的错误警示提示 */}
+          {isBlockedOrFailed && progress && !result && (
+            <article className="subtask-message is-progress is-error">
               <small>{STATUS_LABEL[status] || status}</small>
               <p>{progress}</p>
             </article>
           )}
 
+          {/* 执行过程（复用 ChatActivityGroup 与 ToolStepItem，默认收起为紧凑胶囊，点击可展开详情） */}
           {trace.length > 0 && (
-            <section className="subtask-execution-trace" aria-label="子任务执行过程">
-              <header>
-                <strong>执行过程</strong>
-                <span>{trace.length} 条记录</span>
-              </header>
-              <div>
+            <section className="subtask-activity-section" aria-label="子任务执行过程">
+              <ChatActivityGroup
+                count={toolCount}
+                activityLabel={activityLabel}
+                running={isRunning}
+                isThinking={isRunning && lastTraceStep?.type === 'think'}
+                defaultOpen={false}
+              >
                 {trace.map((item, index) =>
                   item.type === 'tool' ? (
-                    <ToolStepItem key={item.id} step={item} isThinking={status === 'running'} />
+                    <ToolStepItem key={item.id} step={item} isThinking={isRunning} />
                   ) : (
                     <ToolThinkItem
                       key={item.id}
                       step={item}
-                      isThinking={status === 'running' && index === trace.length - 1}
+                      isThinking={isRunning && index === trace.length - 1}
                     />
                   )
                 )}
-              </div>
+              </ChatActivityGroup>
             </section>
           )}
 
+          {/* 执行结果 / 启动中流光提示 */}
           {result ? (
             <article
-              className={`subtask-message is-response ${['failed', 'blocked'].includes(status) ? 'is-error' : ''}`}
+              className={`subtask-message is-response ${isBlockedOrFailed ? 'is-error' : ''}`}
             >
               <small>{status === 'completed' ? 'Agent 回复' : '执行结果'}</small>
               <div>{renderAdvancedMessage(cleanResultSummary(result))}</div>
             </article>
-          ) : (
+          ) : isRunning ? (
+            trace.length === 0 && (
+              <div className="chat-thinking-shimmer subtask-shimmer" role="status" aria-label="处理中">
+                <span className="chat-thinking-shimmer-text">
+                  {progress ? progress.replace(/^子 Agent\s*/, '') : '正在启动并分析任务…'}
+                </span>
+              </div>
+            )
+          ) : status === 'pending' ? (
             <div className="subtask-conversation-pending" role="status">
-              {status === 'running' && <Loader2 className="spin" size={16} />}
-              <span>
-                {status === 'pending'
-                  ? '等待调度'
-                  : status === 'running'
-                    ? 'Agent 正在处理'
-                    : '暂时还没有回复'}
-              </span>
+              <Clock3 size={14} />
+              <span>等待系统调度</span>
+            </div>
+          ) : !isBlockedOrFailed ? (
+            <div className="subtask-conversation-pending" role="status">
+              <span>暂时还没有回复</span>
+            </div>
+          ) : null}
+
+          {/* 子任务产生的文件变更 Diff 追踪与审核 */}
+          {subtaskFileChanges.length > 0 && (
+            <div className="subtask-detail-diff-section">
+              <FileChangesCard changes={subtaskFileChanges} />
             </div>
           )}
 

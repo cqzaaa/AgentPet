@@ -7,8 +7,8 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   AlertTriangle, ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, Clock3, Download, ExternalLink, FileText, Folder,
-  FolderOpen, History, Layers, Link2, LoaderCircle, LocateFixed, Maximize2, Minimize2, Network, Pencil,
-  Plus, RefreshCw, Save, Search, Sparkles, Trash2, X
+  FolderOpen, History, Layers, Link2, LoaderCircle, LocateFixed, Maximize2, Minimize2, Network,
+  Plus, RefreshCw, Search, Sparkles, Trash2, X
 } from 'lucide-react'
 import { FileIcon } from '../components/FileIcon'
 import { EmbeddedFileViewer } from '../components/EmbeddedFileViewer'
@@ -560,7 +560,6 @@ export function WikiPage(): React.JSX.Element {
   const [showParsedText, setShowParsedText] = useState(false)
   const [draft, setDraft] = useState('')
   const [saved, setSaved] = useState('')
-  const [saving, setSaving] = useState(false)
   const [sideTab, setSideTab] = useState<'graph' | 'history'>('graph')
   const [graphExpanded, setGraphExpanded] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
@@ -705,27 +704,34 @@ export function WikiPage(): React.JSX.Element {
     let minY = Infinity
     let maxY = -Infinity
     for (const node of boundsNodes) {
-      const size = node.data.nodeSize || 18
+      const isFragment = node.data.kind === 'fragment'
+      const nodeWidth = isFragment ? 300 : (node.data.nodeSize || 18)
+      const nodeHeight = isFragment ? 146 : (node.data.nodeSize || 18)
       minX = Math.min(minX, node.position.x - 36)
-      maxX = Math.max(maxX, node.position.x + size + 36)
+      maxX = Math.max(maxX, node.position.x + nodeWidth + 36)
       minY = Math.min(minY, node.position.y - 24)
-      maxY = Math.max(maxY, node.position.y + size + 34)
+      maxY = Math.max(maxY, node.position.y + nodeHeight + 34)
     }
     const narrow = window.innerWidth <= 820
     // 右侧小框宽度 350px，右侧预留少量间隙，图谱中心始终居中在开阔的中央舞台
     const drawerOffset = readerOpen && !narrow ? 360 : 0
     const availableWidth = Math.max(320, container.clientWidth - drawerOffset)
     const height = Math.max(260, container.clientHeight * (readerOpen && narrow ? 0.52 : 1))
+    // 扣除上方操作胶囊所占的高度及安全缓冲间隙，保证图谱居中及 fitView 缩放时不被遮挡
+    const island = container.querySelector<HTMLElement>('.wiki-graph-floating-island')
+    const islandBottom = island ? island.getBoundingClientRect().bottom - container.getBoundingClientRect().top : 0
+    const topBarOffset = islandBottom > 0 ? Math.max(52, islandBottom + 12) : 56
+    const availableHeight = Math.max(200, height - topBarOffset)
     const padding = focusedEntityId ? 0.08 : graphExpanded ? 0.10 : 0.14
     const spanX = Math.max(240, maxX - minX)
     const spanY = Math.max(240, maxY - minY)
     const maxZoom = graphExpanded ? 1.25 : 1.15
     const minZoom = 0.45
-    const zoom = Math.max(minZoom, Math.min(maxZoom, Math.min((availableWidth * (1 - padding * 2)) / spanX, (height * (1 - padding * 2)) / spanY)))
+    const zoom = Math.max(minZoom, Math.min(maxZoom, Math.min((availableWidth * (1 - padding * 2)) / spanX, (availableHeight * (1 - padding * 2)) / spanY)))
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
     const targetX = availableWidth / 2 - centerX * zoom
-    const targetY = height / 2 - centerY * zoom
+    const targetY = topBarOffset + availableHeight / 2 - centerY * zoom
     const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     void instance.setViewport({ x: targetX, y: targetY, zoom }, { duration: animate && !reducedMotion ? 380 : 0 })
   }, [activeGraphFocusId, focusedEntityId, graphExpanded, readerOpen])
@@ -887,7 +893,7 @@ export function WikiPage(): React.JSX.Element {
   }, [doc, readerOpen, displayedItem?.id, selectedEvidence])
 
   useEffect(() => {
-    if (progress?.status !== 'completed' || !item?.documentId || dirty || saving) return
+    if (progress?.status !== 'completed' || !item?.documentId || dirty) return
     let active = true
     void Promise.all([window.api.knowledgeGetDocument(item.documentId), window.api.wikiReadItem(item.id)])
       .then(([value, latest]) => {
@@ -897,7 +903,7 @@ export function WikiPage(): React.JSX.Element {
       })
       .catch(reason => { if (active) setError(errorMessage(reason, '解析完成，文档加载失败，请重新打开。')) })
     return () => { active = false }
-  }, [progress?.status, progress?.updatedAt, item?.documentId, item?.id, dirty, saving])
+  }, [progress?.status, progress?.updatedAt, item?.documentId, item?.id, dirty])
 
   useEffect(() => {
     if (sideTab === 'history' && selectedId) {
@@ -1001,20 +1007,6 @@ export function WikiPage(): React.JSX.Element {
     setWorkspaceListOpen(false)
     await loadWorkspaces(id)
     await sync(id)
-  }
-
-  const savePage = async (): Promise<void> => {
-    if (!displayedItem?.editable || !dirty || saving) return
-    setSaving(true)
-    try {
-      await window.api.wikiSavePage(displayedItem.id, draft)
-      setSaved(draft); setMode('read')
-      setSelectedEvidence(null)
-      setDoc(await window.api.knowledgeGetDocument(displayedItem.documentId) as DocDetail | null)
-      await Promise.all([loadItems(workspaceId, displayedItem.id), loadGraph()])
-    } catch (reason: unknown) {
-      setError(errorMessage(reason, '保存失败，编辑内容仍保留在页面中。'))
-    } finally { setSaving(false) }
   }
 
   const submitDialog = async (event: React.FormEvent): Promise<void> => {
@@ -1259,42 +1251,22 @@ export function WikiPage(): React.JSX.Element {
               <span className="wiki-reader-title-text">{displayedItem ? displayedItem.title : '文档详情'}</span>
             </div>
             <div className="wiki-reader-head-actions">
-              {displayedItem && (
-                <>
-                  <span className={`wiki-reader-status${dirty ? ' dirty' : ''}`}>
-                    {saving ? '保存中' : dirty ? '未保存' : <><Check size={11} />已保存</>}
-                  </span>
-                  {displayedItem.editable ? (
-                    mode === 'read' ? (
-                      <button type="button" className="wiki-reader-icon-btn" title="编辑文档" onClick={() => setMode('edit')}>
-                        <Pencil size={12} />
-                        <span>编辑</span>
-                      </button>
-                    ) : (
-                      <>
-                        <button type="button" className="wiki-reader-icon-btn" onClick={() => { setDraft(saved); setMode('read') }}>取消</button>
-                        <button type="button" className="wiki-reader-icon-btn primary" disabled={!dirty || saving} onClick={() => void savePage()}><Save size={12} />保存</button>
-                      </>
-                    )
-                  ) : (
-                    <button
-                      type="button"
-                      className="wiki-reader-icon-btn"
-                      title="在系统默认应用中打开原始文件"
-                      onClick={() => void window.api.openLocalFile(`local-file:///${displayedItem.absolutePath.replace(/\\/g, '/')}`)}
-                    >
-                      <ExternalLink size={12} />
-                      <span>原文件</span>
-                    </button>
-                  )}
-                </>
+              {displayedItem && !displayedItem.editable && (
+                <button
+                  type="button"
+                  className="wiki-reader-icon-btn"
+                  title="在系统默认应用中打开原始文件"
+                  onClick={() => void window.api.openLocalFile(`local-file:///${displayedItem.absolutePath.replace(/\\/g, '/')}`)}
+                >
+                  <ExternalLink size={12} />
+                  <span>原文件</span>
+                </button>
               )}
               <button
                 type="button"
                 className="wiki-reader-close-btn"
                 aria-label="收起文档详情"
-                disabled={dirty}
-                title={dirty ? '请先保存或取消编辑' : '收起文档详情'}
+                title="收起文档详情"
                 onClick={() => setReaderOpen(false)}
               >
                 <X size={14} />

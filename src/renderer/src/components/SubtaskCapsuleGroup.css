@@ -197,93 +197,313 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 22px 20px 36px;
+  gap: 16px;
+  padding: 18px 18px 32px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+
+/* ==========================================================================
+   下发子任务提示词卡片 (基于 taste-skill 极简高质感设计)
+   ========================================================================== */
+.subtask-prompt-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text-primary, #202622) 10%, transparent);
+  background: color-mix(in srgb, var(--text-primary, #202622) 2.5%, var(--bg-card, #fff));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.subtask-prompt-card:hover {
+  border-color: color-mix(in srgb, var(--text-primary, #202622) 16%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.subtask-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary, #202622) 6%, transparent);
+  background: color-mix(in srgb, var(--text-primary, #202622) 3%, transparent);
+}
+
+.subtask-prompt-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.subtask-prompt-agent-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 5px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--text-primary, #202622);
+  background: var(--bg-card, #fff);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #202622) 10%, transparent);
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.subtask-prompt-brand-icon {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.subtask-prompt-length-badge {
+  font-size: 10.5px;
+  color: var(--text-muted, #747d76);
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--text-primary, #202622) 4%, transparent);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.subtask-prompt-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #747d76);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.subtask-prompt-copy-btn:hover {
+  color: var(--text-primary, #202622);
+  background: color-mix(in srgb, var(--text-primary, #202622) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary, #202622) 8%, transparent);
+}
+
+.subtask-prompt-copy-btn.is-copied {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.subtask-prompt-body-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.subtask-prompt-body {
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--text-secondary, #38423b);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.subtask-prompt-body pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text-primary, #202622) 5%, var(--bg-card, #fff));
+  border: 1px solid color-mix(in srgb, var(--text-primary, #202622) 8%, transparent);
+}
+
+.subtask-prompt-body p:first-child {
+  margin-top: 0;
+}
+
+.subtask-prompt-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* 折叠态：限制最大高度并叠加平滑渐变遮罩 */
+.subtask-prompt-card.is-collapsed .subtask-prompt-body-wrap {
+  max-height: 124px;
+  overflow: hidden;
+}
+
+.subtask-prompt-mask {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 60px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    color-mix(in srgb, var(--text-primary, #202622) 2.5%, var(--bg-card, #fff)) 100%
+  );
+}
+
+.dark .subtask-prompt-mask,
+.agent-window-container.dark .subtask-prompt-mask {
+  background: linear-gradient(
+    to bottom,
+    rgba(30, 30, 30, 0) 0%,
+    color-mix(in srgb, #fff 3%, var(--bg-card, #1c1d1f)) 100%
+  );
+}
+
+.subtask-prompt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px 9px;
+}
+
+.subtask-prompt-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  font-size: 11.5px;
+  font-weight: 520;
+  color: var(--accent-color, #3b82f6);
+  background: color-mix(in srgb, var(--accent-color, #3b82f6) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-color, #3b82f6) 15%, transparent);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.subtask-prompt-toggle-btn:hover {
+  background: color-mix(in srgb, var(--accent-color, #3b82f6) 13%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color, #3b82f6) 28%, transparent);
+  transform: translateY(-0.5px);
+}
+
+.subtask-prompt-toggle-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* ==========================================================================
+   子任务执行过程区域（复用正常 Chat Activity 体系，默认收起为紧凑胶囊）
+   ========================================================================== */
+.subtask-activity-section {
+  width: 100%;
+  min-width: 0;
+  margin: 2px 0 6px;
+}
+
+.subtask-activity-section .chat-activity-group {
+  margin: 0;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.subtask-activity-section .chat-activity-group[open] {
+  padding: 8px 12px 10px;
+  background: color-mix(in srgb, var(--text-primary, #202622) 2%, var(--bg-card, #fff));
+  border: 1px solid color-mix(in srgb, var(--text-primary, #202622) 7%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.015);
+}
+
+.dark .subtask-activity-section .chat-activity-group[open],
+.agent-window-container.dark .subtask-activity-section .chat-activity-group[open] {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.subtask-activity-section .chat-activity-summary {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.subtask-shimmer {
+  margin: 6px 0 10px 4px;
+}
+
 .subtask-message {
-  max-width: 88%;
+  width: 100%;
   display: grid;
   gap: 6px;
 }
+
 .subtask-message > small {
   color: var(--text-muted, #747d76);
-  font-size: 10.5px;
+  font-size: 11px;
+  font-weight: 550;
+  padding-left: 2px;
 }
-.subtask-message.is-request {
-  align-self: flex-end;
-}
-.subtask-message.is-request > small {
-  text-align: right;
-}
-.subtask-message.is-request > div {
-  padding: 11px 13px;
-  background: color-mix(in srgb, var(--text-primary, #202622) 5%, var(--bg-card, #fff));
-  border-radius: 14px 14px 4px 14px;
-}
+
 .subtask-message.is-progress,
 .subtask-message.is-response {
   align-self: flex-start;
 }
+
 .subtask-message.is-progress p {
   margin: 0;
+  padding: 8px 12px;
   color: var(--text-secondary, #4f5a52);
+  background: color-mix(in srgb, var(--text-primary, #202622) 3%, transparent);
+  border-radius: 8px;
   font-size: 12.5px;
   line-height: 1.65;
 }
+
 .subtask-message.is-response > div {
+  padding: 13px 15px;
+  background: var(--bg-card, #fff);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #202622) 10%, transparent);
+  border-radius: 12px;
   font-size: 13px;
   line-height: 1.7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
+
 .subtask-message.is-response.is-error > div {
   color: #9f3d33;
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.04);
 }
+
 .subtask-message p:first-child {
   margin-top: 0;
 }
+
 .subtask-message p:last-child {
   margin-bottom: 0;
 }
+
 .subtask-conversation-pending {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 12px;
   color: var(--text-muted, #747d76);
+  background: color-mix(in srgb, var(--text-primary, #202622) 3%, transparent);
+  border-radius: 8px;
   font-size: 12px;
+  width: fit-content;
 }
-.subtask-execution-trace {
-  display: grid;
-  gap: 10px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border-color, #e0e4e1);
-  border-bottom: 1px solid var(--border-color, #e0e4e1);
-}
-.subtask-execution-trace > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-.subtask-execution-trace > header strong {
-  font-size: 11px;
-  font-weight: 650;
-}
-.subtask-execution-trace > header span {
-  color: var(--text-muted, #747d76);
-  font-size: 10.5px;
-}
-.subtask-execution-trace > div {
-  display: grid;
-  gap: 9px;
-  padding-left: 2px;
-}
+
 .chat-split-container.has-subtask-detail {
   flex-direction: row;
 }
+
 .chat-split-container.has-subtask-detail .chat-main {
   min-width: 0;
 }
+
 .subtask-detail-artifacts {
   width: min(100%, 420px);
 }
@@ -336,4 +556,29 @@
   .subtask-capsule-open {
     transition: none;
   }
+}
+
+/* ==========================================================================
+   子任务同级独立活动块 (与 ChatActivityGroup 胶囊平级展示)
+   ========================================================================== */
+.chat-subtasks-activity-block {
+  width: 100%;
+  margin: 4px 0 8px;
+}
+
+.chat-subtasks-activity-block .subtask-capsule-cluster {
+  margin: 0;
+}
+
+/* 子任务抽屉内的代码修改 Diff 区域 */
+.subtask-detail-diff-section {
+  width: 100%;
+  margin: 4px 0 2px;
+}
+
+.subtask-detail-diff-section .file-changes-card {
+  margin: 0;
+  border-radius: 12px;
+  background: var(--bg-card, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }

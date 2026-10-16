@@ -1438,18 +1438,31 @@ function translateToolName(name: string): string {
     'generate_file': '生成了文件',
     'modify_docx_file': '修改了 Word 文档',
     'modify_xlsx_file': '修改了 Excel 表格',
-    'read_file': '读取了文件内容',
+    'read_file': '读取了文件',
+    'view_file': '查看了文件',
+    'write_file': '写入了文件',
+    'write_to_file': '写入了新文件',
+    'edit_file': '修改了文件',
+    'edit_files': '批量修改了文件',
+    'replace_file_content': '修改了文件',
+    'multi_replace_file_content': '批量修改了文件',
+    'delete_file': '删除了文件',
+    'move_file': '移动了文件',
+    'list_directory': '列出了目录',
+    'list_dir': '列出了目录',
+    'grep_content': '检索了代码内容',
+    'find_files': '查找了文件',
+    'get_file_metadata': '检查了文件信息',
+    'request_skill': '加载了能力',
+    'delegate_tasks': '分派了子任务',
+    'update_task_plan': '更新了任务计划',
+    'update_task_step': '更新了任务步骤',
     'search_web': '搜索了网络',
     'read_url_content': '获取了网页',
     'ask_question': '提问了用户',
     'get-current-date': '获取了当前日期',
     'get-station-code-of-citys': '获取了车站代码',
     'get-tickets': '查询了车票',
-    'list_dir': '列出了目录',
-    'view_file': '查看了文件',
-    'write_to_file': '写入了新文件',
-    'replace_file_content': '修改了文件',
-    'multi_replace_file_content': '批量修改了文件',
   }
 
   if (map[name]) return map[name]
@@ -1478,7 +1491,7 @@ function activityTarget(value: unknown, keepEnd = false): string {
   return keepEnd ? `…${clean.slice(-89)}` : `${clean.slice(0, 89)}…`
 }
 
-function describeActivity(step: any, messageRunning: boolean): string {
+export function describeActivity(step: any, messageRunning: boolean): string {
   if (!step) return ''
   if (step.type === 'compaction') return step.status === 'completed' ? '已压缩上下文' : step.status === 'failed' ? '压缩上下文失败' : '正在压缩上下文'
   if (step.type === 'think') return messageRunning ? '正在分析结果' : '已分析结果'
@@ -2381,15 +2394,54 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   ).values()) as any[]
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
   const combinedVisibleToolSteps = combineToolSteps([...visibleToolSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0)), msg.isThinking)
-  const activityBlocks: Array<{ id: string; type: 'commentary' | 'group'; steps: any[] }> = []
-  for (const step of combinedVisibleToolSteps) {
-    const previous = activityBlocks[activityBlocks.length - 1]
-    if (step.type === 'commentary') activityBlocks.push({ id: step.id, type: 'commentary', steps: [step] })
-    else if (step.type === 'compaction') activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
-    else if (previous?.type === 'group' && previous.steps[0]?.type !== 'compaction') previous.steps.push(step)
-    else activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
-  }
+  const activityBlocks: Array<{
+    id: string
+    type: 'commentary' | 'group' | 'subtasks'
+    steps: any[]
+    attachment?: React.ReactNode
+  }> = []
   let delegateAttachmentIndex = 0
+
+  for (const step of combinedVisibleToolSteps) {
+    if (step.type === 'commentary') {
+      activityBlocks.push({ id: step.id, type: 'commentary', steps: [step] })
+      continue
+    }
+    if (step.type === 'compaction') {
+      activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
+      continue
+    }
+    if (step.name === 'delegate_tasks') {
+      const attachment = delegateTaskAttachments?.[delegateAttachmentIndex++]
+      if (attachment) {
+        activityBlocks.push({
+          id: `subtasks-${step.id || delegateAttachmentIndex}`,
+          type: 'subtasks',
+          steps: [step],
+          attachment
+        })
+        continue
+      }
+    }
+    const previous = activityBlocks[activityBlocks.length - 1]
+    if (previous?.type === 'group' && previous.steps[0]?.type !== 'compaction') {
+      previous.steps.push(step)
+    } else {
+      activityBlocks.push({ id: step.id, type: 'group', steps: [step] })
+    }
+  }
+
+  while (delegateAttachmentIndex < (delegateTaskAttachments?.length || 0)) {
+    const attachment = delegateTaskAttachments?.[delegateAttachmentIndex++]
+    if (attachment) {
+      activityBlocks.push({
+        id: `subtasks-extra-${delegateAttachmentIndex}`,
+        type: 'subtasks',
+        steps: [],
+        attachment
+      })
+    }
+  }
 
   const showThinkingShimmer = msg.sender !== 'user' && msg.isThinking && !renderedText && activityBlocks.length === 0
   const shimmerText = '正在启动中'
@@ -2601,33 +2653,40 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         ))}
 
         {activityBlocks.length > 0 && <ChatTurnActivity running={msg.isThinking} durationMs={activityDurationMs(msg)}>
-        {activityBlocks.map(block => block.type === 'commentary' ? (
-          <div key={block.id} className="message-text chat-commentary">
-            {renderAdvancedMessage(block.steps[0].detail, onPreviewFile)}
-          </div>
-        ) : (
-          <ChatActivityGroup key={block.id}
-            count={block.steps.filter(step => step.type === 'tool' || step.type === 'compaction').length}
-            activityLabel={describeActivity(block.steps.at(-1), msg.isThinking)}
-            running={block.steps[0]?.type === 'compaction'
-              ? block.steps[0].status === 'started'
-              : msg.isThinking && (block.steps.some(step => step.isWaiting) ||
-                (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
-            isThinking={block.steps[0]?.type !== 'compaction' && msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
-            {block.steps.map((step: any) => {
-              if (step.type === 'tool') {
-                const attachment = step.name === 'delegate_tasks'
-                  ? delegateTaskAttachments?.[delegateAttachmentIndex++] : null
-                return <React.Fragment key={step.id}>
-                  <ToolStepItem step={step} isThinking={msg.isThinking} />
-                  {attachment}
-                </React.Fragment>
-              }
-              if (step.type === 'compaction') return <ContextCompactionItem key={step.id} step={step} />
-              return <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
-            })}
-          </ChatActivityGroup>
-        ))}
+        {activityBlocks.map(block => {
+          if (block.type === 'commentary') {
+            return (
+              <div key={block.id} className="message-text chat-commentary">
+                {renderAdvancedMessage(block.steps[0].detail, onPreviewFile)}
+              </div>
+            )
+          }
+          if (block.type === 'subtasks') {
+            return (
+              <div key={block.id} className="chat-subtasks-activity-block">
+                {block.attachment}
+              </div>
+            )
+          }
+          return (
+            <ChatActivityGroup key={block.id}
+              count={block.steps.filter(step => step.type === 'tool' || step.type === 'compaction').length}
+              activityLabel={describeActivity(block.steps.at(-1), msg.isThinking)}
+              running={block.steps[0]?.type === 'compaction'
+                ? block.steps[0].status === 'started'
+                : msg.isThinking && (block.steps.some(step => step.isWaiting) ||
+                  (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
+              isThinking={block.steps[0]?.type !== 'compaction' && msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
+              {block.steps.map((step: any) => {
+                if (step.type === 'tool') {
+                  return <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />
+                }
+                if (step.type === 'compaction') return <ContextCompactionItem key={step.id} step={step} />
+                return <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />
+              })}
+            </ChatActivityGroup>
+          )
+        })}
         </ChatTurnActivity>}
 
         {/* ✨ 扫光流光动效：仅在刚启动尚未产生任何步骤和正文时展示 */}

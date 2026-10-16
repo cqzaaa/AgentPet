@@ -1,5 +1,6 @@
 /* ==========================================================================
-   文件差异审核右侧抽屉 / 分栏面板样式
+   文件差异审核右侧抽屉 / 分栏面板样式 (Anti-Slop 极简现代高质感重构)
+   遵循 taste-skill 设计哲学：克制、精致、高对比度、现代化代码查看质感
    ========================================================================== */
 
 /* 聊天分栏容器联动：当包含文件差异抽屉时自动变为横向左右并排 */
@@ -48,12 +49,12 @@ body > .file-diff-drawer-layer {
   justify-content: center;
   user-select: none;
   z-index: 35;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.18s ease;
 }
 
 .file-diff-resizer:hover,
 .file-diff-resizer.is-dragging {
-  background-color: rgba(59, 130, 246, 0.12);
+  background-color: rgba(59, 130, 246, 0.08);
 }
 
 .file-diff-resizer-line {
@@ -63,7 +64,7 @@ body > .file-diff-drawer-layer {
   left: 4px;
   width: 2px;
   background-color: transparent;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.18s ease;
 }
 
 .file-diff-resizer:hover .file-diff-resizer-line,
@@ -74,17 +75,19 @@ body > .file-diff-drawer-layer {
 /* 居中的拖拽抓手胶囊点 */
 .file-diff-resizer-handle {
   width: 4px;
-  height: 32px;
-  border-radius: 2px;
+  height: 28px;
+  border-radius: 9999px;
   background-color: var(--border-color, #cbd5e1);
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0.7;
 }
 
 .file-diff-resizer:hover .file-diff-resizer-handle,
 .file-diff-resizer.is-dragging .file-diff-resizer-handle {
   background-color: #2563eb;
-  height: 44px;
-  box-shadow: 0 0 8px rgba(37, 99, 235, 0.35);
+  height: 40px;
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.4);
 }
 
 /* 正在拖拽调整大小时禁用内部事件与划词选择 */
@@ -106,17 +109,17 @@ body > .file-diff-drawer-layer {
   display: flex;
   flex-direction: column;
   background: var(--bg-card, #ffffff);
-  border-left: 1px solid var(--border-color, #e2e8f0);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.06);
-  animation: diffDrawerIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-left: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.07);
+  animation: diffDrawerIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
-  color: var(--text-color, #1e293b);
+  color: var(--text-color, #0f172a);
 }
 
 @keyframes diffDrawerIn {
   from {
     opacity: 0;
-    transform: translateX(28px);
+    transform: translateX(20px);
   }
   to {
     opacity: 1;
@@ -124,43 +127,57 @@ body > .file-diff-drawer-layer {
   }
 }
 
-/* 顶部 Header */
+/* ==========================================================================
+   Header 头部区域 (高质感毛玻璃与精致排版)
+   ========================================================================== */
 .file-diff-drawer-header {
-  padding: 10px 16px;
-  min-height: 56px;
+  padding: 12px 18px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-  background: var(--bg-surface, #f8fafc);
-  gap: 12px;
+  border-bottom: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
+  background: var(--bg-surface, #ffffff);
+  backdrop-filter: blur(12px);
+  gap: 16px;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .file-diff-header-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+  flex: 1;
 }
 
+/* 文件图标精致磨砂微光 Badge */
 .file-diff-header-icon-box {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(59, 130, 246, 0.1);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(99, 102, 241, 0.06));
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.06);
   color: #2563eb;
   flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.file-diff-header-icon-box:hover {
+  transform: scale(1.04);
 }
 
 .file-diff-title-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
+  flex: 1;
 }
 
 .file-diff-filename-row {
@@ -168,33 +185,51 @@ body > .file-diff-drawer-layer {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .file-diff-filename {
-  font-size: 13.5px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-color, #0f172a);
+  min-width: 0;
 }
 
+/* 状态标签：强制禁止换行，圆润微胶囊设计 */
 .diff-tag-new {
-  font-size: 10.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 9999px;
   font-weight: 600;
-  background: rgba(34, 197, 94, 0.15);
-  color: #16a34a;
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .diff-tag-reverted {
-  font-size: 10.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 9999px;
   font-weight: 500;
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.14);
   color: #64748b;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .file-diff-relpath {
@@ -203,31 +238,41 @@ body > .file-diff-drawer-layer {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 360px;
+  max-width: 480px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  opacity: 0.85;
 }
 
+/* 增删统计微胶囊 (Bento Badge) */
 .file-diff-stats {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11.5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-weight: 600;
   flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .diff-tag-add {
   color: #16a34a;
   background: rgba(34, 197, 94, 0.12);
-  padding: 2px 5px;
-  border-radius: 4px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  padding: 1.5px 6px;
+  border-radius: 9999px;
+  letter-spacing: -0.01em;
 }
 
 .diff-tag-del {
-  color: #dc2626;
-  background: rgba(239, 68, 68, 0.12);
-  padding: 2px 5px;
-  border-radius: 4px;
+  color: #e11d48;
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  padding: 1.5px 6px;
+  border-radius: 9999px;
+  letter-spacing: -0.01em;
 }
 
 /* Header 右侧操作区 */
@@ -238,105 +283,152 @@ body > .file-diff-drawer-layer {
   flex-shrink: 0;
 }
 
+/* 现代化撤销按钮 (Linear / Secondary Button) */
 .file-diff-revert-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 12px;
-  font-weight: 500;
-  padding: 5px 11px;
-  border-radius: 6px;
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #475569;
+  font-weight: 550;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-card, #ffffff);
+  color: #334155;
   cursor: pointer;
-  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.16s ease;
+  white-space: nowrap;
 }
 
 .file-diff-revert-btn:hover:not(:disabled) {
-  background: #f1f5f9;
+  background: var(--bg-surface-hover, #f8fafc);
   border-color: #94a3b8;
-  color: #1e293b;
+  color: #0f172a;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+  transform: translateY(-0.5px);
+}
+
+.file-diff-revert-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.file-diff-revert-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .file-diff-revert-btn.is-reverted {
-  background: #f0fdf4;
-  border-color: #86efac;
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.3);
   color: #16a34a;
   cursor: default;
+  box-shadow: none;
 }
 
+/* 关闭按钮 */
 .file-diff-close-btn {
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: #64748b;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.16s ease;
 }
 
 .file-diff-close-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.06);
   color: #0f172a;
+  transform: scale(1.05);
 }
 
-/* 多文件切换 Tabs */
+.file-diff-close-btn:active {
+  transform: scale(0.96);
+}
+
+/* ==========================================================================
+   多文件切换 Tabs 栏 (IDE 现代化胶囊分段标签)
+   ========================================================================== */
 .file-diff-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  background: var(--bg-surface-secondary, #f1f5f9);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-surface-secondary, #f8fafc);
+  border-bottom: 1px solid var(--border-color, rgba(226, 232, 240, 0.8));
   overflow-x: auto;
   flex-shrink: 0;
+  scrollbar-width: thin;
+}
+
+/* 自定义极细横向滚动条 */
+.file-diff-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.file-diff-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.file-diff-tabs::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+}
+
+.file-diff-tabs::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
 }
 
 .file-diff-tab-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  border-radius: 6px;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   font-size: 12px;
   color: #64748b;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: all 0.16s ease;
 }
 
 .file-diff-tab-item:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.04);
   color: #1e293b;
 }
 
 .file-diff-tab-item.is-active {
   background: #ffffff;
-  border-color: #cbd5e1;
+  border-color: rgba(203, 213, 225, 0.8);
   color: #0f172a;
-  font-weight: 500;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(0, 0, 0, 0.03);
+}
+
+.file-diff-tab-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-diff-tab-stat {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-}
-
-.file-diff-tab-reverted-mark {
-  font-size: 11px;
-  color: #16a34a;
-  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.85;
 }
 
 .tab-add {
@@ -344,17 +436,53 @@ body > .file-diff-drawer-layer {
 }
 
 .tab-del {
-  color: #dc2626;
+  color: #e11d48;
 }
 
-/* 逐行代码 Diff 主体 */
+.tab-zero {
+  color: #94a3b8;
+}
+
+.file-diff-tab-reverted-mark {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   逐行代码 Diff 主体视图 (Anti-Slop 极简现代代码质感)
+   ========================================================================== */
 .file-diff-content-wrapper {
   flex: 1;
   overflow: auto;
   background: var(--bg-editor, #ffffff);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: 22px;
+  scrollbar-width: thin;
+}
+
+/* 高质感代码区域滚动条 */
+.file-diff-content-wrapper::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.file-diff-content-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.file-diff-content-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+}
+
+.file-diff-content-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.45);
 }
 
 .file-diff-table {
@@ -365,98 +493,141 @@ body > .file-diff-drawer-layer {
 }
 
 .file-diff-empty {
-  padding: 32px;
+  padding: 48px;
   text-align: center;
   color: var(--text-muted, #94a3b8);
   font-size: 13px;
 }
 
+/* 代码折叠过渡分隔栏 */
 .file-diff-gap {
-  padding: 3px 12px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-  background: var(--bg-surface, #f8fafc);
-  color: var(--text-muted, #64748b);
+  padding: 5px 16px;
+  border-top: 1px dashed rgba(203, 213, 225, 0.8);
+  border-bottom: 1px dashed rgba(203, 213, 225, 0.8);
+  background: rgba(241, 245, 249, 0.6);
+  color: #64748b;
   font-size: 11px;
+  font-family: inherit;
   text-align: center;
   user-select: none;
   width: 100%;
   box-sizing: border-box;
+  letter-spacing: 0.02em;
 }
 
+/* 代码 Diff 每一行容器 */
 .file-diff-row {
   display: flex;
   align-items: stretch;
   min-width: 100%;
   width: 100%;
-  min-height: 20px;
-  line-height: 20px;
+  min-height: 22px;
+  line-height: 22px;
+  transition: background-color 0.1s ease;
+  border-left: 3px solid transparent; /* 状态指示条锚点 */
 }
 
+.file-diff-row:hover {
+  background-color: rgba(0, 0, 0, 0.025);
+}
+
+/* 新增行样式：克制柔和的浅绿底色，保留高对比度的深色正文文字 */
 .file-diff-row.diff-type-add {
-  background-color: rgba(34, 197, 94, 0.12);
-  color: #15803d;
+  background-color: rgba(34, 197, 94, 0.08);
+  border-left-color: #22c55e; /* 左侧高质感绿色边条 */
+  color: #1e293b;
 }
 
+.file-diff-row.diff-type-add:hover {
+  background-color: rgba(34, 197, 94, 0.13);
+}
+
+/* 删除行样式：克制柔和的浅红底色，保留高对比度的深色正文文字 */
 .file-diff-row.diff-type-del {
-  background-color: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
+  background-color: rgba(244, 63, 94, 0.08);
+  border-left-color: #f43f5e; /* 左侧高质感红色边条 */
+  color: #1e293b;
+}
+
+.file-diff-row.diff-type-del:hover {
+  background-color: rgba(244, 63, 94, 0.13);
 }
 
 .file-diff-row.diff-type-normal {
   background-color: transparent;
+  border-left-color: transparent;
   color: var(--text-color, #1e293b);
 }
 
+/* 行号槽 Gutter 样式 */
 .diff-num {
-  width: 40px;
-  padding: 0 6px;
+  width: 42px;
+  padding: 0 8px;
   text-align: right;
   user-select: none;
   color: #94a3b8;
-  font-size: 10.5px;
+  font-size: 11px;
   flex-shrink: 0;
-  border-right: 1px solid rgba(148, 163, 184, 0.2);
+  border-right: 1px solid rgba(226, 232, 240, 0.8);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
-  line-height: 20px;
+  line-height: 22px;
   box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.015);
+  font-variant-numeric: tabular-nums;
 }
 
 .diff-type-add .diff-num {
   color: #16a34a;
-  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.05);
+  border-right-color: rgba(34, 197, 94, 0.2);
 }
 
 .diff-type-del .diff-num {
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.28);
+  color: #e11d48;
+  background: rgba(244, 63, 94, 0.05);
+  border-right-color: rgba(244, 63, 94, 0.2);
 }
 
+/* 符号槽 (+/-) 样式 */
 .diff-sign {
-  width: 20px;
+  width: 24px;
   text-align: center;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 12px;
   user-select: none;
   flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  line-height: 20px;
+  line-height: 22px;
   box-sizing: border-box;
 }
 
+.diff-type-add .diff-sign {
+  color: #16a34a;
+}
+
+.diff-type-del .diff-sign {
+  color: #e11d48;
+}
+
+.diff-type-normal .diff-sign {
+  color: transparent;
+}
+
+/* 代码正文区域 */
 .diff-code {
   margin: 0;
-  padding: 0 12px 0 8px;
+  padding: 0 16px 0 10px;
   flex: 1;
   white-space: pre;
   word-break: normal;
   overflow-wrap: normal;
   font-family: inherit;
-  font-size: inherit;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 22px;
   box-sizing: border-box;
 }
 
@@ -465,6 +636,227 @@ body > .file-diff-drawer-layer {
   font-size: inherit;
   line-height: inherit;
   tab-size: 2;
+  color: inherit;
+}
+
+/* ==========================================================================
+   深色模式适配 (FileDiffModal Dark Mode)
+   遵循暗调科技感毛玻璃与高对比度排版
+   ========================================================================== */
+.agent-window-container.dark .file-diff-drawer,
+.dark .file-diff-drawer {
+  background: #0d1117;
+  border-left-color: rgba(255, 255, 255, 0.08);
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.55);
+  color: #f1f5f9;
+}
+
+.agent-window-container.dark .file-diff-drawer-header,
+.dark .file-diff-drawer-header {
+  background: #161b22;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .file-diff-header-icon-box,
+.dark .file-diff-header-icon-box {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.12));
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.agent-window-container.dark .file-diff-filename,
+.dark .file-diff-filename {
+  color: #f0f6fc;
+}
+
+.agent-window-container.dark .file-diff-relpath,
+.dark .file-diff-relpath {
+  color: #8b949e;
+}
+
+.agent-window-container.dark .diff-tag-new,
+.dark .diff-tag-new {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.agent-window-container.dark .diff-tag-reverted,
+.dark .diff-tag-reverted {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.agent-window-container.dark .file-diff-stats,
+.dark .file-diff-stats {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-window-container.dark .diff-tag-add,
+.dark .diff-tag-add {
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.agent-window-container.dark .diff-tag-del,
+.dark .diff-tag-del {
+  color: #fb7185;
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.agent-window-container.dark .file-diff-revert-btn,
+.dark .file-diff-revert-btn {
+  background: #21262d;
+  border-color: rgba(240, 246, 252, 0.15);
+  color: #c9d1d9;
+}
+
+.agent-window-container.dark .file-diff-revert-btn:hover:not(:disabled),
+.dark .file-diff-revert-btn:hover:not(:disabled) {
+  background: #30363d;
+  border-color: rgba(240, 246, 252, 0.3);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.agent-window-container.dark .file-diff-revert-btn.is-reverted,
+.dark .file-diff-revert-btn.is-reverted {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.agent-window-container.dark .file-diff-close-btn,
+.dark .file-diff-close-btn {
+  color: #8b949e;
+}
+
+.agent-window-container.dark .file-diff-close-btn:hover,
+.dark .file-diff-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f0f6fc;
+}
+
+.agent-window-container.dark .file-diff-tabs,
+.dark .file-diff-tabs {
+  background: #010409;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .file-diff-tabs::-webkit-scrollbar-thumb,
+.dark .file-diff-tabs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.agent-window-container.dark .file-diff-tab-item,
+.dark .file-diff-tab-item {
+  color: #8b949e;
+}
+
+.agent-window-container.dark .file-diff-tab-item:hover,
+.dark .file-diff-tab-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f6fc;
+}
+
+.agent-window-container.dark .file-diff-tab-item.is-active,
+.dark .file-diff-tab-item.is-active {
+  background: #161b22;
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #58a6ff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.agent-window-container.dark .file-diff-content-wrapper,
+.dark .file-diff-content-wrapper {
+  background: #0d1117;
+}
+
+.agent-window-container.dark .file-diff-content-wrapper::-webkit-scrollbar-thumb,
+.dark .file-diff-content-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.agent-window-container.dark .file-diff-content-wrapper::-webkit-scrollbar-thumb:hover,
+.dark .file-diff-content-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.agent-window-container.dark .file-diff-gap,
+.dark .file-diff-gap {
+  background: rgba(22, 27, 34, 0.8);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #8b949e;
+}
+
+.agent-window-container.dark .file-diff-row:hover,
+.dark .file-diff-row:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-normal,
+.dark .file-diff-row.diff-type-normal {
+  color: #e6edf3;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-add,
+.dark .file-diff-row.diff-type-add {
+  background-color: rgba(34, 197, 94, 0.12);
+  border-left-color: #3fb950;
+  color: #e6edf3;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-add:hover,
+.dark .file-diff-row.diff-type-add:hover {
+  background-color: rgba(34, 197, 94, 0.18);
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-del,
+.dark .file-diff-row.diff-type-del {
+  background-color: rgba(244, 63, 94, 0.12);
+  border-left-color: #f85149;
+  color: #e6edf3;
+}
+
+.agent-window-container.dark .file-diff-row.diff-type-del:hover,
+.dark .file-diff-row.diff-type-del:hover {
+  background-color: rgba(244, 63, 94, 0.18);
+}
+
+.agent-window-container.dark .diff-num,
+.dark .diff-num {
+  color: #6e7681;
+  background: rgba(255, 255, 255, 0.02);
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-window-container.dark .diff-type-add .diff-num,
+.dark .diff-type-add .diff-num {
+  color: #3fb950;
+  background: rgba(34, 197, 94, 0.08);
+  border-right-color: rgba(34, 197, 94, 0.25);
+}
+
+.agent-window-container.dark .diff-type-del .diff-num,
+.dark .diff-type-del .diff-num {
+  color: #f85149;
+  background: rgba(244, 63, 94, 0.08);
+  border-right-color: rgba(244, 63, 94, 0.25);
+}
+
+.agent-window-container.dark .diff-type-add .diff-sign,
+.dark .diff-type-add .diff-sign {
+  color: #3fb950;
+}
+
+.agent-window-container.dark .diff-type-del .diff-sign,
+.dark .diff-type-del .diff-sign {
+  color: #f85149;
 }
 
 /* 窄屏或移动端适配 */
@@ -486,143 +878,6 @@ body > .file-diff-drawer-layer {
   .file-diff-resizer {
     display: none;
   }
-}
-
-/* ==========================================================================
-   深色模式适配 (FileDiffModal)
-   ========================================================================== */
-.agent-window-container.dark .file-diff-drawer,
-.dark .file-diff-drawer {
-  background: #141923;
-  border-left-color: rgba(255, 255, 255, 0.08);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
-  color: #f1f5f9;
-}
-
-.agent-window-container.dark .file-diff-drawer-header,
-.dark .file-diff-drawer-header {
-  background: #1a202c;
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-
-.agent-window-container.dark .file-diff-filename,
-.dark .file-diff-filename {
-  color: #f8fafc;
-}
-
-.agent-window-container.dark .file-diff-relpath,
-.dark .file-diff-relpath {
-  color: #94a3b8;
-}
-
-.agent-window-container.dark .diff-tag-reverted,
-.dark .diff-tag-reverted {
-  background: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
-}
-
-.agent-window-container.dark .file-diff-revert-btn,
-.dark .file-diff-revert-btn {
-  background: #27272a;
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #e2e8f0;
-}
-
-.agent-window-container.dark .file-diff-revert-btn:hover:not(:disabled),
-.dark .file-diff-revert-btn:hover:not(:disabled) {
-  background: #3f3f46;
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #ffffff;
-}
-
-.agent-window-container.dark .file-diff-revert-btn.is-reverted,
-.dark .file-diff-revert-btn.is-reverted {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.35);
-  color: #4ade80;
-}
-
-.agent-window-container.dark .file-diff-close-btn,
-.dark .file-diff-close-btn {
-  color: #94a3b8;
-}
-
-.agent-window-container.dark .file-diff-close-btn:hover,
-.dark .file-diff-close-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f8fafc;
-}
-
-.agent-window-container.dark .file-diff-tabs,
-.dark .file-diff-tabs {
-  background: #11151d;
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-
-.agent-window-container.dark .file-diff-tab-item,
-.dark .file-diff-tab-item {
-  color: #94a3b8;
-}
-
-.agent-window-container.dark .file-diff-tab-item:hover,
-.dark .file-diff-tab-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #f1f5f9;
-}
-
-.agent-window-container.dark .file-diff-tab-item.is-active,
-.dark .file-diff-tab-item.is-active {
-  background: #1e2430;
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #60a5fa;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.agent-window-container.dark .file-diff-content-wrapper,
-.dark .file-diff-content-wrapper {
-  background: #0d1117;
-}
-
-.agent-window-container.dark .file-diff-gap,
-.dark .file-diff-gap {
-  background: #1a202c;
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
-}
-
-.agent-window-container.dark .file-diff-row.diff-type-normal,
-.dark .file-diff-row.diff-type-normal {
-  color: #cbd5e1;
-}
-
-.agent-window-container.dark .file-diff-row.diff-type-add,
-.dark .file-diff-row.diff-type-add {
-  background-color: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
-
-.agent-window-container.dark .file-diff-row.diff-type-del,
-.dark .file-diff-row.diff-type-del {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-}
-
-.agent-window-container.dark .diff-num,
-.dark .diff-num {
-  color: #64748b;
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-
-.agent-window-container.dark .diff-type-add .diff-num,
-.dark .diff-type-add .diff-num {
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.3);
-}
-
-.agent-window-container.dark .diff-type-del .diff-num,
-.dark .diff-type-del .diff-num {
-  color: #f87171;
-  border-color: rgba(239, 68, 68, 0.3);
 }
 
 /* Use the available chat width, including sidebar and other pane allocations. */

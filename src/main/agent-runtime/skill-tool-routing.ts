@@ -10,6 +10,9 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
   'update_task_step'
 ])
 
+// Default visibility still respects the caller's allowlist and blocklist.
+export const DEFAULT_COLLABORATION_TOOL_NAMES = new Set(['list_agents', 'delegate_tasks'])
+
 const DESKTOP_APPLICATION_PATTERN = /(?:微信|weixin|钉钉|dingtalk|qq|企业微信|word|excel|powerpoint|ppt|记事本|notepad|计算器|calculator|文件管理器|资源管理器|explorer|浏览器|chrome|edge)/i
 const DESKTOP_SURFACE_PATTERN = /(?:当前屏幕|屏幕上|当前窗口|这个窗口|桌面上|任务栏|鼠标|键盘)/i
 const DESKTOP_ACTION_PATTERN = /(?:打开|启动|切换|聚焦|点击|双击|输入|键入|发送|按下|滚动|拖动|关闭|最小化|最大化|截图|查看)/i
@@ -63,7 +66,7 @@ export function createInitialActiveToolNames(options: {
   if (options.forceAllTools) return available
 
   const active = new Set<string>()
-  for (const name of BOOTSTRAP_TOOL_NAMES) {
+  for (const name of [...BOOTSTRAP_TOOL_NAMES, ...DEFAULT_COLLABORATION_TOOL_NAMES]) {
     if (available.has(name)) active.add(name)
   }
   for (const name of options.explicitlyRequestedToolNames || []) {

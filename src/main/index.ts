@@ -49,7 +49,7 @@ import {
   clearAgentRuntimeSessionCache,
   restoreAgentRuntimeSessionActivity
 } from './agent-runtime'
-import { BOOTSTRAP_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
+import { BOOTSTRAP_TOOL_NAMES, DEFAULT_COLLABORATION_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { clearProjectGuidanceCache } from './agent-runtime/project-guidance'
 import { parseInspectionEvidence, inspectionReads } from './agent-runtime/inspection-evidence'
 import { fileVersion, canonicalReadPath } from './tools/builtin/file/read-cache'
@@ -6255,6 +6255,32 @@ app.whenReady().then(() => {
           }
           if (step.type === 'generated_files')
             generatedPaths.push(...step.files.map((file) => file.path))
+          if (step.type === 'file_changes') {
+            const taggedChanges = Array.isArray(step.changes)
+              ? step.changes.map((change) => ({
+                  ...change,
+                  subtaskId: request.step.id,
+                  subtaskTitle: request.step.title,
+                  agentId: request.step.agentId || 'agentpet'
+                }))
+              : []
+            if (taggedChanges.length > 0) {
+              await taskRunner.notify(request.run.id, 'file_changes', request.step.id, {
+                changes: taggedChanges
+              })
+              const allWindows = BrowserWindow.getAllWindows()
+              for (const win of allWindows) {
+                if (!win.isDestroyed()) {
+                  win.webContents.send('api:llm-tool-event', {
+                    type: 'file_changes',
+                    changes: taggedChanges,
+                    timestamp: Date.now(),
+                    sessionId: request.run.sessionId
+                  })
+                }
+              }
+            }
+          }
           if (step.type === 'think') {
             await taskRunner.notify(request.run.id, 'think', request.step.id, {
               detail: sanitizeTraceValue(step.detail)
@@ -7169,7 +7195,8 @@ app.whenReady().then(() => {
       // request_skill 成功后由 AgentExecutor 按本轮需要动态加入。
       const tools = getFormattedTools(true)
       return tools.filter((tool: any) =>
-        BOOTSTRAP_TOOL_NAMES.has(String(tool?.function?.name || ''))
+        BOOTSTRAP_TOOL_NAMES.has(String(tool?.function?.name || '')) ||
+        DEFAULT_COLLABORATION_TOOL_NAMES.has(String(tool?.function?.name || ''))
       )
     } catch (err) {
       console.error('获取工具定义失败:', err)

@@ -13,6 +13,9 @@ export interface FileChangeItem {
   originalContent: string
   currentContent: string
   wasCreated?: boolean
+  subtaskId?: string
+  subtaskTitle?: string
+  agentId?: string
 }
 
 export interface DiffLine {
@@ -460,7 +463,9 @@ export function FileDiffDrawer({
             </span>
             <div className="file-diff-title-group">
               <div className="file-diff-filename-row">
-                <span className="file-diff-filename">{currentFile.fileName}</span>
+                <span className="file-diff-filename" title={currentFile.fileName}>
+                  {currentFile.fileName}
+                </span>
                 {currentFile.wasCreated && (
                   <span className="diff-tag-new">新建</span>
                 )}
@@ -530,14 +535,15 @@ export function FileDiffDrawer({
                   onClick={() => setActiveIndex(index)}
                   title={item.filePath}
                 >
-                  <FileIcon fileName={item.fileName || item.filePath} size={13} className="file-diff-tab-icon" />
+                  <FileIcon fileName={item.fileName || item.filePath} size={14} className="file-diff-tab-icon" />
                   <span className="file-diff-tab-name">{item.fileName}</span>
                   <span className="file-diff-tab-stat">
-                    <span className="tab-add">+{item.additions}</span>
-                    <span className="tab-del">-{item.deletions}</span>
+                    {item.additions > 0 && <span className="tab-add">+{item.additions}</span>}
+                    {item.deletions > 0 && <span className="tab-del">-{item.deletions}</span>}
+                    {item.additions === 0 && item.deletions === 0 && <span className="tab-zero">0</span>}
                   </span>
                   {itemReverted && (
-                    <span className="file-diff-tab-reverted-mark">✓</span>
+                    <span className="file-diff-tab-reverted-mark">已撤销</span>
                   )}
                 </button>
               )
@@ -558,11 +564,13 @@ export function FileDiffDrawer({
               ) : (
                 <div
                   key={idx}
-                  className={`file-diff-row diff-type-${line.type}`}
+                  className={`file-diff-row diff-type-${line.type} ${currentFile.wasCreated ? 'is-new-file' : ''}`}
                 >
-                  <span className="diff-num old-num">
-                    {line.oldLine ?? ''}
-                  </span>
+                  {!currentFile.wasCreated && (
+                    <span className="diff-num old-num">
+                      {line.oldLine ?? ''}
+                    </span>
+                  )}
                   <span className="diff-num new-num">
                     {line.newLine ?? ''}
                   </span>

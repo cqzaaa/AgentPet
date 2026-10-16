@@ -4,6 +4,7 @@ import type { OfficeSkillName } from '../tools/builtin/office/skills/types'
 import { DESKTOP_CONTROL_INSTRUCTIONS } from '../tools/builtin/computer/policy'
 import agentPetCodingSkill from '../tools/builtin/agentpet-coding/SKILL.md?raw'
 import { ensureManagedPptMaster, getManagedSkillRoot } from './managed-skill-runtime'
+import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
 
 export interface BuiltinSkillDefinition {
   id: string
@@ -158,7 +159,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
     description: 'Plan substantial work and delegate independent or dependency-linked subtasks.',
     triggers: ['plan', 'delegate', 'subagent', 'task plan', '规划', '计划', '委派', '子任务', '并行'],
     allowedTools: ['list_agents', 'update_task_plan', 'update_task_step', 'delegate_tasks'],
-    instructions: `# Agent workflow\nNever plan a single-file, single-mutation, low-risk task. For substantial work, call update_task_plan once, keep its structure immutable, and use update_task_step for all later progress. Complete or block the current step before another begins; the runtime starts the next ready step and closes successful work automatically. Call list_agents before selecting a non-default execution Agent, then pass its id as agentId. Use delegate_tasks only for concrete independent or dependency-linked subtasks.`
+    instructions: `# Agent workflow\nNever plan a single-file, single-mutation, low-risk task. For substantial work, call update_task_plan once, keep its structure immutable, and use update_task_step for all later progress. Complete or block the current parent plan step before another begins; the runtime starts the next ready step and closes successful work automatically. \n${DELEGATION_POLICY}`
   }),
   staticSkill({
     id: 'files',

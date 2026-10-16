@@ -25,6 +25,7 @@ import { FileChangeTracker } from './file-change-tracker'
 import { CodingInspectionBudget } from './coding-inspection-budget'
 import { WebResearchProgress } from './web-research-progress'
 import { loadProjectGuidance } from './project-guidance'
+import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
 import {
   BOOTSTRAP_TOOL_NAMES,
   activateAllowedTools,
@@ -1010,13 +1011,12 @@ Images in current or historical messages are provided directly to the model. Ins
         : '\n\n<workspace_context>当前会话未绑定工作区；普通文件操作默认使用会话附件目录。</workspace_context>'
     }
 
-    // Keep only the bootstrap policy in the initial prompt. Non-bootstrap tools,
-    // including delegation, become callable only after request_skill activates
-    // the owning built-in skill for this turn.
+    // Collaboration is available by default within the caller's tool permissions.
+    // Other Skill-owned tools still require activation through request_skill.
     const taskToolManifest = toolRegistry.getManifest('delegate_tasks') || toolRegistry.getManifest('update_task_plan')
     const taskToolPolicy = typeof taskToolManifest?.systemRole === 'string' ? taskToolManifest.systemRole : ''
     if (taskToolPolicy && typeof chatHistory[0].content === 'string') {
-      chatHistory[0].content += `\n\n${taskToolPolicy}\n<builtin_task_tools>\n- update_task_plan creates a plan once; update_task_step applies later step changes.\n- Both plan tools are unavailable for simple single-file, single-mutation, low-risk tasks.\n- Load the agent-workflow Skill through request_skill before using delegate_tasks.\n</builtin_task_tools>`
+      chatHistory[0].content += `\n\n${taskToolPolicy}\n${DELEGATION_POLICY}\n<builtin_task_tools>\n- update_task_plan creates a plan once; update_task_step applies later step changes.\n- Both plan tools are unavailable for simple single-file, single-mutation, low-risk tasks.\n</builtin_task_tools>`
     }
 
     if (sessionId) {
@@ -1290,7 +1290,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     }
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
     if (isFrontend && effectiveTools.length > 0) {
-      const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句简洁正文说明行动及目的；后续仅在有重要发现、实质进展、阻碍或工作阶段变化时更新。连续读取或修改同一处代码时合并说明，不要逐个工具报幕，也不要重复工具卡片已展示的操作。中文表达自然，语境明确时省略主语，直接从动作、发现或结果切入；避免连续以“我”“我来”“我先”开头，也不要机械替换成重复的“接下来”“现在”。需要表达判断、承担责任或区分执行者时可以使用“我”，不必一律删除主语。进度内容应提供新信息，例如“先确认目录与控制岛的联动逻辑。”“目录入口已定位，下一步接入展开与收起。”；示例仅用于说明句式，不代表实际发现或结果，不要固定套用。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答说明结果及验证情况，同样避免重复报幕和多余主语。</progress_updates>'
+      const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句自然正文说明要解决的问题及行动目的。后续仅在有重要发现、实质进展、阻碍或工作阶段变化时更新；每次更新应提供工具卡片之外的新信息。连续读取、搜索或修改属于同一阶段时合并说明，没有新信息就继续执行工具，不必补一句过渡语。不要逐个工具报幕，不要把文件名、工具名或创建计划本身作为进度内容的主体。中文表达应像与同事沟通，句子完整、语气自然；按语境使用“我”或省略主语，不刻意删除主语，也不强制从动作开头。避免反复使用“先……”“我先……”“接下来……”“现在……”等固定开场，不要仅替换连接词制造句式变化。“先”只在确实需要解释前后依赖时使用，不作为默认起手式。围绕当前已知事实说明发现、影响、决定或待解决问题；尚未验证的判断要标明不确定，不要把计划写成已完成的结果。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答直接说明结果、验证情况和必要的限制，不重复过程播报。</progress_updates>'
       const systemMessage = chatHistory.find(message => message.role === 'system')
       if (typeof systemMessage?.content === 'string') systemMessage.content += progressInstructions
       else if (Array.isArray(systemMessage?.content)) systemMessage.content.push({ type: 'text', text: progressInstructions })

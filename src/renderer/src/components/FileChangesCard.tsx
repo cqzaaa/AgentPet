@@ -194,6 +194,14 @@ export function FileChangesCard({
                   <span className="file-item-path" title={item.filePath}>
                     {item.relativePath || item.fileName}
                   </span>
+                  {item.subtaskTitle && (
+                    <span
+                      className="file-item-subtask-tag"
+                      title={`由子任务「${item.subtaskTitle}」修改${item.agentId ? ` (${item.agentId})` : ''}`}
+                    >
+                      {item.subtaskTitle}
+                    </span>
+                  )}
                   {isItemReverted && (
                     <span className="file-item-reverted-tag">已撤销</span>
                   )}
