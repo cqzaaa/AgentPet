@@ -1217,10 +1217,6 @@ export function WikiPage(): React.JSX.Element {
         </div>
 
         <h2 className="wiki-onboarding-title">让一个文件夹，长成一张知识地图</h2>
-        <p className="wiki-onboarding-desc">
-          Markdown 是可编辑页面，PDF、Word、表格和演示文稿是可引用来源。<br />
-          原始文件完整保留在本地，无专有格式锁定。
-        </p>
 
         <div className="wiki-onboarding-cta-wrap">
           <button type="button" className="wiki-btn-hero" onClick={() => void chooseWorkspace()}>

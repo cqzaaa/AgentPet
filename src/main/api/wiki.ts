@@ -120,6 +120,8 @@ const MAX_WORKSPACE_FILES = 2000
 const latestSyncByWorkspace = new Map<string, WikiSyncProgress>()
 const workspaceWatchers = new Map<string, { rootPath: string; watcher: fs.FSWatcher; timer: NodeJS.Timeout | null }>()
 const syncingWorkspaces = new Map<string, Promise<WikiSyncProgress>>()
+const syncControllers = new Map<string, AbortController>()
+const removingWorkspaces = new Map<string, Promise<boolean>>()
 function publishSyncProgress(_event: { sender: WebContents } | undefined, progress: WikiSyncProgress): void {
   progress.updatedAt = Date.now()
   latestSyncByWorkspace.set(progress.workspaceId, { ...progress })
@@ -652,8 +654,10 @@ async function syncWorkspace(
   database: Database,
   workspaceId: string,
   rootPath: string,
-  event?: { sender: WebContents }
+  event?: { sender: WebContents },
+  signal?: AbortSignal
 ): Promise<WikiSyncProgress> {
+  signal?.throwIfAborted()
   const progress: WikiSyncProgress = {
     workspaceId,
     status: 'running',
@@ -665,6 +669,7 @@ async function syncWorkspace(
   }
   publishSyncProgress(event, progress)
   const files = await collectWorkspaceFiles(rootPath)
+  signal?.throwIfAborted()
   progress.total = files.length
   publishSyncProgress(event, progress)
   const currentPaths = new Set(files.map(file => file.relativePath))
@@ -673,10 +678,12 @@ async function syncWorkspace(
     WHERE workspace_id = ? AND relative_path NOT IN (${files.map(() => '?').join(',') || "''"})
   `, workspaceId, ...files.map(file => file.relativePath))
   for (const item of removed) {
+    signal?.throwIfAborted()
     if (item.documentId) await removeIndexedDocument(database, item.documentId)
   }
 
   for (const file of files) {
+    signal?.throwIfAborted()
     progress.currentFile = file.relativePath
     publishSyncProgress(event, progress)
     try {
@@ -691,6 +698,7 @@ async function syncWorkspace(
     }
     publishSyncProgress(event, progress)
   }
+  signal?.throwIfAborted()
   if (currentPaths.size === 0) {
     await database.run('DELETE FROM wiki_links WHERE workspace_id = ?', workspaceId)
     await database.run('DELETE FROM wiki_entities WHERE workspace_id = ?', workspaceId)
@@ -699,7 +707,9 @@ async function syncWorkspace(
     progress.currentFile = '关联页面与源码依据'
     publishSyncProgress(event, progress)
     await rebuildWikiSources(database, workspaceId, rootPath)
+    signal?.throwIfAborted()
     await rebuildWikiLinks(database, workspaceId)
+    signal?.throwIfAborted()
     progress.currentFile = '提取正文实体关系'
     publishSyncProgress(event, progress)
     await rebuildWikiEntities(database, workspaceId)
@@ -724,10 +734,18 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
   ipcMain.handle('api:wiki-install-parser-component', event => officeRuntimeManager.installDocling({ event }))
   // Own the promise in main: every caller joins the same job, including after navigation.
   const startSync = (workspaceId: string, rootPath: string, event?: { sender: WebContents }): Promise<WikiSyncProgress> => {
+    if (removingWorkspaces.has(workspaceId)) return Promise.reject(new Error('工作区正在移除。'))
     const current = syncingWorkspaces.get(workspaceId)
     if (current) return current
+    const controller = new AbortController()
+    syncControllers.set(workspaceId, controller)
     const task = deps.getDB()
-      .then(database => syncWorkspace(database, workspaceId, rootPath, event))
+      .then(async database => {
+        controller.signal.throwIfAborted()
+        const workspace = await database.get('SELECT id FROM knowledge_bases WHERE id = ?', workspaceId)
+        if (!workspace) throw new Error('WIKI_WORKSPACE_NOT_FOUND')
+        return syncWorkspace(database, workspaceId, rootPath, event, controller.signal)
+      })
       .catch(error => {
         const previous = latestSyncByWorkspace.get(workspaceId)
         publishSyncProgress(event, {
@@ -736,11 +754,15 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         })
         throw error
       })
-      .finally(() => syncingWorkspaces.delete(workspaceId))
+      .finally(() => {
+        syncingWorkspaces.delete(workspaceId)
+        syncControllers.delete(workspaceId)
+      })
     syncingWorkspaces.set(workspaceId, task)
     return task
   }
   const ensureWorkspaceWatcher = (workspaceId: string, rootPath: string, sender?: WebContents): void => {
+    if (removingWorkspaces.has(workspaceId)) return
     const current = workspaceWatchers.get(workspaceId)
     if (current?.rootPath === rootPath) return
     current?.watcher.close()
@@ -818,21 +840,29 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
   })
 
   ipcMain.handle('api:wiki-remove-workspace', async (_, workspaceId: string) => {
-    if (syncingWorkspaces.has(workspaceId)) throw new Error('工作区正在同步，请等待完成后再移除。')
-    const database = await deps.getDB()
-    const watcher = workspaceWatchers.get(workspaceId)
-    if (watcher?.timer) clearTimeout(watcher.timer)
-    watcher?.watcher.close()
-    workspaceWatchers.delete(workspaceId)
-    latestSyncByWorkspace.delete(workspaceId)
-    const documents = await database.all<Array<{ documentId: string }>>(`
-      SELECT document_id AS documentId FROM wiki_items WHERE workspace_id = ?
-    `, workspaceId)
-    for (const document of documents) {
-      if (document.documentId) await removeIndexedDocument(database, document.documentId)
-    }
-    await database.run('DELETE FROM knowledge_bases WHERE id = ?', workspaceId)
-    return true
+    const current = removingWorkspaces.get(workspaceId)
+    if (current) return current
+    // Stop new jobs immediately, then let the current write finish before deleting its rows.
+    const task = Promise.resolve().then(async () => {
+      const watcher = workspaceWatchers.get(workspaceId)
+      if (watcher?.timer) clearTimeout(watcher.timer)
+      watcher?.watcher.close()
+      workspaceWatchers.delete(workspaceId)
+      syncControllers.get(workspaceId)?.abort(new Error('工作区正在移除，同步已停止。'))
+      await syncingWorkspaces.get(workspaceId)?.catch(() => undefined)
+      const database = await deps.getDB()
+      latestSyncByWorkspace.delete(workspaceId)
+      const documents = await database.all<Array<{ documentId: string }>>(`
+        SELECT document_id AS documentId FROM wiki_items WHERE workspace_id = ?
+      `, workspaceId)
+      for (const document of documents) {
+        if (document.documentId) await removeIndexedDocument(database, document.documentId)
+      }
+      await database.run('DELETE FROM knowledge_bases WHERE id = ?', workspaceId)
+      return true
+    }).finally(() => removingWorkspaces.delete(workspaceId))
+    removingWorkspaces.set(workspaceId, task)
+    return task
   })
 
   ipcMain.handle('api:wiki-get-sync-progress', (_, workspaceId: string) => {
