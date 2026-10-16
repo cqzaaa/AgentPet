@@ -22,13 +22,15 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
+    optimizeDeps: { exclude: ['emf-converter'] },
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src')
       }
     },
     build: {
-      sourcemap: false
+      sourcemap: false,
+      rollupOptions: { external: ['@napi-rs/canvas'] }
     },
     plugins: [react()]
   }

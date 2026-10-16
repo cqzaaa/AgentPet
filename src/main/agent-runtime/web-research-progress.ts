@@ -38,6 +38,9 @@ export class WebResearchProgress {
   }
 
   beforeCall(name: string, args: Record<string, unknown>): string | undefined {
+    if (name === 'web_download' && typeof args.url === 'string') {
+      this.rememberUrls(args.url)
+    }
     if (this.active && this.failedScripts >= 3 && isNetworkScript(name, args)) return RECOVERY
     if (this.active && isNetworkScript(name, args)) {
       const unknown = literalUrls(String(args.code || args.command || '')).filter(url => {
@@ -52,7 +55,7 @@ export class WebResearchProgress {
 
   observe(result: ResearchResult): string | undefined {
     for (const source of [...(result.toolState?.sources || []), ...(result.toolState?.links || [])]) this.rememberUrls(source.url)
-    if (result.toolSuccess && (isNetworkScript(result.toolName, result.toolArgs) || ['read_file', 'run_office_skill'].includes(result.toolName))) {
+    if (result.toolSuccess && (isNetworkScript(result.toolName, result.toolArgs) || ['read_file', 'run_office_skill', 'web_download'].includes(result.toolName))) {
       this.rememberUrls(result.displayResult)
     }
     if (result.toolName === 'web_search') {
@@ -66,6 +69,15 @@ export class WebResearchProgress {
         this.failedScripts = 0
         this.searchesWithoutPage = 0
       } else return RECOVERY
+    }
+    if (result.toolName === 'web_download') {
+      this.active = true
+      if (typeof result.toolArgs.url === 'string') this.rememberUrls(result.toolArgs.url)
+      if (result.toolSuccess) {
+        this.failedScripts = 0
+        this.searchesWithoutPage = 0
+        return '[资料核验] 文件下载成功。请使用 read_file 或 run_office_skill 读取该文件核验真实标题、摘要与正文，确保与需求主题一致后再交付。'
+      }
     }
     if (!this.active) return undefined
     // Local inspection offers a recovery route even when websites are unavailable.

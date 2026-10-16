@@ -159,6 +159,8 @@ const api = {
     ipcRenderer.invoke('api:save-clipboard-image', dataUrl),
   getGeneratedFiles: (sessionId?: string): Promise<{ name: string; path: string; size: number; time: string }[]> =>
     ipcRenderer.invoke('api:get-generated-files', sessionId),
+  getFileMetadata: (filePath: string): Promise<{ exists: boolean; size: number; mtime?: number } | null> =>
+    ipcRenderer.invoke('api:get-file-metadata', filePath),
   saveGeneratedFileAs: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('api:save-generated-file-as', filePath),
   revertFileChanges: (changes: any[]): Promise<{ success: boolean; revertedCount: number; error?: string }> =>

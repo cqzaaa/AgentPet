@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { createViewer, imagePlugin, pdfPlugin, officePlugin, textPlugin } from '@open-file-viewer/core'
+import { createViewer } from '@open-file-viewer/core'
+import { createFileViewerPlugins, localFilePreviewUrl } from './fileViewerPlugins'
 import '@open-file-viewer/core/style.css'
 import JSZip from 'jszip'
 import { AppStore } from '../hooks/useAppStore'
@@ -42,6 +43,14 @@ type GeneratedFileRecord = {
   size: number
   time?: string
   role?: 'final' | 'intermediate'
+}
+
+function formatFileSize(bytes?: number): string {
+  if (typeof bytes !== 'number' || isNaN(bytes) || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
 function GeneratedFileSection({
@@ -95,7 +104,7 @@ function GeneratedFileSection({
                 </span>
                 <span className="generated-file-copy">
                   <span className="generated-file-name">{file.name}</span>
-                  <span className="generated-file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                  <span className="generated-file-size">{formatFileSize(file.size) || (file.size === 0 ? '0 B' : '')}</span>
                 </span>
               </button>
               <button
@@ -325,10 +334,33 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
   const [hasToolbarCtx, setHasToolbarCtx] = useState(false)
 
   useEffect(() => {
+    if (!captureOnly) void loadGeneratedFiles()
+  }, [captureOnly, loadGeneratedFiles])
+
+  useEffect(() => {
     if (captureOnly || !finalArtifactSyncKey || lastArtifactSyncKeyRef.current === finalArtifactSyncKey) return
     lastArtifactSyncKeyRef.current = finalArtifactSyncKey
     void loadGeneratedFiles()
   }, [captureOnly, finalArtifactSyncKey, loadGeneratedFiles])
+
+  // 当预览文件的 size 缺失或为 0 时，自动异步通过 IPC 探查真实大小并回填
+  useEffect(() => {
+    if (!previewFile?.path || (typeof previewFile.size === 'number' && previewFile.size > 0)) return
+    if (!window.api?.getFileMetadata) return
+
+    let cancelled = false
+    window.api.getFileMetadata(previewFile.path).then((meta) => {
+      if (cancelled || !meta?.exists || typeof meta.size !== 'number' || meta.size <= 0) return
+      setPreviewFile((prev: any) => (prev && prev.path === previewFile.path ? { ...prev, size: meta.size } : prev))
+      setOpenTabs((prev: any[]) =>
+        prev.map((t) => (t.path === previewFile.path ? { ...t, size: meta.size } : t))
+      )
+    }).catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [previewFile?.path, previewFile?.size, setPreviewFile, setOpenTabs])
 
   const syncZoomStatus = () => {
     const ctx = toolbarContextRef.current
@@ -398,8 +430,7 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
     setViewerError(null)
 
     try {
-      const formattedPath = previewFile.path.replace(/\\/g, '/')
-      const fileUrl = `local-file:///${formattedPath}`
+      const fileUrl = localFilePreviewUrl(previewFile.path)
 
       viewerRef.current = createViewer({
         container: viewerNode,
@@ -417,12 +448,7 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
             return div
           }
         },
-        plugins: [
-          imagePlugin(),
-          pdfPlugin(),
-          officePlugin(),
-          textPlugin()
-        ],
+        plugins: createFileViewerPlugins(),
         onLoad: () => {
           setPreviewLoading(false)
           setViewerReady({
@@ -467,8 +493,7 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
     let cancelled = false
     setSpreadsheetMetadata(null)
     if (!previewFile || !/\.xlsx$/i.test(previewFile.name)) return
-    const formattedPath = previewFile.path.replace(/\\/g, '/')
-    void loadSpreadsheetMetadata(`local-file:///${formattedPath}`)
+    void loadSpreadsheetMetadata(localFilePreviewUrl(previewFile.path))
       .then(metadata => {
         if (!cancelled) setSpreadsheetMetadata(metadata)
       })
@@ -776,34 +801,19 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
     if (filePanelWidth < 380) setFilePanelWidth(420)
   }
 
-  const panelStyle: React.CSSProperties = isFakeFullscreen
-    ? {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
-      zIndex: 99999,
-      display: 'flex',
-      flexDirection: 'column',
-      background: 'var(--bg-card)',
-      overflow: 'hidden'
-    }
-    : {
-      width: captureOnly ? '100vw' : `${filePanelWidth}px`,
-      height: captureOnly ? '100vh' : undefined,
-      display: 'flex',
-      flexDirection: 'column',
-      background: 'var(--bg-card)',
-      overflow: 'hidden',
-      flexShrink: 0
-    }
+  const panelDynamicStyle: React.CSSProperties = isFakeFullscreen || captureOnly
+    ? {}
+    : { width: `${filePanelWidth}px` }
 
   return (
     <>
-      {/* 拖拽调整条 */}
+      {/* 拖拽调整手柄 */}
       {!isFakeFullscreen && !captureOnly && (
         <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖拽调整预览面板宽度"
+          className="file-preview-resizer"
           onMouseDown={(e) => {
             e.preventDefault()
             isDraggingRef.current = true
@@ -812,294 +822,204 @@ export function FilePreviewPanel({ store, captureOnly = false }: FilePreviewPane
             document.body.style.cursor = 'col-resize'
             document.body.style.userSelect = 'none'
           }}
-          style={{
-            width: '5px',
-            cursor: 'col-resize',
-            background: 'var(--border-color)',
-            flexShrink: 0,
-            transition: 'background 0.15s',
-            position: 'relative'
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--text-muted)'}
-          onMouseLeave={e => { if (!isDraggingRef.current) e.currentTarget.style.background = 'var(--border-color)' }}
         />
       )}
-      <div style={panelStyle}>
-        {/* 面板头部 */}
-        {!captureOnly && <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center' }}>
-            <FolderOpen size={17} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-            已生成的文件 ({visibleFileCount})
-          </span>
-          <button
-            onClick={() => { setShowFilePanel(false); setPreviewFile(null); setOpenTabs([]) }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px' }}
-          ><X size={15} strokeWidth={2} aria-hidden="true" /></button>
-        </div>}
+      <div
+        style={panelDynamicStyle}
+        className={`file-preview-panel-root${isFakeFullscreen ? ' is-fullscreen' : ''}${captureOnly ? ' is-capture-only' : ''}`}
+      >
+        {/* 面板主顶栏：有已打开的 Tab 时作为统一 Tab 导航，无 Tab 时作为简洁标题栏 */}
+        {!captureOnly && (
+          <div className="file-preview-top-bar">
+            {openTabs.length > 0 ? (
+              <div className="file-preview-tabs-container">
+                <div className="file-preview-tabs-scroll">
+                  {openTabs.map((f) => {
+                    const isActive = previewFile?.path === f.path
+                    return (
+                      <div
+                        key={f.path}
+                        onClick={() => handlePreviewFileLocal(f)}
+                        title={`${f.name}${f.size ? ` (${formatFileSize(f.size)})` : ''}`}
+                        className={`file-preview-tab-pill${isActive ? ' active' : ''}`}
+                      >
+                        <span className="file-preview-tab-icon">
+                          <FileTypeIcon fileName={f.name} size={15} />
+                        </span>
+                        <span className="file-preview-tab-name">{f.name}</span>
+                        <Tooltip content="关闭" placement="bottom">
+                          <button
+                            type="button"
+                            className="file-preview-tab-close"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const remaining = openTabs.filter(t => t.path !== f.path)
+                              setOpenTabs(remaining)
+                              if (remaining.length === 0) {
+                                setPreviewFile(null)
+                              } else if (previewFile?.path === f.path) {
+                                const next = remaining[remaining.length - 1]
+                                handlePreviewFileLocal(next)
+                              }
+                            }}
+                            aria-label={`关闭 ${f.name}`}
+                          >
+                            <X size={11} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="file-preview-top-title">
+                <FolderOpen size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+                <span>已生成的文件 ({visibleFileCount})</span>
+              </div>
+            )}
+            <div className="file-preview-top-actions">
+              <Tooltip content="收起预览面板" placement="bottom">
+                <button
+                  type="button"
+                  className="file-preview-icon-btn panel-close"
+                  onClick={() => { setShowFilePanel(false); setPreviewFile(null); setOpenTabs([]) }}
+                  aria-label="关闭预览面板"
+                >
+                  <X size={15} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {openTabs.length > 0 ? (
             <>
-              {/* 有已打开的 Tab 时：上方 Tab 栏 + 下方预览区域 */}
-              {!captureOnly && <div style={{
-                display: 'flex',
-                flexWrap: 'nowrap',
-                overflowX: 'auto',
-                overflowY: 'hidden',
-                flexShrink: 0,
-                gap: '2px',
-                padding: '6px 8px 0',
-                borderBottom: '1px solid var(--border-color)',
-                background: 'var(--bg-menu-hover, rgba(128,128,128,0.03))'
-              }}>
-                {openTabs.map((f) => {
-                  const isActive = previewFile?.path === f.path
-                  return (
-                    <div
-                      key={f.path}
-                      onClick={() => handlePreviewFileLocal(f)}
-                      title={`${f.name} (${(f.size / 1024).toFixed(1)} KB)`}
-                      style={{
-                        padding: '4px 8px',
-                        cursor: 'pointer',
-                        borderRadius: '6px 6px 0 0',
-                        border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
-                        borderBottom: isActive ? '1px solid var(--bg-card)' : '1px solid transparent',
-                        background: isActive ? 'var(--bg-card)' : 'transparent',
-                        color: isActive ? 'var(--text-menu-active)' : 'var(--text-muted)',
-                        fontSize: '11px',
-                        fontWeight: isActive ? 600 : 400,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: '150px',
-                        transition: 'all 0.15s',
-                        marginBottom: '-1px',
-                        position: 'relative' as const,
-                        zIndex: isActive ? 1 : 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--bg-menu-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
-                    >
-                      <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
-                        <FileTypeIcon fileName={f.name} size={17} />
-                      </span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
-                      <Tooltip content="关闭 Tab" placement="bottom">
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            // 从 Tab 列表移除
-                            const remaining = openTabs.filter(t => t.path !== f.path)
-                            setOpenTabs(remaining)
-                            if (remaining.length === 0) {
-                              setPreviewFile(null)
-                            } else if (previewFile?.path === f.path) {
-                              const next = remaining[remaining.length - 1]
-                              handlePreviewFileLocal(next)
-                            }
-                          }}
-                          style={{
-                            fontSize: '10px',
-                            flexShrink: 0,
-                            opacity: 0.5,
-                            cursor: 'pointer',
-                            padding: '0 2px',
-                            borderRadius: '3px',
-                            lineHeight: 1
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(239,68,68,0.15)' }}
-                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}
-                        ><X size={11} strokeWidth={2} aria-hidden="true" /></span>
-                      </Tooltip>
-                    </div>
-                  )
-                })}
-              </div>}
-
               {/* 预览区域 */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                {/* 预览头部 */}
-                <div style={{
-                  padding: '6px 12px',
-                  borderBottom: '1px solid var(--border-color)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexShrink: 0,
-                  background: 'var(--bg-card)'
-                }}>
-                  <span title={previewFile!.name} style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    flex: 1,
-                    marginRight: '8px'
-                  }}>{previewFile!.name}</span>
+                {/* 扁平高效工具栏：消除冗余大文件名，聚合缩放全屏与文件操作 */}
+                <div className="file-preview-sub-toolbar">
+                  <div className="file-preview-sub-info">
+                    {officePreviewRequest?.file?.path === previewFile!.path ? (
+                      <span className="file-preview-ai-status">
+                        {officePreviewRequest.focus?.mode === 'changes'
+                          ? 'AI 正在检查改动位置…'
+                          : 'AI 正在检查文档预览…'}
+                      </span>
+                    ) : (
+                      <span className="file-preview-meta-size">
+                        {formatFileSize(previewFile!.size) || (previewFile!.size === 0 ? '0 B' : '')}
+                      </span>
+                    )}
+                  </div>
 
-                  {officePreviewRequest?.file?.path === previewFile!.path && (
-                    <span style={{
-                      fontSize: '10px',
-                      color: 'var(--accent-color, #4f8cff)',
-                      marginRight: '10px',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0
-                    }}>
-                      {officePreviewRequest.focus?.mode === 'changes'
-                        ? 'AI 正在检查改动位置…'
-                        : 'AI 正在检查文档预览…'}
-                    </span>
-                  )}
-
-                  {/* 自定义预览控制（放大、缩小、适应宽度、旋转） */}
+                  {/* 缩放、旋转与全屏控制胶囊 */}
                   {hasToolbarCtx && (
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '2px',
-                      marginRight: '12px',
-                      background: 'var(--bg-menu-hover, rgba(128,128,128,0.06))',
-                      padding: '2px 4px',
-                      borderRadius: '6px',
-                      flexShrink: 0
-                    }}>
+                    <div className="file-preview-zoom-capsule">
                       <Tooltip content="缩小" placement="bottom">
                         <button
+                          type="button"
                           onClick={() => {
                             toolbarContextRef.current?.command('zoom-out')
                             setTimeout(syncZoomStatus, 50)
                           }}
                           disabled={!canZoomOut}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: canZoomOut ? 'pointer' : 'not-allowed',
-                            opacity: canZoomOut ? 0.8 : 0.3,
-                            padding: '2px 6px',
-                            fontSize: '10px',
-                            color: 'var(--text-primary)',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          onMouseEnter={e => { if (canZoomOut) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          className="file-preview-zoom-btn"
+                          aria-label="缩小视图"
                         >
-                          <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
+                          <ZoomOut size={13} strokeWidth={2} aria-hidden="true" />
                         </button>
                       </Tooltip>
-                      <span style={{
-                        fontSize: '9px',
-                        fontWeight: 600,
-                        minWidth: '38px',
-                        textAlign: 'center',
-                        color: 'var(--text-muted)',
-                        userSelect: 'none'
-                      }}>
+                      <span className="file-preview-zoom-val">
                         {zoomLabel}
                       </span>
                       <Tooltip content="放大" placement="bottom">
                         <button
+                          type="button"
                           onClick={() => {
                             toolbarContextRef.current?.command('zoom-in')
                             setTimeout(syncZoomStatus, 50)
                           }}
                           disabled={!canZoomIn}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: canZoomIn ? 'pointer' : 'not-allowed',
-                            opacity: canZoomIn ? 0.8 : 0.3,
-                            padding: '2px 6px',
-                            fontSize: '10px',
-                            color: 'var(--text-primary)',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          onMouseEnter={e => { if (canZoomIn) e.currentTarget.style.background = 'rgba(128,128,128,0.15)' }}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          className="file-preview-zoom-btn"
+                          aria-label="放大视图"
                         >
-                          <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
+                          <ZoomIn size={13} strokeWidth={2} aria-hidden="true" />
                         </button>
                       </Tooltip>
-                      <div style={{ width: '1px', height: '10px', background: 'var(--border-color)', margin: '0 2px' }} />
-                      <Tooltip content={isFakeFullscreen ? "退出全屏" : "全屏"} placement="bottom">
+                      <div className="file-preview-zoom-sep" />
+                      <Tooltip content={isFakeFullscreen ? "退出全屏" : "全屏预览"} placement="bottom">
                         <button
-                          onClick={() => {
-                            setIsFakeFullscreen(!isFakeFullscreen)
-                          }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            opacity: 0.8,
-                            padding: '2px 6px',
-                            fontSize: '10px',
-                            color: 'var(--text-primary)',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          type="button"
+                          onClick={() => setIsFakeFullscreen(!isFakeFullscreen)}
+                          className="file-preview-zoom-btn"
+                          aria-label={isFakeFullscreen ? "退出全屏" : "全屏"}
                         >
                           {isFakeFullscreen
-                            ? <Minimize2 size={14} strokeWidth={2} aria-hidden="true" />
-                            : <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />}
+                            ? <Minimize2 size={13} strokeWidth={2} aria-hidden="true" />
+                            : <Maximize2 size={13} strokeWidth={2} aria-hidden="true" />}
                         </button>
                       </Tooltip>
                       {canRotate && (
                         <Tooltip content="顺时针旋转" placement="bottom">
                           <button
+                            type="button"
                             onClick={() => {
                               toolbarContextRef.current?.command('rotate-right')
                               setTimeout(syncZoomStatus, 50)
                             }}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              opacity: 0.8,
-                              padding: '2px 6px',
-                              fontSize: '10px',
-                              color: 'var(--text-primary)',
-                              borderRadius: '4px',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(128,128,128,0.15)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                            className="file-preview-zoom-btn"
+                            aria-label="顺时针旋转"
                           >
-                            <RotateCw size={14} strokeWidth={2} aria-hidden="true" />
+                            <RotateCw size={13} strokeWidth={2} aria-hidden="true" />
                           </button>
                         </Tooltip>
                       )}
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    <Tooltip content="另存为" placement="bottom">
-                      <button onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }} style={{ background: 'rgba(59,130,246,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#3b82f6', fontSize: '10px' }}><Save size={14} strokeWidth={2} aria-hidden="true" /></button>
+                  {/* 文件操作动作：另存为、删除、关闭当前文件 */}
+                  <div className="file-preview-actions-bar">
+                    <Tooltip content="另存为本地文件" placement="bottom">
+                      <button
+                        type="button"
+                        className="file-preview-action-btn action-save"
+                        onClick={async () => { await window.api.saveGeneratedFileAs(previewFile!.path) }}
+                        aria-label="另存为"
+                      >
+                        <Save size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
                     </Tooltip>
-                    <Tooltip content="删除" placement="bottom">
-                      <button onClick={() => handleDeleteFileLocal(previewFile!)} style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px' }}><Trash2 size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    <Tooltip content="删除该文件" placement="bottom">
+                      <button
+                        type="button"
+                        className="file-preview-action-btn action-delete"
+                        onClick={() => handleDeleteFileLocal(previewFile!)}
+                        aria-label="删除文件"
+                      >
+                        <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
                     </Tooltip>
-                    <button onClick={() => {
-                      const remaining = openTabs.filter(t => t.path !== previewFile!.path)
-                      setOpenTabs(remaining)
-                      if (remaining.length === 0) {
-                        setPreviewFile(null)
-                      } else {
-                        const next = remaining[remaining.length - 1]
-                        handlePreviewFileLocal(next)
-                      }
-                    }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', padding: '2px 4px' }}><X size={14} strokeWidth={2} aria-hidden="true" /></button>
+                    <Tooltip content="关闭当前预览" placement="bottom">
+                      <button
+                        type="button"
+                        className="file-preview-action-btn action-close"
+                        onClick={() => {
+                          const remaining = openTabs.filter(t => t.path !== previewFile!.path)
+                          setOpenTabs(remaining)
+                          if (remaining.length === 0) {
+                            setPreviewFile(null)
+                          } else {
+                            const next = remaining[remaining.length - 1]
+                            handlePreviewFileLocal(next)
+                          }
+                        }}
+                        aria-label="关闭当前预览"
+                      >
+                        <X size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
 

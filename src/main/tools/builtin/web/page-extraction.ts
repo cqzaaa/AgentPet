@@ -37,8 +37,10 @@ export const FETCH_SCRIPT = String.raw`(async () => {
     if (!url || byUrl.has(url)) continue;
     if (links.length >= 500) { linksTruncated = true; continue; }
     const text = clean(anchor.textContent || anchor.getAttribute('aria-label') || anchor.getAttribute('title') || url).slice(0, 200);
-    const link = { id: 'L' + (links.length + 1), text, url,
-      kind: /\.(?:pdf|docx?|xlsx?|pptx?|zip)(?:[?#]|$)/i.test(url) || anchor.hasAttribute('download') ? 'document' : 'page' };
+    const isDoc = /\.(?:pdf|docx?|xlsx?|pptx?|zip|md|markdown|txt|epub|7z|tar\.gz)(?:[?#]|$)/i.test(url) ||
+      anchor.hasAttribute('download') ||
+      /(?:github\.com|gitee\.com|gitlink\.org\.cn)\/[^/]+\/[^/]+\/(?:blob|raw)\/[^/]+\/.+\.(?:pdf|docx?|md|txt)$/i.test(url);
+    const link = { id: 'L' + (links.length + 1), text, url, kind: isDoc ? 'document' : 'page' };
     links.push(link); byUrl.set(url, link);
   }
   const controls = [...clone.querySelectorAll('button,[role="button"],input[type="button"],input[type="submit"]')]

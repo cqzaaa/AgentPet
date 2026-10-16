@@ -83,6 +83,7 @@ declare global {
       readTextFile: (filePath: string) => Promise<string>
       saveClipboardImage: (dataUrl: string) => Promise<{ path: string; name: string } | null>
       getGeneratedFiles: (sessionId?: string) => Promise<{ name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[]>
+      getFileMetadata: (filePath: string) => Promise<{ exists: boolean; size: number; mtime?: number } | null>
       saveGeneratedFileAs: (filePath: string) => Promise<boolean>
       revertFileChanges: (changes: any[]) => Promise<{ success: boolean; revertedCount: number; error?: string }>
       exportToolTrace: (payload: { defaultFileName?: string; sessionId?: string; messageId?: string | number; trace?: any }) => Promise<{ success: boolean; filePath?: string; error?: string }>

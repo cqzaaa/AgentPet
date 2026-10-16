@@ -42,10 +42,34 @@ export type ExtractedPage = {
 }
 
 export function formatPageLinks(page: ExtractedPage, offset: number, limit: number): string {
-  const links = page.links.slice(offset, offset + limit)
-  const next = offset + links.length
-  return `页面链接（${page.links.length} 个${page.linksTruncated ? '，列表已达上限' : ''}，本次从 ${offset} 开始）：\n` +
-    links.map(link => `[${link.id}] ${link.kind === 'document' ? '文件' : '网页'}：${link.text}\nURL: ${link.url}`).join('\n\n') +
-    (next < page.links.length ? `\n继续列出链接：web_fetch(url=${JSON.stringify(page.url)}, link_offset=${next})。` : '') +
+  const docLinks = page.links.filter(link => link.kind === 'document')
+  const pageLinks = page.links.filter(link => link.kind !== 'document')
+
+  let docSection = ''
+  if (docLinks.length > 0) {
+    const docItems = docLinks.slice(0, 30).map(link => {
+      let directUrl = link.url
+      // If it's a github blob, also provide raw hint
+      if (link.url.includes('github.com') && link.url.includes('/blob/')) {
+        directUrl = link.url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+      }
+      return `[${link.id}] 📄 文档/资源: ${link.text}\nURL: ${link.url}${directUrl !== link.url ? `\n直链(Raw): ${directUrl}` : ''}`
+    }).join('\n\n')
+
+    docSection = `【🎯 本页发现的文档/下载直链（共 ${docLinks.length} 个${docLinks.length > 30 ? '，前 30 个' : ''}）】\n` +
+      `可直接复制上述直链调用 web_download 下载到本地目标目录，无需在缓存中搜索：\n\n` +
+      docItems + '\n\n'
+  }
+
+  const paged = pageLinks.slice(offset, offset + limit)
+  const next = offset + paged.length
+
+  const pageSection = `【🔗 页面普通链接（共 ${pageLinks.length} 个${page.linksTruncated ? '，列表已达上限' : ''}，本次从 ${offset} 开始）：】\n` +
+    (paged.length > 0
+      ? paged.map(link => `[${link.id}] 网页: ${link.text}\nURL: ${link.url}`).join('\n\n')
+      : '（无更多普通页面链接）') +
+    (next < pageLinks.length ? `\n\n继续列出普通链接：web_fetch(url=${JSON.stringify(page.url)}, link_offset=${next})。` : '') +
     '\n打开详情或下载来源页：再次调用 web_fetch，url 使用上述完整 URL；也可使用当前页面 URL 与 link_id 打开指定链接。'
+
+  return docSection + pageSection
 }

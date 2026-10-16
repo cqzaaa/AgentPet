@@ -413,7 +413,25 @@ function DeliverableFileCard({
   const normalizedPath = localFileSystemPath(file.path)
   const fileName = file.name || localFileDisplayName(file.path)
   const ext = fileName.split('.').pop()?.toLowerCase() || ''
-  const sizeText = formatDeliverableSize(file.size)
+  const [resolvedSize, setResolvedSize] = useState<number | undefined>(file.size)
+
+  useEffect(() => {
+    if (typeof file.size === 'number' && file.size > 0) {
+      setResolvedSize(file.size)
+      return
+    }
+    if (!window.api?.getFileMetadata || !normalizedPath) return
+    let active = true
+    window.api.getFileMetadata(normalizedPath).then((meta) => {
+      if (active && meta?.exists && typeof meta.size === 'number' && meta.size > 0) {
+        setResolvedSize(meta.size)
+      }
+    }).catch(() => {})
+    return () => { active = false }
+  }, [file.size, normalizedPath])
+
+  const effectiveSize = resolvedSize ?? file.size
+  const sizeText = formatDeliverableSize(effectiveSize)
 
   const handleOpenOrPreview = async (e: React.MouseEvent): Promise<void> => {
     e.stopPropagation()
@@ -421,7 +439,7 @@ function DeliverableFileCard({
       onPreviewFile({
         name: fileName,
         path: normalizedPath,
-        size: file.size || 0
+        size: effectiveSize || 0
       })
       return
     }
@@ -548,7 +566,7 @@ function extractDeliverables(
 ): { deliverables: DeliverableItem[]; cleanedText: string } {
   const deliverableMap = new Map<string, DeliverableItem>()
 
-  // 1. 从 toolSteps 收集 generatedFiles（排除明确标为 intermediate 的）
+  // 只信任本轮工具上报的生成文件；正文链接可能是输入、历史文件或代码示例。
   const rawGeneratedFiles = (toolSteps || [])
     .filter((step: any) => step.type === 'generatedFiles' && Array.isArray(step.files))
     .flatMap((step: any) => step.files)
@@ -563,24 +581,6 @@ function extractDeliverables(
         path: f.path,
         size: f.size
       })
-    }
-  }
-
-  // 2. 从正文中提取 Markdown 格式的本地生成文件超链接
-  const linkRegex = /\[([^\]\n]+)\]\(((?:<[^>]+>|[^()\n])+)\)/g
-  let match: RegExpExecArray | null
-  while ((match = linkRegex.exec(rawText)) !== null) {
-    const label = match[1]
-    const rawHref = match[2].replace(/^<|>$/g, '').trim()
-    if (isLocalFileReference(rawHref) || /^[A-Za-z]:[/\\]/.test(rawHref)) {
-      const fsPath = localFileSystemPath(rawHref)
-      const norm = fsPath.toLowerCase()
-      if (!deliverableMap.has(norm)) {
-        deliverableMap.set(norm, {
-          name: label.trim() || localFileDisplayName(fsPath),
-          path: fsPath
-        })
-      }
     }
   }
 
@@ -600,15 +600,13 @@ function extractDeliverables(
   let cleanedText = rawText
   if (deliverables.length > 0) {
     const deliverableKeys = new Set(deliverables.map((d) => localFileSystemPath(d.path).toLowerCase()))
-    const deliverableNames = new Set(deliverables.map((d) => d.name.toLowerCase()))
 
     cleanedText = cleanedText.replace(
       /(?:^|\n)[ \t]*(?:(?:[📄📁📊📝📦])?\s*(?:\*\*)?(?:生成的?|导出(?:的)?|输出(?:的)?|相关(?:的)?|最终(?:的)?|交付(?:的)?)?\s*(?:Excel|Word|PDF|数据|分析)?\s*(?:文件|表格|文档|报告|产物|结果|清单)?[：:]?\s*(?:\*\*)?\s*(?:\r?\n[ \t]*)?)?(?:[📄📁📊📝📦])?\s*(?:[-*•]\s*)?\[([^\]\n]+)\]\(((?:<[^>]+>|[^()\n])+)\)[ \t]*(?:<!--[\s\S]*?-->)?[ \t]*(?=\r?\n|$)/gi,
-      (fullMatch, label, href) => {
+      (fullMatch, _label, href) => {
         const cleanHref = href.replace(/^<|>$/g, '').trim()
         const fsPath = localFileSystemPath(cleanHref).toLowerCase()
-        const labelName = label.trim().toLowerCase()
-        if (deliverableKeys.has(fsPath) || deliverableNames.has(labelName)) {
+        if (deliverableKeys.has(fsPath)) {
           return ''
         }
         return fullMatch

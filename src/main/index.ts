@@ -404,7 +404,8 @@ const globalAssistantToolNames = new Set([
   'get_windows',
   'focus_window',
   'web_search',
-  'web_fetch'
+  'web_fetch',
+  'web_download'
 ])
 
 function getAutomationOverlayUrl(): string {
@@ -5661,7 +5662,10 @@ app.whenReady().then(() => {
   ipcMain.handle('api:get-generated-files', async (_, sessionId?: string) => {
     try {
       const genDir = getGeneratedFilesDir(sessionId)
-      const files = await fs.promises.readdir(genDir)
+      const files = await fs.promises.readdir(genDir).catch((error) => {
+        if (error.code === 'ENOENT') return [] as string[]
+        throw error
+      })
       const classificationManifest = join(genDir, '.agentpet-artifacts.json')
       let intermediatePaths = new Set<string>()
       try {
@@ -5678,13 +5682,75 @@ app.whenReady().then(() => {
         // Older sessions do not have an artifact classification manifest.
       }
       const list: { name: string; path: string; size: number; time: string; role: 'final' | 'intermediate' }[] = []
+      const candidates = new Map<string, string>()
+      // Older runtimes omitted external downloads from artifact/generated.
+      // Recover only the tool's explicit success receipt, never prose links or call arguments.
+      const recoverDownload = (name: unknown, result: unknown) => {
+        if (name !== 'web_download' || typeof result !== 'string' || !result.startsWith('【文件下载成功】')) return
+        const filePath = result.match(/^- 本地路径：[ \t]*(.+)$/m)?.[1]?.trim()
+        if (filePath && isAbsolute(filePath)) {
+          candidates.set(resolve(filePath).toLocaleLowerCase(), filePath)
+        }
+      }
+      const addFiles = (items: any[]) => {
+        for (const file of items) {
+          if (typeof file?.path !== 'string' || !isAbsolute(file.path)) continue
+          const key = resolve(file.path).toLocaleLowerCase()
+          if (file.role === 'intermediate') {
+            candidates.delete(key)
+            continue
+          }
+          candidates.set(key, file.path)
+        }
+      }
+      if (sessionId) {
+        const database = await getDB()
+        const messages = await database.all(
+          'SELECT tool_steps FROM messages WHERE session_id = ? AND tool_steps IS NOT NULL ORDER BY rowid',
+          sessionId
+        )
+        for (const message of messages) {
+          try {
+            const steps = JSON.parse(message.tool_steps)
+            for (const step of Array.isArray(steps) ? steps : []) {
+              if (step.type === 'generatedFiles' && Array.isArray(step.files)) addFiles(step.files)
+              if (step.type === 'result') recoverDownload(step.name, step.detail)
+            }
+          } catch {
+            // Ignore malformed legacy tool records.
+          }
+        }
+        const events: any[] = []
+        let beforeSeq: number | undefined
+        do {
+          const page = await sessionEventStore.readPage(sessionId, {
+            types: ['artifact/generated', 'tool/result'], limit: 500, beforeSeq
+          })
+          events.unshift(...page.events)
+          beforeSeq = page.nextBeforeSeq
+        } while (beforeSeq !== undefined)
+        for (const preview of events) {
+          const event = preview.compressed
+            ? await sessionEventStore.readEvent(sessionId, preview.seq)
+            : preview
+          if (Array.isArray(event?.data?.files)) addFiles(event.data.files)
+          if (event?.type === 'tool/result') {
+            recoverDownload(event.data.name, event.data.displayResult ?? event.data.modelResult)
+          }
+        }
+      }
       for (const file of files) {
-        if (file.startsWith('.')) continue
-        const filePath = join(genDir, file)
-        const stat = await fs.promises.stat(filePath)
+        if (!file.startsWith('.')) {
+          const filePath = join(genDir, file)
+          candidates.set(resolve(filePath).toLocaleLowerCase(), filePath)
+        }
+      }
+      for (const filePath of candidates.values()) {
+        const stat = await fs.promises.stat(filePath).catch(() => null)
+        if (!stat) continue
         if (stat.isFile()) {
           list.push({
-            name: file,
+            name: basename(filePath),
             path: filePath,
             size: stat.size,
             time: stat.mtime.toISOString(),
@@ -5700,6 +5766,26 @@ app.whenReady().then(() => {
     } catch (e) {
       console.error('获取生成文件列表失败', e)
       return []
+    }
+  })
+
+  // 获取本地文件的元数据（大小、修改时间等）
+  ipcMain.handle('api:get-file-metadata', async (_, filePath: string) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      return { exists: false, size: 0 }
+    }
+    try {
+      const stat = await fs.promises.stat(filePath.trim())
+      if (!stat.isFile()) {
+        return { exists: false, size: 0 }
+      }
+      return {
+        exists: true,
+        size: stat.size,
+        mtime: stat.mtimeMs
+      }
+    } catch {
+      return { exists: false, size: 0 }
     }
   })
 

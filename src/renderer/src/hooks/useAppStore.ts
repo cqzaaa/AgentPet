@@ -860,17 +860,36 @@ export function useAppStore() {
   }, [activeSessionId])
 
   const handlePreviewFile = useCallback(async (f: { name: string; path: string; size: number }) => {
-    if (/[\\/]generated_files[\\/]/i.test(f.path)) {
+    let resolved = f
+    if ((!f.size || f.size <= 0) && window.api?.getFileMetadata) {
+      try {
+        const meta = await window.api.getFileMetadata(f.path)
+        if (meta?.exists && typeof meta.size === 'number' && meta.size > 0) {
+          resolved = { ...f, size: meta.size }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (/[\\/]generated_files[\\/]/i.test(resolved.path)) {
       setGeneratedFiles(previous =>
-        previous.some(item => item.path === f.path) ? previous : [...previous, f]
+        previous.some(item => item.path === resolved.path) ? previous : [...previous, resolved]
       )
       void loadGeneratedFiles()
     }
-    setPreviewFile(f)
+    setPreviewFile(resolved)
     setOpenTabs(prev => {
-      if (prev.some(t => t.path === f.path)) return prev
-      const fullFile = generatedFiles.find(g => g.path === f.path)
-      return [...prev, fullFile || { ...f, time: '' }]
+      const idx = prev.findIndex(t => t.path === resolved.path)
+      if (idx >= 0) {
+        if (resolved.size > 0 && prev[idx].size <= 0) {
+          const next = [...prev]
+          next[idx] = { ...next[idx], size: resolved.size }
+          return next
+        }
+        return prev
+      }
+      const fullFile = generatedFiles.find(g => g.path === resolved.path)
+      return [...prev, fullFile || { ...resolved, time: '' }]
     })
   }, [generatedFiles, loadGeneratedFiles, setGeneratedFiles, setPreviewFile, setOpenTabs])
 

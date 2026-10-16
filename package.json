@@ -60,7 +60,7 @@
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@lobehub/icons-static-svg": "^1.93.0",
-    "@open-file-viewer/core": "^0.1.17",
+    "@open-file-viewer/core": "1.0.0",
     "@types/katex": "^0.16.8",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.20.1",

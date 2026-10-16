@@ -305,11 +305,12 @@ export class AgentExecutor {
       })
   }
 
-  private getToolGeneratedFiles(state: any): Array<{ name: string; path: string; size: number }> {
+  private getToolGeneratedFiles(state: any, toolName: string): Array<{ name: string; path: string; size: number }> {
     const files: Array<{ name: string; path: string; size: number }> = []
     const seen = new Set<string>()
     const addFile = (filePath: unknown, fileName?: unknown): void => {
-      if (typeof filePath !== 'string' || !/[\\/]generated_files[\\/]/i.test(filePath)) return
+      if (typeof filePath !== 'string' || !isAbsolute(filePath)) return
+      if (toolName !== 'web_download' && !/[\\/]generated_files[\\/]/i.test(filePath)) return
       if (seen.has(filePath)) return
       try {
         const stat = fs.statSync(filePath)
@@ -1289,7 +1290,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     }
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
     if (isFrontend && effectiveTools.length > 0) {
-      const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句简洁正文说明你将做什么；在有重要发现或工作阶段变化时，继续用正文报告实际进展和下一步。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要每个工具都重复解释，不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答说明结果及验证情况。</progress_updates>'
+      const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句简洁正文说明行动及目的；后续仅在有重要发现、实质进展、阻碍或工作阶段变化时更新。连续读取或修改同一处代码时合并说明，不要逐个工具报幕，也不要重复工具卡片已展示的操作。中文表达自然，语境明确时省略主语，直接从动作、发现或结果切入；避免连续以“我”“我来”“我先”开头，也不要机械替换成重复的“接下来”“现在”。需要表达判断、承担责任或区分执行者时可以使用“我”，不必一律删除主语。进度内容应提供新信息，例如“先确认目录与控制岛的联动逻辑。”“目录入口已定位，下一步接入展开与收起。”；示例仅用于说明句式，不代表实际发现或结果，不要固定套用。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答说明结果及验证情况，同样避免重复报幕和多余主语。</progress_updates>'
       const systemMessage = chatHistory.find(message => message.role === 'system')
       if (typeof systemMessage?.content === 'string') systemMessage.content += progressInstructions
       else if (Array.isArray(systemMessage?.content)) systemMessage.content.push({ type: 'text', text: progressInstructions })
@@ -1781,7 +1782,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
                   toolState = res.state
                   webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
                   imageFilePaths = this.getToolImagePaths(res.state)
-                  generatedFiles = this.getToolGeneratedFiles(res.state)
+                  generatedFiles = this.getToolGeneratedFiles(res.state, toolName)
                 }
               }
             } else {
@@ -1809,7 +1810,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
               toolState = res.state
               webSources = Array.isArray(res.state?.sources) ? res.state.sources : undefined
               imageFilePaths = this.getToolImagePaths(res.state)
-              generatedFiles = this.getToolGeneratedFiles(res.state)
+              generatedFiles = this.getToolGeneratedFiles(res.state, toolName)
             }
 
             if (toolSuccess && (toolName === 'request_skill' || toolName === 'wait_skill_ready') && typeof chatHistory[0]?.content === 'string') {

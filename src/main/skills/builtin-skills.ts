@@ -179,14 +179,16 @@ const builtinSkills: BuiltinSkillDefinition[] = [
   staticSkill({
     id: 'web-research',
     name: 'Web research',
-    description: 'Search the public web and fetch pages as readable Markdown.',
-    triggers: ['web', 'internet', 'latest', 'current', 'search online', '网页', '联网', '最新', '搜索网络'],
-    allowedTools: ['web_search', 'web_fetch'],
+    description: 'Search the public web, fetch pages as readable Markdown, and download public documents or files.',
+    triggers: ['web', 'internet', 'latest', 'current', 'search online', 'download', '网页', '联网', '最新', '搜索网络', '下载文件'],
+    allowedTools: ['web_search', 'web_fetch', 'web_download'],
     instructions: `# Web research
 Search before answering unstable or current questions. Treat results as candidates, not verified facts. Check that titles and snippets match the topic; when irrelevant or empty, shorten/rephrase the query or switch the engine while preserving the user's domain and file-type constraints.
 Open relevant primary sources with web_fetch. It returns the real title, final URL, readable text and L-numbered links. Follow a detail/download link using its exact URL or web_fetch(url=current page, link_id=Lx); link IDs belong only to that page. Paginate links with link_offset and reuse caches. Read long cached pages in relevant ranges, not all at once.
+Use web_download to download discovered document, dataset, code, or package URLs directly into authorized local directories. It automatically follows safe redirects and writes clean files.
 If a page requires a button, expansion, pagination or login without a usable link, load desktop-control and observe the visible browser. Do not invent DOM selectors, download endpoints, repository paths or paper identifiers; do not bypass verification or access restrictions.
-For requested documents: discover a real source page, verify its actual title/abstract and topic, follow its published download link, then inspect the downloaded document with the file/office tools. Keep actual title, source URL and local file together. A PDF header, successful download, or plausible filename proves neither relevance nor authenticity. Never rename an unrelated paper to match the requested subject. Scripts may download discovered URLs or query documented APIs; they must not replace source verification with guessed URLs. An unrelated file is not a completed deliverable.
+For requested documents: discover a real source page, verify its actual title/abstract and topic, follow its published download link with web_download, then inspect the downloaded document with the file/office tools. Keep actual title, source URL and local file together. A PDF header, successful download, or plausible filename proves neither relevance nor authenticity. Never rename an unrelated paper to match the requested subject.
+🚫 严禁以生成伪造检索：当用户明确要求在网上检索、寻找或下载文档（如 MD/PDF/DOCX 等）时，必须通过网络真实下载交付。严禁在未能找到现成文件时擅自使用本地工具自行编写内容、转换格式冒充网上下载！若多次检索均未获得可下载文件，必须如实说明检索情况并提供已找到的相关网页候选链接供用户查阅。
 After two failed approaches, change the source/query/navigation method. On repeated 403/429 or timeouts, stop retrying the same route and explain the remaining gap. Distinguish publication time from event time, and cite source URLs.`
   }),
   staticSkill({

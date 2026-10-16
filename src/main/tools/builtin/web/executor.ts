@@ -5,19 +5,115 @@ import { promises as dns } from 'dns'
 import { isIP } from 'net'
 import { BrowserWindow } from 'electron'
 import { IToolExecutor, ToolContext, ToolResult, WebSource } from '../../core/types'
-import { getActiveStorageDir } from '../../utils/paths'
+import { getActiveStorageDir, resolveLocalPath, resolveSessionPath, getAllowedFileRoots, isPathWithinRoots } from '../../utils/paths'
+
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000
+const MAX_DOWNLOAD_TIMEOUT_MS = 300_000
+const DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024 // 100MB
+
+function normalizeDownloadTimeout(seconds: unknown): number {
+  const value = Number(seconds) || DEFAULT_DOWNLOAD_TIMEOUT_MS / 1000
+  return Math.min(Math.max(value * 1000, MIN_TIMEOUT_MS), MAX_DOWNLOAD_TIMEOUT_MS)
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim()
+}
+
+function parseContentDispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined
+  const utf8Match = header.match(/filename\*\s*=\s*utf-8''([^;\s]+)/i)
+  if (utf8Match && utf8Match[1]) {
+    try {
+      const decoded = decodeURIComponent(utf8Match[1])
+      const clean = sanitizeFilename(decoded)
+      if (clean) return clean
+    } catch {
+      // ignore decoding error
+    }
+  }
+  const regularMatch = header.match(/filename\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i)
+  const candidate = regularMatch ? regularMatch[1] || regularMatch[2] || regularMatch[3] : undefined
+  if (candidate) {
+    const clean = sanitizeFilename(candidate)
+    if (clean) return clean
+  }
+  return undefined
+}
+
+function inferFilenameFromUrl(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr)
+    const base = path.basename(parsed.pathname)
+    const clean = sanitizeFilename(base)
+    if (clean && clean.includes('.')) return clean
+  } catch {
+    // ignore parse error
+  }
+  return `download_${Date.now()}`
+}
+
+function resolveDownloadTargetPath(outputPath: string, suggestedFilename: string, context: ToolContext): string {
+  const resolved = resolveLocalPath(outputPath) || outputPath
+  const fullPath = resolveSessionPath(resolved, context.sessionId, context.workspacePath)
+  const isDirectory = fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()
+  const endsWithSep = outputPath.endsWith('/') || outputPath.endsWith('\\')
+  if (isDirectory || endsWithSep) {
+    return path.join(fullPath, suggestedFilename)
+  }
+  return fullPath
+}
+
+async function assertAllowedDownloadPath(targetPath: string, context: ToolContext): Promise<string> {
+  const allowedRoots = getAllowedFileRoots(context)
+  if (!isPathWithinRoots(targetPath, allowedRoots)) {
+    throw new Error('下载目标路径不在当前会话已授权的文件夹内。请保存至桌面、工作区或会话附件目录。')
+  }
+  let existingAncestor = targetPath
+  while (!fs.existsSync(existingAncestor) && path.dirname(existingAncestor) !== existingAncestor) {
+    existingAncestor = path.dirname(existingAncestor)
+  }
+  const realAncestor = await fs.promises.realpath(existingAncestor)
+  if (!isPathWithinRoots(realAncestor, allowedRoots)) {
+    throw new Error('下载目标路径的父目录不在已授权的文件夹内。')
+  }
+  return targetPath
+}
 
 import { relevantSearchResults, formatPageLinks, type SearchResult, type ExtractedPage } from './research-quality'
 import { FETCH_SCRIPT } from './page-extraction'
 type BingRawSearch = { isFiltered: boolean; results: SearchResult[] }
 
-const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_TIMEOUT_MS = 15_000
 const MIN_TIMEOUT_MS = 5_000
-const MAX_TIMEOUT_MS = 120_000
+const MAX_TIMEOUT_MS = 60_000
 
 function normalizeTimeout(seconds: unknown): number {
   const value = Number(seconds) || DEFAULT_TIMEOUT_MS / 1000
   return Math.min(Math.max(value * 1000, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS)
+}
+
+function sanitizeSearchQuery(query: string, engine: string): string {
+  if (engine === 'bing') return query
+  return query
+    .replace(/\bfiletype:(?:pdf|docx?|xlsx?|pptx?|md|txt)\b/gi, match => match.split(':')[1])
+    .replace(/\bsite:([^\s]+)/gi, (_match, domain) => {
+      const root = domain.replace(/^www\./, '').split('.')[0]
+      return root || ''
+    })
+    .replace(/\b(?:OR|AND)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeDownloadUrl(urlStr: string): string {
+  let clean = urlStr.trim()
+  // Automatically convert GitHub blob page to raw direct download URL
+  const ghBlobMatch = clean.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i)
+  if (ghBlobMatch) {
+    clean = `https://raw.githubusercontent.com/${ghBlobMatch[1]}/${ghBlobMatch[2]}/${ghBlobMatch[3]}/${ghBlobMatch[4]}`
+  }
+  return clean
 }
 
 function isPrivateIp(ip: string): boolean {
@@ -167,10 +263,10 @@ async function runInHiddenPage<T>(
       try {
         await win.loadURL(url)
       } catch (error) {
-        if (downloadUrl) throw new Error(`链接返回文件下载：${downloadUrl}。请从已确认的来源下载该文件，并用文件/Office 工具核验实际标题与内容。`)
+        if (downloadUrl) throw new Error(`链接返回文件下载：${downloadUrl}。请调用 web_download 工具下载该文件（url="${downloadUrl}", output_path=...），并用文件/Office 工具核验实际标题与内容。`)
         throw error
       }
-      if (downloadUrl) throw new Error(`链接返回文件下载：${downloadUrl}。请下载后核验实际标题与内容。`)
+      if (downloadUrl) throw new Error(`链接返回文件下载：${downloadUrl}。请调用 web_download 工具下载该文件（url="${downloadUrl}", output_path=...），并用文件/Office 工具核验实际标题与内容。`)
       if (abortSignal?.aborted) throw new Error('UserAborted')
       if (responseCode >= 400) throw new Error(`网页返回 HTTP ${responseCode}，请检查来源链接或换用其他来源`)
       return await win.webContents.executeJavaScript(script, true) as T
@@ -290,6 +386,7 @@ export class WebExecutor implements IToolExecutor {
       if (context.abortSignal?.aborted) throw new Error('UserAborted')
       if (api === 'web_search') return await this.search(args, context)
       if (api === 'web_fetch') return await this.fetch(args, context)
+      if (api === 'web_download') return await this.download(args, context)
       return { content: `未知的网页操作：${api}`, success: false }
     } catch (error) {
       if (error instanceof Error && error.message === 'UserAborted') throw error
@@ -299,11 +396,12 @@ export class WebExecutor implements IToolExecutor {
   }
 
   private async search(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-    const query = String(args.query || '').trim()
-    if (!query) return { content: '错误：缺少必要参数 query', success: false }
+    const rawQuery = String(args.query || '').trim()
+    if (!rawQuery) return { content: '错误：缺少必要参数 query', success: false }
     const maxResults = Math.min(Math.max(Number(args.max_results) || 8, 1), 15)
     const timeout = normalizeTimeout(args.timeout_seconds)
     const engine = args.engine === 'bing' || args.engine === 'baidu' ? args.engine : 'auto'
+    const query = sanitizeSearchQuery(rawQuery, engine)
     const deadline = Date.now() + timeout
     const attempts: Array<{ engine: string; status: string }> = []
 
@@ -452,8 +550,154 @@ export class WebExecutor implements IToolExecutor {
     }
   }
 
+  private async download(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+    const rawUrl = String(args.url || '').trim()
+    if (!rawUrl) return { content: '错误：缺少必要参数 url', success: false }
+    const rawOutputPath = String(args.output_path || '').trim()
+    if (!rawOutputPath) return { content: '错误：缺少必要参数 output_path', success: false }
+
+    const timeout = normalizeDownloadTimeout(args.timeout_seconds)
+    const maxBytes = Math.min(
+      Math.max(Number(args.max_bytes) || DEFAULT_MAX_DOWNLOAD_BYTES, 1024),
+      200 * 1024 * 1024
+    )
+
+    let currentUrl = normalizeDownloadUrl(rawUrl)
+    let redirects = 0
+    const maxRedirects = 10
+    let finalResponse: Response | null = null
+    let fallbackTried = false
+
+    while (redirects <= maxRedirects) {
+      if (context.abortSignal?.aborted) throw new Error('UserAborted')
+      const parsed = await assertSafeRemoteUrl(currentUrl)
+
+      const controller = new AbortController()
+      const onParentAbort = (): void => controller.abort()
+      if (context.abortSignal) {
+        context.abortSignal.addEventListener('abort', onParentAbort, { once: true })
+      }
+      const timer = setTimeout(() => controller.abort(new Error(`下载连接超时（${timeout / 1000}秒）`)), timeout)
+
+      try {
+        const res = await fetch(parsed.toString(), {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': '*/*'
+          },
+          redirect: 'manual',
+          signal: controller.signal
+        })
+
+        if ([301, 302, 303, 307, 308].includes(res.status)) {
+          const location = res.headers.get('location')
+          try { await res.body?.cancel() } catch { /* ignore cancel error */ }
+          if (!location) throw new Error(`HTTP ${res.status} 重定向未提供 Location 头部`)
+          currentUrl = normalizeDownloadUrl(new URL(location, currentUrl).toString())
+          redirects++
+          continue
+        }
+
+        if (!res.ok) {
+          try { await res.body?.cancel() } catch { /* ignore */ }
+          throw new Error(`下载请求失败，服务器返回 HTTP ${res.status} ${res.statusText || ''}`)
+        }
+
+        finalResponse = res
+        break
+      } catch (fetchErr: any) {
+        // If raw.githubusercontent.com failed with network reset/timeout, fallback once to gitmirror
+        if (!fallbackTried && currentUrl.includes('raw.githubusercontent.com') &&
+            (/ERR_CONNECTION_CLOSED|ECONNRESET|fetch failed|超时/i.test(fetchErr?.message || ''))) {
+          fallbackTried = true
+          currentUrl = currentUrl.replace('raw.githubusercontent.com', 'raw.gitmirror.com')
+          continue
+        }
+        throw fetchErr
+      } finally {
+        clearTimeout(timer)
+        if (context.abortSignal) {
+          context.abortSignal.removeEventListener('abort', onParentAbort)
+        }
+      }
+    }
+
+    if (!finalResponse) {
+      throw new Error(`重定向次数过多（超过 ${maxRedirects} 次）或请求未完成`)
+    }
+
+    const contentType = finalResponse.headers.get('content-type') || 'application/octet-stream'
+    const contentDisposition = finalResponse.headers.get('content-disposition')
+    const suggestedFilename = parseContentDispositionFilename(contentDisposition) || inferFilenameFromUrl(currentUrl)
+
+    const resolvedPath = resolveDownloadTargetPath(rawOutputPath, suggestedFilename, context)
+    const finalPath = await assertAllowedDownloadPath(resolvedPath, context)
+
+    await fs.promises.mkdir(path.dirname(finalPath), { recursive: true })
+
+    if (!finalResponse.body) {
+      throw new Error('下载失败：响应体为空')
+    }
+
+    const fileStream = fs.createWriteStream(finalPath)
+    let downloadedBytes = 0
+    const reader = finalResponse.body.getReader()
+
+    try {
+      while (true) {
+        if (context.abortSignal?.aborted) throw new Error('UserAborted')
+        const { done, value } = await reader.read()
+        if (done) break
+        downloadedBytes += value.length
+        if (downloadedBytes > maxBytes) {
+          throw new Error(`文件大小超出限制（允许最大 ${(maxBytes / (1024 * 1024)).toFixed(0)}MB，已接收 ${(downloadedBytes / (1024 * 1024)).toFixed(1)}MB）`)
+        }
+        fileStream.write(Buffer.from(value))
+      }
+      await new Promise<void>((resolve, reject) => {
+        fileStream.on('finish', () => resolve())
+        fileStream.on('error', reject)
+        fileStream.end()
+      })
+    } catch (err) {
+      fileStream.destroy()
+      try {
+        if (fs.existsSync(finalPath)) await fs.promises.unlink(finalPath)
+      } catch {
+        // ignore unlink error
+      }
+      throw err
+    }
+
+    const sizeKb = (downloadedBytes / 1024).toFixed(2)
+    const isTextDoc = /\.(?:md|markdown|txt|csv|json)$/i.test(finalPath)
+    const isTiny = isTextDoc && downloadedBytes < 300
+    const tinyWarning = isTiny
+      ? `\n⚠️ 【内容预警】该文本文件体积仅 ${downloadedBytes} 字节，可能是占位说明或空文档，请务必使用 read_file 检查正文，必要时下载更完整的文件。`
+      : ''
+
+    const content = `【文件下载成功】\n` +
+      `- 原始链接：${rawUrl}\n` +
+      `- 实际直链：${currentUrl}\n` +
+      `- 本地路径：${finalPath}\n` +
+      `- 文件大小：${sizeKb} KB (${downloadedBytes} 字节)\n` +
+      `- MIME 类型：${contentType}\n${tinyWarning}\n` +
+      `资料核验提醒：文件已成功写入磁盘。请立即使用 read_file 或 Office 工具（如 run_office_skill inspect）读取该文件，核验文件实际标题、正文及主题是否符合要求。未核验的文件不得视为有效交付。`
+
+    return {
+      content,
+      state: {
+        file_path: finalPath,
+        downloaded_files: [finalPath],
+        researchStatus: 'downloaded'
+      },
+      success: true
+    }
+  }
+
   public getApiNames(): string[] {
-    return ['web_search', 'web_fetch']
+    return ['web_search', 'web_fetch', 'web_download']
   }
 }
 
