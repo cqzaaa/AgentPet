@@ -1,108 +1,6 @@
-type CommandSegment = {
-  raw: string
-  command: string
-  args: string
-}
+import { assessCommand, type CommandShell } from './command-policy'
 
-const READ_ONLY_COMMANDS = new Set([
-  'cat',
-  'dir',
-  'echo',
-  'findstr',
-  'format-custom',
-  'format-list',
-  'format-table',
-  'format-wide',
-  'get-childitem',
-  'get-ciminstance',
-  'get-command',
-  'get-content',
-  'get-date',
-  'get-eventlog',
-  'get-item',
-  'get-itemproperty',
-  'get-location',
-  'get-nettcpconnection',
-  'get-process',
-  'get-service',
-  'get-winevent',
-  'get-wmiobject',
-  'grep',
-  'head',
-  'hostname',
-  'less',
-  'ls',
-  'more',
-  'measure-object',
-  'netstat',
-  'nslookup',
-  'out-string',
-  'ping',
-  'pwd',
-  'rg',
-  'select-object',
-  'select-string',
-  'sort-object',
-  'systeminfo',
-  'tail',
-  'tasklist',
-  'test-connection',
-  'test-netconnection',
-  'test-path',
-  'tracert',
-  'type',
-  'wc',
-  'where-object',
-  'whoami',
-  'write-output'
-])
-
-const VERSION_COMMANDS = new Set([
-  'cargo',
-  'docker',
-  'git',
-  'go',
-  'java',
-  'node',
-  'npm',
-  'npx',
-  'pip',
-  'pnpm',
-  'python',
-  'rustc',
-  'tsc',
-  'yarn'
-])
-
-const GIT_READ_ONLY_SUBCOMMANDS = new Set([
-  'branch',
-  'diff',
-  'log',
-  'remote',
-  'show',
-  'status',
-  'tag'
-])
-
-function hasShellRedirection(command: string): boolean {
-  let quote: '"' | "'" | null = null
-
-  for (let i = 0; i < command.length; i += 1) {
-    const char = command[i]
-    const prev = command[i - 1]
-
-    if ((char === '"' || char === "'") && prev !== '`' && prev !== '\\') {
-      quote = quote === char ? null : quote || char
-      continue
-    }
-
-    if (!quote && (char === '>' || char === '<')) {
-      return true
-    }
-  }
-
-  return false
-}
+type CommandSegment = { raw: string; command: string; args: string }
 
 function splitCommandSegments(command: string): string[] {
   const segments: string[] = []
@@ -152,37 +50,6 @@ function parseSegment(raw: string): CommandSegment {
   }
 }
 
-function isGitReadOnly(args: string): boolean {
-  const tokens = args.toLowerCase().split(/\s+/).filter(Boolean)
-  const subcommand = tokens.find(token => !token.startsWith('-'))
-
-  // ls-files only inspects the index/worktree, including --stage and --deleted.
-  // Limit this new classification to a direct invocation with literal arguments;
-  // shell expansion or an embedded command must still go through approval.
-  if (subcommand === 'ls-files') {
-    return tokens[0] === 'ls-files' && !/[`$(){}&\r\n%!]/.test(args)
-  }
-
-  if (!subcommand) return false
-  if (GIT_READ_ONLY_SUBCOMMANDS.has(subcommand)) return true
-
-  return subcommand === 'config' && (tokens.includes('--list') || tokens.includes('-l'))
-}
-
-function isVersionCheck(command: string, args: string): boolean {
-  const firstArg = args.toLowerCase().split(/\s+/).find(Boolean)
-  return VERSION_COMMANDS.has(command) && (firstArg === '-v' || firstArg === '--version')
-}
-
-function isReadOnlySegment(segment: CommandSegment): boolean {
-  if (!segment.command) return false
-  if (READ_ONLY_COMMANDS.has(segment.command)) return true
-  if (segment.command === 'git') return isGitReadOnly(segment.args)
-  return isVersionCheck(segment.command, segment.args)
-}
-
-const ROUTINE_PACKAGE_SCRIPTS = /^(?:check|lint|test|typecheck)(?::[a-z0-9._-]+)*$/i
-
 function unwrapCmdCommand(segment: CommandSegment): string | null {
   const executable = executableBasename(segment.command)
   if (executable !== 'cmd' && executable !== 'cmd.exe') return null
@@ -193,36 +60,6 @@ function unwrapCmdCommand(segment: CommandSegment): string | null {
     return inner.slice(1, -1).trim()
   }
   return inner
-}
-
-function isRoutineWorkspaceSegment(segment: CommandSegment, depth: number): boolean {
-  if (isReadOnlySegment(segment)) return true
-
-  const wrappedCommand = unwrapCmdCommand(segment)
-  if (wrappedCommand) return depth < 3 && isRoutineWorkspaceCommandInternal(wrappedCommand, depth + 1)
-
-  const executable = executableBasename(segment.command)
-  if (executable === 'tsc' || executable === 'tsc.cmd' || executable === 'tsc.exe') {
-    return /(?:^|\s)--noemit(?:\s|$)/i.test(segment.args)
-  }
-
-  if (/^(?:npm|npm\.cmd|npm\.exe|pnpm|pnpm\.cmd|pnpm\.exe)$/.test(executable)) {
-    const match = segment.args.match(/^(?:run|run-script)\s+([^\s]+)/i)
-    return Boolean(match && ROUTINE_PACKAGE_SCRIPTS.test(match[1]))
-  }
-  if (/^(?:yarn|yarn\.cmd|yarn\.exe)$/.test(executable)) {
-    const match = segment.args.match(/^(?:run\s+)?([^\s]+)/i)
-    return Boolean(match && ROUTINE_PACKAGE_SCRIPTS.test(match[1]))
-  }
-
-  return false
-}
-
-function isRoutineWorkspaceCommandInternal(command: string, depth: number): boolean {
-  const trimmed = command.trim()
-  if (!trimmed || hasShellRedirection(trimmed)) return false
-  const segments = getCommandSegments(trimmed)
-  return segments.length > 0 && segments.every(segment => isRoutineWorkspaceSegment(segment, depth))
 }
 
 export function getCommandSegments(command: string): CommandSegment[] {
@@ -259,27 +96,18 @@ export function invokesNodeExecutable(command: string): boolean {
   })
 }
 
+// Compatibility entry points share the audit pipeline's complete-command policy.
 export function looksLikeReadOnlyInspection(command: string): boolean {
-  const segments = getCommandSegments(command)
-  return segments.some(segment => isReadOnlySegment(segment))
+  return getCommandSegments(command).some(segment => assessCommand(segment.raw).kind === 'read-only')
 }
 
-// Returns true only when every command segment is a non-mutating inspection command.
-export function isReadOnlyCommand(command: string): boolean {
-  const trimmed = command.trim()
-  if (!trimmed || hasShellRedirection(trimmed)) return false
-
-  const segments = getCommandSegments(trimmed)
-  return segments.length > 0 && segments.every(segment => isReadOnlySegment(segment))
+export function isReadOnlyCommand(command: string, shell?: CommandShell): boolean {
+  return assessCommand(command, shell).kind === 'read-only'
 }
 
-/**
- * Commands suitable for automatic review inside an authorized workspace.
- * This is deliberately narrower than "not currently known to be dangerous":
- * every segment must be read-only or a conventional verification script.
- */
-export function isRoutineWorkspaceCommand(command: string): boolean {
-  return isRoutineWorkspaceCommandInternal(command, 0)
+export function isRoutineWorkspaceCommand(command: string, shell?: CommandShell): boolean {
+  const { kind } = assessCommand(command, shell)
+  return kind === 'read-only' || kind === 'verification'
 }
 
 export function checkCommandSafety(command: string): { safe: boolean; warning?: string } {

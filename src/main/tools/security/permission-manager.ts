@@ -80,6 +80,12 @@ type PermissionResponse = {
   reason?: string
 }
 
+export function permissionScopeId(params: { sessionId?: string; interactionOrigin?: string; taskRunId?: string }): string | undefined {
+  return params.interactionOrigin === 'orchestration' && params.taskRunId
+    ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
+    : params.sessionId
+}
+
 export class PermissionManager {
   private static instance: PermissionManager
   private pendingPermissions = new Map<number, (response: PermissionResponse) => void>()
@@ -127,10 +133,7 @@ export class PermissionManager {
     if (scheduledTaskId && (await this.isScheduledTaskAuthorized(scheduledTaskId))) {
       return { approved: true, scope: 'turn' }
     }
-    const approvalScopeId =
-      params.interactionOrigin === 'orchestration' && params.taskRunId
-        ? `${params.sessionId || 'default'}:orchestration:${params.taskRunId}`
-        : params.sessionId
+    const approvalScopeId = permissionScopeId(params)
     const highRisk = this.isHighRiskRequest(params.command, params.warning)
     if (!params.forcePrompt && !highRisk && this.isTurnApprovalGranted(approvalScopeId)) {
       return { approved: true, scope: 'turn' }

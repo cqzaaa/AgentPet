@@ -12,6 +12,7 @@ import { getActiveStorageDir, getSessionFilesDir } from '../tools/utils/paths'
 import { toolRegistry } from '../tools/core/tool-registry'
 import { mcpManager } from '../tools/mcp/mcp-manager'
 import { unifiedToolExecutor } from '../tools/core/tool-executor'
+import { createApprovalReviewer } from '../tools/security/approval-reviewer'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
@@ -1178,6 +1179,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     const getFileChanges = () => fileChangeTracker.getChanges()
 
     const modelProvider = ModelRuntimeFactory.getProvider(provider, apiKey, baseUrl)
+    const approvalReviewer = createApprovalReviewer(modelProvider, model, messages)
+    const executionTarget = sessionId && sshManager.getDeviceType(sessionId) === 'ssh' ? 'ssh' as const : 'local' as const
     const allowedToolNames = Array.isArray(config.allowedToolNames)
       ? new Set(config.allowedToolNames.map((name) => String(name)))
       : null
@@ -1771,6 +1774,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
                     taskStepId: config.taskStepId,
                     isFrontend,
                     sandboxMode: effectiveSandboxMode,
+                    approvalReviewer,
+                    executionTarget,
                     event,
                     abortSignal,
                     fileChangeTracker,
@@ -1799,6 +1804,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
                 taskStepId: config.taskStepId,
                 isFrontend,
                 sandboxMode: effectiveSandboxMode,
+                approvalReviewer,
+                executionTarget,
                 event,
                 abortSignal,
                 fileChangeTracker,

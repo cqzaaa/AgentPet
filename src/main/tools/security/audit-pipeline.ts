@@ -1,11 +1,15 @@
 import { ToolManifest, ToolContext } from '../core/types'
-import { checkCommandSafety, isReadOnlyCommand, isRoutineWorkspaceCommand, looksLikeReadOnlyInspection } from './safety-checker'
+import { checkCommandSafety } from './safety-checker'
+import { assessCommand } from './command-policy'
 
 export interface AuditResult {
   blocked: boolean
   requireApproval: boolean
   warning?: string
   reason?: string
+  reviewable?: boolean
+  forcePrompt?: boolean
+  allowTurnScope?: boolean
 }
 
 export class AuditPipeline {
@@ -64,36 +68,32 @@ export class AuditPipeline {
     }
 
     if (toolName === 'run_terminal_command' || toolName === 'run_command') {
-      // Allow pure inspection commands without interrupting the user. This is
-      // segment-based, so code text such as PowerShell Add-Type is not mistaken
-      // for the CMD "type" command.
-      if (isReadOnlyCommand(command)) {
+      const shell = args.shell === 'cmd' || args.shell === 'bash' || args.shell === 'powershell'
+        ? args.shell : context.executionTarget === 'ssh' ? 'bash' : 'powershell'
+      const assessment = assessCommand(command, shell)
+      if (assessment.kind === 'read-only') {
         return { blocked: false, requireApproval: false }
       }
-
       const safety = checkCommandSafety(command)
       if (!safety.safe) {
         return {
           blocked: false,
           requireApproval: true,
-          warning: safety.warning
+          warning: safety.warning,
+          forcePrompt: true,
+          allowTurnScope: false
         }
       }
-
-      // Only positively classified workspace inspection/verification commands
-      // are auto-approved without pretending that AgentPet has an OS-enforced
-      // command sandbox. Unknown commands fail closed and still ask the user.
-      if (permissionMode === 'assist' && isRoutineWorkspaceCommand(command)) {
+      if (permissionMode === 'assist' && assessment.kind === 'verification') {
         return { blocked: false, requireApproval: false }
       }
-
-      if (looksLikeReadOnlyInspection(command)) {
-        return {
-          blocked: false,
-          requireApproval: true,
-          warning:
-            '命令包含只读查看片段，但还混合了未识别或可能改变状态的操作。请核对完整命令后再允许。'
-        }
+      return {
+        blocked: false,
+        requireApproval: true,
+        reviewable: assessment.kind === 'review',
+        forcePrompt: true,
+        allowTurnScope: false,
+        warning: `${assessment.reason}。${assessment.segment ? `相关片段：${assessment.segment.slice(0, 180)}。` : ''}请核对后允许。`
       }
     }
 
@@ -102,24 +102,15 @@ export class AuditPipeline {
       return {
         blocked: false,
         requireApproval: true,
-        warning: `检测到 AI 正在请求删除文件：${filePath}。请手动核对批准后再执行。`
+        warning: `检测到 AI 正在请求删除文件：${filePath}。请手动核对批准后再执行。`,
+        forcePrompt: true,
+        allowTurnScope: false
       }
     }
 
     // “帮我审批”自动放行普通写入、修改和执行；删除及安全
     // 检查识别出的高风险命令仍然走用户确认。
     if (permissionMode === 'assist') {
-      if (toolName === 'run_terminal_command' || toolName === 'run_command') {
-        const safety = checkCommandSafety(command)
-        if (!safety.safe) {
-          return { blocked: false, requireApproval: true, warning: safety.warning }
-        }
-        return {
-          blocked: false,
-          requireApproval: true,
-          warning: '自动审核无法确认该命令只在授权工作区内执行常规检查。AgentPet 尚未提供操作系统级命令沙箱，请手动核对后允许。'
-        }
-      }
       return { blocked: false, requireApproval: false }
     }
 

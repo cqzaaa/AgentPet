@@ -1,6 +1,7 @@
 import { toolRegistry } from './tool-registry'
 import { auditPipeline } from '../security/audit-pipeline'
-import { permissionManager } from '../security/permission-manager'
+import { permissionManager, permissionScopeId } from '../security/permission-manager'
+import { approvalActionHash, type ApprovalReviewRequest } from '../security/approval-reviewer'
 import { ToolContext, ToolResult } from './types'
 import { mcpManager } from '../mcp/mcp-manager'
 import { getDefaultWorkingDirectory, resolveSessionPath } from '../utils/paths'
@@ -23,6 +24,9 @@ export class UnifiedToolExecutor {
     args: any,
     context: ToolContext
   ): Promise<ToolResult> {
+    // An asynchronous review approves this invocation's arguments, not a caller's
+    // subsequently mutated command/cwd object.
+    if (name === 'run_command' || name === 'run_terminal_command') args = { ...args }
     const manifest = toolRegistry.getManifest(name)
     const executor = toolRegistry.getExecutor(name)
 
@@ -50,11 +54,47 @@ export class UnifiedToolExecutor {
 
 
     // 1. 安全审计
-    const auditResult = await auditPipeline.audit(name, args, manifest, context)
+    const assistMode = context.sandboxMode === 'assist' ||
+      (context.sandboxMode !== false && permissionManager.isTurnApprovalGranted(permissionScopeId(context)))
+    let auditResult = await auditPipeline.audit(name, args, manifest, assistMode ? { ...context, sandboxMode: 'assist' } : context)
     if (auditResult.blocked) {
       return {
         content: `[安全拦截] 该操作已被安全管道拦截。原因: ${auditResult.reason}`,
         success: false
+      }
+    }
+
+    if (auditResult.requireApproval && auditResult.reviewable && assistMode && context.approvalReviewer) {
+      context.abortSignal?.throwIfAborted()
+      const shell = args.shell === 'bash' || args.shell === 'cmd' || args.shell === 'powershell'
+        ? args.shell : context.executionTarget === 'ssh' ? 'bash' : 'powershell'
+      const request: ApprovalReviewRequest = {
+        toolName: name,
+        command: String(args.command || ''),
+        shell,
+        cwd: context.executionTarget === 'ssh' ? '(remote session working directory)' :
+          typeof args.cwd === 'string' && args.cwd.trim()
+            ? resolveSessionPath(args.cwd, context.sessionId, context.workspacePath)
+            : getDefaultWorkingDirectory(context),
+        workspacePath: context.workspacePath,
+        executionTarget: context.executionTarget || 'unknown',
+        reason: auditResult.warning || ''
+      }
+      const actionHash = approvalActionHash(request)
+      await context.traceEvent?.({ type: 'approval/review-started', data: { actionHash, toolName: name } })
+      let review
+      try {
+        review = await context.approvalReviewer(request, context.abortSignal)
+      } catch {
+        context.abortSignal?.throwIfAborted()
+        review = { decision: 'ask' as const, reason: '自动审核暂不可用，请手动核对本次操作。' }
+      }
+      context.abortSignal?.throwIfAborted()
+      await context.traceEvent?.({ type: 'approval/review-completed', data: { actionHash, ...review } })
+      auditResult = {
+        ...auditResult,
+        requireApproval: review.decision !== 'allow',
+        warning: review.decision === 'allow' ? undefined : `自动审核未放行：${review.reason}`
       }
     }
 
@@ -78,7 +118,9 @@ export class UnifiedToolExecutor {
         sender: context.event?.sender,
         interactionOrigin: context.interactionOrigin,
         taskRunId: context.taskRunId,
-        taskStepId: context.taskStepId
+        taskStepId: context.taskStepId,
+        forcePrompt: auditResult.forcePrompt,
+        allowTurnScope: auditResult.allowTurnScope
       })
 
       if (!permission.approved) {

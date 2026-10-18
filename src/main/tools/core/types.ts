@@ -66,6 +66,9 @@ export interface ToolContext {
   isFrontend: boolean
   event?: Electron.IpcMainInvokeEvent
   sandboxMode: boolean | 'assist'
+  /** Separate, tool-free review using this run's configured model. */
+  approvalReviewer?: import('../security/approval-reviewer').ApprovalReviewer
+  executionTarget?: 'local' | 'ssh'
   abortSignal?: AbortSignal
   /** Emits durable protocol-level events for tools with an external transport. */
   traceEvent?: (event: ToolTraceEvent) => void | Promise<void>
