@@ -156,6 +156,13 @@ function isGitReadOnly(args: string): boolean {
   const tokens = args.toLowerCase().split(/\s+/).filter(Boolean)
   const subcommand = tokens.find(token => !token.startsWith('-'))
 
+  // ls-files only inspects the index/worktree, including --stage and --deleted.
+  // Limit this new classification to a direct invocation with literal arguments;
+  // shell expansion or an embedded command must still go through approval.
+  if (subcommand === 'ls-files') {
+    return tokens[0] === 'ls-files' && !/[`$(){}&\r\n%!]/.test(args)
+  }
+
   if (!subcommand) return false
   if (GIT_READ_ONLY_SUBCOMMANDS.has(subcommand)) return true
 

@@ -23,6 +23,7 @@ import { taskRunner } from '../task-runtime/task-runner'
 import { ArtifactTracker } from './artifact-tracker'
 import { FileChangeTracker } from './file-change-tracker'
 import { CodingInspectionBudget } from './coding-inspection-budget'
+import { summarizeCodingVerification } from './coding-verification'
 import { WebResearchProgress } from './web-research-progress'
 import { loadProjectGuidance } from './project-guidance'
 import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
@@ -85,10 +86,12 @@ const sessionActivityCache = new Map<string, Map<string, SessionActivityEntry>>(
 function summarizeReusableToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  success = true
+  success = true,
+  state?: Record<string, unknown>
 ): Omit<SessionActivityEntry, 'updatedAt'> | null {
   let summary: Record<string, unknown> | null = null
   let kind: SessionActivityKind = 'inspect'
+  const verification = summarizeCodingVerification(toolName, args, success, state)
   if (toolName === 'list_directory') {
     kind = 'search'
     summary = { directory_path: args.directory_path || '.' }
@@ -122,12 +125,9 @@ function summarizeReusableToolCall(
       file_path: args.file_path || args.source_path,
       destination_path: args.destination_path || args.target_path
     }
-  } else if (
-    (toolName === 'run_terminal_command' || toolName === 'run_command') &&
-    /(?:^|\s)(?:test|typecheck|lint|check|verify|build)(?::\S+)?(?:\s|$)|(?:pytest|vitest|jest|tsc|eslint|cargo\s+(?:test|check)|go\s+test)/i.test(String(args.command || ''))
-  ) {
+  } else if (verification) {
     kind = 'verify'
-    summary = { command: String(args.command || '').slice(0, 500), status: success ? 'passed' : 'failed' }
+    summary = verification
   } else if (
     success &&
     (toolName === 'run_terminal_command' || toolName === 'run_command') &&
@@ -140,7 +140,7 @@ function summarizeReusableToolCall(
   if (!summary) return null
   const serialized = `${toolName} ${JSON.stringify(summary)}`
   const key = kind === 'verify'
-    ? `${kind}:${toolName}:${String(args.command || '')}`
+    ? `${kind}:${toolName}:${JSON.stringify([args.cwd || args.working_directory, args.shell, args.command])}`
     : `${kind}:${serialized}`
   return { key, kind, summary: serialized }
 }
@@ -150,10 +150,11 @@ function rememberSessionActivity(
   toolName: string,
   args: Record<string, unknown>,
   success = true,
-  evidence?: InspectionEvidence
+  evidence?: InspectionEvidence,
+  state?: Record<string, unknown>
 ): void {
   if (!sessionId) return
-  const activity = summarizeReusableToolCall(toolName, args, success)
+  const activity = summarizeReusableToolCall(toolName, args, success, state)
   if (!activity) return
   if (!sessionActivityCache.has(sessionId)) {
     if (sessionActivityCache.size >= 100) {
@@ -1940,9 +1941,9 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
               this.getArtifactInputPaths(res.toolArgs, artifactTracker.getCandidatePaths()),
               generatedArtifacts
             )
-            rememberSessionActivity(sessionId, res.toolName, res.toolArgs || {}, true, res.inspectionEvidence)
+            rememberSessionActivity(sessionId, res.toolName, res.toolArgs || {}, true, res.inspectionEvidence, res.toolState)
           } else {
-            rememberSessionActivity(sessionId, res.toolName, res.toolArgs || {}, false, res.inspectionEvidence)
+            rememberSessionActivity(sessionId, res.toolName, res.toolArgs || {}, false, res.inspectionEvidence, res.toolState)
           }
           if (res.toolSuccess && (res.toolName === 'request_skill' || res.toolName === 'wait_skill_ready')) {
             for (const skillId of Array.isArray(res.toolState?.loadedSkillIds) ? res.toolState.loadedSkillIds : []) {

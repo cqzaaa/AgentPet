@@ -1,0 +1,566 @@
+/* Wiki 模型按钮与独立弹窗 (Taste-Skill Anti-Slop Model Dialog) */
+
+/* 1. 顶部 Header 内置的触发按钮 (Precision Header Capsule Button) */
+.wiki-header-model-btn {
+  height: 32px;
+  padding: 0 10px 0 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 85%, transparent);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.wiki-header-model-btn:hover {
+  background: var(--bg-card);
+  border-color: color-mix(in srgb, var(--wiki-accent) 45%, var(--border-color));
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px -1px rgba(0, 0, 0, 0.08);
+}
+
+.wiki-header-model-btn:active {
+  transform: scale(0.98);
+}
+
+.wiki-header-model-btn.is-active {
+  border-color: var(--wiki-accent);
+  background: color-mix(in srgb, var(--wiki-accent) 8%, var(--bg-card));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wiki-accent) 22%, transparent);
+}
+
+.wiki-header-model-icon-box {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--wiki-accent) 10%, transparent);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.wiki-header-model-icon-box .wiki-model-brand-icon {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.wiki-header-model-icon-box .wiki-model-btn-icon-fallback {
+  color: var(--wiki-accent);
+}
+
+.wiki-header-model-icon-box .wiki-model-btn-icon-sparkle {
+  color: #8b5cf6;
+}
+
+.wiki-header-model-icon-box .wiki-model-btn-icon-local {
+  color: var(--wiki-amber);
+}
+
+.wiki-header-model-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.wiki-header-model-tag {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.wiki-header-model-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wiki-header-model-sub {
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--text-muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-header-model-arrow {
+  color: var(--text-muted);
+  margin-left: 2px;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.wiki-header-model-btn:hover .wiki-header-model-arrow {
+  color: var(--wiki-accent);
+}
+
+/* 2. 独立模态背景遮罩 (Modal Backdrop: 全局浮层脱离任何父级 overflow 截断) */
+.wiki-model-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 9, 18, 0.52);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: wikiModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes wikiModalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 3. 模态面板卡片 (Precision Modal Panel) */
+.wiki-model-dialog {
+  width: 100%;
+  width: min(600px, 94vw);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  background: var(--bg-content);
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  animation: wikiModalZoomIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes wikiModalZoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 弹窗头部 */
+.wiki-model-dialog-header {
+  padding: 18px 20px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+}
+
+.wiki-model-dialog-title-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.wiki-model-dialog-badge-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--wiki-accent);
+  background: color-mix(in srgb, var(--wiki-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wiki-accent) 24%, transparent);
+  flex-shrink: 0;
+}
+
+.wiki-model-dialog-title-group h3 {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.wiki-model-dialog-title-group p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.wiki-model-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wiki-model-dialog-refresh-btn,
+.wiki-model-dialog-close-btn {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 7px !important;
+  border: 1px solid var(--border-color) !important;
+  background: var(--bg-card) !important;
+  color: var(--text-secondary) !important;
+  display: grid !important;
+  place-items: center !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+}
+
+.wiki-model-dialog-refresh-btn:hover:not(:disabled),
+.wiki-model-dialog-close-btn:hover {
+  color: var(--text-primary) !important;
+  border-color: color-mix(in srgb, var(--wiki-accent) 50%, var(--border-color)) !important;
+  background: var(--bg-menu-hover) !important;
+}
+
+.wiki-model-dialog-refresh-btn:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+}
+
+.wiki-model-dialog-confirm-btn {
+  height: 30px !important;
+  padding: 0 18px !important;
+  border-radius: 7px !important;
+  border: 1px solid rgba(59, 120, 235, 0.4) !important;
+  background: linear-gradient(180deg, #3f84f6 0%, #2b70e4 100%) !important;
+  color: #ffffff !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+  box-shadow: 0 2px 6px rgba(43, 112, 228, 0.22) !important;
+}
+
+.wiki-model-dialog-confirm-btn:hover {
+  background: linear-gradient(180deg, #4d8efc 0%, #3579ee 100%) !important;
+  box-shadow: 0 3px 10px rgba(43, 112, 228, 0.32) !important;
+}
+
+/* 当前采用状态指示胶囊条 */
+.wiki-model-dialog-effective-bar {
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--wiki-accent) 6%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--wiki-accent) 14%, transparent);
+}
+
+.wiki-model-effective-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  flex-shrink: 0;
+}
+
+.wiki-model-effective-dot.neutral {
+  background: var(--wiki-amber);
+  box-shadow: 0 0 0 3px rgba(217, 154, 71, 0.2);
+}
+
+.wiki-model-effective-text strong {
+  color: var(--text-primary);
+  margin-left: 2px;
+}
+
+/* 核心内容区 */
+.wiki-model-dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.wiki-model-dialog-group-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+  margin: 0 0 8px;
+}
+
+.wiki-model-dialog-group-title:not(:first-child) {
+  margin-top: 18px;
+}
+
+/* 基础模式卡片网格 */
+/* 弹窗专用全局重置，防止外部 .wiki-page button 的全局样式污染 */
+.wiki-model-dialog button {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: all 0.16s ease;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* 基础模式卡片网格 */
+.wiki-model-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.wiki-model-card-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 106px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  background: var(--bg-card);
+  text-align: left;
+  position: relative;
+  box-sizing: border-box;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.wiki-model-card-btn:hover {
+  border-color: color-mix(in srgb, var(--wiki-accent) 55%, var(--border-color));
+  background: var(--bg-menu-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.08);
+}
+
+.wiki-model-card-btn:focus-visible {
+  border-color: var(--wiki-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wiki-accent) 30%, transparent);
+}
+
+.wiki-model-card-btn.is-selected {
+  border-color: var(--wiki-accent);
+  background: color-mix(in srgb, var(--wiki-accent) 9%, var(--bg-card));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wiki-accent) 26%, transparent), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.wiki-model-card-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.wiki-model-card-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--wiki-accent) 12%, transparent);
+  color: var(--wiki-accent);
+  flex-shrink: 0;
+}
+
+.wiki-model-card-icon-wrap.local {
+  background: color-mix(in srgb, var(--wiki-amber) 12%, transparent);
+  color: var(--wiki-amber);
+}
+
+.wiki-model-card-icon-wrap .wiki-model-brand-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.wiki-model-card-check {
+  color: var(--wiki-accent);
+  flex-shrink: 0;
+}
+
+.wiki-model-card-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wiki-model-card-content strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.wiki-model-card-content p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* 独立配置模型列表 */
+.wiki-model-profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wiki-model-profile-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  min-height: 52px !important;
+  gap: 13px !important;
+  padding: 10px 15px !important;
+  border-radius: 10px !important;
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent) !important;
+  background: var(--bg-card) !important;
+  text-align: left !important;
+  box-sizing: border-box !important;
+  cursor: pointer !important;
+  transition: all 0.16s ease !important;
+}
+
+.wiki-model-profile-row:hover:not(.is-disabled) {
+  border-color: color-mix(in srgb, var(--wiki-accent) 55%, var(--border-color)) !important;
+  background: var(--bg-menu-hover) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 3px 10px -2px rgba(0, 0, 0, 0.06) !important;
+}
+
+.wiki-model-profile-row.is-selected {
+  border-color: var(--wiki-accent) !important;
+  background: color-mix(in srgb, var(--wiki-accent) 9%, var(--bg-card)) !important;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wiki-accent) 26%, transparent) !important;
+}
+
+.wiki-model-profile-row.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+.wiki-model-profile-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--border-color) 40%, transparent);
+  flex-shrink: 0;
+}
+
+.wiki-model-profile-icon img {
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+}
+
+.wiki-model-profile-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wiki-model-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wiki-model-profile-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wiki-model-profile-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--wiki-accent);
+  background: color-mix(in srgb, var(--wiki-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wiki-accent) 20%, transparent);
+  text-transform: uppercase;
+}
+
+.wiki-model-profile-model {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-model-profile-check {
+  color: var(--wiki-accent);
+  flex-shrink: 0;
+}
+
+/* 提示与状态 */
+.wiki-model-dialog-error {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  color: var(--wiki-danger);
+  background: color-mix(in srgb, var(--wiki-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wiki-danger) 24%, transparent);
+}
+
+.wiki-model-dialog-success {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+/* 弹窗底部操作栏 */
+.wiki-model-dialog-footer {
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 70%, transparent);
+}
+
+.wiki-model-dialog-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+

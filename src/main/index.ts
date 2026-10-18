@@ -4202,6 +4202,14 @@ app.whenReady().then(() => {
           FOREIGN KEY (workspace_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
           FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS wiki_entity_extraction_cache (
+          item_id TEXT NOT NULL,
+          cache_key TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (item_id, cache_key),
+          FOREIGN KEY (item_id) REFERENCES wiki_items(id) ON DELETE CASCADE
+        );
         CREATE INDEX IF NOT EXISTS idx_knowledge_documents_base ON knowledge_documents(knowledge_base_id);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_document_order ON knowledge_nodes(document_id, order_index);
         CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_parent ON knowledge_nodes(parent_id);
@@ -5505,7 +5513,7 @@ app.whenReady().then(() => {
     getDB,
     getSystemLlmConfig: () => systemLlmConfig
   })
-  registerWikiAPIs({ getDB })
+  registerWikiAPIs({ getDB, getSystemLlmConfig: () => systemLlmConfig })
 
   ipcMain.handle('api:parse-file-content', async (_, filePath: string) => {
     if (isImageAttachment(filePath)) return ''

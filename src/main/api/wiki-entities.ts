@@ -1,4 +1,5 @@
 import type { WikiEntityEvidence } from '../../preload/wiki-types'
+import { hasCorruptText } from '../document-parsing/text-quality'
 
 export interface WikiEntityNodeRow {
   nodeId: string
@@ -18,6 +19,7 @@ export interface EntityCandidate {
   mentionCount: number
   confidence: number
   evidence: WikiEntityEvidence[]
+  aliases?: string[]
 }
 
 const ENTITY_STOP_WORDS = new Set([
@@ -88,6 +90,7 @@ export function parseEntityEvidence(value: string): WikiEntityEvidence[] {
 }
 
 export function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate[] {
+  if (hasCorruptText(row.content) || /(?:参考文献|references|bibliography)/i.test(row.headingPath)) return []
   const candidates = new Map<string, EntityCandidate>()
   // A section's title and content often contain the same text. Do not count it twice.
   const sourceText = [...new Set([row.title, row.content].filter(Boolean))].join('\n')
@@ -97,6 +100,7 @@ export function extractEntityCandidates(row: WikiEntityNodeRow): EntityCandidate
   const add = (rawName: string, confidence: number): void => {
     const name = cleanEntityName(rawName)
     const normalizedName = normalizeEntityName(name)
+    if (/^(?:mA|mV|mW|nm|mm|cm|Hz|MHz|GHz|eV|meV|mol|rpm|AM|PM|Fig|DOI|ISBN)$/i.test(name)) return
     if (name.length < 2 || name.length > 40 || ENTITY_STOP_WORDS.has(normalizedName)) return
     if (/^\d+(?:[._-]\d+)*$/.test(name)) return
     const quote = entityEvidence(sourceText, name)

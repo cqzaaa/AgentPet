@@ -1,0 +1,23 @@
+/* PDF wrappers already have explicit dimensions from the viewer. Isolate text
+   measurement and skip painting distant pages without changing scroll geometry. */
+.ofv-root .ofv-pdf-page-wrapper {
+  contain: layout paint style;
+  content-visibility: auto;
+}
+
+.ofv-root .ofv-pdf-text-layer {
+  contain: layout style;
+}
+
+/* A long document contains a placeholder for every unloaded page. Animating all
+   of them competes with scrolling and PDF rasterization on the renderer thread. */
+.ofv-root .ofv-pdf-skeleton {
+  animation: none;
+  background: var(--ofv-surface-muted);
+}
+
+@media print {
+  .ofv-root .ofv-pdf-page-wrapper {
+    content-visibility: visible;
+  }
+}

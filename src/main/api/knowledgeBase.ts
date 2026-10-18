@@ -35,6 +35,13 @@ import {
   type DocumentMediaAsset,
   type DocumentMediaStore
 } from '../document-parsing/document-media'
+import {
+  detectDelimiter,
+  normalizeExtension,
+  sniffFileType,
+  SUPPORTED_CANONICAL_TYPES,
+  type CanonicalFileType
+} from '../document-parsing/file-type-detector'
 
 interface KnowledgeBaseDependencies {
   getDB: () => Promise<any>
@@ -68,7 +75,7 @@ interface KnowledgeNodeDraft {
   sourceMeta: Record<string, unknown>
 }
 
-const SUPPORTED_EXTENSIONS = ['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'csv', 'txt', 'md', 'json', 'html', 'htm', 'xml', 'yaml', 'yml']
+export const SUPPORTED_EXTENSIONS = Array.from(SUPPORTED_CANONICAL_TYPES)
 const MAX_CHUNK_CHARS = 1600
 const CHUNK_OVERLAP_CHARS = 160
 
@@ -123,10 +130,158 @@ function looksLikeHeading(line: string): { title: string; level: number } | null
     return { title: line.trim(), level }
   }
 
-  if (line.length <= 32 && !/[。！？.!?；;]$/.test(line) && /[\u3400-\u9fffA-Za-z]/.test(line)) {
+  // Reject code/syntax/data lines from being treated as level 2 headings
+  if (
+    line.length <= 32 &&
+    !/[。！？.!?；;]$/.test(line) &&
+    /[\u3400-\u9fffA-Za-z]/.test(line) &&
+    !/^[{}[\]"';:,<>=/\\|*`~]|[,;:{}[\]]$/.test(line) &&
+    !/[:=]\s/.test(line) &&
+    !/^(?:const|let|var|function|import|export|class|interface|type|return)\b/.test(line)
+  ) {
     return { title: line.trim(), level: 2 }
   }
   return null
+}
+
+function parseJsonBlocks(text: string): ParsedBlock[] {
+  const blocks: ParsedBlock[] = []
+  try {
+    const data = JSON.parse(text)
+    if (Array.isArray(data)) {
+      blocks.push({ type: 'heading', text: `数据记录集（共 ${data.length} 条）`, level: 1 })
+      if (data.length > 0 && typeof data[0] === 'object' && data[0] !== null) {
+        const keys = Object.keys(data[0]).slice(0, 10)
+        blocks.push({ type: 'table', text: `字段：${keys.join('｜')}` })
+        data.slice(0, 100).forEach((item, idx) => {
+          if (typeof item === 'object' && item !== null) {
+            const rowText = keys
+              .map((k) => `${k}=${String((item as Record<string, unknown>)[k] ?? '').trim()}`)
+              .join('；')
+            blocks.push({ type: 'table_row', text: `记录 ${idx + 1}：${rowText}` })
+          } else {
+            blocks.push({ type: 'paragraph', text: `[${idx + 1}] ${String(item)}` })
+          }
+        })
+      } else {
+        data.slice(0, 200).forEach((item, idx) => {
+          blocks.push({ type: 'paragraph', text: `[${idx + 1}] ${String(item)}` })
+        })
+      }
+    } else if (typeof data === 'object' && data !== null) {
+      const obj = data as Record<string, unknown>
+      const name = String(obj.name || obj.title || 'JSON 数据结构')
+      blocks.push({ type: 'heading', text: name, level: 1 })
+      for (const [key, val] of Object.entries(obj)) {
+        if (val === null || val === undefined) continue
+        if (typeof val === 'object') {
+          blocks.push({ type: 'heading', text: `配置项：${key}`, level: 2 })
+          if (Array.isArray(val)) {
+            blocks.push({
+              type: 'paragraph',
+              text: `包含 ${val.length} 项：${JSON.stringify(val.slice(0, 10))}${val.length > 10 ? '...' : ''}`
+            })
+          } else {
+            const entries = Object.entries(val as Record<string, unknown>).map(
+              ([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`
+            )
+            blocks.push({ type: 'paragraph', text: entries.join('\n') })
+          }
+        } else {
+          blocks.push({ type: 'paragraph', text: `${key}：${String(val)}` })
+        }
+      }
+    } else {
+      blocks.push({ type: 'paragraph', text: String(data) })
+    }
+  } catch {
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+    blocks.push({ type: 'heading', text: `结构化数据流（共 ${lines.length} 行）`, level: 1 })
+    for (let i = 0; i < Math.min(lines.length, 100); i++) {
+      try {
+        const item = JSON.parse(lines[i]) as Record<string, unknown>
+        const summary = Object.entries(item)
+          .slice(0, 6)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join('；')
+        blocks.push({ type: 'table_row', text: `第 ${i + 1} 行：${summary}` })
+      } catch {
+        blocks.push({ type: 'paragraph', text: `第 ${i + 1} 行：${lines[i].slice(0, 300)}` })
+      }
+    }
+  }
+  return blocks
+}
+
+function parseYamlBlocks(text: string): ParsedBlock[] {
+  const blocks: ParsedBlock[] = [{ type: 'heading', text: 'YAML 配置文档', level: 1 }]
+  const lines = text.split(/\r?\n/)
+  let currentGroup: string[] = []
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+    if (!line.trim() || line.trim().startsWith('#')) continue
+    if (
+      /^[A-Za-z0-9_-]+:\s*(?:$|[^\s])/.test(line) &&
+      !line.startsWith(' ') &&
+      !line.startsWith('\t')
+    ) {
+      if (currentGroup.length > 0) {
+        blocks.push({ type: 'paragraph', text: currentGroup.join('\n') })
+        currentGroup = []
+      }
+      const match = /^([A-Za-z0-9_-]+):(.*)$/.exec(line)
+      if (match) {
+        const key = match[1].trim()
+        const val = match[2].trim()
+        blocks.push({ type: 'heading', text: `配置段：${key}`, level: 2 })
+        if (val) currentGroup.push(`${key}: ${val}`)
+      }
+    } else {
+      currentGroup.push(line.trim())
+    }
+  }
+  if (currentGroup.length > 0) {
+    blocks.push({ type: 'paragraph', text: currentGroup.join('\n') })
+  }
+  return blocks
+}
+
+function extractMarkdownFrontmatter(markdown: string): {
+  frontmatter: Record<string, unknown>
+  cleanedMarkdown: string
+} {
+  const match = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)
+  if (!match) return { frontmatter: {}, cleanedMarkdown: markdown }
+
+  const rawYaml = match[1]
+  const cleanedMarkdown = markdown.slice(match[0].length)
+  const frontmatter: Record<string, unknown> = {}
+
+  for (const line of rawYaml.split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line.trim())
+    if (!kv) continue
+    const key = kv[1]
+    let value: unknown = kv[2].trim()
+
+    if (typeof value === 'string') {
+      if (/^\[(.*)\]$/.test(value)) {
+        value = value
+          .slice(1, -1)
+          .split(',')
+          .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(Boolean)
+      } else {
+        value = value.replace(/^['"]|['"]$/g, '')
+      }
+    }
+    frontmatter[key] = value
+  }
+
+  return { frontmatter, cleanedMarkdown }
 }
 
 function parsePlainText(text: string): ParsedBlock[] {
@@ -228,23 +383,30 @@ async function parseHtmlWithMedia(filePath: string, html: string): Promise<{ blo
   return { blocks: parseHtmlBlocks(html, imageAssets), assetDir: store.assetDir, imageCount: imageAssets.size }
 }
 
-async function parseMarkdownWithMedia(filePath: string, markdown: string): Promise<{ blocks: ParsedBlock[]; assetDir?: string; imageCount: number }> {
+async function parseMarkdownWithMedia(
+  filePath: string,
+  rawMarkdown: string
+): Promise<{ blocks: ParsedBlock[]; assetDir?: string; imageCount: number; frontmatter: Record<string, unknown> }> {
   // Front matter is provenance, not document prose. Keep headings as independent
   // blocks even when authors do not put blank lines around them.
-  markdown = markdown.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '')
+  const { frontmatter, cleanedMarkdown } = extractMarkdownFrontmatter(rawMarkdown)
+  let markdown = cleanedMarkdown
   let fence = ''
-  markdown = markdown.split(/\r?\n/).map(line => {
-    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1]
-    if (marker) {
-      if (!fence) fence = marker
-      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = ''
-      return line
-    }
-    return !fence && /^#{1,6}\s+/.test(line) ? `\n${line}\n` : line
-  }).join('\n')
+  markdown = markdown
+    .split(/\r?\n/)
+    .map((line) => {
+      const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1]
+      if (marker) {
+        if (!fence) fence = marker
+        else if (marker[0] === fence[0] && marker.length >= fence.length) fence = ''
+        return line
+      }
+      return !fence && /^#{1,6}\s+/.test(line) ? `\n${line}\n` : line
+    })
+    .join('\n')
   const imagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g
   const matches = [...markdown.matchAll(imagePattern)]
-  if (matches.length === 0) return { blocks: parsePlainText(markdown), imageCount: 0 }
+  if (matches.length === 0) return { blocks: parsePlainText(markdown), imageCount: 0, frontmatter }
   const store = await createDocumentMediaStore(filePath)
   const blocks: ParsedBlock[] = []
   let cursor = 0
@@ -262,7 +424,7 @@ async function parseMarkdownWithMedia(filePath: string, markdown: string): Promi
     cursor = (match.index || 0) + match[0].length
   }
   blocks.push(...parsePlainText(markdown.slice(cursor)))
-  return { blocks, assetDir: store.assetDir, imageCount }
+  return { blocks, assetDir: store.assetDir, imageCount, frontmatter }
 }
 
 interface ParsedFile {
@@ -275,9 +437,19 @@ interface ParsedFile {
   profile: Record<string, unknown>
 }
 
-export async function parseKnowledgeFile(filePath: string, event?: { sender: WebContents }, onProgress?: (detail: string) => void): Promise<ParsedFile> {
-  const ext = extname(filePath).slice(1).toLowerCase()
-  if (!SUPPORTED_EXTENSIONS.includes(ext)) throw new Error(`暂不支持 .${ext || 'unknown'} 文件`)
+export async function parseKnowledgeFile(
+  filePath: string,
+  event?: { sender: WebContents },
+  onProgress?: (detail: string) => void
+): Promise<ParsedFile> {
+  const sniffed = await sniffFileType(filePath)
+  const ext =
+    sniffed.fileType !== 'unknown'
+      ? sniffed.fileType
+      : (normalizeExtension(extname(filePath)) as CanonicalFileType | 'unknown')
+  if (ext === 'unknown' || !SUPPORTED_CANONICAL_TYPES.has(ext as CanonicalFileType)) {
+    throw new Error(`暂不支持 .${sniffed.rawExtension || 'unknown'} 文件`)
+  }
 
   if (ext === 'pdf') {
     try {
@@ -428,35 +600,99 @@ export async function parseKnowledgeFile(filePath: string, event?: { sender: Web
     return { blocks, parser: imageCount > 0 ? 'local-workbook-structure+media' : 'local-workbook-structure', warning, characterCount: blocks.reduce((sum, block) => sum + block.text.length, 0), qualityScore: 0.82, profile: { kind: 'workbook', format: ext, imageCount, imageAssetDir } }
   }
 
-  if (ext === 'csv') {
+  if (ext === 'csv' || ext === 'tsv') {
     const text = await fs.promises.readFile(filePath, 'utf-8')
-    const parsed = Papa.parse<any[]>(text, { header: false, skipEmptyLines: true })
+    const delimiter =
+      sniffed.delimiter ||
+      (ext === 'tsv' ? '\t' : detectDelimiter(text.slice(0, 4096)))
+    const parsed = Papa.parse<any[]>(text, { header: false, skipEmptyLines: true, delimiter })
     const rows = parsed.data || []
-    const headers = (rows[0] || []).map(value => String(value || '').trim())
-    const blocks: ParsedBlock[] = [{ type: 'heading', text: 'CSV 数据', level: 1 }]
+    const headers = (rows[0] || []).map((value) => String(value || '').trim())
+    const blocks: ParsedBlock[] = [{ type: 'heading', text: `${ext.toUpperCase()} 表格数据`, level: 1 }]
     if (headers.length > 0) blocks.push({ type: 'table', text: `列：${headers.join('｜')}` })
     rows.slice(1).forEach((row, index) => {
       blocks.push({
         type: 'table_row',
-        text: `第 ${index + 1} 行：${row.map((value, column) => `${headers[column] || `列${column + 1}`}=${String(value ?? '').trim()}`).join('；')}`
+        text: `第 ${index + 1} 行：${row
+          .map((value, column) => `${headers[column] || `列${column + 1}`}=${String(value ?? '').trim()}`)
+          .join('；')}`
       })
     })
-    return { blocks, parser: 'local-csv-structure', warning: '', characterCount: text.length, qualityScore: 0.9, profile: { kind: 'table', format: 'csv' } }
+    return {
+      blocks,
+      parser: `local-${ext}-structure`,
+      warning: '',
+      characterCount: text.length,
+      qualityScore: 0.9,
+      profile: { kind: 'table', format: ext, delimiter }
+    }
+  }
+
+  if (ext === 'json' || ext === 'jsonl') {
+    const text = await fs.promises.readFile(filePath, 'utf-8')
+    const blocks = parseJsonBlocks(text)
+    return {
+      blocks,
+      parser: `local-${ext}-structure`,
+      warning: '',
+      characterCount: text.length,
+      qualityScore: blocks.length > 0 ? 0.88 : 0.3,
+      profile: { kind: 'structured-data', format: ext }
+    }
+  }
+
+  if (ext === 'yaml') {
+    const text = await fs.promises.readFile(filePath, 'utf-8')
+    const blocks = parseYamlBlocks(text)
+    return {
+      blocks,
+      parser: 'local-yaml-structure',
+      warning: '',
+      characterCount: text.length,
+      qualityScore: blocks.length > 0 ? 0.85 : 0.3,
+      profile: { kind: 'structured-config', format: 'yaml' }
+    }
   }
 
   const text = await fs.promises.readFile(filePath, 'utf-8')
-  const mediaResult = ext === 'html' || ext === 'htm'
-    ? await parseHtmlWithMedia(filePath, text)
-    : ext === 'md'
-      ? await parseMarkdownWithMedia(filePath, text)
-      : { blocks: parsePlainText(text), imageCount: 0, assetDir: undefined }
+  if (ext === 'html') {
+    const mediaResult = await parseHtmlWithMedia(filePath, text)
+    return {
+      blocks: mediaResult.blocks,
+      parser: `local-html-structure${mediaResult.imageCount > 0 ? '+media' : ''}`,
+      warning: '',
+      characterCount: text.length,
+      qualityScore: mediaResult.blocks.length > 0 ? 0.8 : 0.2,
+      profile: { kind: 'text', format: 'html', imageCount: mediaResult.imageCount, imageAssetDir: mediaResult.assetDir }
+    }
+  }
+
+  if (ext === 'md') {
+    const mediaResult = await parseMarkdownWithMedia(filePath, text)
+    return {
+      blocks: mediaResult.blocks,
+      parser: `local-md-structure${mediaResult.imageCount > 0 ? '+media' : ''}`,
+      warning: '',
+      characterCount: text.length,
+      qualityScore: mediaResult.blocks.length > 0 ? 0.85 : 0.2,
+      profile: {
+        kind: 'text',
+        format: 'md',
+        imageCount: mediaResult.imageCount,
+        imageAssetDir: mediaResult.assetDir,
+        frontmatter: mediaResult.frontmatter
+      }
+    }
+  }
+
+  const plainBlocks = parsePlainText(text)
   return {
-    blocks: mediaResult.blocks,
-    parser: `local-${ext || 'text'}-structure${mediaResult.imageCount > 0 ? '+media' : ''}`,
+    blocks: plainBlocks,
+    parser: `local-${ext || 'text'}-structure`,
     warning: '',
     characterCount: text.length,
-    qualityScore: mediaResult.blocks.length > 0 ? 0.8 : 0.2,
-    profile: { kind: 'text', format: ext || 'text', imageCount: mediaResult.imageCount, imageAssetDir: mediaResult.assetDir }
+    qualityScore: plainBlocks.length > 0 ? 0.8 : 0.2,
+    profile: { kind: 'text', format: ext || 'text' }
   }
 }
 

@@ -1,8 +1,8 @@
 import type { WikiGraphData as GraphData, WikiEntityEvidence, WikiSyncProgress as SyncProgress, WikiParserComponentStatus } from '../../../preload/wiki-types'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Controls, Handle, MarkerType, Position, ReactFlow,
-  type Edge, type Node, type NodeProps, type ReactFlowInstance
+  applyNodeChanges, Controls, Handle, MarkerType, Position, ReactFlow,
+  type Edge, type Node, type NodeChange, type NodeProps, type ReactFlowInstance
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
@@ -11,6 +11,7 @@ import {
   Plus, RefreshCw, Search, Sparkles, Trash2, X
 } from 'lucide-react'
 import { FileIcon } from '../components/FileIcon'
+import { WikiModelSettings } from '../components/WikiModelSettings'
 import { EmbeddedFileViewer } from '../components/EmbeddedFileViewer'
 import './WikiPage.css'
 
@@ -322,9 +323,9 @@ function stablePagePositions(data: GraphData): Map<string, { x: number; y: numbe
 }
 
 function WikiGraphNodeView({ data }: NodeProps<WikiFlowNode>): React.JSX.Element {
-  if (data.kind === 'fragment') return <div className="wiki-fragment-node">
+  if (data.kind === 'fragment') return <div className={`wiki-fragment-node${data.selected ? ' is-selected' : ''}`}>
     <Handle type="target" position={Position.Left} />
-    <button type="button" onClick={data.activate} className="wiki-fragment-action nodrag nopan">
+    <button type="button" onClick={data.activate} aria-pressed={data.selected} className="wiki-fragment-action nodrag nopan">
       <span className="wiki-fragment-title"><FileText size={14} /><strong>{data.label}</strong>{data.evidence?.pageStart && <small>第 {data.evidence.pageStart} 页</small>}</span>
       <span className="wiki-fragment-quote">{data.evidence?.quote}</span><span className="wiki-fragment-path" title={data.relativePath}>{data.relativePath} · 点击定位原文</span>
     </button>
@@ -333,7 +334,7 @@ function WikiGraphNodeView({ data }: NodeProps<WikiFlowNode>): React.JSX.Element
   return <div className={`wiki-graph-node ${data.kind}${data.selected ? ' selected' : ''}${data.highlighted ? ' highlighted' : ''}${data.dimmed ? ' dimmed' : ''}${data.anchor ? ' anchor' : ''}`} style={{ '--wiki-node-size': `${data.nodeSize}px` } as React.CSSProperties}>
     <Handle type="target" position={Position.Top} />
     <span aria-hidden="true" />
-    <button type="button" className="wiki-node-action nodrag nopan" aria-label={`查看 ${data.label}`} onClick={data.activate} />
+    <button type="button" className="wiki-node-action nodrag nopan" aria-label={`查看 ${data.label}`} aria-pressed={data.selected} onClick={data.activate} />
     {data.showLabel && <strong title={data.label}>{data.label}</strong>}
     <Handle type="source" position={Position.Bottom} />
   </div>
@@ -354,14 +355,19 @@ function layoutGraph(data: GraphData, focusId: string, hoveredId: string, wideLa
       positions.set(node.id, { x: 710, y: indexes.length ? indexes.reduce((sum, index) => sum + index * 180, 0) / indexes.length : 0 })
     })
     data.nodes.filter(node => node.kind === 'source').forEach((node, index) => positions.set(node.id, { x: 970, y: index * 150 }))
-    const nodes: WikiFlowNode[] = data.nodes.filter(node => positions.has(node.id)).map(node => ({
-      id: node.id, type: 'wikiGraph', position: positions.get(node.id)!,
-      data: { label: node.label, itemId: node.itemId, kind: node.kind, evidence: node.evidence,
-        relativePath: node.relativePath, resource: node.resource, nodeSize: node.kind === 'fragment' ? 300 : 32,
-        selected: node.id === focusId, highlighted: true, dimmed: false, showLabel: true, anchor: false },
-      draggable: false, selectable: false, focusable: true, ariaLabel: node.kind === 'fragment' ? `${node.label}：${node.evidence?.quote}，查看原文` : node.label,
-      className: 'wiki-flow-node', style: { width: node.kind === 'fragment' ? 300 : 32, height: node.kind === 'fragment' ? 146 : 32 }
-    }))
+    const nodes: WikiFlowNode[] = data.nodes.filter(node => positions.has(node.id)).map(node => {
+      const nodeWidth = node.kind === 'fragment' ? 300 : 32
+      const nodeHeight = node.kind === 'fragment' ? 146 : 32
+      return {
+        id: node.id, type: 'wikiGraph', position: positions.get(node.id)!,
+        width: nodeWidth, height: nodeHeight, initialWidth: nodeWidth, initialHeight: nodeHeight,
+        data: { label: node.label, itemId: node.itemId, kind: node.kind, evidence: node.evidence,
+          relativePath: node.relativePath, resource: node.resource, nodeSize: nodeWidth,
+          selected: node.id === focusId, highlighted: true, dimmed: false, showLabel: true, anchor: false },
+        draggable: false, selectable: false, focusable: true, ariaLabel: node.kind === 'fragment' ? `${node.label}：${node.evidence?.quote}，查看原文` : node.label,
+        className: 'wiki-flow-node', style: { width: nodeWidth, height: nodeHeight }
+      }
+    })
     const ids = new Set(nodes.map(node => node.id))
     return { nodes, edges: data.edges.filter(edge => ids.has(edge.source) && ids.has(edge.target) && (edge.kind === 'evidence' || edge.source.startsWith('fragment:') || edge.target.startsWith('fragment:'))).map(edge => ({
       ...edge, type: 'smoothstep', label: edge.kind === 'contains' ? '出自' : edge.kind === 'evidence' ? '引用' : '提及',
@@ -494,6 +500,10 @@ function layoutGraph(data: GraphData, focusId: string, hoveredId: string, wideLa
         id: item.id,
         type: 'wikiGraph',
         position: positionFor(item, nodeSize),
+        width: nodeSize,
+        height: nodeSize,
+        initialWidth: nodeSize,
+        initialHeight: nodeSize,
         data: {
           label: item.label,
           itemId: item.itemId,
@@ -563,6 +573,10 @@ export function WikiPage(): React.JSX.Element {
   const [sideTab, setSideTab] = useState<'graph' | 'history'>('graph')
   const [graphExpanded, setGraphExpanded] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
+  const [readerWidth, setReaderWidth] = useState(350)
+  const [readerMaxWidth, setReaderMaxWidth] = useState(960)
+  const [readerResizing, setReaderResizing] = useState(false)
+  const readerDragRef = useRef<{ pointerId: number; x: number; width: number } | null>(null)
   const [focusedEntityId, setFocusedEntityId] = useState('')
   const [focusedGraphNodeId, setFocusedGraphNodeId] = useState('')
   const [selectedEvidence, setSelectedEvidence] = useState<{ itemId: string; evidence: WikiEntityEvidence } | null>(null)
@@ -576,6 +590,7 @@ export function WikiPage(): React.JSX.Element {
   const [sourceLoading, setSourceLoading] = useState('')
   const [sourceError, setSourceError] = useState<{ itemId: string; message: string } | null>(null)
   const [revisions, setRevisions] = useState<Revision[]>([])
+  const [viewingRevision, setViewingRevision] = useState<{ id: string; content: string; createdAt: string; characterCount?: number } | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [dialogValue, setDialogValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -586,6 +601,29 @@ export function WikiPage(): React.JSX.Element {
   const graphContainerRef = useRef<HTMLDivElement>(null)
   const flowInstanceRef = useRef<ReactFlowInstance<WikiFlowNode, Edge> | null>(null)
   const renderedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  const hoverLeaveTimerRef = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    const container = graphContainerRef.current
+    if (!container) return
+    const resize = (): void => {
+      const max = Math.max(280, Math.min(960, container.clientWidth - 28))
+      setReaderMaxWidth(max)
+      setReaderWidth(width => Math.min(width, max))
+    }
+    resize()
+    const observer = new ResizeObserver(resize)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [workspaceId, sideTab, graphExpanded, workspaceListOpen])
+
+  const resizeReader = (width: number): void => {
+    setReaderWidth(Math.max(Math.min(320, readerMaxWidth), Math.min(readerMaxWidth, width)))
+  }
+  const stopReaderResize = (): void => {
+    readerDragRef.current = null
+    setReaderResizing(false)
+  }
 
   useEffect(() => {
     let active = true
@@ -598,7 +636,11 @@ export function WikiPage(): React.JSX.Element {
     const unsubscribe = window.api.onWikiParserComponentStatus(receive)
     void window.api.wikiGetParserComponent().then(receive)
       .catch(reason => { if (active) setError(errorMessage(reason, '无法读取文档解析组件状态。')) })
-    return () => { active = false; unsubscribe() }
+    return () => {
+      active = false
+      unsubscribe()
+      if (hoverLeaveTimerRef.current !== undefined) window.clearTimeout(hoverLeaveTimerRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -642,6 +684,10 @@ export function WikiPage(): React.JSX.Element {
     [graph, activeGraphFocusId, graphExpanded]
   )
   const [animatedNodes, setAnimatedNodes] = useState<WikiFlowNode[]>(graphElements.nodes)
+  const handleGraphNodesChange = useCallback((changes: NodeChange<WikiFlowNode>[]): void => {
+    // Controlled nodes must retain ResizeObserver measurements across progress updates.
+    setAnimatedNodes(nodes => applyNodeChanges(changes, nodes))
+  }, [])
 
   useEffect(() => {
     const targetNodes = graphElements.nodes
@@ -662,7 +708,16 @@ export function WikiPage(): React.JSX.Element {
     }
     if (reducedMotion || previousPositions.size === 0 || !hasMovement) {
       renderedPositionsRef.current = new Map(targetNodes.map(node => [node.id, { ...node.position }]))
-      setAnimatedNodes(targetNodes)
+      setAnimatedNodes(prevNodes => {
+        const prevMap = new Map(prevNodes.map(n => [n.id, n]))
+        return targetNodes.map(node => {
+          const prev = prevMap.get(node.id)
+          return {
+            ...node,
+            measured: prev?.measured || (node.width && node.height ? { width: node.width, height: node.height } : undefined)
+          }
+        })
+      })
       return
     }
     let frameId = 0
@@ -672,15 +727,22 @@ export function WikiPage(): React.JSX.Element {
       const progress = Math.min(1, (now - startTime) / duration)
       const eased = 1 - Math.pow(1 - progress, 3)
       const nextMap = new Map<string, { x: number; y: number }>()
-      const interpolated = targetNodes.map(node => {
-        const startPos = previousPositions.get(node.id) || node.position
-        const x = startPos.x + (node.position.x - startPos.x) * eased
-        const y = startPos.y + (node.position.y - startPos.y) * eased
-        nextMap.set(node.id, { x, y })
-        return { ...node, position: { x, y } }
+      setAnimatedNodes(prevNodes => {
+        const prevMap = new Map(prevNodes.map(n => [n.id, n]))
+        return targetNodes.map(node => {
+          const prev = prevMap.get(node.id)
+          const startPos = previousPositions.get(node.id) || node.position
+          const x = startPos.x + (node.position.x - startPos.x) * eased
+          const y = startPos.y + (node.position.y - startPos.y) * eased
+          nextMap.set(node.id, { x, y })
+          return {
+            ...node,
+            position: { x, y },
+            measured: prev?.measured || (node.width && node.height ? { width: node.width, height: node.height } : undefined)
+          }
+        })
       })
       renderedPositionsRef.current = nextMap
-      setAnimatedNodes(interpolated)
       if (progress < 1) {
         frameId = window.requestAnimationFrame(step)
       }
@@ -713,8 +775,7 @@ export function WikiPage(): React.JSX.Element {
       maxY = Math.max(maxY, node.position.y + nodeHeight + 34)
     }
     const narrow = window.innerWidth <= 820
-    // 右侧小框宽度 350px，右侧预留少量间隙，图谱中心始终居中在开阔的中央舞台
-    const drawerOffset = readerOpen && !narrow ? 360 : 0
+    const drawerOffset = readerOpen && !narrow ? readerWidth + 28 : 0
     const availableWidth = Math.max(320, container.clientWidth - drawerOffset)
     const height = Math.max(260, container.clientHeight * (readerOpen && narrow ? 0.52 : 1))
     // 扣除上方操作胶囊所占的高度及安全缓冲间隙，保证图谱居中及 fitView 缩放时不被遮挡
@@ -722,10 +783,12 @@ export function WikiPage(): React.JSX.Element {
     const islandBottom = island ? island.getBoundingClientRect().bottom - container.getBoundingClientRect().top : 0
     const topBarOffset = islandBottom > 0 ? Math.max(52, islandBottom + 12) : 56
     const availableHeight = Math.max(200, height - topBarOffset)
-    const padding = focusedEntityId ? 0.08 : graphExpanded ? 0.10 : 0.14
+    // Let the overview fill the available canvas, while keeping room for labels.
+    const overview = !activeGraphFocusId
+    const padding = overview ? 0.03 : focusedEntityId ? 0.08 : graphExpanded ? 0.10 : 0.14
     const spanX = Math.max(240, maxX - minX)
     const spanY = Math.max(240, maxY - minY)
-    const maxZoom = graphExpanded ? 1.25 : 1.15
+    const maxZoom = overview ? (graphExpanded ? 1.65 : 1.55) : graphExpanded ? 1.25 : 1.15
     const minZoom = 0.45
     const zoom = Math.max(minZoom, Math.min(maxZoom, Math.min((availableWidth * (1 - padding * 2)) / spanX, (availableHeight * (1 - padding * 2)) / spanY)))
     const centerX = (minX + maxX) / 2
@@ -734,23 +797,33 @@ export function WikiPage(): React.JSX.Element {
     const targetY = topBarOffset + availableHeight / 2 - centerY * zoom
     const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     void instance.setViewport({ x: targetX, y: targetY, zoom }, { duration: animate && !reducedMotion ? 380 : 0 })
-  }, [activeGraphFocusId, focusedEntityId, graphExpanded, readerOpen])
+  }, [activeGraphFocusId, focusedEntityId, graphExpanded, readerOpen, readerWidth])
 
   useEffect(() => {
     if (sideTab !== 'graph' || !viewportNodes.length) return
     const timer = window.setTimeout(() => {
-      centerGraphViewport(viewportNodes, true)
+      centerGraphViewport(viewportNodes, !readerResizing)
     }, 16)
     return () => window.clearTimeout(timer)
-  }, [centerGraphViewport, viewportNodes, sideTab])
+  }, [centerGraphViewport, viewportNodes, sideTab, readerResizing])
 
   const handleGraphNodeEnter = useCallback((nodeId: string): void => {
     if (activeGraphFocusId) return
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current)
+      hoverLeaveTimerRef.current = undefined
+    }
     setHoveredGraphNode(current => current === nodeId ? current : nodeId)
   }, [activeGraphFocusId])
   const handleGraphNodeLeave = useCallback((nodeId: string): void => {
     if (activeGraphFocusId) return
-    setHoveredGraphNode(current => current === nodeId ? '' : current)
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current)
+    }
+    hoverLeaveTimerRef.current = window.setTimeout(() => {
+      setHoveredGraphNode(current => current === nodeId ? '' : current)
+      hoverLeaveTimerRef.current = undefined
+    }, 48)
   }, [activeGraphFocusId])
   const visibleSourcePreview = sourcePreview?.itemId === selectedId ? sourcePreview : null
   const visibleSourceError = sourceError?.itemId === selectedId ? sourceError.message : ''
@@ -814,6 +887,7 @@ export function WikiPage(): React.JSX.Element {
       if (value.status === 'failed') setError(value.error || '同步失败，请重试。')
       if (value.status === 'completed') {
         if (value.failed) setError(`${value.failed} 个文件解析失败，请重试同步。`)
+        else if (value.error) setError(value.error)
         void Promise.all([window.api.wikiListItems(workspaceId), window.api.wikiListWorkspaces()])
           .then(([rows, workspacesValue]) => {
             if (!active || latestUpdate !== value.updatedAt) return
@@ -866,16 +940,24 @@ export function WikiPage(): React.JSX.Element {
       return
     }
     let stale = false
-    window.api.wikiReadItem(selectedId).then(async value => {
+    window.api.wikiReadItem(selectedId).then(value => {
       if (stale || !value) return
       setDoc(null)
       const next = value as WikiItem
       setItem(next); setDraft(next.content || ''); setSaved(next.content || ''); setMode('read')
-      const detail = next.documentId ? await window.api.knowledgeGetDocument(next.documentId) : null
-      if (!stale) setDoc(detail as DocDetail | null)
     }).catch(reason => { if (!stale) setError(errorMessage(reason, '无法读取页面。')) })
     return () => { stale = true }
   }, [selectedId, workspaceId])
+
+  // Original-file preview and graph page navigation do not need the parsed text payload.
+  useEffect(() => {
+    if (!displayedItem?.documentId || (!displayedItem.editable && !showParsedText)) return
+    let active = true
+    void window.api.knowledgeGetDocument(displayedItem.documentId)
+      .then(value => { if (active) setDoc(value as DocDetail | null) })
+      .catch(reason => { if (active) setError(errorMessage(reason, '无法读取备用文本。')) })
+    return () => { active = false }
+  }, [displayedItem?.documentId, displayedItem?.editable, showParsedText])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -890,12 +972,15 @@ export function WikiPage(): React.JSX.Element {
     if (!readerOpen || selectedEvidence?.itemId !== displayedItem?.id || !doc) return
     const target = document.getElementById(`wiki-content-${selectedEvidence?.evidence.nodeId}`)
     target?.scrollIntoView({ block: 'center', behavior: 'instant' })
-  }, [doc, readerOpen, displayedItem?.id, selectedEvidence])
+  }, [doc, readerOpen, displayedItem?.id, selectedEvidence, showParsedText])
 
   useEffect(() => {
     if (progress?.status !== 'completed' || !item?.documentId || dirty) return
     let active = true
-    void Promise.all([window.api.knowledgeGetDocument(item.documentId), window.api.wikiReadItem(item.id)])
+    void Promise.all([
+      item.editable || showParsedText ? window.api.knowledgeGetDocument(item.documentId) : Promise.resolve(null),
+      window.api.wikiReadItem(item.id)
+    ])
       .then(([value, latest]) => {
         if (!active) return
         setDoc(value as DocDetail | null)
@@ -903,7 +988,7 @@ export function WikiPage(): React.JSX.Element {
       })
       .catch(reason => { if (active) setError(errorMessage(reason, '解析完成，文档加载失败，请重新打开。')) })
     return () => { active = false }
-  }, [progress?.status, progress?.updatedAt, item?.documentId, item?.id, dirty])
+  }, [progress?.status, progress?.updatedAt, item?.documentId, item?.id, item?.editable, showParsedText, dirty])
 
   useEffect(() => {
     if (sideTab === 'history' && selectedId) {
@@ -950,7 +1035,7 @@ export function WikiPage(): React.JSX.Element {
     }
   }, [busy, dialog])
 
-  const openItem = (id: string, preserveGraph = false): void => {
+  const openItem = useCallback((id: string, preserveGraph = false): void => {
     if (!dirty) { setShowParsedText(false); if (!preserveGraph) setSelectedEvidence(null) }
     if (!preserveGraph && !dirty) { setFocusedEntityId(''); setFocusedGraphNodeId(id) }
     if (id === selectedId) { setReaderOpen(true); return }
@@ -958,9 +1043,9 @@ export function WikiPage(): React.JSX.Element {
     setHoveredGraphNode('')
     setReaderOpen(true)
     setSelectedId(id); setFolder('')
-  }
+  }, [dirty, selectedId])
 
-  const openSource = async (source: Pick<SourceEvidence, 'resource'>): Promise<void> => {
+  const openSource = useCallback(async (source: Pick<SourceEvidence, 'resource'>): Promise<void> => {
     if (!workspaceId || sourceLoading) return
     const sourceItemId = selectedId
     setSourceLoading(source.resource)
@@ -974,7 +1059,34 @@ export function WikiPage(): React.JSX.Element {
     } finally {
       setSourceLoading('')
     }
-  }
+  }, [workspaceId, sourceLoading, selectedId])
+
+  // Sync progress changes the page state, not the graph. Keep the node identities
+  // stable so React Flow does not discard measurements between observer callbacks.
+  const flowNodes = useMemo(() => animatedNodes.map(node => ({
+    ...node,
+    focusable: false,
+    data: { ...node.data,
+      selected: node.data.kind === 'fragment'
+        ? Boolean(selectedEvidence && node.data.itemId === selectedEvidence.itemId
+          && node.data.evidence?.nodeId === selectedEvidence.evidence.nodeId
+          && node.data.evidence?.quote === selectedEvidence.evidence.quote)
+        : node.data.selected,
+      activate: () => {
+      setHoveredGraphNode('')
+      if (node.data.kind === 'entity') {
+        setSelectedEvidence(null)
+        setFocusedEntityId(node.id); setFocusedGraphNodeId('')
+        if (!dirty) setReaderOpen(false)
+      } else if (node.data.itemId) {
+        if (dirty && node.data.itemId !== selectedId) { openItem(node.data.itemId, true); return }
+        setSelectedEvidence(node.data.evidence ? { itemId: node.data.itemId, evidence: node.data.evidence } : null)
+        openItem(node.data.itemId, true)
+      } else if (node.data.resource) {
+        void openSource({ resource: node.data.resource })
+      }
+    } }
+  })), [animatedNodes, dirty, selectedId, selectedEvidence, openItem, openSource])
 
   const openFolder = (path: string): void => {
     if (dirty) return setDialog({ type: 'discard', nextFolder: path })
@@ -1138,6 +1250,7 @@ export function WikiPage(): React.JSX.Element {
         </div>
       ) : <div className="wiki-brand-empty" />}
       <div className="wiki-header-actions">
+        <WikiModelSettings />
         {workspace && <button type="button" onClick={() => void window.api.showItemInFolder(workspace.rootPath)}><FolderOpen size={14} />打开目录</button>}
         {workspace && <button type="button" disabled={progress?.status === 'running'} onClick={() => void sync(workspace.id)}><RefreshCw className={progress?.status === 'running' ? 'wiki-spin' : ''} size={14} />同步</button>}
         {workspace && <button type="button" className="wiki-btn-open-ws primary" onClick={() => void chooseWorkspace()}><Plus size={14} />添加工作区</button>}
@@ -1223,7 +1336,8 @@ export function WikiPage(): React.JSX.Element {
       </main>
     ) : workspace ? (
       <div
-        className={`wiki-workbench wiki-graph-workbench${graphExpanded ? ' is-graph-expanded' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}
+        className={`wiki-workbench wiki-graph-workbench${graphExpanded ? ' is-graph-expanded' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}${readerResizing ? ' is-resizing' : ''}`}
+        style={{ '--wiki-reader-width': `${readerWidth}px` } as React.CSSProperties}
       >
         <aside className={`wiki-sidebar${sidebarCollapsed ? ' is-collapsed' : ''}`} aria-label="Wiki 文件树">
           <div className="wiki-sidebar-head">
@@ -1245,6 +1359,49 @@ export function WikiPage(): React.JSX.Element {
           <div className="wiki-tree">{query ? (matches.length ? matches.map(match => <div className="wiki-search-row" key={match.id}><button type="button" className="wiki-search-result" onClick={() => openItem(match.id)}>{icon(match.fileType, 16, match.relativePath || match.title)}<span><strong>{match.title}</strong><small>{match.relativePath}</small></span></button><button type="button" className="wiki-item-remove" aria-label={`删除 ${match.title}`} title={`移入回收站：${match.title}`} onClick={(e) => { e.stopPropagation(); setDialog({ type: 'delete-item', item: match }) }}><Trash2 size={13} /></button></div>) : <div className="wiki-empty-small">没有匹配结果</div>) : tree.length ? renderTree(tree) : <div className="wiki-empty-small">文件夹中还没有支持的文档</div>}</div>
         </aside>
         <main className={`wiki-content wiki-graph-reader${readerOpen ? ' is-open' : ''}`} aria-label="图谱文档详情">
+          <div
+            className="wiki-reader-resizer"
+            role="separator"
+            aria-label="调整文档面板宽度"
+            aria-orientation="vertical"
+            aria-valuemin={Math.min(320, readerMaxWidth)}
+            aria-valuemax={readerMaxWidth}
+            aria-valuenow={readerWidth}
+            tabIndex={readerOpen ? 0 : -1}
+            title="向左拖动加宽文档，双击恢复默认宽度"
+            onPointerDown={event => {
+              if (event.button !== 0) return
+              event.preventDefault()
+              event.currentTarget.focus()
+              event.currentTarget.setPointerCapture(event.pointerId)
+              readerDragRef.current = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                width: event.currentTarget.parentElement?.getBoundingClientRect().width || readerWidth
+              }
+              setReaderResizing(true)
+            }}
+            onPointerMove={event => {
+              const drag = readerDragRef.current
+              if (drag?.pointerId === event.pointerId) resizeReader(drag.width + drag.x - event.clientX)
+            }}
+            onPointerUp={event => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+              stopReaderResize()
+            }}
+            onPointerCancel={stopReaderResize}
+            onLostPointerCapture={stopReaderResize}
+            onDoubleClick={() => resizeReader(350)}
+            onKeyDown={event => {
+              const step = event.shiftKey ? 80 : 24
+              const next = event.key === 'ArrowLeft' ? readerWidth + step
+                : event.key === 'ArrowRight' ? readerWidth - step
+                  : event.key === 'Home' ? 320 : event.key === 'End' ? readerMaxWidth : null
+              if (next === null) return
+              event.preventDefault()
+              resizeReader(next)
+            }}
+          />
           <div className="wiki-reader-head">
             <div className="wiki-reader-head-left" title={displayedItem ? displayedItem.title : '文档详情'}>
               <BookOpen size={14} />
@@ -1274,14 +1431,13 @@ export function WikiPage(): React.JSX.Element {
             </div>
           </div>
           {progress?.status === 'running' && <div className="wiki-sync" role="status"><span style={{ width: `${percent}%` }} /><LoaderCircle className="wiki-spin" size={14} /><strong>正在建立索引</strong><small>{progress.currentFile || '准备文件'} · {progress.completed}/{progress.total}</small></div>}
-          {displayedItem && !displayedItem.editable && (
+          {displayedItem && !displayedItem.editable && showParsedText && (
             <div className="wiki-preview-switch" role="group" aria-label="文档查看方式">
-              <button type="button" aria-pressed={!showParsedText && selectedEvidence?.itemId !== displayedItem.id} onClick={() => { setShowParsedText(false); setSelectedEvidence(null) }}>原文预览</button>
-              <button type="button" aria-pressed={showParsedText || selectedEvidence?.itemId === displayedItem.id} onClick={() => setShowParsedText(true)}>解析文本</button>
+              <button type="button" onClick={() => setShowParsedText(false)}>返回原文预览</button>
             </div>
           )}
-          {displayedItem && !displayedItem.editable && !showParsedText && selectedEvidence?.itemId !== displayedItem.id ? (
-            readerOpen && <EmbeddedFileViewer key={displayedItem.id} path={displayedItem.absolutePath} name={displayedItem.relativePath.split(/[\\/]/).pop() || displayedItem.title} onShowText={() => setShowParsedText(true)} />
+          {displayedItem && !displayedItem.editable && !showParsedText ? (
+            readerOpen && <EmbeddedFileViewer key={displayedItem.id} itemId={displayedItem.id} path={displayedItem.absolutePath} name={displayedItem.relativePath.split(/[\\/]/).pop() || displayedItem.title} evidence={selectedEvidence?.itemId === displayedItem.id ? selectedEvidence.evidence : undefined} onShowText={() => setShowParsedText(true)} />
           ) : displayedItem ? <>
             <div className="wiki-document">
               <section className="wiki-document-title">
@@ -1492,19 +1648,8 @@ export function WikiPage(): React.JSX.Element {
               {graph.nodes.length ? (
                 <ReactFlow<WikiFlowNode, Edge>
                   key={graphExpanded ? 'wiki-graph-wide' : 'wiki-graph-compact'}
-                  nodes={animatedNodes.map(node => ({ ...node, focusable: false, data: { ...node.data, activate: () => {
-                    setHoveredGraphNode('')
-                    if (node.data.kind === 'entity') {
-                      setFocusedEntityId(node.id); setFocusedGraphNodeId('')
-                      if (!dirty) setReaderOpen(false)
-                    } else if (node.data.itemId) {
-                      if (dirty && node.data.itemId !== selectedId) { openItem(node.data.itemId, true); return }
-                      setSelectedEvidence(node.data.evidence ? { itemId: node.data.itemId, evidence: node.data.evidence } : null)
-                      openItem(node.data.itemId, true)
-                    } else if (node.data.resource) {
-                      void openSource({ resource: node.data.resource })
-                    }
-                  } } }))}
+                  nodes={flowNodes}
+                  onNodesChange={handleGraphNodesChange}
                   edges={graphElements.edges}
                   nodeTypes={wikiGraphNodeTypes}
                   onInit={instance => {
@@ -1532,7 +1677,131 @@ export function WikiPage(): React.JSX.Element {
                 </div>
               )}
             </div>
-          ) : <div className="wiki-history"><header><small>保存记录</small><strong>{revisions.length}</strong></header>{revisions.map(revision => <div key={revision.id}><Clock3 size={14} /><span><strong>{new Date(revision.createdAt).toLocaleString('zh-CN')}</strong><small>{revision.characterCount} 字符</small></span></div>)}{!revisions.length && <div className="wiki-context-empty compact"><div className="wiki-empty-icon-wrap"><History size={18} strokeWidth={1.8} /></div><span>保存页面后，这里会保留版本记录。</span></div>}</div>}
+          ) : (
+            <div className="wiki-history-wrapper">
+              <div className="wiki-history-panel">
+                <header className="wiki-history-header">
+                  <div className="wiki-history-header-left">
+                    <div className="wiki-history-badge-icon">
+                      <History size={14} />
+                    </div>
+                    <div>
+                      <div className="wiki-history-title-row">
+                        <span className="wiki-history-title">版本快照</span>
+                        <span className="wiki-history-count-badge">{revisions.length} 次保存</span>
+                      </div>
+                      <p className="wiki-history-desc">每次保存页面都会在此沉淀快照，可随时追溯内容演进</p>
+                    </div>
+                  </div>
+                </header>
+
+                {revisions.length > 0 ? (
+                  <div className="wiki-history-timeline">
+                    {revisions.map((revision, idx) => (
+                      <div
+                        key={revision.id}
+                        className={`wiki-history-item${viewingRevision?.id === revision.id ? ' is-active' : ''}`}
+                        onClick={async () => {
+                          const detail = await (window.api as any).wikiGetRevision(revision.id)
+                          if (detail) {
+                            setViewingRevision({
+                              id: detail.id,
+                              content: detail.content,
+                              createdAt: detail.createdAt,
+                              characterCount: revision.characterCount
+                            })
+                          }
+                        }}
+                      >
+                        <div className="wiki-history-indicator">
+                          <span className="wiki-history-dot" />
+                          {idx !== revisions.length - 1 && <span className="wiki-history-line" />}
+                        </div>
+                        <div className="wiki-history-card" role="button" tabIndex={0} title="点击查看此快照详情">
+                          <div className="wiki-history-card-top">
+                            <span className="wiki-history-time">
+                              <Clock3 size={13} />
+                              <strong>{new Date(revision.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong>
+                            </span>
+                            <span className="wiki-history-version-tag">#{revisions.length - idx}</span>
+                          </div>
+                          <div className="wiki-history-meta">
+                            <span>{revision.characterCount.toLocaleString()} 字符</span>
+                            <span className="wiki-history-meta-sep">/</span>
+                            <span>自动快照</span>
+                            <span className="wiki-history-view-hint">查看详情</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="wiki-context-empty wiki-history-empty">
+                    <div className="wiki-empty-icon-wrap">
+                      <History size={26} strokeWidth={1.8} />
+                    </div>
+                    <strong>暂无版本记录</strong>
+                    <span>在文档编辑并保存后，这里将生成完整的历史版本快照链，记录你的每一次思考演进。</span>
+                    <button
+                      type="button"
+                      className="wiki-empty-action-btn"
+                      onClick={() => setSideTab('graph')}
+                    >
+                      <Network size={13} />
+                      <span>返回知识图谱</span>
+                    </button>
+                  </div>
+                )}
+
+                {viewingRevision && (
+                  <div className="wiki-revision-drawer-backdrop" onClick={() => setViewingRevision(null)}>
+                    <div className="wiki-revision-drawer" onClick={e => e.stopPropagation()}>
+                      <div className="wiki-revision-drawer-head">
+                        <div className="wiki-revision-drawer-head-left">
+                          <History size={15} />
+                          <div>
+                            <strong>快照详情</strong>
+                            <small>{new Date(viewingRevision.createdAt).toLocaleString('zh-CN')}</small>
+                          </div>
+                        </div>
+                        <div className="wiki-revision-drawer-head-actions">
+                          {item && item.editable && (
+                            <button
+                              type="button"
+                              className="wiki-revision-restore-btn"
+                              title="将此快照内容恢复到编辑器"
+                              onClick={() => {
+                                setDraft(viewingRevision.content)
+                                setMode('edit')
+                                setViewingRevision(null)
+                                setReaderOpen(true)
+                                setSideTab('graph')
+                              }}
+                            >
+                              恢复此版本
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="wiki-revision-close-btn"
+                            aria-label="关闭预览"
+                            onClick={() => setViewingRevision(null)}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="wiki-revision-drawer-body">
+                        <pre className="wiki-revision-preview-content">
+                          {viewingRevision.content}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     ) : null}

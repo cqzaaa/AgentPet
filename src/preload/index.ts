@@ -1,4 +1,4 @@
-import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
+import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiModelSelection, WikiModelSettings, WikiEvidenceLocation } from './wiki-types'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
@@ -118,6 +118,9 @@ const api = {
     ipcRenderer.on('api:wiki-parser-component-status', handler)
     return () => { ipcRenderer.removeListener('api:wiki-parser-component-status', handler) }
   },
+  wikiGetModelSettings: (): Promise<WikiModelSettings> => ipcRenderer.invoke('api:wiki-get-model-settings'),
+  wikiSaveModelSettings: (selection: WikiModelSelection): Promise<WikiModelSettings> =>
+    ipcRenderer.invoke('api:wiki-save-model-settings', selection),
   wikiListWorkspaces: (): Promise<any[]> =>
     ipcRenderer.invoke('api:wiki-list-workspaces'),
   wikiOpenWorkspace: (): Promise<string | null> =>
@@ -137,6 +140,8 @@ const api = {
     ipcRenderer.invoke('api:wiki-list-items', workspaceId),
   wikiReadItem: (itemId: string): Promise<any | null> =>
     ipcRenderer.invoke('api:wiki-read-item', itemId),
+  wikiGetEvidenceLocation: (itemId: string, nodeId: string): Promise<WikiEvidenceLocation> =>
+    ipcRenderer.invoke('api:wiki-evidence-location', itemId, nodeId),
   wikiDeleteItem: (itemId: string): Promise<boolean> =>
     ipcRenderer.invoke('api:wiki-delete-item', itemId),
   wikiCreatePage: (workspaceId: string, title: string, parentPath?: string): Promise<string> =>
@@ -145,6 +150,8 @@ const api = {
     ipcRenderer.invoke('api:wiki-save-page', itemId, content),
   wikiListRevisions: (itemId: string): Promise<any[]> =>
     ipcRenderer.invoke('api:wiki-list-revisions', itemId),
+  wikiGetRevision: (revisionId: string): Promise<any> =>
+    ipcRenderer.invoke('api:wiki-get-revision', revisionId),
   wikiReadSource: (workspaceId: string, resource: string): Promise<any> =>
     ipcRenderer.invoke('api:wiki-read-source', workspaceId, resource),
   wikiGetGraph: (workspaceId: string, focusItemId?: string, focusEntityId?: string): Promise<WikiGraphData> =>

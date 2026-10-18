@@ -1,5 +1,11 @@
 import { extractEntityCandidates, parseEntityEvidence, type WikiEntityNodeRow, type EntityCandidate } from './wiki-entities'
-import type { WikiGraphData, WikiSyncProgress } from '../../preload/wiki-types'
+import { chunkEntityRows, ENTITY_EXTRACTION_VERSION, entityExtractionPrompt, mergeEntityCandidates, validateEntityExtraction } from './wiki-entity-extraction'
+import { createWikiEntityModel } from './wiki-entity-model'
+import { WikiModelSettingsStore } from './wiki-model-settings'
+import { loadEvidenceLocation } from './wiki-evidence-location'
+import type { RuntimeLlmConfig } from '../security/llm-config-store'
+import { DOCLING_PARSER } from '../document-parsing/docling-parser'
+import type { WikiGraphData, WikiSyncProgress, WikiEvidenceLocation } from '../../preload/wiki-types'
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import * as fs from 'fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
@@ -14,9 +20,16 @@ import {
   EMBEDDING_MODEL,
   embeddingContentHash
 } from '../embedding/embedding-client'
+import {
+  normalizeExtension,
+  sniffFileType,
+  SUPPORTED_CANONICAL_TYPES,
+  EDITABLE_CANONICAL_TYPES
+} from '../document-parsing/file-type-detector'
 
 interface WikiDependencies {
   getDB: () => Promise<Database>
+  getSystemLlmConfig?: () => RuntimeLlmConfig
 }
 
 interface KnowledgeNodeRow {
@@ -107,11 +120,8 @@ interface WikiFileEntry {
   contentHash: string
 }
 
-const SUPPORTED_EXTENSIONS = new Set([
-  'pdf', 'docx', 'pptx', 'xlsx', 'xls', 'csv', 'txt', 'md', 'json', 'html', 'htm',
-  'xml', 'yaml', 'yml'
-])
-const EDITABLE_EXTENSIONS = new Set(['md', 'txt'])
+const SUPPORTED_EXTENSIONS = SUPPORTED_CANONICAL_TYPES as Set<string>
+const EDITABLE_EXTENSIONS = EDITABLE_CANONICAL_TYPES as Set<string>
 const SEARCHABLE_NODE_TYPES = new Set([
   'clause', 'item', 'paragraph', 'list', 'table', 'table_row', 'figure', 'caption'
 ])
@@ -158,16 +168,22 @@ async function collectWorkspaceFiles(rootPath: string): Promise<WikiFileEntry[]>
         continue
       }
       if (!entry.isFile()) continue
-      const fileType = extname(entry.name).slice(1).toLowerCase()
-      if (!SUPPORTED_EXTENSIONS.has(fileType)) continue
+      const rawExt = extname(entry.name)
+      const normalizedExt = normalizeExtension(rawExt)
+      if (normalizedExt === 'unknown' || !SUPPORTED_EXTENSIONS.has(normalizedExt)) continue
       const stat = await fs.promises.stat(absolutePath)
+      const sniffed = await sniffFileType(absolutePath)
+      if (sniffed.isBinary && !['pdf', 'docx', 'pptx', 'xlsx', 'xls'].includes(sniffed.fileType)) {
+        continue
+      }
+      const fileType = sniffed.fileType !== 'unknown' ? sniffed.fileType : normalizedExt
       const relativePath = normalizeRelativePath(relative(rootPath, absolutePath))
       result.push({
         absolutePath,
         relativePath,
         parentPath: normalizeRelativePath(dirname(relativePath) === '.' ? '' : dirname(relativePath)),
         fileType,
-        title: basename(entry.name, extname(entry.name)),
+        title: basename(entry.name, rawExt),
         fileSize: stat.size,
         modifiedAt: stat.mtimeMs,
         contentHash: await hashFile(absolutePath)
@@ -278,7 +294,7 @@ async function upsertWikiFile(
       : null
     // Upgrade cached general PDFs once; retry degraded conversions on explicit sync.
     const currentMarkdownIndex = entry.fileType !== 'md' || document?.profileJson.includes('"wikiMarkdownVersion":2')
-    if (currentMarkdownIndex && (entry.fileType !== 'pdf' || document?.parser === 'docling-2.60.0+rapidocr'
+    if (currentMarkdownIndex && (entry.fileType !== 'pdf' || document?.parser === DOCLING_PARSER
       || (document?.parser === 'pymupdf-layout+legal-cn-v1' && !document.profileJson.includes('enhancedParseFailed')))) {
       return { itemId: existing.id, documentId: existing.documentId, changed: false }
     }
@@ -530,7 +546,9 @@ async function rebuildWikiSources(database: Database, workspaceId: string, rootP
   }
 }
 
-async function rebuildWikiEntities(database: Database, workspaceId: string): Promise<void> {
+export async function rebuildWikiEntities(database: Database, workspaceId: string,
+  options: { model?: ReturnType<typeof createWikiEntityModel>; signal?: AbortSignal; onProgress?: (detail: string) => void } = {}
+): Promise<string[]> {
   const rows = await database.all<WikiEntityNodeRow[]>(`
     SELECT n.id AS nodeId, n.heading_path AS headingPath, wi.id AS itemId, wi.title AS itemTitle, n.node_type AS nodeType,
       COALESCE(n.title, '') AS title, COALESCE(n.content, '') AS content, n.page_start AS pageStart
@@ -539,36 +557,68 @@ async function rebuildWikiEntities(database: Database, workspaceId: string): Pro
     WHERE wi.workspace_id = ? AND n.node_type <> 'document'
     ORDER BY wi.id, n.order_index
   `, workspaceId)
-  const byItem = new Map<string, Map<string, EntityCandidate>>()
+  const byItem = new Map<string, WikiEntityNodeRow[]>()
   for (const row of rows) {
-    let itemEntities = byItem.get(row.itemId)
-    if (!itemEntities) {
-      itemEntities = new Map<string, EntityCandidate>()
-      byItem.set(row.itemId, itemEntities)
-    }
-    for (const candidate of extractEntityCandidates(row)) {
-      const existing = itemEntities.get(candidate.normalizedName)
-      if (existing) {
-        existing.mentionCount += candidate.mentionCount
-        existing.confidence = Math.max(existing.confidence, candidate.confidence)
-        for (const evidence of candidate.evidence) {
-          if (!existing.evidence.some(value => value.nodeId === evidence.nodeId) && existing.evidence.length < 8) existing.evidence.push(evidence)
+    const itemRows = byItem.get(row.itemId) || []
+    itemRows.push(row)
+    byItem.set(row.itemId, itemRows)
+  }
+  const extracted = new Map<string, EntityCandidate[]>()
+  const warnings = new Set<string>()
+  let failures = 0
+  for (const [itemId, itemRows] of byItem) {
+    const candidates: EntityCandidate[] = []
+    const chunks = chunkEntityRows(itemRows)
+    const usedKeys: string[] = []
+    for (let index = 0; index < chunks.length; index++) {
+      options.signal?.throwIfAborted()
+      const chunk = chunks[index]
+      options.onProgress?.(`${itemRows[0].itemTitle} · 实体与原文证据 ${index + 1}/${chunks.length}`)
+      if (options.model) {
+        const prompt = entityExtractionPrompt(chunk)
+        const cacheKey = createHash('sha256').update(JSON.stringify([ENTITY_EXTRACTION_VERSION, options.model.key, prompt])).digest('hex')
+        usedKeys.push(cacheKey)
+        try {
+          const cached = await database.get<{ resultJson: string }>(
+            'SELECT result_json AS resultJson FROM wiki_entity_extraction_cache WHERE item_id = ? AND cache_key = ?', itemId, cacheKey)
+          if (!cached && failures >= 3) throw new Error('模型连续失败，剩余片段改用本地规则')
+          const raw = cached?.resultJson ?? await options.model.call(prompt, options.signal)
+          candidates.push(...validateEntityExtraction(raw, chunk))
+          options.signal?.throwIfAborted()
+          if (!cached) await database.run(`INSERT OR REPLACE INTO wiki_entity_extraction_cache
+            (item_id, cache_key, result_json, updated_at) VALUES (?, ?, ?, ?)`, itemId, cacheKey, raw, Date.now())
+          failures = 0
+          continue
+        } catch (error) {
+          options.signal?.throwIfAborted()
+          failures++
+          warnings.add('部分实体模型抽取失败，已使用本地规则；重新同步可重试。')
+          console.warn('[Wiki] Entity extraction failed:', error instanceof Error ? error.message : 'unknown error')
+          await database.run('DELETE FROM wiki_entity_extraction_cache WHERE item_id = ? AND cache_key = ?', itemId, cacheKey)
         }
-      } else {
-        itemEntities.set(candidate.normalizedName, candidate)
+      }
+      candidates.push(...chunk.flatMap(extractEntityCandidates))
+    }
+    extracted.set(itemId, mergeEntityCandidates(candidates))
+    if (options.model) {
+      // Prune obsolete model/content versions without a SQLite variable-limit-sized IN clause.
+      const cachedKeys = await database.all<Array<{ cacheKey: string }>>('SELECT cache_key AS cacheKey FROM wiki_entity_extraction_cache WHERE item_id = ?', itemId)
+      const activeKeys = new Set(usedKeys)
+      for (const row of cachedKeys) if (!activeKeys.has(row.cacheKey)) {
+        await database.run('DELETE FROM wiki_entity_extraction_cache WHERE item_id = ? AND cache_key = ?', itemId, row.cacheKey)
       }
     }
   }
 
+  options.signal?.throwIfAborted()
   const now = Date.now()
   await database.exec('BEGIN TRANSACTION')
   try {
     await database.run('DELETE FROM wiki_entities WHERE workspace_id = ?', workspaceId)
-    for (const [itemId, entityMap] of byItem) {
-      const ranked = [...entityMap.values()]
+    for (const [itemId, itemEntities] of extracted) {
+      const ranked = itemEntities
         .filter(entity => entity.confidence >= 0.84)
         .sort((left, right) => (right.confidence * 4 + Math.log2(right.mentionCount + 1)) - (left.confidence * 4 + Math.log2(left.mentionCount + 1)))
-        .slice(0, 20)
       for (const entity of ranked) {
         const entityId = `entity:${createHash('sha256').update(`${workspaceId}:${entity.normalizedName}`).digest('hex').slice(0, 24)}`
         await database.run(`
@@ -589,6 +639,7 @@ async function rebuildWikiEntities(database: Database, workspaceId: string): Pro
       }
     }
     await database.exec('COMMIT')
+    return [...warnings]
   } catch (error) {
     await database.exec('ROLLBACK')
     throw error
@@ -596,9 +647,12 @@ async function rebuildWikiEntities(database: Database, workspaceId: string): Pro
 }
 
 async function rebuildWikiLinks(database: Database, workspaceId: string): Promise<void> {
-  const items = await database.all<WikiLinkSourceRow[]>(`
-    SELECT id, relative_path AS relativePath, absolute_path AS absolutePath, title, editable
-    FROM wiki_items WHERE workspace_id = ? ORDER BY relative_path
+  const items = await database.all<Array<WikiLinkSourceRow & { profileJson?: string }>>(`
+    SELECT wi.id, wi.relative_path AS relativePath, wi.absolute_path AS absolutePath, wi.title, wi.editable,
+      kd.profile_json AS profileJson
+    FROM wiki_items wi
+    LEFT JOIN knowledge_documents kd ON kd.id = wi.document_id
+    WHERE wi.workspace_id = ? ORDER BY wi.relative_path
   `, workspaceId)
   const lookup = new Map<string, WikiLinkSourceRow>()
   for (const item of items) {
@@ -607,9 +661,25 @@ async function rebuildWikiLinks(database: Database, workspaceId: string): Promis
       const normalized = normalizedLinkKey(key)
       if (normalized && !lookup.has(normalized)) lookup.set(normalized, item)
     }
+    if (item.profileJson) {
+      try {
+        const profile = JSON.parse(item.profileJson) as { frontmatter?: { aliases?: unknown } }
+        const aliases = profile?.frontmatter?.aliases
+        if (Array.isArray(aliases)) {
+          for (const alias of aliases) {
+            if (typeof alias === 'string' && alias.trim()) {
+              const normalized = normalizedLinkKey(alias.trim())
+              if (normalized && !lookup.has(normalized)) lookup.set(normalized, item)
+            }
+          }
+        }
+      } catch {
+        // ignore malformed profile JSON
+      }
+    }
   }
   await database.run('DELETE FROM wiki_links WHERE workspace_id = ?', workspaceId)
-  for (const item of items.filter(candidate => candidate.editable)) {
+  for (const item of items.filter((candidate) => candidate.editable)) {
     let content = ''
     try {
       content = await fs.promises.readFile(item.absolutePath, 'utf8')
@@ -617,15 +687,28 @@ async function rebuildWikiLinks(database: Database, workspaceId: string): Promis
       continue
     }
     const wikiTargets = [...content.matchAll(/\[\[([^\]]+)\]\]/g)]
-      .map(match => ({
-        targetText: match[1].split('|')[0].split('#')[0].trim(),
-        linkType: 'explicit'
-      }))
-      .filter(target => Boolean(target.targetText))
+      .map((match) => {
+        const raw = match[1].trim()
+        const [targetPart, aliasPart] = raw.split('|')
+        const targetText = (targetPart || '').split('#')[0].trim()
+        const aliasText = aliasPart ? aliasPart.trim() : ''
+        return {
+          targetText,
+          aliasText,
+          linkType: 'explicit'
+        }
+      })
+      .filter((target) => Boolean(target.targetText))
     const markdownTargets = [...content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)]
-      .map(match => match[1].trim().replace(/^<|>$/g, '').split(/\s+["']/)[0])
-      .map(rawTarget => {
-        if (!rawTarget || rawTarget.startsWith('#') || rawTarget.startsWith('/') || /^[a-z][a-z\d+.-]*:/i.test(rawTarget)) return null
+      .map((match) => match[1].trim().replace(/^<|>$/g, '').split(/\s+["']/)[0])
+      .map((rawTarget) => {
+        if (
+          !rawTarget ||
+          rawTarget.startsWith('#') ||
+          rawTarget.startsWith('/') ||
+          /^[a-z][a-z\d+.-]*:/i.test(rawTarget)
+        )
+          return null
         let decodedTarget = ''
         try {
           decodedTarget = decodeURIComponent(rawTarget.split(/[?#]/)[0]).replace(/\\/g, '/')
@@ -635,17 +718,30 @@ async function rebuildWikiLinks(database: Database, workspaceId: string): Promis
         if (!decodedTarget) return null
         const targetText = normalizeRelativePath(join(dirname(item.relativePath), decodedTarget))
         if (!targetText || targetText === '..' || targetText.startsWith('../')) return null
-        return { targetText, linkType: 'markdown' }
+        return { targetText, aliasText: '', linkType: 'markdown' }
       })
-      .filter((target): target is { targetText: string; linkType: string } => target !== null)
-    const targets = new Map([...wikiTargets, ...markdownTargets]
-      .map(target => [`${target.linkType}:${target.targetText}`, target]))
-    for (const { targetText, linkType } of targets.values()) {
-      const target = lookup.get(normalizedLinkKey(targetText))
-      await database.run(`
+      .filter((target): target is { targetText: string; aliasText: string; linkType: string } => target !== null)
+    const targets = new Map(
+      [...wikiTargets, ...markdownTargets].map((target) => [`${target.linkType}:${target.targetText}`, target])
+    )
+    for (const { targetText, aliasText, linkType } of targets.values()) {
+      let target = lookup.get(normalizedLinkKey(targetText))
+      if (!target && aliasText) {
+        target = lookup.get(normalizedLinkKey(aliasText))
+      }
+      await database.run(
+        `
         INSERT INTO wiki_links (id, workspace_id, from_item_id, to_item_id, target_text, link_type, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, randomUUID(), workspaceId, item.id, target?.id || null, targetText, linkType, Date.now())
+      `,
+        randomUUID(),
+        workspaceId,
+        item.id,
+        target?.id || null,
+        targetText,
+        linkType,
+        Date.now()
+      )
     }
   }
 }
@@ -655,7 +751,8 @@ async function syncWorkspace(
   workspaceId: string,
   rootPath: string,
   event?: { sender: WebContents },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  model?: ReturnType<typeof createWikiEntityModel>
 ): Promise<WikiSyncProgress> {
   signal?.throwIfAborted()
   const progress: WikiSyncProgress = {
@@ -710,9 +807,13 @@ async function syncWorkspace(
     signal?.throwIfAborted()
     await rebuildWikiLinks(database, workspaceId)
     signal?.throwIfAborted()
-    progress.currentFile = '提取正文实体关系'
+    progress.currentFile = '提取实体并核验原文证据'
     publishSyncProgress(event, progress)
-    await rebuildWikiEntities(database, workspaceId)
+    const warnings = await rebuildWikiEntities(database, workspaceId, { model, signal, onProgress: detail => {
+      progress.currentFile = detail
+      publishSyncProgress(event, progress)
+    } })
+    if (warnings.length) progress.error = warnings.join(' ')
   }
   progress.currentFile = ''
   progress.status = 'completed'
@@ -730,6 +831,10 @@ function safePageName(value: string): string {
 }
 
 export function registerWikiAPIs(deps: WikiDependencies): void {
+  const modelSettings = new WikiModelSettingsStore(join(app.getPath('userData'), 'wiki-model.json'), () => deps.getSystemLlmConfig?.())
+  const getEntityModel = (): ReturnType<typeof createWikiEntityModel> => createWikiEntityModel(modelSettings.getRuntimeConfig())
+  ipcMain.handle('api:wiki-get-model-settings', () => modelSettings.getSettings())
+  ipcMain.handle('api:wiki-save-model-settings', (_event, selection: unknown) => modelSettings.save(selection))
   ipcMain.handle('api:wiki-get-parser-component', () => officeRuntimeManager.getDoclingStatus())
   ipcMain.handle('api:wiki-install-parser-component', event => officeRuntimeManager.installDocling({ event }))
   // Own the promise in main: every caller joins the same job, including after navigation.
@@ -744,7 +849,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         controller.signal.throwIfAborted()
         const workspace = await database.get('SELECT id FROM knowledge_bases WHERE id = ?', workspaceId)
         if (!workspace) throw new Error('WIKI_WORKSPACE_NOT_FOUND')
-        return syncWorkspace(database, workspaceId, rootPath, event, controller.signal)
+        return syncWorkspace(database, workspaceId, rootPath, event, controller.signal, getEntityModel())
       })
       .catch(error => {
         const previous = latestSyncByWorkspace.get(workspaceId)
@@ -880,6 +985,24 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     `, workspaceId)
   })
 
+  ipcMain.handle('api:wiki-evidence-location', async (_, itemId: string, nodeId: string): Promise<WikiEvidenceLocation> => {
+    if (typeof itemId !== 'string' || typeof nodeId !== 'string') throw new Error('WIKI_INVALID_EVIDENCE')
+    const database = await deps.getDB()
+    const row = await database.get<{
+      rootPath: string; absolutePath: string; sourceMeta: string; fileSize: number; modifiedAt: number
+    }>(`
+      SELECT kb.root_path AS rootPath, wi.absolute_path AS absolutePath,
+        n.source_meta AS sourceMeta, wi.file_size AS fileSize, wi.modified_at AS modifiedAt
+      FROM wiki_items wi JOIN knowledge_bases kb ON kb.id = wi.workspace_id
+      JOIN knowledge_nodes n ON n.document_id = wi.document_id
+      WHERE wi.id = ? AND n.id = ? AND wi.file_type = 'pdf'
+    `, itemId, nodeId)
+    if (!row) return { regions: [], reason: '此证据没有可用的原页坐标。' }
+    const [rootPath, filePath] = await Promise.all([fs.promises.realpath(row.rootPath), fs.promises.realpath(row.absolutePath)])
+    if (!isWithinRoot(rootPath, filePath)) throw new Error('WIKI_PATH_OUTSIDE_WORKSPACE')
+    return loadEvidenceLocation(filePath, row.sourceMeta, { size: row.fileSize, modifiedAt: row.modifiedAt })
+  })
+
   ipcMain.handle('api:wiki-read-item', async (_, itemId: string) => {
     const database = await deps.getDB()
     const item = await database.get(`
@@ -920,7 +1043,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     await database.run('DELETE FROM wiki_items WHERE id = ?', itemId)
     await rebuildWikiSources(database, item.workspaceId, item.rootPath)
     await rebuildWikiLinks(database, item.workspaceId)
-    await rebuildWikiEntities(database, item.workspaceId)
+    await rebuildWikiEntities(database, item.workspaceId, { model: getEntityModel() })
     return true
   })
 
@@ -951,7 +1074,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     const indexed = await upsertWikiFile(database, workspaceId, entry, event)
     await rebuildWikiSources(database, workspaceId, rootPath)
     await rebuildWikiLinks(database, workspaceId)
-    await rebuildWikiEntities(database, workspaceId)
+    await rebuildWikiEntities(database, workspaceId, { model: getEntityModel() })
     return indexed.itemId
   })
 
@@ -986,7 +1109,7 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
     await upsertWikiFile(database, item.workspace_id, entry, event)
     await rebuildWikiSources(database, item.workspace_id, item.rootPath)
     await rebuildWikiLinks(database, item.workspace_id)
-    await rebuildWikiEntities(database, item.workspace_id)
+    await rebuildWikiEntities(database, item.workspace_id, { model: getEntityModel() })
     return { saved: true, itemId }
   })
 
@@ -997,6 +1120,14 @@ export function registerWikiAPIs(deps: WikiDependencies): void {
         length(content) AS characterCount
       FROM wiki_revisions WHERE item_id = ? ORDER BY created_at DESC LIMIT 30
     `, itemId)
+  })
+
+  ipcMain.handle('api:wiki-get-revision', async (_, revisionId: string) => {
+    const database = await deps.getDB()
+    return database.get<{ id: string; itemId: string; content: string; createdAt: string }>(`
+      SELECT id, item_id AS itemId, content, created_at AS createdAt
+      FROM wiki_revisions WHERE id = ? LIMIT 1
+    `, revisionId)
   })
 
   ipcMain.handle('api:wiki-read-source', async (_, workspaceId: string, resource: string) => {

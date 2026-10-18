@@ -1,3 +1,23 @@
+export type WikiModelSelection =
+  | { mode: 'system' }
+  | { mode: 'local' }
+  | { mode: 'profile'; profileId: string }
+
+export interface WikiModelOption {
+  id: string
+  name: string
+  provider: string
+  model: string
+  available: boolean
+}
+
+export interface WikiModelSettings {
+  selection: WikiModelSelection
+  profiles: WikiModelOption[]
+  effectiveModel: WikiModelOption | null
+  warning?: string
+}
+
 export interface WikiSyncProgress {
   workspaceId: string
   status: 'running' | 'completed' | 'failed'
@@ -20,6 +40,20 @@ export interface WikiEntityEvidence {
   title: string
   pageStart: number | null
   quote: string
+}
+
+export interface WikiEvidenceRegion {
+  page: number
+  // Fractions of the unrotated PDF page, measured from its top-left corner.
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface WikiEvidenceLocation {
+  regions: WikiEvidenceRegion[]
+  reason?: string
 }
 
 export interface WikiGraphNode {

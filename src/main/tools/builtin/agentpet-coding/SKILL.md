@@ -69,11 +69,24 @@ For a new empty workspace, confirm the directory is empty, choose the smallest s
 ## Verify proportionately
 
 1. Inspect the relevant diff and run `git diff --check` when Git is available. Reread source only when the diff lacks necessary context; do not automatically read every changed file again.
-2. Run the narrowest useful test first, then the repository's lint, typecheck, test, or build commands needed for the affected surface.
+2. Choose checks from the changed behavior and the target repository's existing scripts/configuration. Reuse relevant tests first. For TS/TSX, run the applicable typecheck; for JS/CJS, use the configured lint/tests and, when useful, `node --check path/to/file.cjs`. Syntax checking does not execute assertions. For CSS/Less, use existing style checks when available; formatting alone does not prove correct layout. Do not install a test framework or run a full build for a routine change when narrower checks suffice.
 3. Fix failures caused by the change. Clearly separate pre-existing or unrelated failures from new regressions. Run independent checks in the same tool round; do not repeat a successful check without a relevant subsequent change. Stop verification once required checks pass and no concrete concern remains.
 4. Never claim a check passed unless its current tool result proves it. If a check was not run, say so.
 
-The session checkpoint records successful verification commands. A later file mutation invalidates those verification entries, so rerun only the checks affected by subsequent changes.
+The session checkpoint records recognized verification commands with their status and available exit evidence; a zero exit code still needs to match the expected assertions/output. A later file mutation invalidates those verification entries, so rerun only the checks affected by subsequent changes. History restored without exit evidence is unverified.
+
+### Add a focused verification script when needed
+
+- When a meaningful behavior change or bug fix has no adequate existing test, write a small regression check using the repository's conventions. In a Node repository without a suitable test harness, `scripts/verify-<behavior>.cjs` with `node:assert/strict` and optionally `node:test` is a lightweight choice; `.cjs` works as CommonJS even in a `type: module` package. Do not create scripts for every edit or duplicate existing coverage.
+- Derive expected results from the user's requirement or a reproduced bug. Call the actual implementation and assert observable output/state, including a relevant failure or boundary case. Do not copy the production algorithm into the test. Source-string checks can support a wiring constraint but cannot stand in for functional verification. Use the project's existing loader/build output for TypeScript; transpilation without type checking is not a typecheck.
+- Keep scripts repeatable and independent of personal data, credentials, production services, and fixed machine paths. Use isolated fixtures, clean up resources the script created, and bound waits. Assertions, rejected promises, and child-command failures must produce a nonzero exit code; never catch a failure and print success. A skipped check is not a pass.
+- Run the script, for example `node scripts/verify-<behavior>.cjs` or `node --test scripts/verify-<behavior>.cjs`, through the existing terminal tool with the repository cwd. Prefer foreground execution for short checks. For asynchronous commands, poll `get_command_output` until completion and inspect the actual exit result; successful launch or a `running`/`unverified` checkpoint is not proof of passing. Do not chain commands in a way that hides an earlier failure's exit code.
+- Fix regressions caused by the change and rerun the affected check. Do not weaken an assertion just to make it pass. If blocked by missing dependencies or environment access, report the unverified behavior and the concrete blocker. Preserve useful regression scripts in the repository; final handoff names the command, tested behavior, and result.
+
+### Verify rendered frontend behavior
+
+- For UI changes, distinguish static checks from actual page behavior. Reuse an existing browser-test setup when available; assert visible results of interactions and inspect runtime errors. For layout bugs, check computed styles or element bounds at the affected viewport; screenshots support visual review but do not replace behavioral assertions.
+- Stay within the available browser/desktop tools and their permissions. Follow the existing terminal restriction on launching local GUI browsers; do not install or launch a separate browser merely to complete a script. Use `desktop-control` for visible-page inspection when needed. If no usable page or browser-test environment is available, report that visual/interaction verification was not performed instead of treating CSS text checks as visual success.
 
 For AgentPet itself, preserve Electron process boundaries: privileged Node and filesystem work belongs in `src/main`, renderer UI belongs in `src/renderer`, and IPC contract changes must keep preload exposure and TypeScript declarations synchronized.
 

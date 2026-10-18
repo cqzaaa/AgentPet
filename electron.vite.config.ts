@@ -2,6 +2,7 @@ import { resolve } from 'path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { copyFileSync, mkdirSync } from 'fs'
+import { pdfViewerPerformance } from './scripts/pdf-viewer-performance'
 
 export default defineConfig({
   main: {
@@ -32,6 +33,6 @@ export default defineConfig({
       sourcemap: false,
       rollupOptions: { external: ['@napi-rs/canvas'] }
     },
-    plugins: [react()]
+    plugins: [react(), pdfViewerPerformance()]
   }
 })

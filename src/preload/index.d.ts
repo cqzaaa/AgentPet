@@ -1,4 +1,4 @@
-import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus } from './wiki-types'
+import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiModelSelection, WikiModelSettings, WikiEvidenceLocation } from './wiki-types'
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
 
@@ -64,6 +64,8 @@ declare global {
       wikiGetParserComponent: () => Promise<WikiParserComponentStatus>
       wikiInstallParserComponent: () => Promise<WikiParserComponentStatus>
       onWikiParserComponentStatus: (callback: (status: WikiParserComponentStatus) => void) => () => void
+      wikiGetModelSettings: () => Promise<WikiModelSettings>
+      wikiSaveModelSettings: (selection: WikiModelSelection) => Promise<WikiModelSettings>
       wikiListWorkspaces: () => Promise<any[]>
       wikiOpenWorkspace: () => Promise<string | null>
       wikiRemoveWorkspace: (workspaceId: string) => Promise<boolean>
@@ -72,6 +74,7 @@ declare global {
       onWikiSyncProgress: (callback: (progress: WikiSyncProgress) => void) => () => void
       wikiListItems: (workspaceId: string) => Promise<any[]>
       wikiReadItem: (itemId: string) => Promise<any | null>
+      wikiGetEvidenceLocation: (itemId: string, nodeId: string) => Promise<WikiEvidenceLocation>
       wikiDeleteItem: (itemId: string) => Promise<boolean>
       wikiCreatePage: (workspaceId: string, title: string, parentPath?: string) => Promise<string>
       wikiSavePage: (itemId: string, content: string) => Promise<{ saved: boolean; itemId: string }>

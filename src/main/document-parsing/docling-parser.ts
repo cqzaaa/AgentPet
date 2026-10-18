@@ -6,10 +6,16 @@ import type { WebContents } from 'electron'
 import { officeRuntimeManager } from '../tools/interaction/office-runtime-manager'
 import type { CanonicalKnowledgeNode, StructuredPdfResult } from './legal-pdf-parser'
 import { DOCLING_SCRIPT } from './docling-script'
+import { textCorruptionRatio } from './text-quality'
+
+export const DOCLING_PARSER = 'docling-2.60.0+rapidocr-v3'
 
 interface DoclingOutput {
   pageCount: number
   status: string
+  forcedOcrPages?: number[]
+  fullPageOcr?: boolean
+  confidence?: { mean_score?: number | null; layout_score?: number | null; ocr_score?: number | null; table_score?: number | null }
   blocks: Array<{ label: string; level: number; text: string; ref: string; sources: Array<{ page: number; bbox: number[]; coordOrigin: string }> }>
 }
 
@@ -40,10 +46,27 @@ export function normalizeDocling(output: DoclingOutput, title: string): Structur
     if (isHeading) headings.push(node)
   }
   const characterCount = output.blocks.reduce((sum, block) => sum + block.text.length, 0)
+  const corruptionRatio = textCorruptionRatio(output.blocks.map(block => block.text).join('\n'))
+  const coveredPages = new Set(output.blocks.flatMap(block => block.sources.map(source => source.page))).size
+  const pageCoverage = coveredPages / Math.max(1, output.pageCount)
+  const measured = output.confidence?.mean_score
+  const baseScore = typeof measured === 'number' && Number.isFinite(measured) ? Math.max(0, Math.min(1, measured)) : 0.7
+  const incompleteTables = output.blocks.filter(block => block.label === 'table' &&
+    block.text.split('\n').find(line => line.trim().startsWith('|'))?.split('|').slice(1, -1).some(cell => !cell.trim())).length
+  const qualityScore = Math.min(baseScore, characterCount >= 80 ? 1 : 0.4,
+    corruptionRatio > 0.02 ? 0.35 : 1, pageCoverage < 0.8 || incompleteTables > 0 ? 0.55 : 1)
+  const warnings: string[] = []
+  if (characterCount < 80) warnings.push('提取文字较少，请对照原文检查。')
+  if (corruptionRatio > 0.02) warnings.push('解析结果仍包含乱码，请对照原页核验，暂不提取乱码段落的实体。')
+  if (pageCoverage < 0.8) warnings.push('部分页面未提取到正文，请检查扫描页或纯图片页。')
+  if (incompleteTables) warnings.push(`${incompleteTables} 个表格含空白或合并表头，请对照原页核验列对应关系。`)
+  if (qualityScore < 0.6 && !warnings.length) warnings.push('版面或文字识别置信度偏低，请对照原文核验。')
   return {
-    nodes, parser: 'docling-2.60.0+rapidocr', characterCount, qualityScore: characterCount >= 80 ? 0.8 : 0.4,
-    warning: characterCount >= 80 ? '' : '提取文字较少，请对照原文检查。',
-    profile: { kind: 'structured-pdf', pageCount: output.pageCount, parserVersion: 1 }
+    nodes, parser: DOCLING_PARSER, characterCount, qualityScore,
+    warning: warnings.join(' '),
+    profile: { kind: 'structured-pdf', pageCount: output.pageCount, parserVersion: 3,
+      backend: 'pypdfium2', fullPageOcr: output.fullPageOcr || false, forcedOcrPages: output.forcedOcrPages || [],
+      corruptionRatio, pageCoverage, incompleteTables, confidence: output.confidence || {} }
   }
 }
 
