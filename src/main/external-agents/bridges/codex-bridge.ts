@@ -306,21 +306,43 @@ export class CodexAcpBridge {
         if (message.params?.threadId && message.params.threadId !== threadId) return
         const item = message.params?.item
 
-        // 1. 文件变更/工具调用状态
-        if (message.method === 'item/completed' && /file.?change/i.test(String(item?.type || ''))) {
-          const title = '文件修改'
-          const toolCallId = `file-change-${Date.now()}`
-          updates.notify({
-            sessionId,
-            update: {
-              sessionUpdate: 'tool_call',
-              toolCallId,
-              title,
-              name: 'file_edit',
-              status: 'completed',
-              rawInput: item?.changes
+        // App Server 的 item 生命周期承载命令、文件修改和外部工具的实时进度。
+        if (message.method === 'item/started' || message.method === 'item/completed') {
+          const type = String(item?.type || '')
+          const completed = message.method === 'item/completed'
+          const toolCallId = String(item?.id || `${type}-${Date.now()}`)
+          const tool = type === 'commandExecution'
+            ? { name: 'run_command', title: '执行命令', input: { command: item?.command, cwd: item?.cwd }, output: typeof item?.aggregatedOutput === 'string' ? item.aggregatedOutput.slice(-12_000) : (item?.exitCode != null ? `退出码 ${item.exitCode}` : undefined) }
+            : type === 'fileChange'
+              ? { name: 'edit_file', title: '修改文件', input: { changes: item?.changes }, output: item?.status }
+              : type === 'mcpToolCall'
+                ? { name: String(item?.tool || 'mcp_tool'), title: `调用 ${String(item?.server || 'MCP')} 工具`, input: item?.arguments, output: item?.error ?? item?.result }
+                : type === 'webSearch'
+                  ? { name: 'search_web', title: '搜索网络', input: { query: item?.query }, output: item?.action }
+                  : null
+          if (tool) {
+            if (completed && type !== 'fileChange') {
+              updates.notify({ sessionId, update: {
+                sessionUpdate: 'tool_call_update',
+                toolCallId,
+                status: item?.status === 'failed' || item?.status === 'declined' ? 'failed' : 'completed',
+                rawOutput: tool.output
+              } })
+            } else {
+              updates.notify({ sessionId, update: {
+                sessionUpdate: 'tool_call',
+                toolCallId,
+                title: tool.title,
+                name: tool.name,
+                status: completed ? (item?.status === 'failed' ? 'failed' : 'completed') : 'in_progress',
+                rawInput: tool.input
+              } })
             }
-          })
+          }
+          if (completed && type === 'reasoning' && Array.isArray(item?.summary)) {
+            const summary = item.summary.filter((part: unknown) => typeof part === 'string').join('\n').trim()
+            if (summary) updates.notify({ sessionId, update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: summary } } })
+          }
         }
 
         // 2. 文本增量

@@ -55,10 +55,13 @@ export class TaskStore {
           `INSERT INTO task_steps (id, task_run_id, sequence, title, goal, dependencies_json, acceptance_criteria, status, detail, result_summary, artifact_paths_json, retry_count, agent_role, agent_id, model, prompt, started_at, completed_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(task_run_id, id) DO UPDATE SET
-             sequence = excluded.sequence, title = excluded.title, goal = excluded.goal, dependencies_json = excluded.dependencies_json,
+             sequence = excluded.sequence, title = excluded.title,
+             goal = COALESCE(excluded.goal, task_steps.goal),
+             dependencies_json = excluded.dependencies_json,
              acceptance_criteria = excluded.acceptance_criteria, status = excluded.status, detail = excluded.detail,
              result_summary = excluded.result_summary, artifact_paths_json = excluded.artifact_paths_json,
-             retry_count = excluded.retry_count, agent_role = excluded.agent_role, agent_id = excluded.agent_id, model = excluded.model, prompt = excluded.prompt,
+             retry_count = excluded.retry_count, agent_role = excluded.agent_role, agent_id = excluded.agent_id, model = excluded.model,
+             prompt = COALESCE(excluded.prompt, task_steps.prompt),
              started_at = excluded.started_at, completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
           item.id, id, index + 1, item.title, item.goal || null, toJson(item.dependencies || []), item.acceptanceCriteria || null,
           stepStatus, item.detail || null, item.resultSummary || item.detail || null, toJson(item.artifactPaths || []), item.retryCount || previous?.retry_count || 0,

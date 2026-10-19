@@ -274,13 +274,19 @@
   font-variant-numeric: tabular-nums;
 }
 
-.subtask-prompt-copy-btn {
+.subtask-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.subtask-prompt-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
+  padding: 2.5px 8px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 520;
   color: var(--text-muted, #747d76);
   background: transparent;
   border: 1px solid transparent;
@@ -290,10 +296,26 @@
   user-select: none;
 }
 
-.subtask-prompt-copy-btn:hover {
+.subtask-prompt-action-btn:hover {
   color: var(--text-primary, #202622);
   background: color-mix(in srgb, var(--text-primary, #202622) 6%, transparent);
-  border-color: color-mix(in srgb, var(--text-primary, #202622) 8%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary, #202622) 10%, transparent);
+}
+
+.subtask-prompt-action-btn:active {
+  transform: scale(0.96);
+}
+
+.subtask-prompt-header-toggle {
+  color: var(--accent-color, #3b82f6);
+  background: color-mix(in srgb, var(--accent-color, #3b82f6) 6%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color, #3b82f6) 14%, transparent);
+}
+
+.subtask-prompt-header-toggle:hover {
+  color: var(--accent-color, #3b82f6);
+  background: color-mix(in srgb, var(--accent-color, #3b82f6) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color, #3b82f6) 24%, transparent);
 }
 
 .subtask-prompt-copy-btn.is-copied {
@@ -336,15 +358,43 @@
 
 /* 折叠态：限制最大高度并叠加平滑渐变遮罩 */
 .subtask-prompt-card.is-collapsed .subtask-prompt-body-wrap {
-  max-height: 124px;
+  max-height: 110px;
   overflow: hidden;
+}
+
+/* 展开态：设置最大可视高度并启用框内平滑滑动（独立滚动，不破坏页面整体结构） */
+.subtask-prompt-card.is-expanded .subtask-prompt-body-wrap {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-primary, #202622) 20%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+
+.subtask-prompt-card.is-expanded .subtask-prompt-body-wrap::-webkit-scrollbar {
+  width: 5px;
+}
+
+.subtask-prompt-card.is-expanded .subtask-prompt-body-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.subtask-prompt-card.is-expanded .subtask-prompt-body-wrap::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-primary, #202622) 18%, transparent);
+  border-radius: 9999px;
+  transition: background 0.15s ease;
+}
+
+.subtask-prompt-card.is-expanded .subtask-prompt-body-wrap::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-primary, #202622) 32%, transparent);
 }
 
 .subtask-prompt-mask {
   position: absolute;
   inset-inline: 0;
   bottom: 0;
-  height: 60px;
+  height: 58px;
   pointer-events: none;
   background: linear-gradient(
     to bottom,
@@ -366,7 +416,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 12px 9px;
+  padding: 5px 12px 9px;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.subtask-prompt-card.is-expanded .subtask-prompt-footer {
+  border-top: 1px dashed color-mix(in srgb, var(--text-primary, #202622) 8%, transparent);
+  background: color-mix(in srgb, var(--text-primary, #202622) 2%, transparent);
 }
 
 .subtask-prompt-toggle-btn {

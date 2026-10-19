@@ -79,7 +79,7 @@ function groupByDependencyLayer(steps: TaskStep[]): TaskStep[][] {
 
 type SubtaskTraceItem = {
   id: string
-  type: 'think' | 'tool'
+  type: 'think' | 'tool' | 'message'
   detail?: string
   callId?: string
   name?: string
@@ -90,6 +90,23 @@ type SubtaskTraceItem = {
 
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function subtaskToolName(value: unknown): string {
+  const name = String(value || 'tool')
+  const aliases: Record<string, string> = {
+    Bash: 'run_command',
+    Read: 'read_file',
+    Write: 'write_file',
+    Edit: 'edit_file',
+    Grep: 'grep_content',
+    Glob: 'find_files',
+    WebSearch: 'search_web',
+    WebFetch: 'read_url_content',
+    Task: 'delegate_tasks',
+    TodoWrite: 'update_task_plan'
+  }
+  return aliases[name] || name
 }
 
 function buildSubtaskTrace(events: TaskEvent[], stepId: string): SubtaskTraceItem[] {
@@ -146,6 +163,49 @@ function buildSubtaskTrace(events: TaskEvent[], stepId: string): SubtaskTraceIte
       if (event.type === 'agent_event' && update.type) {
         append(String(update.type), update, `${String(event.id || index)}-agent`)
       }
+      if (event.type !== 'agent_event') return
+      const sessionUpdate = String(update.sessionUpdate || '')
+      const updateId = `${String(event.id || index)}-acp`
+      if (sessionUpdate === 'agent_thought_chunk') {
+        const content = recordOf(update.content)
+        const detail = String(content.text || '').trim()
+        if (detail) trace.push({ id: updateId, type: 'think', detail })
+      }
+      if (sessionUpdate === 'agent_message_chunk') {
+        const content = recordOf(update.content)
+        const text = typeof content.text === 'string' ? content.text : ''
+        if (text) {
+          const previous = trace[trace.length - 1]
+          if (previous?.type === 'message') previous.detail = `${previous.detail || ''}${text}`
+          else trace.push({ id: updateId, type: 'message', detail: text })
+        }
+      }
+      if (sessionUpdate !== 'tool_call' && sessionUpdate !== 'tool_call_update') return
+      const callId = String(update.toolCallId || '')
+      const match = [...trace].reverse().find((item) => item.type === 'tool' && item.callId === callId)
+      if (sessionUpdate === 'tool_call' && !match) {
+        trace.push({
+          id: updateId,
+          type: 'tool',
+          callId,
+          name: subtaskToolName(update.name),
+          callDetail: update.rawInput,
+          resultDetail: update.status === 'completed' ? update.rawOutput ?? '已完成' : update.status === 'failed' ? '执行失败' : undefined,
+          isWaiting: update.status !== 'completed' && update.status !== 'failed'
+        })
+      } else if (match) {
+        match.resultDetail = update.rawOutput ?? (update.status === 'failed' ? '执行失败' : '已完成')
+        match.isWaiting = false
+      } else {
+        trace.push({
+          id: updateId,
+          type: 'tool',
+          callId,
+          name: subtaskToolName(update.name),
+          resultDetail: update.rawOutput ?? (update.status === 'failed' ? '执行失败' : '已完成'),
+          isWaiting: false
+        })
+      }
     })
   return trace
 }
@@ -184,10 +244,40 @@ function extractSubtaskFileChanges(events: TaskEvent[], stepId: string): FileCha
   return [...changesMap.values()]
 }
 
+function resolveSubtaskPrompt(step: TaskStep, events: TaskEvent[] = []): string {
+  const direct = String(step.prompt || '').trim()
+  if (direct) return direct
+
+  // 从事件流中回溯最初的下发 prompt
+  for (const event of events) {
+    if (event.taskStepId && String(event.taskStepId) !== String(step.id)) continue
+    const payload = recordOf(event.payload)
+    const request = recordOf(payload.request)
+    const requestPrompt = String(request.prompt || payload.prompt || '').trim()
+    if (requestPrompt) return requestPrompt
+
+    const plan = recordOf(payload.plan)
+    const planSteps = Array.isArray(plan.steps) ? plan.steps : []
+    const matchingStep = planSteps.find((s: any) => String(s?.id) === String(step.id))
+    if (matchingStep?.prompt && String(matchingStep.prompt).trim()) {
+      return String(matchingStep.prompt).trim()
+    }
+  }
+
+  const goal = String(step.goal || '').trim()
+  if (goal) return goal
+
+  const title = String(step.title || '').trim()
+  if (title) return `执行任务：${title}`
+
+  return '执行该子任务并返回可验证结果。'
+}
+
 /**
  * 下发任务提示词卡片（基于 taste-skill 极简高质感设计）：
- * - 长文本时默认折叠，带平滑渐变遮罩与“展开全部/收起”控制
- * - 顶部展示目标 Agent 胶囊与字数统计，支持一键便捷复制
+ * - 长文本默认折叠（平滑渐变遮罩 + 胶囊展开）
+ * - 展开后支持在卡片内丝滑滑动（独立滚动限高，不撑爆外层界面）
+ * - 顶部与底部双重便捷收起，支持一键复制代码与状态微反馈
  */
 function SubtaskPromptCard({
   prompt,
@@ -199,9 +289,9 @@ function SubtaskPromptCard({
   const [isExpanded, setIsExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  // 当指令文本较长（> 140 字符或 > 4 行）时默认折叠
+  // 当指令文本较长（> 110 字符或 > 3 行）时默认折叠
   const isLongText = useMemo(() => {
-    return prompt.length > 140 || prompt.split('\n').length > 4
+    return prompt.length > 110 || prompt.split('\n').length > 3
   }, [prompt])
 
   const handleCopy = useCallback(async () => {
@@ -218,7 +308,10 @@ function SubtaskPromptCard({
     <article
       className={`subtask-prompt-card ${isLongText ? (isExpanded ? 'is-expanded' : 'is-collapsed') : 'is-short'}`}
     >
-      <header className="subtask-prompt-header">
+      <header
+        className="subtask-prompt-header"
+        onDoubleClick={isLongText ? () => setIsExpanded((prev) => !prev) : undefined}
+      >
         <div className="subtask-prompt-meta">
           <span className="subtask-prompt-agent-tag">
             <span className="subtask-prompt-brand-icon" aria-hidden="true">
@@ -228,16 +321,41 @@ function SubtaskPromptCard({
           </span>
           <span className="subtask-prompt-length-badge">{prompt.length} 字</span>
         </div>
-        <button
-          type="button"
-          className={`subtask-prompt-copy-btn ${copied ? 'is-copied' : ''}`}
-          onClick={handleCopy}
-          aria-label={copied ? '已复制完整指令' : '复制完整指令'}
-          title="复制指令内容"
-        >
-          {copied ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
-          <span>{copied ? '已复制' : '复制'}</span>
-        </button>
+
+        <div className="subtask-prompt-actions">
+          {isLongText && (
+            <button
+              type="button"
+              className="subtask-prompt-action-btn subtask-prompt-header-toggle"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              aria-expanded={isExpanded}
+              title={isExpanded ? '收起完整指令' : '展开完整指令'}
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp size={12} strokeWidth={2.2} aria-hidden="true" />
+                  <span>收起</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={12} strokeWidth={2.2} aria-hidden="true" />
+                  <span>展开</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            className={`subtask-prompt-action-btn subtask-prompt-copy-btn ${copied ? 'is-copied' : ''}`}
+            onClick={handleCopy}
+            aria-label={copied ? '已复制完整指令' : '复制完整指令'}
+            title="复制指令内容"
+          >
+            {copied ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} strokeWidth={2} />}
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+        </div>
       </header>
 
       <div className="subtask-prompt-body-wrap">
@@ -374,7 +492,7 @@ export function SubtaskDetailDrawer({
   if (!step) return null
   const status = String(step.status || 'pending')
   const agentId = String(step.agentId || 'agentpet')
-  const prompt = String(step.prompt || step.goal || '执行该子任务并返回可验证结果。')
+  const prompt = resolveSubtaskPrompt(step, snapshot.events || [])
   const progress = String(step.detail || '').trim()
   const result = String(step.resultSummary || '').trim()
   const trace = buildSubtaskTrace(snapshot.events || [], stepId)
@@ -385,6 +503,10 @@ export function SubtaskDetailDrawer({
 
   // 动态活动摘要：优先反映当前具体执行步骤，若处于等待模型继续阶段且有后端进度日志，平滑融入活动摘要
   const activityLabel = useMemo(() => {
+    if (lastTraceStep?.type === 'message') {
+      const text = String(lastTraceStep.detail || '').replace(/\s+/g, ' ').trim()
+      return text ? `${isRunning ? '正在回复' : '已回复'}：${text.slice(-36)}` : '正在回复'
+    }
     if (isRunning && progress && trace.length > 0 && !lastTraceStep?.isWaiting) {
       const cleanProgress = cleanProgressMessage(progress)
       if (cleanProgress.length <= 40) return cleanProgress
@@ -443,6 +565,11 @@ export function SubtaskDetailDrawer({
                 {trace.map((item, index) =>
                   item.type === 'tool' ? (
                     <ToolStepItem key={item.id} step={item} isThinking={isRunning} />
+                  ) : item.type === 'message' ? (
+                    <article key={item.id} className="subtask-message is-progress">
+                      <small>过程消息</small>
+                      <p>{item.detail}</p>
+                    </article>
                   ) : (
                     <ToolThinkItem
                       key={item.id}

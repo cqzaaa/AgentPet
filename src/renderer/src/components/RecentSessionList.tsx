@@ -247,12 +247,25 @@ export function RecentSessionList(props: Props): React.JSX.Element {
         }))
       }
 
-      const activeListId = activeSession.pinned
-        ? 'pinned'
+      const groupSessions = activeSession.pinned
+        ? sessions.filter((s) => s.pinned)
         : activeSession.workspacePath
-          ? `workspace:${activeSession.workspacePath}`
-          : `time:${getTimeGroup(activeSession)}`
-      setExpandedSessionGroups((previous) => ({ ...previous, [activeListId]: true }))
+          ? sessions.filter((s) => !s.pinned && s.workspacePath === activeSession.workspacePath)
+          : sessions.filter(
+              (s) =>
+                !s.pinned &&
+                !s.workspacePath &&
+                getTimeGroup(s) === getTimeGroup(activeSession)
+            )
+      const sessionIndexInGroup = groupSessions.findIndex((s) => s.id === activeSession.id)
+      if (sessionIndexInGroup >= 5) {
+        const activeListId = activeSession.pinned
+          ? 'pinned'
+          : activeSession.workspacePath
+            ? `workspace:${activeSession.workspacePath}`
+            : `time:${getTimeGroup(activeSession)}`
+        setExpandedSessionGroups((previous) => ({ ...previous, [activeListId]: true }))
+      }
 
     })
     return () => cancelAnimationFrame(frame)

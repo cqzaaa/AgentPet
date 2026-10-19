@@ -196,6 +196,21 @@ export class ClaudeAcpBridge {
           }
         }
 
+        if (event.type === 'user' && Array.isArray(event.message?.content)) {
+          for (const block of event.message.content) {
+            if (block?.type !== 'tool_result' || !block.tool_use_id) continue
+            updates.notify({
+              sessionId,
+              update: {
+                sessionUpdate: 'tool_call_update',
+                toolCallId: String(block.tool_use_id),
+                status: block.is_error ? 'failed' : 'completed',
+                rawOutput: block.content
+              }
+            })
+          }
+        }
+
         // 3. 最终结果
         if (event.type === 'result' && !hasStreamedText && typeof event.result === 'string' && event.result.trim()) {
           updates.notify({
