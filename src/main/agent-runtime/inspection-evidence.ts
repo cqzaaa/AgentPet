@@ -2,7 +2,7 @@ type ReadEvidence = { path: string; version: string; ranges: Array<{ start: numb
 export type InspectionEvidence = {
   read?: ReadEvidence
   reads?: ReadEvidence[]
-  searches?: Array<{ question?: string; pattern: string; scope?: string; status: string; files?: string[]; locations?: string[]; unresolved?: string }>
+  searches?: Array<{ question?: string; pattern: string; scope?: string; status: string; fingerprint?: string; files?: string[]; locations?: string[]; unresolved?: string }>
 }
 
 const MARKER = '[代码检索检查点] '
@@ -23,7 +23,7 @@ export function inspectionEvidence(state: any): InspectionEvidence | undefined {
   }
   if (Array.isArray(state?.searchEvidence)) {
     return { searches: state.searchEvidence.slice(0, 6).map(item => ({
-      question: item.question, pattern: item.pattern, scope: item.scope, status: item.status,
+      question: item.question, pattern: item.pattern, scope: item.scope, status: item.status, fingerprint: item.fingerprint,
       files: item.files?.slice(0, 6), locations: item.locations?.slice(0, 3), unresolved: item.unresolved
     })) }
   }

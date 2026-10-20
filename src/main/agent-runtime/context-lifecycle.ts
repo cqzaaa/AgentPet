@@ -7,6 +7,7 @@ export type ContextCheckpoint = {
   userKeys: string[]
   messages: ChatMessage[]
   skills?: Array<{ id: string; sections?: string[] }>
+  loadedMcpToolNames?: string[]
   tokenCalibration?: { model: string; scale: number }
 }
 

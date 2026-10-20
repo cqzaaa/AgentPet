@@ -49,7 +49,7 @@ import {
   clearAgentRuntimeSessionCache,
   restoreAgentRuntimeSessionActivity
 } from './agent-runtime'
-import { BOOTSTRAP_TOOL_NAMES, DEFAULT_COLLABORATION_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
+import { DEFAULT_TOOL_NAMES } from './agent-runtime/skill-tool-routing'
 import { clearProjectGuidanceCache } from './agent-runtime/project-guidance'
 import { parseInspectionEvidence, inspectionReads } from './agent-runtime/inspection-evidence'
 import { fileVersion, canonicalReadPath } from './tools/builtin/file/read-cache'
@@ -71,6 +71,7 @@ import { handleSkillHubDownload } from './skills/skillhub-download-installer'
 import { skillRegistry } from './skills/skill-registry'
 import { localMeetingRuntime } from './local-meeting-runtime'
 import { SessionEventStore } from './session-events/session-event-store'
+import { summarizeTracePerformance } from './session-events/trace-performance'
 import { sanitizeTraceValue, traceFingerprint } from './session-events/trace-payload'
 import { countTokens } from './tools/context/token-counter'
 import { externalAgentManager } from './external-agents'
@@ -5908,6 +5909,7 @@ app.whenReady().then(() => {
               summary: {
                 eventCount: storedTurn.events.length,
                 toolCallCount: toolCalls.length,
+                performance: summarizeTracePerformance(storedTurn.events),
                 reasoningChunkCount: reasoningChunks.length,
                 reasoningCharacters: reasoningChunks.reduce((total, chunk) => total + chunk.text.length, 0),
                 firstSeq: storedTurn.events[0]?.seq ?? null,
@@ -7203,8 +7205,7 @@ app.whenReady().then(() => {
       // request_skill 成功后由 AgentExecutor 按本轮需要动态加入。
       const tools = getFormattedTools(true)
       return tools.filter((tool: any) =>
-        BOOTSTRAP_TOOL_NAMES.has(String(tool?.function?.name || '')) ||
-        DEFAULT_COLLABORATION_TOOL_NAMES.has(String(tool?.function?.name || ''))
+        DEFAULT_TOOL_NAMES.has(String(tool?.function?.name || ''))
       )
     } catch (err) {
       console.error('获取工具定义失败:', err)

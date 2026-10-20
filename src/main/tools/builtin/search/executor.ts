@@ -1,15 +1,23 @@
 import * as fs from 'fs'
 import { execFile } from 'child_process'
+import { createHash } from 'crypto'
 import { IToolExecutor, ToolContext, ToolResult } from '../../core/types'
 import { getAllowedFileRoots, getDefaultWorkingDirectory, isPathWithinRoots, resolveSessionPath } from '../../utils/paths'
+import { canonicalReadPath } from '../file/read-cache'
+import { queryProperties } from './manifest'
+import { isGeneratedSearchTarget, SOURCE_SEARCH_EXCLUDES } from './source-search-policy'
 const { rgPath } = require('vscode-ripgrep')
 
 export class SearchExecutor implements IToolExecutor {
   public async execute(api: string, args: Record<string, any>, context: ToolContext): Promise<ToolResult> {
     if (api !== 'grep_content') return { content: `未知的操作类型: ${api}`, success: false }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return { content: '错误：搜索参数必须是对象。', success: false }
     if (args.queries !== undefined) {
       if (!Array.isArray(args.queries) || args.queries.length < 1 || args.queries.length > 6 || args.pattern !== undefined) {
         return { content: '错误：请提供 pattern 或包含 1–6 项的 queries，不能同时提供。', success: false }
+      }
+      if (Object.keys(args).some(key => key !== 'queries')) {
+        return { content: '错误：批量搜索的 scope、path 等参数必须放在各 queries 项内，不能放在顶层。', success: false }
       }
       const results: ToolResult[] = new Array(args.queries.length)
       let next = 0
@@ -36,10 +44,16 @@ export class SearchExecutor implements IToolExecutor {
       state: { searchEvidence: [{ question, pattern: pattern.slice(0, 300), status: 'failed', unresolved: message.slice(0, 500) }] }
     })
     try {
+      if (!args || typeof args !== 'object' || Array.isArray(args)) return failure('错误：每项查询必须是对象')
+      const unknown = Object.keys(args).filter(key => !Object.hasOwn(queryProperties, key))
+      if (unknown.length) return failure(`错误：未知搜索参数 ${unknown.join('、')}；搜索范围请使用 scope（兼容 path）。`)
       if (!pattern.trim()) return failure('错误：每项查询必须提供非空 pattern')
       if (context.abortSignal?.aborted) return failure('搜索已取消')
-      if (args.scope !== undefined && typeof args.scope !== 'string') return failure('错误：scope 必须是本地路径字符串')
+      for (const key of ['scope', 'path']) {
+        if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) return failure(`错误：${key} 必须是非空本地路径字符串`)
+      }
       if (args.glob !== undefined && typeof args.glob !== 'string') return failure('错误：glob 必须是字符串')
+      if (args.include_generated !== undefined && typeof args.include_generated !== 'boolean') return failure('错误：include_generated 必须是布尔值')
       const outputMode = args.output_mode || 'content'
       if (!['content', 'files_with_matches', 'count'].includes(outputMode)) return failure('错误：无效的 output_mode')
       for (const [key, max] of [['context_lines', 80], ['max_results', 300]] as const) {
@@ -47,16 +61,37 @@ export class SearchExecutor implements IToolExecutor {
           return failure(`错误：${key} 超出允许范围`)
         }
       }
-      const searchDir = args.scope ? resolveSessionPath(args.scope, context.sessionId, context.workspacePath) : getDefaultWorkingDirectory(context)
+      const resolveScope = (value: string): string => resolveSessionPath(value, context.sessionId, context.workspacePath)
+      if (args.scope !== undefined && args.path !== undefined && canonicalReadPath(resolveScope(args.scope)) !== canonicalReadPath(resolveScope(args.path))) {
+        return failure('错误：scope 与 path 指向不同路径；请只保留一个明确的搜索范围。')
+      }
+      const searchDir = args.scope !== undefined || args.path !== undefined ? resolveScope(args.scope ?? args.path) : getDefaultWorkingDirectory(context)
       const roots = getAllowedFileRoots(context)
       if (!isPathWithinRoots(searchDir, roots)) return failure('错误：搜索范围不在当前会话已授权的文件夹内。')
       const realSearchDir = await fs.promises.realpath(searchDir)
       if (!isPathWithinRoots(realSearchDir, roots)) return failure('错误：搜索范围经真实路径解析后不在已授权文件夹内。')
       const singleFile = (await fs.promises.stat(realSearchDir)).isFile()
+      const defaultRoot = await fs.promises.realpath(getDefaultWorkingDirectory(context))
+      if (!args.include_generated && isGeneratedSearchTarget(realSearchDir, defaultRoot)) {
+        return failure('默认源码检索不搜索依赖或生成文件。请改查源码；只有确需调查该生成文件时，才对这个具体范围设置 include_generated=true。')
+      }
+      if (args.include_generated) {
+        if (canonicalReadPath(realSearchDir) === canonicalReadPath(defaultRoot)) {
+          return failure('错误：调查生成文件时请指定具体文件或子目录，不能在整个工作区开启 include_generated。')
+        }
+      }
       const execArgs = ['--color', 'never']
       if (args.case_insensitive) execArgs.push('-i')
       if (args.fixed_strings) execArgs.push('-F')
       if (args.glob) execArgs.push('-g', args.glob)
+      if (!args.include_generated) {
+        // Put exclusions after caller globs so e.g. "*.js" cannot re-include dist.
+        for (const glob of SOURCE_SEARCH_EXCLUDES) execArgs.push('--iglob', `!${glob}`)
+      } else {
+        // Explicit generated-file investigations can include gitignored output,
+        // while hidden paths still require an explicit scope.
+        execArgs.push('--no-ignore')
+      }
       if (outputMode === 'files_with_matches') execArgs.push('-l')
       else if (outputMode === 'count') execArgs.push('--count', '-H')
       else execArgs.push('--json', '-m', '200', '-C', String(args.context_lines ?? (singleFile ? 12 : 3)))
@@ -74,6 +109,7 @@ export class SearchExecutor implements IToolExecutor {
       const contentRows: Array<{ file: string; line: number; text: string; match: boolean }> = []
       let matchCount = 0
       let limited = false
+      let clippedLines = false
       if (outputMode === 'content') {
         const counts = new Map<string, number>()
         for (const line of lines) {
@@ -82,7 +118,14 @@ export class SearchExecutor implements IToolExecutor {
           const file = event.data.path.text || '[非 UTF-8 文件名]'
           const body = event.data.lines.text || '[非 UTF-8 内容]'
           paths.add(file)
-          const text = body.replace(/\r?\n$/, '')
+          let text = body.replace(/\r?\n$/, '')
+          if (text.length > 1200) {
+            const bytes = Buffer.from(text)
+            const matchStart = event.data.submatches?.[0]?.start || 0
+            const from = Math.max(0, matchStart - 200)
+            text = `${from ? '…' : ''}${bytes.subarray(from, from + 1000).toString('utf8')}… [长行仅返回节选]`
+            clippedLines = true
+          }
           contentRows.push({ file, line: event.data.line_number, text, match: event.type === 'match' })
           rows.push(`${file}:${event.data.line_number}:${event.type === 'match' ? '>' : ' '} ${text}`)
           if (event.type === 'match') {
@@ -123,17 +166,24 @@ export class SearchExecutor implements IToolExecutor {
           if (row.match && deliveredLocations.length < 6) deliveredLocations.push(`${row.file}:${row.line}: ${row.text}`.slice(0, 250))
         }
       }
-      const truncated = limited || delivered < rows.length
+      const truncated = limited || clippedLines || delivered < rows.length
       const status = paths.size === 0 ? 'no_matches' : truncated ? 'truncated' : 'complete'
       const heading = outputMode === 'count'
         ? `共 ${matchCount} 个匹配行，分布在 ${paths.size} 个文件（按行计数）`
         : `命中 ${paths.size} 个文件${outputMode === 'content' ? `，${matchCount} 个匹配行${limited ? '（已达单文件上限）' : ''}` : ''}`
-      const notice = truncated ? '\n[结果已截断或达到单文件 200 个匹配行上限；请按已知文件、符号缩小范围。未展示部分不能视为无匹配。]' : ''
+      const notice = truncated ? '\n[结果已截断、长行仅返回节选或达到单文件 200 个匹配行上限；请按已知文件、符号缩小范围。未展示部分不能视为无匹配。]' : ''
+      const policy = args.include_generated
+        ? '[检索模式] 包含指定范围内的依赖和生成文件'
+        : '[检索模式] 源码优先，已排除 node_modules、dist/build/out、coverage、框架缓存、*.map、*.min.js/css 等生成文件'
       return {
         success: true,
-        content: `[搜索结果] ${heading}\n${selected || (paths.size ? '(匹配内容超过输出预算，请缩小范围或使用字符分页读取对应文件)' : '(无匹配)')}${notice}`,
+        content: `[搜索范围] ${realSearchDir}\n${policy}\n[搜索结果] ${heading}\n${selected || (paths.size ? '(匹配内容超过输出预算，请缩小范围或使用字符分页读取对应文件)' : '(当前检索模式下无匹配)')}${notice}`,
         state: { searchEvidence: [{
           question, pattern: pattern.slice(0, 300), scope: realSearchDir, status,
+          // Compare delivered evidence, not the keyword used to obtain it.
+          fingerprint: createHash('sha256').update(JSON.stringify([realSearchDir, outputMode, status,
+            outputMode === 'content' ? contentRows.slice(0, delivered).map(({ file, line, text }) => [file, line, text]) : selected,
+            paths.size === 0 ? pattern : null])).digest('hex'),
           files: [...paths].slice(0, 12), locations: outputMode === 'content' ? deliveredLocations : rows.slice(0, Math.min(delivered, 6)).map(row => row.slice(0, 250)),
           unresolved: truncated ? '缩小范围查看未展示的匹配' : paths.size === 0 ? '此范围无匹配；检查关键词或逐级扩大范围' : undefined
         }] }

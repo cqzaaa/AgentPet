@@ -10936,27 +10936,34 @@ body {
 
 /* 7. PDF 容器（灰色 → 与主题匹配） */
 .file-preview-viewer-container .ofv-pdf-viewer,
-.file-preview-viewer-container .ofv-pdf {
+.file-preview-viewer-container .ofv-pdf,
+.wiki-file-preview .ofv-pdf-viewer,
+.wiki-file-preview .ofv-pdf {
+  position: relative !important;
   background: var(--bg-content, #f1f5f9) !important;
 }
 
 /* 8. 文本预览背景 */
-.file-preview-viewer-container .ofv-text {
+.file-preview-viewer-container .ofv-text,
+.wiki-file-preview .ofv-text {
   background: var(--bg-card, #ffffff) !important;
 }
 
 /* 9. 确保 iframe 无白边撑满 */
-.file-preview-viewer-container iframe {
+.file-preview-viewer-container iframe,
+.wiki-file-preview iframe {
   border: none !important;
   display: block !important;
 }
 
-.file-preview-viewer-container canvas {
+.file-preview-viewer-container canvas,
+.wiki-file-preview canvas {
   display: block !important;
 }
 
 /* 10. PDF 翻页导航栏微质感悬浮化 */
-.file-preview-viewer-container .ofv-pdf-page-navigator {
+.file-preview-viewer-container .ofv-pdf-page-navigator,
+.wiki-file-preview .ofv-pdf-page-navigator {
   position: absolute !important;
   bottom: 16px !important;
   left: 50% !important;
@@ -10978,12 +10985,14 @@ body {
   user-select: none !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator:hover {
+.file-preview-viewer-container .ofv-pdf-page-navigator:hover,
+.wiki-file-preview .ofv-pdf-page-navigator:hover {
   box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.18), 0 3px 8px -2px rgba(0, 0, 0, 0.1) !important;
   border-color: color-mix(in srgb, var(--accent-color, #4f8cff) 35%, var(--border-color)) !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator button {
+.file-preview-viewer-container .ofv-pdf-page-navigator button,
+.wiki-file-preview .ofv-pdf-page-navigator button {
   width: 24px !important;
   height: 24px !important;
   padding: 0 !important;
@@ -10998,17 +11007,20 @@ body {
   transition: background 0.15s ease, transform 0.1s ease !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator button:hover:not(:disabled) {
+.file-preview-viewer-container .ofv-pdf-page-navigator button:hover:not(:disabled),
+.wiki-file-preview .ofv-pdf-page-navigator button:hover:not(:disabled) {
   background: var(--bg-menu-hover, rgba(128, 128, 128, 0.12)) !important;
   transform: scale(1.05) !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator button:disabled {
+.file-preview-viewer-container .ofv-pdf-page-navigator button:disabled,
+.wiki-file-preview .ofv-pdf-page-navigator button:disabled {
   opacity: 0.35 !important;
   cursor: not-allowed !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator input {
+.file-preview-viewer-container .ofv-pdf-page-navigator input,
+.wiki-file-preview .ofv-pdf-page-navigator input {
   width: 38px !important;
   height: 22px !important;
   text-align: center !important;
@@ -11024,14 +11036,17 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
-.file-preview-viewer-container .ofv-pdf-page-navigator input:focus {
+.file-preview-viewer-container .ofv-pdf-page-navigator input:focus,
+.wiki-file-preview .ofv-pdf-page-navigator input:focus {
   border-color: var(--accent-color, #4f8cff) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color, #4f8cff) 25%, transparent) !important;
 }
 
 /* 11. PDF / Office 文档纸张阴影与间距增强 */
 .file-preview-viewer-container .ofv-pdf-page-wrapper,
-.file-preview-viewer-container .ofv-docx-page-frame {
+.file-preview-viewer-container .ofv-docx-page-frame,
+.wiki-file-preview .ofv-pdf-page-wrapper,
+.wiki-file-preview .ofv-docx-page-frame {
   margin: 12px auto !important;
   border-radius: 4px !important;
   box-shadow: 0 4px 18px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04) !important;
@@ -11039,7 +11054,9 @@ body {
 }
 
 .agent-window-container.dark .file-preview-viewer-container .ofv-pdf-page-wrapper,
-.agent-window-container.dark .file-preview-viewer-container .ofv-docx-page-frame {
+.agent-window-container.dark .file-preview-viewer-container .ofv-docx-page-frame,
+.agent-window-container.dark .wiki-file-preview .ofv-pdf-page-wrapper,
+.agent-window-container.dark .wiki-file-preview .ofv-docx-page-frame {
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
 }
 

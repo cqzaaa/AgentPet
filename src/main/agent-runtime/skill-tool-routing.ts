@@ -12,6 +12,13 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
 
 // Default visibility still respects the caller's allowlist and blocklist.
 export const DEFAULT_COLLABORATION_TOOL_NAMES = new Set(['list_agents', 'delegate_tasks'])
+export const DEFAULT_TERMINAL_TOOL_NAMES = new Set([
+  'run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'
+])
+// Default visibility is separate from bootstrap's allowlist exemption.
+export const DEFAULT_TOOL_NAMES = new Set([
+  ...BOOTSTRAP_TOOL_NAMES, ...DEFAULT_COLLABORATION_TOOL_NAMES, ...DEFAULT_TERMINAL_TOOL_NAMES
+])
 
 const DESKTOP_APPLICATION_PATTERN = /(?:微信|weixin|钉钉|dingtalk|qq|企业微信|word|excel|powerpoint|ppt|记事本|notepad|计算器|calculator|文件管理器|资源管理器|explorer|浏览器|chrome|edge)/i
 const DESKTOP_SURFACE_PATTERN = /(?:当前屏幕|屏幕上|当前窗口|这个窗口|桌面上|任务栏|鼠标|键盘)/i
@@ -31,7 +38,7 @@ export function isPptMasterRequest(conversationText: string): boolean {
  * discussions about mouse or screenshot code must continue through normal
  * Skill routing instead of unexpectedly exposing mutation tools.
  */
-export function inferPreloadedSkillIds(userText: string): string[] {
+export function inferPreloadedSkillIds(userText: string, workspacePath?: string): string[] {
   const text = String(userText || '').trim()
   if (!text) return []
 
@@ -45,8 +52,11 @@ export function inferPreloadedSkillIds(userText: string): string[] {
   if (explicitDesktopRequest && !discussesImplementation) return ['desktop-control']
 
   const isCodingMutation = CODING_ACTION_PATTERN.test(intentText) && CODING_TARGET_PATTERN.test(intentText)
+  const isWorkspaceCodeQuestion = Boolean(workspacePath?.trim()) &&
+    /(?:什么时候|何时|怎么|如何|哪里|在哪|触发|调用|执行|作用|什么意思|为什么)/.test(intentText) &&
+    /(?:函数|方法|组件|接口|源码|\b[a-z_$][\w$]*[A-Z][\w$]*\b|\b[A-Za-z_$][\w$]*_[\w$]+\b)/.test(intentText)
   const isOfficeOnly = OFFICE_TARGET_PATTERN.test(intentText) && !/(?:代码|源码|脚本|程序|项目|仓库|repo)/i.test(intentText)
-  if (isCodingMutation && !isOfficeOnly) return ['agentpet-coding']
+  if ((isCodingMutation || isWorkspaceCodeQuestion) && !isOfficeOnly) return ['agentpet-coding']
   if (isPptMasterRequest(text)) return ['ppt-master']
 
   if (!DESKTOP_ACTION_PATTERN.test(intentText)) return []
@@ -66,7 +76,7 @@ export function createInitialActiveToolNames(options: {
   if (options.forceAllTools) return available
 
   const active = new Set<string>()
-  for (const name of [...BOOTSTRAP_TOOL_NAMES, ...DEFAULT_COLLABORATION_TOOL_NAMES]) {
+  for (const name of DEFAULT_TOOL_NAMES) {
     if (available.has(name)) active.add(name)
   }
   for (const name of options.explicitlyRequestedToolNames || []) {

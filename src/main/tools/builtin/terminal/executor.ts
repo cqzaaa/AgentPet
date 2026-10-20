@@ -8,6 +8,7 @@ import { pythonRuntimeManager } from '../../interaction/python-runtime-manager'
 import { nodeRuntimeManager } from '../../interaction/node-runtime-manager'
 import { invokesNodeExecutable, invokesPythonExecutable } from '../../security/safety-checker'
 import { getManagedSkillRoot } from '../../../skills/managed-skill-runtime'
+import { isRecursivePowerShellContentSearch, SOURCE_SEARCH_GUIDANCE } from '../search/source-search-policy'
 
 const { rgPath } = require('vscode-ripgrep')
 
@@ -106,6 +107,13 @@ export class TerminalExecutor implements IToolExecutor {
     context: ToolContext
   ): Promise<ToolResult> {
     try {
+      if (api === 'run_terminal_command' || api === 'run_command') {
+        const isSsh = Boolean(context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh')
+        if (!isSsh && context.workspacePath &&
+            isRecursivePowerShellContentSearch(String(args.command || ''), String(args.shell || 'powershell'))) {
+          return { success: false, content: `未执行：这种递归内容搜索会遍历依赖或构建产物，source map 长行可能撑爆输出。${SOURCE_SEARCH_GUIDANCE}` }
+        }
+      }
       if (api === 'run_terminal_command') {
         const { command } = args
         const isSsh = Boolean(context.sessionId && sshManager.getDeviceType(context.sessionId) === 'ssh')

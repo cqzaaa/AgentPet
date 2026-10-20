@@ -15,6 +15,7 @@ import { unifiedToolExecutor } from '../tools/core/tool-executor'
 import { createApprovalReviewer } from '../tools/security/approval-reviewer'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
+import { TERMINAL_TOOL_INSTRUCTIONS } from '../tools/builtin/terminal/manifest'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
 import { skillRegistry } from '../skills/skill-registry'
 import { availableSkillTokens, type SkillLoadBudget } from '../skills/skill-budget'
@@ -24,12 +25,14 @@ import { taskRunner } from '../task-runtime/task-runner'
 import { ArtifactTracker } from './artifact-tracker'
 import { FileChangeTracker } from './file-change-tracker'
 import { CodingInspectionBudget } from './coding-inspection-budget'
+import { formatMcpToolDefinition, loadMcpToolSchemas } from './progressive-mcp-tools'
 import { summarizeCodingVerification } from './coding-verification'
 import { WebResearchProgress } from './web-research-progress'
 import { loadProjectGuidance } from './project-guidance'
 import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
 import {
   BOOTSTRAP_TOOL_NAMES,
+  DEFAULT_TERMINAL_TOOL_NAMES,
   activateAllowedTools,
   createInitialActiveToolNames,
   filterToolDefinitions,
@@ -603,14 +606,7 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     // 添加 MCP 外部工具
     const mcpTools = mcpManager.getTools()
     for (const tool of mcpTools) {
-      list.push({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description || '',
-          parameters: simplify ? { type: 'object', properties: {} } : (tool.inputSchema || { type: 'object', properties: {} })
-        }
-      })
+      list.push(formatMcpToolDefinition(tool, !simplify))
     }
 
     this.toolListCache[cacheKey] = list
@@ -1071,14 +1067,7 @@ Images in current or historical messages are provided directly to the model. Ins
       // 3. 注入已启用的外部 MCP 工具提示
       const mcpTools = mcpManager.getTools()
       if (mcpTools.length > 0) {
-        extraContext += `\n\n[系统状态：当前已挂载外部扩展工具 (MCP)]
-- 你的系统已通过 Model Context Protocol (MCP) 扩展协议接入了以下外部工具。
-- 用户可以直接要求你使用它们，大模型在遇到相关需求时也应主动调用。
-- 已挂载扩展工具列表：
-`
-        for (const t of mcpTools) {
-          extraContext += `- 工具名称: \`${t.name}\` | 功能描述: ${t.description || '暂无描述'}\n`
-        }
+        extraContext += '\n\n[MCP 渐进式工具] 已授权的外部工具名称和简介已在 tools 中，可直接选择调用，无需先获取列表或激活。首次选中后运行时按需提供参数定义；已加载定义在当前会话继续复用。list_mcp_servers 仅用于服务配置与连接状态检查。'
       }
 
       if (extraContext) {
@@ -1168,6 +1157,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
     let streamRecoveryUsed = false
     let resumedTextPrefix = ''
     const inspectionBudget = new CodingInspectionBudget(workspacePath)
+    let inspectionCheckpoint: string | undefined
+    let lastProgressAt = Date.now()
     const researchProgress = new WebResearchProgress(chatHistory.filter(message => message.role === 'user' || message.role === 'tool').map(messageText))
     let singleEditCalls = 0
     let nextEditNudgeAt = 3
@@ -1197,8 +1188,21 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
           .filter((tool: any) => !blockedToolNames.has(tool.function.name))
     const availableToolNameSet = new Set(availableToolDefinitions.map((tool: any) => String(tool.function.name)))
     const activeToolNames = createInitialActiveToolNames({
-      availableToolNames: availableToolNameSet
+      availableToolNames: availableToolNameSet,
+      explicitlyRequestedToolNames: allowedToolNames || []
     })
+    const localToolNames = new Set(Object.keys(toolRegistry.getAllToolsInfo()))
+    const mcpToolNames = new Set([...availableToolNameSet].filter(name => !localToolNames.has(name)))
+    for (const name of mcpToolNames) activeToolNames.add(name)
+    const loadedMcpToolNames = new Set<string>()
+    const loadMcpSchemas = (names: Iterable<string>): boolean => loadMcpToolSchemas(
+      availableToolDefinitions, names, mcpToolNames, loadedMcpToolNames,
+      name => this.getFullToolDefinitionByName(name, isFrontend)
+    )
+    loadMcpSchemas([
+      ...(resumedContext && Array.isArray(config.sessionContext?.loadedMcpToolNames) ? config.sessionContext.loadedMcpToolNames : []),
+      ...chatHistory.filter(message => message.role === 'tool' && message.name).map(message => message.name!)
+    ])
     const activeSkillIds = new Set<string>()
     const persistContext = async (): Promise<void> => {
       if (!config.onTraceEvent) return
@@ -1208,6 +1212,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         await config.onTraceEvent({ type: 'context/checkpoint', data: { checkpoint: {
           version: 1, userKeys: sourceUserKeys, messages: retained,
           skills: skillRegistry.getSessionSkills(sessionId).map(skill => ({ id: skill.id, sections: skill.sections })),
+          loadedMcpToolNames: [...loadedMcpToolNames],
           tokenCalibration: { model, scale: contextTokenScale }
         } } })
       } catch (error) { console.warn('[Context] 无法保存有效上下文检查点:', error) }
@@ -1227,19 +1232,13 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       remainingTokens: availableSkillTokens(contextWindow, chatHistory, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens),
       loadedKeys: new Set()
     }
-    const localToolNames = new Set(Object.keys(toolRegistry.getAllToolsInfo()))
-    for (const name of availableToolNameSet) {
-      // This migration classifies every local built-in. External MCP tools keep
-      // their existing exposure until MCP servers gain first-class Skill metadata.
-      if (!localToolNames.has(name)) activeToolNames.add(name)
-    }
     const recentConversationText = chatHistory
       .filter(message => message.role === 'user' || message.role === 'assistant')
       .slice(-6)
       .map(message => messageText(message))
       .join('\n')
     const requiresPptMaster = isPptMasterRequest(recentConversationText)
-    const inferredPreloadedSkillIds = inferPreloadedSkillIds(latestUserText)
+    const inferredPreloadedSkillIds = inferPreloadedSkillIds(latestUserText, workspacePath)
     let pptMasterPreparing = false
     const preloadedSkillIds = inferredPreloadedSkillIds.filter(id => {
       if (id !== 'ppt-master') return true
@@ -1293,6 +1292,13 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       chatHistory[0].content += '\n\n<required_managed_skill id="ppt-master" status="preparing">This presentation-design request requires PPT Master. Call request_skill for ppt-master, then call wait_skill_ready exactly once if it is still preparing. Do not use run_office_skill create as a fallback.</required_managed_skill>'
     }
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
+    if (!activeSkillIds.has('terminal') && effectiveTools.some(tool => DEFAULT_TERMINAL_TOOL_NAMES.has(tool.function.name))) {
+      const terminalInstructions = `\n\n<default_terminal_tools>\n${TERMINAL_TOOL_INSTRUCTIONS}\n</default_terminal_tools>`
+      const systemMessage = chatHistory.find(message => message.role === 'system')
+      if (typeof systemMessage?.content === 'string') systemMessage.content += terminalInstructions
+      else if (Array.isArray(systemMessage?.content)) systemMessage.content.push({ type: 'text', text: terminalInstructions })
+      else chatHistory.unshift({ role: 'system', content: terminalInstructions })
+    }
     if (isFrontend && effectiveTools.length > 0) {
       const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句自然正文说明要解决的问题及行动目的。后续仅在有重要发现、实质进展、阻碍或工作阶段变化时更新；每次更新应提供工具卡片之外的新信息。连续读取、搜索或修改属于同一阶段时合并说明，没有新信息就继续执行工具，不必补一句过渡语。不要逐个工具报幕，不要把文件名、工具名或创建计划本身作为进度内容的主体。中文表达应像与同事沟通，句子完整、语气自然；按语境使用“我”或省略主语，不刻意删除主语，也不强制从动作开头。避免反复使用“先……”“我先……”“接下来……”“现在……”等固定开场，不要仅替换连接词制造句式变化。“先”只在确实需要解释前后依赖时使用，不作为默认起手式。围绕当前已知事实说明发现、影响、决定或待解决问题；尚未验证的判断要标明不确定，不要把计划写成已完成的结果。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答直接说明结果、验证情况和必要的限制，不重复过程播报。</progress_updates>'
       const systemMessage = chatHistory.find(message => message.role === 'system')
@@ -1354,12 +1360,19 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         chatOptions.tool_choice = 'auto'
       }
 
+      const requestGuidance = [inspectionCheckpoint,
+        isFrontend && Date.now() - lastProgressAt >= 60000
+          ? '距离上次进度说明已超过一分钟。请用一句自然正文说明当前已确认的事实和仍待解决的问题，然后继续执行；不要输出内部思维链或把进度当成最终回答。' : undefined
+      ].filter(Boolean).join('\n')
+      const requestMessages: ChatMessage[] = requestGuidance
+        ? [...chatHistory, { role: 'system', content: requestGuidance }]
+        : chatHistory
       // The caller persists and flushes this exact request boundary before the
       // generator is resumed, so model-visible state cannot outrun its trace.
       yield {
         type: 'request_start',
         step: loopCount,
-        messages: chatHistory,
+        messages: requestMessages,
         options: {
           model: chatOptions.model,
           temperature: chatOptions.temperature,
@@ -1374,8 +1387,9 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       try {
         if (modelProvider.chatStream) {
           let streamedMessage: ChatMessage | null = null
-          for await (const event of modelProvider.chatStream(chatHistory, chatOptions)) {
+          for await (const event of modelProvider.chatStream(requestMessages, chatOptions)) {
             if (event.type === 'delta') {
+              if (event.content.trim()) lastProgressAt = Date.now()
               yield {
                 type: 'assistant_chunk',
                 step: loopCount,
@@ -1402,7 +1416,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
           if (!streamedMessage) throw new Error('流式响应未包含最终消息')
           responseMsg = streamedMessage
         } else {
-          responseMsg = await modelProvider.chat(chatHistory, chatOptions)
+          responseMsg = await modelProvider.chat(requestMessages, chatOptions)
+          if (typeof responseMsg.content === 'string' && responseMsg.content.trim()) lastProgressAt = Date.now()
           if (responseMsg.raw_request) {
             yield { type: 'model_request', step: loopCount, request: responseMsg.raw_request }
           }
@@ -1545,6 +1560,9 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
 
       const toolCalls = responseMsg.tool_calls
       if (toolCalls && toolCalls.length > 0) {
+        if (loadMcpSchemas(toolCalls.map(call => call.function.name))) {
+          effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
+        }
         if (toolCalls.some(call => ['request_skill', 'wait_skill_ready'].includes(call.function.name))) {
           const plan = this.getContextCompactionPlan(chatHistory, contextWindow, filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames), maxTokens, contextTokenScale)
           if (plan) {
@@ -1908,7 +1926,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
         const results = toolExecutionResults
         const toolImagePathsForNextTurn: string[] = []
         if (activeSkillIds.has('agentpet-coding')) {
-          const nudge = inspectionBudget.observe(results.map(res => ({
+          inspectionCheckpoint = inspectionBudget.observe(results.map(res => ({
             toolName: res.toolName,
             toolArgs: res.toolArgs,
             toolSuccess: res.toolSuccess,
@@ -1916,10 +1934,6 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
             inspection: isReadOnlyInspectionToolCall(res.toolName, res.toolArgs),
             mutation: isMutatingToolCall(res.toolName, res.toolArgs)
           })))
-          if (nudge && results.length > 0) {
-            const lastResult = results[results.length - 1]
-            lastResult.contextToolResult += `\n\n${nudge}`
-          }
         }
 
         // 3. 异步并行执行完后，顺序 yield 工具结果事件并写入 chatHistory 历史

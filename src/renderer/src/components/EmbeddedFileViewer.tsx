@@ -79,7 +79,14 @@ export function EmbeddedFileViewer({
         height: '100%',
         fit: 'width',
         locale: 'zh-CN',
-        toolbar: true,
+        toolbar: {
+          zoom: true,
+          rotate: true,
+          download: true,
+          fullscreen: true,
+          print: true,
+          search: false
+        },
         plugins: createFileViewerPlugins({ onPdfRotationChange: setRotation }),
         onLoad: () => {
           if (active) {

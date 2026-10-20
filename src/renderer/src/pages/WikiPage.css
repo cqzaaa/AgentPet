@@ -1728,3 +1728,8 @@
 .wiki-evidence-region { position: absolute; z-index: 3; box-sizing: border-box; pointer-events: none; border: 2px solid #ed8a13; border-radius: 3px; background: rgba(255, 196, 70, .14); box-shadow: 0 0 0 1px rgba(255, 255, 255, .9); }
 .wiki-file-preview-status { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 10px; padding: 20px; overflow: auto; background: var(--bg-card); color: var(--text-primary); font-size: 13px; text-align: center; }
 .wiki-file-preview-status p { width: 100%; overflow-wrap: anywhere; color: var(--text-muted); }
+
+/* Wiki 模块原件预览：隐藏内置搜索框 */
+.wiki-file-preview .ofv-toolbar-search {
+  display: none !important;
+}

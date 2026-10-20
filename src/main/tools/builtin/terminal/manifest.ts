@@ -1,4 +1,10 @@
 import { ToolManifest } from '../../core/types'
+import { SOURCE_SEARCH_GUIDANCE } from '../search/source-search-policy'
+
+export const TERMINAL_TOOL_INSTRUCTIONS = `# Terminal commands
+Terminal tools present in tools are available by default; do not request the terminal Skill before using them. An explicitly restricted task may expose only a subset.
+${SOURCE_SEARCH_GUIDANCE}
+Use run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Local node/npm/npx commands automatically use AgentPet's managed portable Node runtime, isolated npm prefix and cache; never inspect or install into the system-global Node environment. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls. Never use Start-Process, start, explorer.exe, or a browser executable to open a local browser; load desktop-control, call get_windows first, and use focus_window on the user's existing browser.`
 
 export const terminalManifest: ToolManifest = {
   identifier: 'agentpet-terminal',
@@ -70,7 +76,7 @@ export const terminalManifest: ToolManifest = {
     },
     {
       name: 'run_terminal_command',
-      description: '同步执行终端命令并返回结果。适用于快速命令（≤2分钟），超时自动终止。支持使用分号和管道把相关只读检索合并为一次调用；代码调查时优先这样做，避免连续调用许多 read_file/grep_content。',
+      description: '同步执行终端命令并返回结果，适用于快速命令（≤2分钟），超时自动终止。源码内容检索优先使用 grep_content，避免遍历依赖与构建产物；终端适合运行验证命令或批量执行已明确范围的检查。',
       timeout: 120000,
       parameters: {
         type: 'object',

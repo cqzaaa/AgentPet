@@ -1851,7 +1851,28 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     scheduleBottomAlignment()
   }, [cancelPendingScroll, scheduleBottomAlignment, updateTurnSpacer])
 
-  const handleManualScroll = useCallback(() => {
+  const handleManualScroll = useCallback((event: React.SyntheticEvent<HTMLDivElement>) => {
+    const scroller = messagesBoxRef.current?.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')
+    const target = event.target
+    // Portal events from the Diff drawer still travel through the chat's React tree.
+    if (!scroller || !(target instanceof Element) || !scroller.contains(target)) return
+
+    if (event.type === 'pointerdown') {
+      const pointer = event as React.PointerEvent<HTMLDivElement>
+      // Only a scrollbar press expresses scroll intent; clicking a message action
+      // must preserve bottom following while the drawer changes the chat width.
+      if (pointer.pointerType !== 'mouse' || pointer.button !== 0 || target !== scroller) return
+    } else if (event.type === 'wheel') {
+      const wheel = event as React.WheelEvent<HTMLDivElement>
+      if (wheel.deltaY === 0 || wheel.ctrlKey) return
+    } else if (event.type === 'keydown') {
+      const keyboard = event as React.KeyboardEvent<HTMLDivElement>
+      if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(keyboard.key)) return
+      if (keyboard.altKey || keyboard.ctrlKey || keyboard.metaKey) return
+      if (target.closest('input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])')) return
+      if (keyboard.key === ' ' && target.closest('button, a, [role="button"]')) return
+    }
+
     cancelPendingScroll()
     userScrollingRef.current = true
     isAtBottomRef.current = false
@@ -2134,11 +2155,9 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
         {/* 消息滚动列表 */}
         <div className="chat-messages-box" ref={messagesBoxRef}
           onWheelCapture={handleManualScroll}
-          onTouchStartCapture={handleManualScroll}
+          onTouchMoveCapture={handleManualScroll}
           onPointerDownCapture={handleManualScroll}
-          onKeyDownCapture={(event) => {
-            if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) handleManualScroll()
-          }}>
+          onKeyDownCapture={handleManualScroll}>
           {!isSessionSwitching && (messageIds.length === 0 ? (
             <div className="chat-empty-state">
               <AgentPetMark key={activeSessionId} active drawOnce className="chat-empty-mark" />
