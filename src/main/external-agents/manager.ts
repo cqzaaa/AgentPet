@@ -12,6 +12,7 @@ import { ClaudeAcpBridge, createClaudeAcpConnection } from './bridges/claude-bri
 import { CodexAcpBridge, createCodexAcpConnection, disposeCodexProcessPool } from './bridges/codex-bridge'
 import { clearExecutableCache, classifyAgentError, resolveExecutable } from './process-utils'
 import { ExternalAgentStore } from './store'
+import { findAcpModelOption, listAcpModelChoices } from './acp-model-options'
 import type {
   ExternalAgentDefinition,
   ExternalAgentListItem,
@@ -151,8 +152,7 @@ export class ExternalAgentManager {
         {
           customStream: connection.clientStream,
           onDispose: connection.dispose,
-          signal: options?.signal,
-          model: request.model
+          signal: options?.signal
         }
       )
     }
@@ -167,8 +167,7 @@ export class ExternalAgentManager {
         {
           customStream: connection.clientStream,
           onDispose: connection.dispose,
-          signal: options?.signal,
-          model: request.model
+          signal: options?.signal
         }
       )
     }
@@ -183,12 +182,14 @@ export class ExternalAgentManager {
         {
           customStream: connection.clientStream,
           onDispose: connection.dispose,
-          signal: options?.signal,
-          model: request.model
+          signal: options?.signal
         }
       )
     }
-    return this.client.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, onProtocolEvent, options)
+    return this.client.runPrompt(definition, cwd, request.prompt.trim(), onUpdate, onProtocolEvent, {
+      ...options,
+      model: request.model
+    })
   }
 
   public async runRemotePrompt(
@@ -219,7 +220,8 @@ export class ExternalAgentManager {
     const definition = await this.find(agentId)
     const normalizedCwd = this.normalizeCwd(cwd)
     if (definition.protocol === 'internal') {
-      return [{ id: configuredModel || 'default', name: configuredModel || '当前对话模型', source: 'configured' }]
+      if (!configuredModel?.trim()) throw new Error('当前对话没有可记录的明确模型 ID')
+      return [{ id: configuredModel, name: configuredModel, source: 'configured' }]
     }
     if (definition.protocol === 'codex-app-server') {
       const bridge = new CodexAcpBridge(definition, normalizedCwd, configuredModel)
@@ -234,16 +236,12 @@ export class ExternalAgentManager {
       return bridge.listModels()
     }
     const probe = await this.probe(agentId, normalizedCwd)
-    const options = Array.isArray(probe.configOptions) ? probe.configOptions : []
-    const modelOption = options.find((option: any) => /model/i.test(String(option?.id || option?.name || option?.category || ''))) as any
-    const choices = modelOption?.options || modelOption?.values || []
-    const models = (Array.isArray(choices) ? choices : []).map((choice: any) => ({
-      id: String(choice?.value || choice?.id || choice?.name),
-      name: String(choice?.name || choice?.label || choice?.value || choice?.id),
-      description: typeof choice?.description === 'string' ? choice.description : undefined,
-      source: 'acp' as const
-    })).filter((model: ExternalAgentModel) => model.id && model.id !== 'undefined')
-    return models.length ? models : [{ id: 'default', name: 'ACP Agent 默认模型', source: 'acp' }]
+    if (probe.status !== 'ready') {
+      throw new Error(probe.error || `${definition.name} 模型检测失败（${probe.status}）`)
+    }
+    const models = listAcpModelChoices(findAcpModelOption(probe.configOptions))
+    if (!models.length) throw new Error(`${definition.name} 未通过 ACP 公开可选择的模型 ID`)
+    return models
   }
 
   private async find(agentId: string): Promise<ExternalAgentDefinition> {

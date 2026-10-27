@@ -11,7 +11,7 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
 ])
 
 // Default visibility still respects the caller's allowlist and blocklist.
-export const DEFAULT_COLLABORATION_TOOL_NAMES = new Set(['list_agents', 'delegate_tasks'])
+export const DEFAULT_COLLABORATION_TOOL_NAMES = new Set(['list_agents', 'list_agent_models', 'delegate_tasks'])
 export const DEFAULT_TERMINAL_TOOL_NAMES = new Set([
   'run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'
 ])

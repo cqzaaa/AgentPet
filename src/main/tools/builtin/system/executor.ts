@@ -188,6 +188,15 @@ export class SystemExecutor implements IToolExecutor {
         if (!title || steps.length < 2) {
           return { content: 'A new task plan requires a title and at least two valid steps. Do not send empty updates; use update_task_step after creation.', success: false }
         }
+        const stepWithoutModel = steps.find((step) =>
+          step.agentId && step.agentId !== 'agentpet' && (!step.model || step.model === 'default')
+        )
+        if (stepWithoutModel) {
+          return {
+            content: `计划步骤「${stepWithoutModel.title}」必须为 ${stepWithoutModel.agentId} 指定明确模型。请先调用 list_agent_models；若返回多个模型且用户未指定，请调用 request_user_clarification。`,
+            success: false
+          }
+        }
         const existing = await taskRunner.getRunForMessage(context.sessionId, context.messageId)
         if (existing) {
           return {
@@ -290,6 +299,21 @@ export class SystemExecutor implements IToolExecutor {
         return { content: JSON.stringify(result), state: result, success: true }
       }
 
+      if (api === 'list_agent_models') {
+        const agentId = String(args.agentId || '').trim()
+        if (!agentId) return { content: 'list_agent_models requires agentId.', success: false }
+        const agent = await externalAgentManager.describe(agentId)
+        const models = await externalAgentManager.listModels(agentId, context.workspacePath)
+        const result = {
+          agentId,
+          agentName: agent.name,
+          models,
+          selectionRequired: models.length > 1,
+          selectionPolicy: models.length > 1 ? 'ask_user' : 'use_only_model'
+        }
+        return { content: JSON.stringify(result), state: result, success: true }
+      }
+
       if (api === 'delegate_tasks') {
         let rawTasks: any[] = Array.isArray(args.tasks) ? args.tasks : []
         if (rawTasks.length === 0 && Array.isArray(args.subtasks)) rawTasks = args.subtasks
@@ -310,6 +334,29 @@ export class SystemExecutor implements IToolExecutor {
           dependencies: Array.isArray(task?.dependencies) ? task.dependencies.map(String).filter(Boolean) : [],
           acceptanceCriteria: String(task?.acceptanceCriteria || '').trim() || undefined
         }))
+        const externalTasks = tasks.filter((task) => task.agentId && task.agentId !== 'agentpet')
+        const missingModel = externalTasks.find((task) => !task.model || task.model === 'default')
+        if (missingModel) {
+          return {
+            content: `子任务「${missingModel.title}」必须为 ${missingModel.agentId} 指定明确模型。请先调用 list_agent_models；若返回多个模型且用户未指定，请调用 request_user_clarification。`,
+            success: false
+          }
+        }
+        const modelsByAgent = new Map<string, Awaited<ReturnType<typeof externalAgentManager.listModels>>>()
+        for (const agentId of new Set(externalTasks.map((task) => String(task.agentId)))) {
+          modelsByAgent.set(agentId, await externalAgentManager.listModels(agentId, context.workspacePath))
+        }
+        const unsupportedModel = externalTasks.find((task) =>
+          !modelsByAgent.get(String(task.agentId))?.some((model) => model.id === task.model)
+        )
+        if (unsupportedModel) {
+          const supported = modelsByAgent.get(String(unsupportedModel.agentId)) || []
+          return {
+            content: `${unsupportedModel.agentId} 不支持模型 ${unsupportedModel.model}；可用模型：${supported.map((model) => model.id).join('、')}`,
+            state: { agentId: unsupportedModel.agentId, models: supported },
+            success: false
+          }
+        }
         const title = String(args.title || args.goal || 'Delegated task group').trim().slice(0, 120)
         const maxConcurrency = Math.max(1, Math.min(6, Number(args.maxConcurrency) || 3))
         const result = await subagentRunner.delegate(context.sessionId || 'default', context.messageId, context.turn, context.toolCallId, title, tasks, maxConcurrency, context.workspacePath, context.abortSignal)
@@ -748,7 +795,7 @@ if (-not $task.Wait(15000)) {
   }
 
   public getApiNames(): string[] {
-    return ['list_mcp_servers', 'add_mcp_server', 'list_skills', 'install_skill', 'update_task_plan', 'update_task_step', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
+    return ['list_mcp_servers', 'add_mcp_server', 'list_skills', 'install_skill', 'update_task_plan', 'update_task_step', 'list_agents', 'list_agent_models', 'delegate_tasks', 'request_skill', 'wait_skill_ready', 'get_system_status', 'get_location', 'request_user_clarification', 'manage_cron_task', 'trigger_memory_purify', 'append_memory_summary']
   }
 
   private dedupeClarificationQuestions<T extends { question: string }>(questions: T[]): T[] {

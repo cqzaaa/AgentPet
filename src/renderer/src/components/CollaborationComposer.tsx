@@ -156,7 +156,7 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
 }
 
 function TaskNode({ data, selected }: NodeProps<Node<TaskNodeData>>): React.JSX.Element {
-  const isDefaultModel = !data.model || data.model === 'default'
+  const isMissingModel = !data.model || data.model === 'default'
   return (
     <div className={`collab-flow-node ${selected ? 'selected' : ''}`}>
       <div className="collab-node-header">
@@ -182,7 +182,7 @@ function TaskNode({ data, selected }: NodeProps<Node<TaskNodeData>>): React.JSX.
         <div className="collab-node-meta">
           <span className="collab-model-pill">
             <Zap size={11} className="collab-model-icon" />
-            <span className="collab-model-name">{isDefaultModel ? '默认模型' : data.model}</span>
+            <span className="collab-model-name">{isMissingModel ? '未选择模型' : data.model}</span>
           </span>
           {data.control?.kind !== 'condition' && data.control?.kind !== 'rpa' && (
             <span className="collab-node-location" title={data.connection?.kind === 'ssh' ? `远端 SSH · ${data.connection.host || '未配置主机'}` : '本机'}>
@@ -324,13 +324,14 @@ function taskNode(
   prompt: string,
   agent: AgentChoice,
   x: number,
-  y: number
+  y: number,
+  model?: string
 ): Node<TaskNodeData> {
   return {
     id,
     type: 'task',
     position: { x, y },
-    data: { title, prompt, agentId: agent.id, agentName: agent.name }
+    data: { title, prompt, agentId: agent.id, agentName: agent.name, model }
   }
 }
 
@@ -419,7 +420,8 @@ function graphFromPlan(
       String(task.prompt || `完成该子任务并交付可验证结果。\n\n总体目标：${goal}`).slice(0, 8000),
       agent,
       60 + level * 330,
-      60 + row * 180
+      60 + row * 180,
+      String(task.model || '').trim() || undefined
     )
   })
   const edges: Edge[] = rawTasks.flatMap((task, index) => {
@@ -648,7 +650,7 @@ function RuntimeConsolePanel({
         <span>
           <strong>{agentName}</strong>
           <small>
-            {step.model || '默认模型'} · {step.title}
+            {step.model && step.model !== 'default' ? step.model : '未记录模型'} · {step.title}
           </small>
         </span>
         <em>
@@ -1056,9 +1058,18 @@ export function CollaborationComposer({
           llmConfig.model
         )
         if (!active) return
-        if (result.status === 'ready')
-          setModels((current) => ({ ...current, [agentId]: result.models as AgentModel[] }))
-        else setModelFailure(result)
+        if (result.status === 'ready') {
+          const discovered = result.models as AgentModel[]
+          setModels((current) => ({ ...current, [agentId]: discovered }))
+          if (discovered.length === 1) {
+            const onlyModel = discovered[0].id
+            setNodes((current) => current.map((node) =>
+              node.id === selectedNodeId && (!node.data.model || node.data.model === 'default')
+                ? { ...node, data: { ...node.data, model: onlyModel } }
+                : node
+            ))
+          }
+        } else setModelFailure(result)
       } catch (error: unknown) {
         if (active) setModelFailure({ status: 'error', error: errorMessage(error, '读取模型失败') })
       } finally {
@@ -1068,7 +1079,7 @@ export function CollaborationComposer({
     return () => {
       active = false
     }
-  }, [llmConfig.model, selectedAgentId, selectedConnectionKind, sessionWorkspacePath, workspacePath, modelRetry])
+  }, [llmConfig.model, selectedAgentId, selectedConnectionKind, selectedNodeId, sessionWorkspacePath, workspacePath, modelRetry, setNodes])
 
   const openAgentLogin = async (): Promise<void> => {
     if (!selectedAgentId || openingLogin) return
@@ -1167,10 +1178,46 @@ export function CollaborationComposer({
     }
     setPlanning(true)
     try {
+      const modelEntries = await Promise.all(allowedAgents.map(async (agent) => {
+        const result = await window.api.getAgentModelStatus(
+          agent.id,
+          workspacePath || sessionWorkspacePath,
+          llmConfig.model
+        )
+        if (result.status !== 'ready' || !Array.isArray(result.models) || result.models.length === 0) {
+          throw new Error(`${agent.name} 模型检测失败${result.error ? `：${result.error}` : ''}`)
+        }
+        const discovered = result.models as AgentModel[]
+        return [agent.id, discovered] as const
+      }))
+      const discoveredModels = Object.fromEntries(modelEntries) as Record<string, AgentModel[]>
+      setModels((current) => ({ ...current, ...discoveredModels }))
+      const normalizedGoal = goal.trim().toLowerCase()
+      const selectedModels = Object.fromEntries(allowedAgents.map((agent) => {
+        const candidates = discoveredModels[agent.id]
+        const mentioned = candidates.filter((model) =>
+          normalizedGoal.includes(model.id.toLowerCase()) || normalizedGoal.includes(model.name.toLowerCase())
+        )
+        return [agent.id, candidates.length === 1 ? candidates[0].id : mentioned.length === 1 ? mentioned[0].id : '']
+      })) as Record<string, string>
+      const ambiguousAgents = allowedAgents.filter((agent) => !selectedModels[agent.id])
+      if (ambiguousAgents.length > 0) {
+        const choices = ambiguousAgents.map((agent) =>
+          `${agent.name}：${discoveredModels[agent.id].map((model) => model.id).join(' / ')}`
+        ).join('；')
+        showToast(`请先在协作目标中明确模型：${choices}`, 'info')
+        return
+      }
       const available = allowedAgents.map((agent) => ({
         id: agent.id,
         name: agent.name,
-        protocol: agent.protocol
+        protocol: agent.protocol,
+        selectedModel: selectedModels[agent.id],
+        models: discoveredModels[agent.id].map((model) => ({
+          id: model.id,
+          name: model.name,
+          description: model.description
+        }))
       }))
       const response = await window.api.callLLM(
         { ...llmConfig, temperature: 0.2 },
@@ -1180,16 +1227,17 @@ export function CollaborationComposer({
             content: [
               '你是多 Agent 编排器。请生成最小、清晰、可直接执行的 DAG，只输出 JSON，不要 Markdown。',
               `目标：${goal.trim()}`,
-              `可用 Agent：${JSON.stringify(available)}`,
-              '格式：{"title":"任务组名称","tasks":[{"id":"短英文id","title":"任务名","prompt":"完整自包含任务说明与验收标准","agentId":"可用Agent id","dependencies":["前置任务id"]}]}。',
+              `可用 Agent 及其当前支持的模型：${JSON.stringify(available)}`,
+              '格式：{"title":"任务组名称","tasks":[{"id":"短英文id","title":"任务名","prompt":"完整自包含任务说明与验收标准","agentId":"可用Agent id","model":"该Agent支持的模型id","dependencies":["前置任务id"]}]}。',
               '编排规则：',
               '1. 默认只生成 2～4 个任务，绝对不超过 5 个；能由一个节点完整承担的职责不要继续拆分。',
               '2. 按完整交付职责拆分，例如“界面完整实现”“核心逻辑完整实现”“集成验收”，不要按按钮、组件、文件或细小功能拆节点。',
               '3. 不要创建纯分析、纯规划、进度汇报、结果汇总等没有直接产物的节点。',
               '4. “可用 Agent”就是用户明确勾选的参与 Agent，必须全部使用：每个列出的 Agent id 至少分配一个节点，不得遗漏，也不得使用列表外的 Agent。',
-              '5. 只有真正可以独立修改不同范围的任务才并行；可能修改同一文件的任务必须合并或建立依赖。',
-              '6. 有多个实现节点时只增加一个最终“集成验收”节点；简单目标使用“完整实现 → 验收与修复”两步即可。',
-              '7. 每个 Prompt 必须包含工作范围、预期产物和验收标准，但保持简洁，禁止重复总体目标的长篇说明。'
+              '5. 每个任务必须填写 model，并逐字复制该 Agent 的 selectedModel；不得自行改选、猜测或使用列表外模型。',
+              '6. 只有真正可以独立修改不同范围的任务才并行；可能修改同一文件的任务必须合并或建立依赖。',
+              '7. 有多个实现节点时只增加一个最终“集成验收”节点；简单目标使用“完整实现 → 验收与修复”两步即可。',
+              '8. 每个 Prompt 必须包含工作范围、预期产物和验收标准，但保持简洁，禁止重复总体目标的长篇说明。'
             ].join('\n')
           }
         ],
@@ -1215,6 +1263,13 @@ export function CollaborationComposer({
       const allowedAgentIdSet = new Set(allowedAgents.map((agent) => agent.id))
       if (plannedTasks.some((task) => !allowedAgentIdSet.has(String(task.agentId || ''))))
         throw new Error('规划使用了未参与的 Agent')
+      for (const task of plannedTasks) {
+        const agentId = String(task.agentId || '')
+        const model = String(task.model || '').trim()
+        if (!model) throw new Error(`规划未给 ${agentId} 选择模型`)
+        if (model !== selectedModels[agentId])
+          throw new Error(`规划没有使用为 ${agentId} 指定的模型：${selectedModels[agentId]}`)
+      }
       const graph = graphFromPlan(parsedPlan, allowedAgents, goal.trim())
       setNodes(graph.nodes)
       setEdges(graph.edges)
@@ -1321,6 +1376,11 @@ export function CollaborationComposer({
     }))
     if (tasks.some((task) => !task.title || (task.control.kind === 'agent' && !task.prompt))) {
       showToast('Agent 节点需要任务名称和 Prompt', 'info')
+      return
+    }
+    const missingModel = tasks.find((task) => task.control.kind === 'agent' && !task.model)
+    if (missingModel) {
+      showToast(`请为「${missingModel.title}」选择明确模型后再开始`, 'info')
       return
     }
     tasks.forEach((task) => {
@@ -1576,7 +1636,7 @@ export function CollaborationComposer({
             </div>
             <div>
               <dt>模型</dt>
-              <dd>{selectedReadonlyStep.model || '默认模型'}</dd>
+              <dd>{selectedReadonlyStep.model && selectedReadonlyStep.model !== 'default' ? selectedReadonlyStep.model : '未记录模型'}</dd>
             </div>
             <div>
               <dt>状态</dt>
@@ -2086,24 +2146,30 @@ export function CollaborationComposer({
                         )}
                         <label className="collab-field compact">
                           <span>
-                            模型 <small>{selectedConnectionKind === 'ssh' ? '使用远端默认模型' : loadingModels ? '检测中…' : '来自本地 CLI'}</small>
+                            模型 <small>{selectedConnectionKind === 'ssh' ? '填写远端模型 ID' : loadingModels ? '检测中…' : '来自本地 CLI'}</small>
                           </span>
-                          <select
-                            disabled={selectedConnectionKind === 'ssh' || loadingModels || !!modelFailure}
-                            aria-busy={loadingModels}
-                            value={selectedNode.data.model || 'default'}
-                            onChange={(event) => updateSelected({ model: event.target.value })}
-                          >
-                            {(
-                              models[selectedNode.data.agentId] || [
-                                { id: 'default', name: '默认模型', source: 'configured' }
-                              ]
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.name}
-                              </option>
-                            ))}
-                          </select>
+                          {selectedConnectionKind === 'ssh' ? (
+                            <input
+                              value={selectedNode.data.model || ''}
+                              onChange={(event) => updateSelected({ model: event.target.value.trim() || undefined })}
+                              placeholder="例如：model-id"
+                              autoComplete="off"
+                            />
+                          ) : (
+                            <select
+                              disabled={loadingModels || !!modelFailure}
+                              aria-busy={loadingModels}
+                              value={selectedNode.data.model || ''}
+                              onChange={(event) => updateSelected({ model: event.target.value || undefined })}
+                            >
+                              <option value="" disabled>请选择明确模型</option>
+                              {(models[selectedNode.data.agentId] || []).map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </label>
                         {modelFailure && (
                           <div className="collab-model-feedback" role="status">

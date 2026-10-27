@@ -311,6 +311,7 @@ function SubtaskPromptCard({
       <header
         className="subtask-prompt-header"
         onDoubleClick={isLongText ? () => setIsExpanded((prev) => !prev) : undefined}
+        title={isLongText ? (isExpanded ? '双击收起完整指令' : '双击展开完整指令') : undefined}
       >
         <div className="subtask-prompt-meta">
           <span className="subtask-prompt-agent-tag">
@@ -319,6 +320,7 @@ function SubtaskPromptCard({
             </span>
             <span>下发给 {agentId}</span>
           </span>
+          <span className="subtask-prompt-badge">完整指令</span>
           <span className="subtask-prompt-length-badge">{prompt.length} 字</span>
         </div>
 
@@ -358,7 +360,11 @@ function SubtaskPromptCard({
         </div>
       </header>
 
-      <div className="subtask-prompt-body-wrap">
+      <div
+        className="subtask-prompt-body-wrap"
+        onClick={isLongText && !isExpanded ? () => setIsExpanded(true) : undefined}
+        title={isLongText && !isExpanded ? '点击展开完整指令' : undefined}
+      >
         <div className="subtask-prompt-body message-text">
           {renderAdvancedMessage(prompt)}
         </div>
@@ -492,6 +498,9 @@ export function SubtaskDetailDrawer({
   if (!step) return null
   const status = String(step.status || 'pending')
   const agentId = String(step.agentId || 'agentpet')
+  const storedModel = String(step.model || '').trim()
+  const recordedModel = storedModel && storedModel !== 'default' ? storedModel : ''
+  const modelLabel = recordedModel || '未记录模型'
   const prompt = resolveSubtaskPrompt(step, snapshot.events || [])
   const progress = String(step.detail || '').trim()
   const result = String(step.resultSummary || '').trim()
@@ -529,7 +538,11 @@ export function SubtaskDetailDrawer({
           </span>
           <span>
             <strong id="subtask-detail-title">{step.title || '子任务详情'}</strong>
-            <small>{agentId} · 执行记录</small>
+            <small title={`执行 Agent：${agentId}；模型：${modelLabel}`}>
+              <span>{agentId}</span>
+              <span aria-hidden="true">·</span>
+              <span className={`subtask-detail-model ${recordedModel ? '' : 'is-missing'}`}>{modelLabel}</span>
+            </small>
           </span>
           <em className={`status-${status}`}>
             <StepStatusIcon status={status} />
@@ -540,10 +553,12 @@ export function SubtaskDetailDrawer({
           </button>
         </header>
 
-        <div className="subtask-conversation" role="log" aria-live="polite">
-          {/* 下发子任务卡片（长文本默认不全部展开，微毛玻璃渐变遮罩 + 展开/收起） */}
+        {/* 顶部置顶完整指令面板：展开工具栏或执行日志滚动时，始终置顶常驻可见 */}
+        <section className="subtask-detail-prompt-panel" aria-label="子任务指令要求">
           <SubtaskPromptCard prompt={prompt} agentId={agentId} />
+        </section>
 
+        <div className="subtask-conversation" role="log" aria-live="polite">
           {/* 异常终止或受阻时的错误警示提示 */}
           {isBlockedOrFailed && progress && !result && (
             <article className="subtask-message is-progress is-error">

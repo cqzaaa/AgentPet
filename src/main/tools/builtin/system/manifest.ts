@@ -89,7 +89,7 @@ The available skill catalog contains metadata only. Call request_skill only with
                 artifactPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths produced by the step' },
                 retryCount: { type: 'number', description: 'Number of attempts already made' },
                 agentId: { type: 'string', description: 'Agent id; defaults to agentpet' },
-                model: { type: 'string', description: 'Optional model id exposed by the selected Agent CLI' }
+                model: { type: 'string', description: 'Exact model id returned by list_agent_models; required for every non-default Agent and must never be "default"' }
               },
               required: ['id', 'title', 'status']
             }
@@ -100,8 +100,19 @@ The available skill catalog contains metadata only. Call request_skill only with
     },
     {
       name: 'list_agents',
-      description: 'List AgentPet and locally configured Agents with installation status. Use before selecting a non-default Agent.',
+      description: 'List AgentPet and locally configured Agents with installation status. Use before selecting a non-default Agent, then call list_agent_models before choosing its model.',
       parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'list_agent_models',
+      description: 'List the explicit model ids currently supported by one Agent. Call list_agents first. If one model is returned, select it explicitly; if multiple are returned and the user did not specify one, ask the user with request_user_clarification before delegate_tasks. Never guess, omit, or pass "default" for a non-default Agent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agentId: { type: 'string', description: 'Exact Agent id returned by list_agents' }
+        },
+        required: ['agentId']
+      }
     },
     {
       name: 'delegate_tasks',
@@ -125,7 +136,7 @@ The available skill catalog contains metadata only. Call request_skill only with
                   type: 'string',
                   description: 'Execution Agent id: agentpet (default), claude-code, codex, antigravity, or a custom ACP Agent id'
                 },
-                model: { type: 'string', description: 'Optional model id exposed by the selected Agent CLI' },
+                model: { type: 'string', description: 'Exact model id returned by list_agent_models; required for every non-default Agent and must never be "default"' },
                 dependencies: { type: 'array', items: { type: 'string' } },
                 acceptanceCriteria: { type: 'string' }
               },

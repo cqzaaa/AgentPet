@@ -88,7 +88,6 @@ export class ClaudeAcpBridge {
 
   public listModels(): ExternalAgentModel[] {
     return [
-      { id: 'default', name: '默认（CLI 当前配置）', source: 'cli-alias' },
       { id: 'sonnet', name: 'Sonnet', source: 'cli-alias' },
       { id: 'opus', name: 'Opus', source: 'cli-alias' }
     ]

@@ -13,6 +13,7 @@ function isNetworkScript(name: string, args: Record<string, unknown>): boolean {
 }
 
 const RECOVERY = '[网页检索纠偏] 连续尝试未获得可靠进展。停止猜测下载地址、仓库路径或论文编号。请改写关键词并用 web_search 获取真实候选，随后 web_fetch 打开来源页和链接；也可读取已下载文件核验真实标题与正文。受限页面使用 desktop-control，403/429 不要反复重试。未核验的下载不能计为完成。'
+const WEB_FETCH_REQUIRED = '[网页研究路由保护] web_search 已返回候选来源，但尚未打开任何来源正文。当前必须先调用 web_fetch 打开最相关的候选 URL；不要改用 Python、终端、curl、PowerShell、重复搜索或直接下载来绕过正文核验。若 web_fetch 无法读取该来源，再更换候选、搜索方式或使用 desktop-control。'
 
 function literalUrls(text: string): string[] {
   return (text.match(/https?:\/\/[^\s"'<>`\\)\]]+/g) || []).flatMap(value => {
@@ -27,6 +28,7 @@ export class WebResearchProgress {
   private active = false
   private failedScripts = 0
   private searchesWithoutPage = 0
+  private awaitingCandidatePage = false
   private knownUrls = new Set<string>()
 
   constructor(sourceHistory: string[] = []) {
@@ -40,6 +42,9 @@ export class WebResearchProgress {
   beforeCall(name: string, args: Record<string, unknown>): string | undefined {
     if (name === 'web_download' && typeof args.url === 'string') {
       this.rememberUrls(args.url)
+    }
+    if (this.awaitingCandidatePage && (name === 'web_search' || name === 'web_download' || isNetworkScript(name, args))) {
+      return WEB_FETCH_REQUIRED
     }
     if (this.active && this.failedScripts >= 3 && isNetworkScript(name, args)) return RECOVERY
     if (this.active && isNetworkScript(name, args)) {
@@ -61,10 +66,16 @@ export class WebResearchProgress {
     if (result.toolName === 'web_search') {
       this.active = true
       this.searchesWithoutPage++
+      if (result.toolSuccess && result.toolState?.researchStatus === 'candidates' && result.toolState.sources?.length) {
+        this.awaitingCandidatePage = true
+      }
       if (!result.toolSuccess || this.searchesWithoutPage >= 3) return RECOVERY
     }
     if (result.toolName === 'web_fetch') {
       this.active = true
+      // A real fetch attempt satisfies the search -> open-page routing step. If
+      // it fails, recovery may search again or try another candidate/source.
+      this.awaitingCandidatePage = false
       if (result.toolSuccess && result.toolState?.researchStatus === 'page_read') {
         this.failedScripts = 0
         this.searchesWithoutPage = 0

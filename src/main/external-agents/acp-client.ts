@@ -14,6 +14,7 @@ import { Readable, Transform, Writable } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
 import * as acp from '@agentclientprotocol/sdk'
 import { createAcpProtocolRecorder } from './acp-protocol-recorder'
+import { findAcpModelOption, listAcpModelChoices } from './acp-model-options'
 import { classifyAgentError, killProcessTree, resolveExecutable, spawnAgentProcess } from './process-utils'
 import type {
   ExternalAgentDefinition,
@@ -391,12 +392,29 @@ export class AcpExternalAgentClient {
         cancelSession = () => {
           void ctx.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId }).catch(() => {})
         }
+        let configOptions = session.newSessionResponse.configOptions || undefined
+        const requestedModel = options?.model?.trim()
+        if (prompt && requestedModel && requestedModel !== 'default') {
+          const modelOption = findAcpModelOption(configOptions)
+          const configId = String(modelOption?.id || '').trim()
+          if (!configId) throw new Error('ACP Agent 未公开可配置的模型选项')
+          const supportedModels = listAcpModelChoices(modelOption)
+          if (supportedModels.length > 0 && !supportedModels.some(model => model.id === requestedModel)) {
+            throw new Error(`ACP Agent 不支持模型 ${requestedModel}；可用模型：${supportedModels.map(model => model.id).join('、')}`)
+          }
+          const response = await ctx.request(acp.methods.agent.session.setConfigOption, {
+            sessionId: session.sessionId,
+            configId,
+            value: requestedModel
+          })
+          configOptions = response.configOptions
+        }
         const base: AcpConnectionResult = {
           protocolVersion: initialized.protocolVersion,
           agentInfo: initialized.agentInfo || undefined,
           capabilities: initialized.agentCapabilities as Record<string, unknown> | undefined,
           modes: session.modes,
-          configOptions: session.newSessionResponse.configOptions || undefined,
+          configOptions,
           sessionId: session.sessionId
         }
         // 如果是探针（probe）调用，没有 prompt，则完成会话建立后即可直接返回

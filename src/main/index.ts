@@ -5996,6 +5996,10 @@ app.whenReady().then(() => {
       }
       const selectedAgentId = request.step.agentId || 'agentpet'
       if (selectedAgentId !== 'agentpet') {
+        const selectedModel = request.step.model?.trim()
+        if (!selectedModel || selectedModel === 'default') {
+          throw new Error(`${selectedAgentId} 子任务缺少明确模型 ID，请重新选择模型后执行`)
+        }
         await request.reportProgress(`正在由 ${selectedAgentId} 执行`)
         const cwd = request.run.workspacePath || getActiveStorageDir()
         const agent = await externalAgentManager.describe(selectedAgentId)
@@ -6004,12 +6008,12 @@ app.whenReady().then(() => {
           agentId: selectedAgentId,
           agentName: agent.name,
           protocol: agent.protocol,
-          model: request.step.model || 'default',
+          model: selectedModel,
           attempt,
           request: sanitizeTraceValue({
             operation: 'runPrompt',
             agentId: selectedAgentId,
-            model: request.step.model || 'default',
+            model: selectedModel,
             cwd,
             prompt: request.prompt
           })
@@ -6024,7 +6028,7 @@ app.whenReady().then(() => {
             agentId: selectedAgentId,
             prompt: request.prompt,
             cwd,
-            model: request.step.model
+            model: selectedModel
           }
           const onAgentUpdate = (update: unknown): Promise<void> =>
             eventBatcher.push({
@@ -6082,7 +6086,7 @@ app.whenReady().then(() => {
             agentId: selectedAgentId,
             agentName: agent.name,
             protocol: agent.protocol,
-            model: request.step.model || 'default',
+            model: selectedModel,
             attempt,
             response: sanitizeTraceValue({
               sessionId: result.sessionId,
@@ -6124,7 +6128,7 @@ app.whenReady().then(() => {
             agentId: selectedAgentId,
             agentName: agent.name,
             protocol: agent.protocol,
-            model: request.step.model || 'default',
+            model: selectedModel,
             attempt,
             error: sanitizeTraceValue({
               name: error instanceof Error ? error.name : 'Error',
