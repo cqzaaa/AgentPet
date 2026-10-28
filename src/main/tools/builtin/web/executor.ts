@@ -466,7 +466,7 @@ export class WebExecutor implements IToolExecutor {
       `[${source.id}] 标题: ${source.title}\nURL: ${source.url}\n摘要: ${source.snippet || '无'}`
     ).join('\n\n')
     return {
-      content: `<web_sources>\n${content}\n</web_sources>\n\n这些是主题匹配的搜索候选，尚未核验正文。请用 web_fetch 打开最相关的来源页，核对真实标题、摘要和下载链接，再引用或下载。不得由文件格式或下载成功推断内容相关。`,
+      content: `<web_sources>\n${content}\n</web_sources>\n\n这些是主题匹配的搜索候选，尚未核验正文。请用 web_fetch 打开最相关的来源页，核对真实标题、摘要和下载链接，再引用或下载。不得由文件格式或下载成功推断内容相关。在正式回答中凡采纳了上述网页信息，必须在对应语句末尾标注来源编号（如 [S1]、[S2]），前端会自动渲染为右上角数字引用角标。`,
       state: { sources, researchStatus: 'candidates', attempts },
       success: true
     }

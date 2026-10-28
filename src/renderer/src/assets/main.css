@@ -11863,18 +11863,593 @@ body {
   pointer-events: none;
 }
 
+.web-citation-sup {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: super;
+  line-height: 0;
+  margin: 0 1.5px 0 2px;
+  top: -0.18em;
+  position: relative;
+}
+
 .web-citation {
   display: inline-flex;
   align-items: center;
-  margin: 0 2px;
-  padding: 1px 5px;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4.5px;
   border-radius: 999px;
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.1);
-  font-size: 0.78em;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.web-citation:hover {
+  color: #f8fafc;
+  background: #0284c7;
+  border-color: rgba(125, 211, 252, 0.65);
+  box-shadow:
+    0 3px 10px -2px rgba(2, 132, 199, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transform: translateY(-1.5px) scale(1.06);
+}
+
+.web-citation:active {
+  transform: translateY(0) scale(0.95);
+}
+
+.web-citation:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
+.web-citation.is-static {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.agent-window-container.light .web-citation {
+  color: #0369a1;
+  background: rgba(2, 132, 199, 0.09);
+  border-color: rgba(2, 132, 199, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.agent-window-container.light .web-citation:hover {
+  color: #ffffff;
+  background: #0284c7;
+  border-color: #0369a1;
+  box-shadow: 0 3px 10px -2px rgba(2, 132, 199, 0.32);
+}
+
+/* ── Taste-Skill Double-Bezel 网页引用浮层卡片 ────────────────────────── */
+.web-citation-popover {
+  position: fixed;
+  z-index: 10025;
+  width: min(368px, calc(100vw - 24px));
+  animation: web-citation-popover-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.web-citation-popover.placement-top {
+  transform: translateY(-100%);
+  animation: web-citation-popover-in-top 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes web-citation-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes web-citation-popover-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - 6px)) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-100%) scale(1);
+  }
+}
+
+/* Outer Shell (Doppelrand / Double-Bezel) */
+.web-citation-popover-shell {
+  padding: 4px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 22px 48px -12px rgba(4, 9, 20, 0.52),
+    0 4px 14px -2px rgba(4, 9, 20, 0.28);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+/* Inner Core */
+.web-citation-popover-core {
+  padding: 11px 12px 11px;
+  border-radius: 12px;
+  background: rgba(17, 22, 33, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.web-citation-popover-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.web-citation-popover-index {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.25;
-  vertical-align: baseline;
+}
+
+.web-citation-popover-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5px;
+}
+
+.web-citation-popover-domain {
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-citation-popover-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-citation-popover-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.web-citation-popover-close:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+}
+
+.web-citation-popover-snippet {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(56, 189, 248, 0.5);
+  color: #94a3b8;
+  font-size: 11.5px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.web-citation-popover-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Island Button-in-Button 地址栏：显示完整 URL，点击直接打开网页 */
+.web-citation-url-bar {
+  min-width: 0;
+  height: 32px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  background: rgba(14, 165, 233, 0.08);
+  color: #bae6fd;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.web-citation-url-bar:hover {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(56, 189, 248, 0.48);
+}
+
+.web-citation-url-bar:active {
+  transform: scale(0.985);
+}
+
+.web-citation-url-text {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #7dd3fc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-citation-url-cta {
+  height: 24px;
+  padding: 0 4px 0 9px;
+  border-radius: 999px;
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: background-color 0.2s ease;
+}
+
+.web-citation-url-bar:hover .web-citation-url-cta {
+  background: #0369a1;
+}
+
+.web-citation-url-cta-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.web-citation-url-bar:hover .web-citation-url-cta-icon {
+  transform: translate(1px, -1px) scale(1.05);
+}
+
+.web-citation-copy-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.15s ease;
+}
+
+.web-citation-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #f1f5f9;
+}
+
+.web-citation-copy-btn:active {
+  transform: scale(0.95);
+}
+
+.web-citation-copy-btn.is-copied {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+/* Light Mode 适配 */
+.agent-window-container.light .web-citation-popover-shell {
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 20px 44px -12px rgba(15, 23, 42, 0.16),
+    0 4px 12px -2px rgba(15, 23, 42, 0.07);
+}
+
+.agent-window-container.light .web-citation-popover-core {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(15, 23, 42, 0.07);
+  box-shadow: inset 0 1px 0 #ffffff;
+  color: #0f172a;
+}
+
+.agent-window-container.light .web-citation-popover-index {
+  background: rgba(2, 132, 199, 0.1);
+  border-color: rgba(2, 132, 199, 0.25);
+  color: #0284c7;
+}
+
+.agent-window-container.light .web-citation-popover-title {
+  color: #0f172a;
+}
+
+.agent-window-container.light .web-citation-popover-close:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+.agent-window-container.light .web-citation-popover-snippet {
+  background: #f8fafc;
+  border-left-color: #0284c7;
+  color: #475569;
+}
+
+.agent-window-container.light .web-citation-url-bar {
+  background: #f0f9ff;
+  border-color: rgba(2, 132, 199, 0.24);
+  color: #0369a1;
+}
+
+.agent-window-container.light .web-citation-url-bar:hover {
+  background: #e0f2fe;
+  border-color: rgba(2, 132, 199, 0.42);
+}
+
+.agent-window-container.light .web-citation-url-text {
+  color: #0369a1;
+}
+
+.agent-window-container.light .web-citation-copy-btn {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.agent-window-container.light .web-citation-copy-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* ── 消息底部精简来源抽屉 ────────────────────────── */
+.web-sources-drawer {
+  margin-top: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-card) 65%, transparent);
+  padding: 6px 10px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.web-sources-drawer[open] {
+  padding-bottom: 10px;
+}
+
+.web-sources-summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.web-sources-summary::-webkit-details-marker {
+  display: none;
+}
+
+.web-sources-summary:hover {
+  color: var(--text-primary);
+}
+
+.web-sources-summary-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.26);
+  color: #38bdf8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agent-window-container.light .web-sources-summary-icon {
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.09);
+  border-color: rgba(2, 132, 199, 0.22);
+}
+
+.web-sources-summary-chevron {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0.7;
+}
+
+.web-sources-drawer[open] .web-sources-summary-chevron {
+  transform: rotate(90deg);
+}
+
+.web-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+
+.web-sources-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.web-sources-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.web-sources-list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+}
+
+.web-sources-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+.web-sources-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.18s ease;
+}
+
+.web-sources-item:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+.web-sources-item:active {
+  transform: scale(0.992);
+}
+
+.web-sources-item-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.web-sources-item-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-sources-item-domain {
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.web-sources-item-snippet {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.web-sources-item-url {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: #38bdf8;
+}
+
+.web-sources-item-url > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-window-container.light .web-sources-item-url {
+  color: #0284c7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .web-citation,
+  .web-citation-popover,
+  .web-citation-url-bar,
+  .web-citation-url-cta-icon,
+  .web-sources-item {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .lucide {

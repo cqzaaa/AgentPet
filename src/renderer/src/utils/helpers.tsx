@@ -30,7 +30,12 @@ export function createSessionId(prefix = 'agent:main:dashboard'): string {
 // ── 字节格式化 ───────────────────────────────────────────────
 export function normalizeSearchCitations(text: string, display: 'markdown' | 'plain' = 'markdown'): string {
   if (!text) return text
-  const citation = (_match: string, id: string) => display === 'plain' ? `【S${id}】` : `[S${id}]`
+  const citation = (_match: string, id: string) => display === 'plain' ? `[${id}]` : `[S${id}]`
+  const expandCitationList = (raw: string) => {
+    const ids = Array.from(raw.matchAll(/S?(\d+)/gi), m => m[1])
+    if (ids.length === 0) return raw
+    return ids.map(id => display === 'plain' ? `[${id}]` : `[S${id}]`).join('')
+  }
 
   return text
     .replace(/\[\s*\[S(\d+)\]\s*\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
@@ -38,6 +43,9 @@ export function normalizeSearchCitations(text: string, display: 'markdown' | 'pl
     .replace(/\[S(\d+)\]\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, citation)
     .replace(/\[S(\d+)\]\s*\(\s*\)\s*\(\s*[^)\n]*\s*\)/gi, citation)
     .replace(/\[S(\d+)\]\s*\(\s*\)/gi, citation)
+    // 支持模型输出的组合引用如 [S1, S2]、[S1、S2] 或 【S1, S2】
+    .replace(/(?:\[|【)\s*(S\d+(?:\s*[,，、/]\s*S?\d+)+)\s*(?:\]|】)/gi, (_m, list) => expandCitationList(list))
+    .replace(/【\s*S(\d+)\s*】/gi, citation)
     .replace(/\]\s*\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
     .replace(/\s*(?:\(\s*\))?\s*(?:\]\s*)?\(\s*newsDetail_forward_[^)\n]*\s*\)/gi, '')
     .replace(/\bnewsDetail_forward_[\w-]+\b/gi, '')

@@ -191,7 +191,8 @@ Use web_download to download discovered document, dataset, code, or package URLs
 If a page requires a button, expansion, pagination or login without a usable link, load desktop-control and observe the visible browser. Do not invent DOM selectors, download endpoints, repository paths or paper identifiers; do not bypass verification or access restrictions.
 For requested documents: discover a real source page, verify its actual title/abstract and topic, follow its published download link with web_download, then inspect the downloaded document with the file/office tools. Keep actual title, source URL and local file together. A PDF header, successful download, or plausible filename proves neither relevance nor authenticity. Never rename an unrelated paper to match the requested subject.
 🚫 严禁以生成伪造检索：当用户明确要求在网上检索、寻找或下载文档（如 MD/PDF/DOCX 等）时，必须通过网络真实下载交付。严禁在未能找到现成文件时擅自使用本地工具自行编写内容、转换格式冒充网上下载！若多次检索均未获得可下载文件，必须如实说明检索情况并提供已找到的相关网页候选链接供用户查阅。
-After two failed approaches, change the source/query/navigation method. On repeated 403/429 or timeouts, stop retrying the same route and explain the remaining gap. Distinguish publication time from event time, and cite source URLs.`
+After two failed approaches, change the source/query/navigation method. On repeated 403/429 or timeouts, stop retrying the same route and explain the remaining gap. Distinguish publication time from event time, and cite source URLs.
+- 网页引用标注规范：当你在正式回答中采纳了 \`web_search\` 或 \`web_fetch\` 返回的网页内容时，**必须**在对应事实、数据或结论句子的末尾紧贴标注对应的来源编号（例如 \`[S1]\`、\`[S2]\`；若同处参考多个来源可并列写为 \`[S1][S2]\`）。严禁省略编号，前端会自动将其渲染为文本右上角可点击的数字角标（1、2、3）。`
   }),
   staticSkill({
     id: 'desktop-control',

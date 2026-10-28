@@ -32,6 +32,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  Globe,
   Hourglass,
   Lightbulb,
   LoaderCircle,
@@ -297,7 +298,11 @@ function parseInlineMarkdown(text: string): string {
   html = html.replace(/!\[(.*?)\]\(((?:[^()]|\([^()]*\))*)\)/g, '<img src="$2" alt="$1" class="chat-inline-image" style="max-width:100%;max-height:200px;border-radius:8px;margin:4px 0;display:block;cursor:zoom-in" onerror="this.outerHTML=\'<div class=\\\'image-error-tip\\\' style=\\\'color:#888;font-size:12px;border:1px dashed #ccc;padding:8px;border-radius:6px;margin:4px 0;display:inline-block;background-color:rgba(0,0,0,0.02)\\\'>已被删除 (\'+this.alt+\')</div>\'" />')
 
   // 6. 链接 [text](url)
-  html = html.replace(/\[S(\d+)\]\(((?:[^()]|\([^()]*\))*)\)/g, '<a href="$2" target="_blank" class="markdown-link local-link web-citation">【S$1】</a>')
+  html = html.replace(/\[S(\d+)(?:#(\d+))?\]\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, rawNum, displaySeq, rawHref) => {
+    const cleanHref = rawHref.replace(/^&lt;/, '').replace(/&gt;$/, '').trim()
+    const badgeNum = displaySeq || rawNum
+    return `<sup class="web-citation-sup"><button type="button" class="web-citation" data-source-id="S${rawNum}" data-source-num="${badgeNum}" data-source-url="${cleanHref}" aria-label="查看网页来源 ${badgeNum}">${badgeNum}</button></sup>`
+  })
   html = html.replace(/(?<!!)\[(.*?)\]\(((?:[^()]|\([^()]*\))*)\)/g, (_match, label, rawHref) => {
     const cleanHref = rawHref.replace(/^&lt;/, '').replace(/&gt;$/, '').trim()
     const isLocal = isLocalFileReference(cleanHref)
@@ -316,8 +321,12 @@ function parseInlineMarkdown(text: string): string {
     return `<button type="button" class="knowledge-citation" data-citation-id="KB${id}" aria-label="查看知识库引用 KB${id}">【KB${id}】</button>`
   })
 
-  // 联网回答中的可验证来源角标（实际链接由消息底部的「来源」卡片提供）
-  html = html.replace(/\[S(\d+)\]/g, '<span class="web-citation">【S$1】</span>')
+  // 联网回答中的可验证来源角标：在文本右上角显示 1、2、3，点击后弹出地址卡片
+  html = html.replace(/(?:\[S(\d+)(?:#(\d+))?\]|【S(\d+)(?:#(\d+))?】)/gi, (_match, s1, seq1, s2, seq2) => {
+    const rawNum = s1 || s2
+    const badgeNum = seq1 || seq2 || rawNum
+    return `<sup class="web-citation-sup"><button type="button" class="web-citation" data-source-id="S${rawNum}" data-source-num="${badgeNum}" aria-label="查看网页来源 ${badgeNum}">${badgeNum}</button></sup>`
+  })
 
   // 8. 还原受保护的内联代码
   if (inlineCodeMap.size > 0) {
@@ -1701,6 +1710,31 @@ interface KnowledgeCitationPopoverState {
   loading: boolean
 }
 
+interface WebCitationPopoverState {
+  sourceId: string
+  displayNum: string
+  top: number
+  left: number
+  placement: 'top' | 'bottom'
+  source: {
+    id: string
+    title: string
+    url: string
+    snippet?: string
+    sourceType?: string
+    domain: string
+  }
+}
+
+function extractUrlDomain(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl)
+    return parsed.hostname.replace(/^www\./i, '')
+  } catch {
+    return rawUrl
+  }
+}
+
 interface TextSelectionPopoverState {
   text: string
   top: number
@@ -2027,9 +2061,12 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const [promptInfoLoading, setPromptInfoLoading] = useState(false)
   const [activePromptTab, setActivePromptTab] = useState<'recall' | 'context' | 'tools'>('recall')
   const [citationPopover, setCitationPopover] = useState<KnowledgeCitationPopoverState | null>(null)
+  const [webCitationPopover, setWebCitationPopover] = useState<WebCitationPopoverState | null>(null)
+  const [webUrlCopied, setWebUrlCopied] = useState(false)
   const [selectionPopover, setSelectionPopover] = useState<TextSelectionPopoverState | null>(null)
   const [selectionPrompt, setSelectionPrompt] = useState('')
   const citationPopoverRef = useRef<HTMLDivElement>(null)
+  const webCitationPopoverRef = useRef<HTMLDivElement>(null)
   const selectionPopoverRef = useRef<HTMLDivElement>(null)
   const selectionPromptRef = useRef<HTMLInputElement>(null)
   const promptModalRef = useRef<HTMLDivElement>(null)
@@ -2164,6 +2201,33 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   }, [citationPopover])
 
   useEffect(() => {
+    if (!webCitationPopover) return undefined
+    const close = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null
+      if (webCitationPopoverRef.current?.contains(target as Node)) return
+      if (target?.closest?.('.web-citation')) return
+      setWebCitationPopover(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setWebCitationPopover(null)
+    }
+    const closeOnScroll = (event: Event): void => {
+      if (webCitationPopoverRef.current && event.target instanceof Node && webCitationPopoverRef.current.contains(event.target)) {
+        return
+      }
+      setWebCitationPopover(null)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('scroll', closeOnScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('scroll', closeOnScroll, true)
+    }
+  }, [webCitationPopover])
+
+  useEffect(() => {
     if (!showPromptModal) return undefined
     const previousOverflow = document.documentElement.style.overflow
     const closeOnEscape = (event: KeyboardEvent): void => {
@@ -2194,6 +2258,58 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   }, [showPromptModal])
 
   const openKnowledgeCitation = async (event: React.MouseEvent): Promise<void> => {
+    const webButton = (event.target as HTMLElement).closest<HTMLButtonElement>('button.web-citation')
+    if (webButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      const sourceId = webButton.dataset.sourceId || ''
+      const displayNum = webButton.dataset.sourceNum || sourceId.replace(/^S/i, '') || '1'
+      const fallbackUrl = webButton.dataset.sourceUrl || ''
+
+      // 若再次点击同一个已打开的角标，则收起浮层
+      if (webCitationPopover && webCitationPopover.sourceId === sourceId && webCitationPopover.displayNum === displayNum) {
+        setWebCitationPopover(null)
+        return
+      }
+
+      const allSources = (msg.toolSteps || [])
+        .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
+        .flatMap((step: any) => step.detail)
+        .filter((item: any) => item?.id && item?.url)
+
+      const matched = allSources.find((item: any) => String(item.id).toUpperCase() === sourceId.toUpperCase())
+      const url = matched?.url || fallbackUrl
+      if (!url) return
+
+      const rect = webButton.getBoundingClientRect()
+      const width = Math.min(368, window.innerWidth - 24)
+      const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left + rect.width / 2 - width / 2))
+      const estimatedHeight = matched?.snippet ? 176 : 128
+      const placeBelow = rect.bottom + estimatedHeight + 14 < window.innerHeight || rect.top < estimatedHeight + 14
+      const top = placeBelow
+        ? rect.bottom + 8
+        : Math.max(12, rect.top - 8)
+
+      setWebUrlCopied(false)
+      setCitationPopover(null)
+      setWebCitationPopover({
+        sourceId: sourceId || `S${displayNum}`,
+        displayNum,
+        top,
+        left,
+        placement: placeBelow ? 'bottom' : 'top',
+        source: {
+          id: matched?.id || sourceId || `S${displayNum}`,
+          title: matched?.title || extractUrlDomain(url),
+          url,
+          snippet: matched ? readableWebSourceSnippet(matched) : undefined,
+          sourceType: matched?.sourceType,
+          domain: extractUrlDomain(url)
+        }
+      })
+      return
+    }
+
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.knowledge-citation')
     if (!button) return
     event.preventDefault()
@@ -2228,6 +2344,32 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     setCitationPopover(null)
   }
 
+  const openWebCitationUrl = (url: string): void => {
+    if (!url) return
+    if (window.api?.openExternalUrl) {
+      void window.api.openExternalUrl(url).then((ok) => {
+        if (!ok) window.open(url, '_blank', 'noopener,noreferrer')
+      }).catch(() => {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      })
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+    setWebCitationPopover(null)
+  }
+
+  const copyWebCitationUrl = (event: React.MouseEvent, url: string): void => {
+    event.stopPropagation()
+    if (!url) return
+    if (window.api?.copyText) {
+      window.api.copyText(url)
+    } else {
+      void navigator.clipboard.writeText(url)
+    }
+    setWebUrlCopied(true)
+    setTimeout(() => setWebUrlCopied(false), 1800)
+  }
+
   // 缓存消息文本渲染结果，避免重渲染导致 DOM 替换丢失选区
   const deferredStreamingText = useDeferredValue(msg.isThinking ? msg.text : null)
   const textForRender = msg.isThinking ? deferredStreamingText : msg.text
@@ -2259,19 +2401,48 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         ? `系统：已成功加载 ${currentAvatarName} 神经网络内核 V2.1.0。内核状态 [正常]。`
         : sourceText
     // Resolve source IDs emitted by the model (for example [新浪新闻 S32])
-    // to the URL retained in the corresponding web_sources tool event.
+    // into sequentially numbered [S1], [S2], [S3]... in order of appearance
+    // so inline superscript badges always read cleanly as 1, 2, 3.
     displayText = normalizeSearchCitations(displayText)
     const sourceById = new Map(
       (msg.toolSteps || [])
         .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
         .flatMap((step: any) => step.detail)
         .filter((source: any) => source?.id && source?.url)
-        .map((source: any) => [source.id, source])
+        .map((source: any) => [String(source.id).toUpperCase(), source])
     )
-    displayText = displayText.replace(/\[([^\]\n]*?\bS\d+)\](?!\()/g, (citation, label) => {
-      const sourceId = label.match(/\b(S\d+)\b/)?.[1]
-      const source = sourceId ? sourceById.get(sourceId) as any : undefined
-      return source ? `[${sourceId}](${source.url})` : citation
+    const appearanceOrder = new Map<string, number>()
+    let nextDisplayNum = 1
+    const registerAppearance = (rawId: string): number => {
+      const key = rawId.toUpperCase()
+      const existing = appearanceOrder.get(key)
+      if (existing) return existing
+      const assigned = nextDisplayNum++
+      appearanceOrder.set(key, assigned)
+      return assigned
+    }
+
+    // 1. 先处理已经是 [S12](url) 的形式
+    displayText = displayText.replace(/\[S(\d+)\]\(((?:[^()]|\([^()]*\))*)\)/gi, (_full, num, url) => {
+      const sourceId = `S${num}`
+      const seqNum = registerAppearance(sourceId)
+      return `@@WEBCITE_${sourceId}_${seqNum}_${url}@@`
+    })
+
+    // 2. 处理 [新浪新闻 S12] 或 [S12] 形式
+    displayText = displayText.replace(/\[([^\]\n]*?\bS\d+)\](?!\()/gi, (citation, label) => {
+      const sourceId = label.match(/\b(S\d+)\b/i)?.[1]?.toUpperCase()
+      if (!sourceId) return citation
+      const source = sourceById.get(sourceId) as any
+      const seqNum = registerAppearance(sourceId)
+      return source?.url
+        ? `@@WEBCITE_${sourceId}_${seqNum}_${source.url}@@`
+        : `@@WEBCITE_${sourceId}_${seqNum}_@@`
+    })
+
+    // 3. 还原为带真实 sourceId、顺序显示编号与链接的标准标记
+    displayText = displayText.replace(/@@WEBCITE_(S\d+)_(\d+)_([^@]*)@@/g, (_m, sourceId, seqNum, url) => {
+      return url ? `[${sourceId}#${seqNum}](${url})` : `[${sourceId}#${seqNum}]`
     })
     return renderAdvancedMessage(displayText, onPreviewFile)
   }, [cleanedText, quotedMessage, currentAvatarName, msg.toolSteps, onPreviewFile])
@@ -2384,14 +2555,25 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const clarificationSteps = toolSteps.filter((step: any) => step.type === 'clarification')
   const credentialSteps = toolSteps.filter((step: any) => step.type === 'credential')
   const officeRuntimeSteps = toolSteps.filter((step: any) => step.type === 'officeRuntime')
-  const citedSourceIds = new Set(Array.from(String(msg.text || '').matchAll(/\bS(\d+)\b/g), match => `S${match[1]}`))
-  const webSources = Array.from(new Map(
+  const citedSourceOrder: string[] = []
+  for (const match of String(msg.text || '').matchAll(/\bS(\d+)\b/gi)) {
+    const id = `S${match[1]}`
+    if (!citedSourceOrder.includes(id)) citedSourceOrder.push(id)
+  }
+  const citedSourceIds = new Set(citedSourceOrder)
+  const webSourceMap = new Map(
     toolSteps
       .filter((step: any) => step.type === 'sources' && Array.isArray(step.detail))
       .flatMap((step: any) => step.detail)
-      .filter((source: any) => source?.id && source?.url && citedSourceIds.has(source.id))
-      .map((source: any) => [source.id, source])
-  ).values()) as any[]
+      .filter((source: any) => source?.id && source?.url && citedSourceIds.has(String(source.id).toUpperCase()))
+      .map((source: any) => [String(source.id).toUpperCase(), source])
+  )
+  const webSources = citedSourceOrder
+    .map((id, idx) => {
+      const found = webSourceMap.get(id)
+      return found ? { ...found, displayNum: idx + 1 } : null
+    })
+    .filter(Boolean) as any[]
   const senderName = msg.sender === 'user' ? '我' : currentAvatarName
   const combinedVisibleToolSteps = combineToolSteps([...visibleToolSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0)), msg.isThinking)
   const activityBlocks: Array<{
@@ -2897,21 +3079,103 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           document.querySelector('.agent-window-container') || document.body
         )}
 
-        {webSources.length > 0 && !msg.isThinking && (
-          <details style={{ marginTop: '12px', border: '1px solid rgba(59, 130, 246, 0.24)', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.04)', padding: '8px 12px' }}>
-            <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: '12px', fontWeight: 600 }}>
-              来源 ({webSources.length})
-            </summary>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
-              {webSources.map((source: any) => (
-                <a key={source.id} href={source.url} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', padding: '8px', borderRadius: '6px', background: 'var(--bg-card, #fff)' }}>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'baseline' }}>
-                    <span className="web-citation">{source.id}</span>
-                    <span style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.title}</span>
+        {webCitationPopover && createPortal(
+          <div
+            ref={webCitationPopoverRef}
+            className={`web-citation-popover placement-${webCitationPopover.placement}`}
+            style={{ top: webCitationPopover.top, left: webCitationPopover.left }}
+            role="dialog"
+            aria-label={`网页引用 ${webCitationPopover.displayNum} 详情`}
+          >
+            <div className="web-citation-popover-shell">
+              <div className="web-citation-popover-core">
+                <header className="web-citation-popover-header">
+                  <span className="web-citation-popover-index">{webCitationPopover.displayNum}</span>
+                  <div className="web-citation-popover-meta">
+                    <span className="web-citation-popover-domain">{webCitationPopover.source.domain}</span>
+                    <strong className="web-citation-popover-title" title={webCitationPopover.source.title}>
+                      {webCitationPopover.source.title}
+                    </strong>
                   </div>
-                  {source.snippet && <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', marginTop: '4px', lineHeight: 1.45, overflowWrap: 'anywhere' }}>{readableWebSourceSnippet(source)}</div>}
-                  <div style={{ fontSize: '10px', color: '#2563eb', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.url}</div>
-                </a>
+                  <button
+                    type="button"
+                    className="web-citation-popover-close"
+                    aria-label="关闭来源浮层"
+                    onClick={() => setWebCitationPopover(null)}
+                  >
+                    <X size={13} strokeWidth={2} />
+                  </button>
+                </header>
+
+                {webCitationPopover.source.snippet && (
+                  <p className="web-citation-popover-snippet">
+                    {webCitationPopover.source.snippet}
+                  </p>
+                )}
+
+                <div className="web-citation-popover-actions">
+                  <button
+                    type="button"
+                    className="web-citation-url-bar"
+                    onClick={() => openWebCitationUrl(webCitationPopover.source.url)}
+                    title={`点击打开：${webCitationPopover.source.url}`}
+                  >
+                    <span className="web-citation-url-text">{webCitationPopover.source.url}</span>
+                    <span className="web-citation-url-cta">
+                      <span>打开</span>
+                      <span className="web-citation-url-cta-icon">
+                        <ExternalLink size={11} strokeWidth={2.2} />
+                      </span>
+                    </span>
+                  </button>
+                  <Tooltip content={webUrlCopied ? '已复制链接' : '复制网页地址'} placement="top">
+                    <button
+                      type="button"
+                      className={`web-citation-copy-btn ${webUrlCopied ? 'is-copied' : ''}`}
+                      onClick={(e) => copyWebCitationUrl(e, webCitationPopover.source.url)}
+                      aria-label="复制链接地址"
+                    >
+                      {webUrlCopied ? <Check size={13} strokeWidth={2.4} /> : <Copy size={13} strokeWidth={2} />}
+                    </button>
+                  </Tooltip>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.querySelector('.agent-window-container') || document.body
+        )}
+
+        {webSources.length > 0 && !msg.isThinking && (
+          <details className="web-sources-drawer">
+            <summary className="web-sources-summary">
+              <span className="web-sources-summary-icon" aria-hidden="true">
+                <Globe size={13} strokeWidth={2} />
+              </span>
+              <span>已采纳 {webSources.length} 个网页来源</span>
+              <ChevronRight size={13} className="web-sources-summary-chevron" aria-hidden="true" />
+            </summary>
+            <div className="web-sources-list">
+              {webSources.map((source: any) => (
+                <button
+                  key={source.id}
+                  type="button"
+                  className="web-sources-item"
+                  onClick={() => openWebCitationUrl(source.url)}
+                  title={`点击在浏览器中打开：${source.url}`}
+                >
+                  <div className="web-sources-item-top">
+                    <span className="web-citation is-static">{source.displayNum}</span>
+                    <span className="web-sources-item-title">{source.title}</span>
+                    <span className="web-sources-item-domain">{extractUrlDomain(source.url)}</span>
+                  </div>
+                  {source.snippet && (
+                    <div className="web-sources-item-snippet">{readableWebSourceSnippet(source)}</div>
+                  )}
+                  <div className="web-sources-item-url">
+                    <span>{source.url}</span>
+                    <ExternalLink size={11} strokeWidth={2} />
+                  </div>
+                </button>
               ))}
             </div>
           </details>
