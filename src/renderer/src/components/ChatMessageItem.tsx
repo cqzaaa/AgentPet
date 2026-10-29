@@ -13,6 +13,7 @@ import { OfficeRuntimeInstallCard } from './OfficeRuntimeInstallCard'
 import { FileChangesCard } from './FileChangesCard'
 import { Tooltip } from './Tooltip'
 import { FileIcon } from './FileIcon'
+import { ImagePreviewModal } from './ImagePreviewModal'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -915,14 +916,11 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
         onContextMenu={handleContextMenu}
         onError={() => setHasError(true)}
       />
-      {previewSrc && (
-        <div
-          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
-          onClick={() => setPreviewSrc(null)}
-        >
-          <img src={previewSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
-        </div>
-      )}
+      <ImagePreviewModal
+        src={previewSrc}
+        alt={alt}
+        onClose={() => setPreviewSrc(null)}
+      />
     </>
   )
 }
@@ -1076,14 +1074,10 @@ export function MarkdownText({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
       />
-      {previewSrc && (
-        <div
-          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
-          onClick={() => setPreviewSrc(null)}
-        >
-          <img src={previewSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
-        </div>
-      )}
+      <ImagePreviewModal
+        src={previewSrc}
+        onClose={() => setPreviewSrc(null)}
+      />
     </>
   )
 }
@@ -1553,7 +1547,11 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
     } else if (step.type === 'compaction' || step.type === 'commentary') {
       combined.push(step)
     } else if (step.type === 'call') {
-      combined.push({
+      const orphanResult = combined.findLastIndex((item) => {
+        const sameCall = step.callId ? item.callId === step.callId : !item.callId && item.name === step.name
+        return item.type === 'tool' && sameCall && item.callDetail === undefined
+      })
+      const call = {
         id: step.id,
         type: 'tool',
         callId: step.callId,
@@ -1561,7 +1559,9 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
         callDetail: step.detail,
         liveDetail: step.liveDetail,
         isWaiting: false
-      })
+      }
+      if (orphanResult >= 0) combined[orphanResult] = { ...combined[orphanResult], ...call }
+      else combined.push(call)
     } else if (step.type === 'result') {
       let matched = false
       for (let i = combined.length - 1; i >= 0; i--) {
@@ -1577,6 +1577,7 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
         combined.push({
           id: step.id,
           type: 'tool',
+          callId: step.callId,
           name: step.name,
           resultDetail: step.detail,
           isWaiting: false
@@ -3667,20 +3668,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         document.body
       )}
 
-      {previewImageSrc && (
-        <div
-          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
-          onClick={() => setPreviewImageSrc(null)}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            if (window.api && typeof window.api.showImageContextMenu === 'function') {
-              window.api.showImageContextMenu(previewImageSrc)
-            }
-          }}
-        >
-          <img src={previewImageSrc} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
-        </div>
-      )}
+      <ImagePreviewModal
+        src={previewImageSrc}
+        onClose={() => setPreviewImageSrc(null)}
+      />
     </div>
   )
 }, areMessageItemPropsEqual)

@@ -425,6 +425,7 @@ body {
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
+  letter-spacing: -0.01em;
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
@@ -471,16 +472,16 @@ body {
 .titlebar-tab.active {
   background: var(--bg-titlebar-tab-active);
   color: var(--text-titlebar-tab-active);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-weight: 550;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
   border: 1px solid var(--border-color);
 }
 
 .light .titlebar-tab.active {
   background: #ffffff;
-  color: #09090b;
-  border-color: #e4e4e7;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  color: #0f172a;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
 }
 
 .titlebar-tab.function-tab {
@@ -788,9 +789,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 17px;
+  height: 17px;
+  border-radius: 9999px;
   font-size: 10px;
   color: var(--text-muted);
   opacity: 0;
@@ -804,15 +805,21 @@ body {
 
 .titlebar-tab:hover .titlebar-tab-close,
 .titlebar-tab.active .titlebar-tab-close {
-  opacity: 0.6;
+  opacity: 0.5;
   transform: scale(1);
   pointer-events: auto;
 }
 
 .titlebar-tab-close:hover {
-  background: rgba(239, 68, 68, 0.12) !important;
-  color: #ef4444 !important;
+  background: rgba(0, 0, 0, 0.07) !important;
+  color: var(--text-primary) !important;
   opacity: 1 !important;
+}
+
+.dark .titlebar-tab-close:hover,
+.agent-window-container.dark .titlebar-tab-close:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #f8fafc !important;
 }
 
 /* 新建会话按钮 '+' */

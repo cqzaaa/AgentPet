@@ -13,6 +13,7 @@ import { CollaborationRunCard, type CollaborationSnapshot } from '../components/
 import { SubtaskCapsuleGroup, SubtaskDetailDrawer } from '../components/SubtaskCapsuleGroup'
 import { PermissionApprovalCard } from '../components/PermissionApprovalCard'
 import { PastedTextModal } from '../components/PastedTextModal'
+import { ImagePreviewModal } from '../components/ImagePreviewModal'
 import { requestConfirmation } from '../components/confirmService'
 import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
@@ -1889,13 +1890,6 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     return () => observer.disconnect()
   }, [updateTurnSpacer, scheduleBottomAlignment])
 
-  const handleImageContextMenu = (e: React.MouseEvent, imgSrc: string) => {
-    e.preventDefault()
-    if (window.api && typeof window.api.showImageContextMenu === 'function') {
-      window.api.showImageContextMenu(imgSrc)
-    }
-  }
-
   useEffect(() => {
     if (highlightedMessageId == null) return
     scrollToUserMessage(Number(highlightedMessageId), 'center')
@@ -3393,40 +3387,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
         />
       )}
 
-      {previewImageSrc && (
-        <div
-          className="fullscreen-image-preview"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'zoom-out'
-          }}
-          onClick={() => setPreviewImageSrc(null)}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            handleImageContextMenu(e, previewImageSrc)
-          }}
-        >
-          <img
-            src={previewImageSrc}
-            style={{
-              maxWidth: '90%',
-              maxHeight: '90%',
-              objectFit: 'contain',
-              borderRadius: '8px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
-            }}
-          />
-        </div>
-      )}
+      <ImagePreviewModal
+        src={previewImageSrc}
+        onClose={() => setPreviewImageSrc(null)}
+      />
 
       {showSshModal && (
         <div

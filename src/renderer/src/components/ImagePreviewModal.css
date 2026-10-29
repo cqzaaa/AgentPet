@@ -1,0 +1,192 @@
+/* ==========================================================================
+   ImagePreviewModal - Taste-Skill Minimalist & Anti-Slop Image Viewer
+   ========================================================================== */
+
+.image-preview-portal {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  user-select: none;
+  animation: imgViewerFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 亮色模式：通透柔和的白色微透毛玻璃 */
+.image-preview-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  transition: background-color 0.2s ease;
+}
+
+/* 暗色模式：深邃墨色毛玻璃 */
+.dark .image-preview-backdrop,
+.agent-window-container.dark .image-preview-backdrop {
+  background: rgba(13, 17, 23, 0.86);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+}
+
+/* 右上角单圆形关闭按钮 (Taste-Skill 极简微胶囊) */
+.image-preview-close-btn {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569;
+  cursor: pointer;
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: all 0.16s ease;
+  animation: imgViewerSlideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.image-preview-close-btn:hover {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 6px 18px -2px rgba(15, 23, 42, 0.12), 0 2px 4px rgba(0, 0, 0, 0.05);
+  transform: scale(1.05);
+}
+
+.dark .image-preview-close-btn,
+.agent-window-container.dark .image-preview-close-btn {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.4);
+}
+
+.dark .image-preview-close-btn:hover,
+.agent-window-container.dark .image-preview-close-btn:hover {
+  background: rgba(45, 55, 72, 0.95);
+  color: #f8fafc;
+}
+
+/* 主展示区域 */
+.image-preview-stage {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 48px 32px;
+  box-sizing: border-box;
+  cursor: zoom-out;
+}
+
+/* 核心展示图片卡片 */
+.image-preview-card {
+  position: relative;
+  max-width: 92%;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  animation: imgViewerZoomIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.image-preview-img {
+  max-width: 90vw;
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 20px 48px -12px rgba(15, 23, 42, 0.14),
+              0 4px 12px -2px rgba(15, 23, 42, 0.06),
+              0 0 0 1px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: transparent;
+}
+
+.dark .image-preview-img,
+.agent-window-container.dark .image-preview-img {
+  box-shadow: 0 24px 56px -12px rgba(0, 0, 0, 0.65),
+              0 4px 16px -2px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* 底部轻量提示（按 Esc 或 点击空白关闭） */
+.image-preview-footer-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: none;
+  animation: imgViewerSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark .image-preview-footer-hint,
+.agent-window-container.dark .image-preview-footer-hint {
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 动效 */
+@keyframes imgViewerFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes imgViewerZoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes imgViewerSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes imgViewerSlideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

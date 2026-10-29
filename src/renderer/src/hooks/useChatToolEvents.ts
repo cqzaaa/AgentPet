@@ -87,7 +87,7 @@ export function appendToolSteps(existingSteps: any[] | undefined, events: ChatTo
         : toolSteps.findLastIndex(step => step.type === 'think' && step.isProgress && step.name === name)
       if (existing >= 0) {
         toolSteps[existing] = isTerminalOutput
-          ? { ...toolSteps[existing], liveDetail: progressDetail, progress: Number(progress) || 0, timestamp }
+          ? { ...toolSteps[existing], liveDetail: progressDetail, progress: Number(progress) || 0, progressTimestamp: timestamp }
           : { ...toolSteps[existing], detail: progressDetail, progress: Number(progress) || 0, timestamp }
       } else {
         toolSteps.push({ id, sequence, timestamp, type: 'think', name, detail: progressDetail, progress: Number(progress) || 0, isProgress: true })

@@ -74,7 +74,10 @@ function resolveExecutionCwd(value: unknown, context: ToolContext): string {
 }
 
 export class TerminalExecutor implements IToolExecutor {
-  private createLiveOutputReporter(context: ToolContext, toolName: string): (chunk: string) => void {
+  private createLiveOutputReporter(context: ToolContext, toolName: string): {
+    report: (chunk: string) => void
+    finish: () => void
+  } {
     let output = ''
     let lastSentAt = 0
     let pendingTimer: NodeJS.Timeout | undefined
@@ -93,11 +96,18 @@ export class TerminalExecutor implements IToolExecutor {
       })
     }
 
-    return (chunk: string) => {
-      output = renderTerminalOutput(output, chunk)
-      const delay = Math.max(0, 120 - (Date.now() - lastSentAt))
-      if (pendingTimer) return
-      pendingTimer = setTimeout(emit, delay)
+    return {
+      report: (chunk: string) => {
+        output = renderTerminalOutput(output, chunk)
+        const delay = Math.max(0, 120 - (Date.now() - lastSentAt))
+        if (pendingTimer) return
+        pendingTimer = setTimeout(emit, delay)
+      },
+      finish: () => {
+        if (!pendingTimer) return
+        clearTimeout(pendingTimer)
+        pendingTimer = undefined
+      }
     }
   }
 
@@ -157,14 +167,19 @@ export class TerminalExecutor implements IToolExecutor {
           nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : process.env
         )
         // run_terminal_command 同步执行，传入动态超时与中止信号
-        const reportLiveOutput = this.createLiveOutputReporter(context, api)
-        const { stdout, stderr, exitCode } = await shellManager.exec(command, shell, {
+        const liveOutput = this.createLiveOutputReporter(context, api)
+        const executionResult = await shellManager.exec(command, shell, {
           cwd: execCwd,
           timeout: cmdTimeout,
           signal: context.abortSignal,
-          onOutput: reportLiveOutput,
+          onOutput: liveOutput.report,
           env: commandEnvironment
-        } as any)
+        } as any).finally(() => {
+          // The tool result is authoritative once the foreground process settles.
+          // Do not let a throttled progress timer arrive after it and reorder the call.
+          liveOutput.finish()
+        })
+        const { stdout, stderr, exitCode } = executionResult
         const renderedStdout = renderTerminalOutput('', stdout)
         const renderedStderr = renderTerminalOutput('', stderr)
         const combinedOutput = `${renderedStdout}\n${renderedStderr}`
@@ -224,16 +239,20 @@ export class TerminalExecutor implements IToolExecutor {
         const timeout = typeof args.timeout_seconds === 'number'
           ? Math.max(0, args.timeout_seconds * 1000)
           : 120_000
-        const { stdout, stderr, exitCode } = await shellManager.execFile(
+        const liveOutput = this.createLiveOutputReporter(context, api)
+        const executionResult = await shellManager.execFile(
           runtime.pythonPath,
           pythonArgs,
           {
             cwd,
             timeout,
             signal: context.abortSignal,
-            onOutput: this.createLiveOutputReporter(context, api)
+            onOutput: liveOutput.report
           }
-        )
+        ).finally(() => {
+          liveOutput.finish()
+        })
+        const { stdout, stderr, exitCode } = executionResult
         const renderedStdout = renderTerminalOutput('', stdout)
         const renderedStderr = renderTerminalOutput('', stderr)
         return {
@@ -289,11 +308,12 @@ export class TerminalExecutor implements IToolExecutor {
         const commandEnvironment = buildTerminalEnvironment(
           nodeRuntime ? nodeRuntimeManager.environment(nodeRuntime) : process.env
         )
+        const liveOutput = this.createLiveOutputReporter(context, api)
         const session = shellManager.startSession(
           command,
           shell,
           execCwd,
-          this.createLiveOutputReporter(context, api),
+          liveOutput.report,
           commandEnvironment
         )
         return {
