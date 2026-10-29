@@ -472,6 +472,7 @@ export const useAppStoreRaw = create<any>((set) => ({
   sessions: [],
   contextTokenUsageBySession: {},
   activeSessionId: localStorage.getItem('agentself_active_session_id') || localStorage.getItem('agentpet_active_session_id') || 'agent:main:dashboard:default',
+  chatDrafts: {} as Record<string, { inputValue: string; attachedFiles: AttachedFile[] }>,
   inputValue: '',
   attachedFiles: [],
   selectedKnowledgeBaseId: localStorage.getItem('agentpet_selected_knowledge_base_id') || '',
@@ -596,12 +597,15 @@ export const useAppStoreRaw = create<any>((set) => ({
   setActiveSessionId: (val: any) => set((state: any) => {
     const nextSessionId = typeof val === 'function' ? val(state.activeSessionId) : val
     if (nextSessionId === state.activeSessionId) return { activeSessionId: nextSessionId }
+    const nextDraft = state.chatDrafts[nextSessionId]
 
     // File previews and generated-file tabs belong to the conversation that opened
     // them. Clear them atomically with the session id so files from conversation A
     // are never rendered for even one frame after switching to conversation B.
     return {
       activeSessionId: nextSessionId,
+      inputValue: nextDraft?.inputValue || '',
+      attachedFiles: nextDraft?.attachedFiles || [],
       generatedFiles: [],
       showFilePanel: false,
       openTabs: [],
@@ -610,12 +614,32 @@ export const useAppStoreRaw = create<any>((set) => ({
       officePreviewRequest: null
     }
   }),
-  setInputValue: (val: any) => set((state: any) => ({
-    inputValue: typeof val === 'function' ? val(state.inputValue) : val
-  })),
-  setAttachedFiles: (val: any) => set((state: any) => ({
-    attachedFiles: typeof val === 'function' ? val(state.attachedFiles) : val
-  })),
+  setInputValue: (val: any) => set((state: any) => {
+    const inputValue = typeof val === 'function' ? val(state.inputValue) : val
+    const chatDrafts = { ...state.chatDrafts }
+    if (!inputValue && state.attachedFiles.length === 0) delete chatDrafts[state.activeSessionId]
+    else chatDrafts[state.activeSessionId] = { inputValue, attachedFiles: state.attachedFiles }
+    return {
+      inputValue,
+      chatDrafts
+    }
+  }),
+  setAttachedFiles: (val: any) => set((state: any) => {
+    const attachedFiles = typeof val === 'function' ? val(state.attachedFiles) : val
+    const chatDrafts = { ...state.chatDrafts }
+    if (!state.inputValue && attachedFiles.length === 0) delete chatDrafts[state.activeSessionId]
+    else chatDrafts[state.activeSessionId] = { inputValue: state.inputValue, attachedFiles }
+    return {
+      attachedFiles,
+      chatDrafts
+    }
+  }),
+  clearChatDraft: (sessionId: string) => set((state: any) => {
+    if (!state.chatDrafts[sessionId]) return state
+    const chatDrafts = { ...state.chatDrafts }
+    delete chatDrafts[sessionId]
+    return { chatDrafts }
+  }),
   setSelectedKnowledgeBase: (base: { id: string; name: string } | null) => {
     const id = base?.id || ''
     const name = base?.name || ''
@@ -1539,10 +1563,6 @@ export function useAppStore() {
     if (skeletonTimerRef.current) clearTimeout(skeletonTimerRef.current)
     setIsSessionSwitching(true)
 
-    // 切换会话时清空输入框和附件
-    setInputValue('')
-    setAttachedFiles([])
-
     skeletonTimerRef.current = setTimeout(() => {
       skeletonTimerRef.current = null
       setIsSessionSwitching(false)
@@ -1635,6 +1655,7 @@ export function useAppStore() {
     }
     setSessions(nextSessions)
     if (activeSessionId === id) setActiveSessionId(nextSessions[0].id)
+    useAppStoreRaw.getState().clearChatDraft(id)
     await window.api.deleteSession(id)
   }
 
@@ -1669,12 +1690,15 @@ export function useAppStore() {
     const currentSessions = useAppStoreRaw.getState().sessions as Session[]
     const currentActiveId = useAppStoreRaw.getState().activeSessionId
     const currentActiveSession = currentSessions.find(session => session.id === currentActiveId)
+    const currentDraftState = useAppStoreRaw.getState()
     const nextWorkspacePath = requestedWorkspacePath?.trim() || ''
     const canReuseCurrentDraft =
       currentActiveSession &&
       (currentActiveSession.name === '(未命名)' || currentActiveSession.name === '新会话') &&
       (currentActiveSession.messages?.length || 0) === 0 &&
       !currentActiveSession.contextSummary &&
+      !currentDraftState.inputValue.trim() &&
+      currentDraftState.attachedFiles.length === 0 &&
       !useAppStoreRaw.getState().sendingSessionIds[currentActiveSession.id]
     if (canReuseCurrentDraft) {
       if ((currentActiveSession.workspacePath || '') !== nextWorkspacePath) {
