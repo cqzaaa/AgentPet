@@ -20,6 +20,7 @@ import * as XLSX from 'xlsx'
 import * as Papa from 'papaparse'
 import ExcelJS from 'exceljs'
 import { randomUUID } from 'crypto'
+import { ensureCompleteJpeg, resolveLocalFilePath } from './image-binary'
 
 // Upload previews are only a navigation aid. The original file path remains
 // available to file/Office tools, so storing a large inline copy wastes the
@@ -2559,33 +2560,36 @@ app.whenReady().then(() => {
   }
 
   const resolveLocalPath = (filePath: string): string => {
-    if (!filePath || typeof filePath !== 'string') return filePath
-    let resolved = filePath
-    if (resolved.startsWith('local-file:///')) {
-      resolved = resolved.replace('local-file:///', '')
-      if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
-      resolved = decodeURIComponent(resolved)
-    } else if (resolved.startsWith('local-file://')) {
-      resolved = resolved.replace('local-file://', '')
-      if (/^\/[A-Za-z]:\//.test(resolved)) resolved = resolved.slice(1)
-      resolved = decodeURIComponent(resolved)
-    } else if (resolved.startsWith('wechat-file://')) {
-      const relativePath = decodeURIComponent(
-        resolved.replace('wechat-file://', '').replace(/^\/+/, '')
-      )
-      const segments = relativePath.split('/')
-      if (segments.length >= 3 && segments[0] === 'local') {
-        // 新格式：wechat-file://local/<safeSessionId>/<fileName>
-        const safeSessionId = segments[1]
-        const fileName = segments.slice(2).join('/')
-        resolved = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
-      } else if (segments.length >= 2 && segments[0] === 'local') {
-        // 旧格式：wechat-file://local/<fileName>
-        const fileName = segments.slice(1).join('/')
-        resolved = join(getActiveStorageDir(), 'wechat_files', fileName)
-      }
+    return resolveLocalFilePath(filePath, getActiveStorageDir())
+  }
+
+  const loadClipboardNativeImage = async (imageUrl: string): Promise<Electron.NativeImage> => {
+    if (
+      imageUrl.startsWith('local-file://') ||
+      imageUrl.startsWith('wechat-file://') ||
+      imageUrl.startsWith('file://')
+    ) {
+      const filePath = resolveLocalPath(imageUrl)
+      if (!fs.existsSync(filePath)) throw new Error(`图片文件不存在：${filePath}`)
+      return nativeImage.createFromBuffer(ensureCompleteJpeg(fs.readFileSync(filePath)))
     }
-    return resolved
+    if (imageUrl.startsWith('data:image/')) {
+      const match = /^data:[^;,]+(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(imageUrl)
+      return match
+        ? nativeImage.createFromBuffer(ensureCompleteJpeg(Buffer.from(match[1], 'base64')))
+        : nativeImage.createFromDataURL(imageUrl)
+    }
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const response = await net.fetch(imageUrl)
+      if (!response.ok) throw new Error(`下载图片失败：HTTP ${response.status}`)
+      const buffer = Buffer.from(await response.arrayBuffer())
+      return nativeImage.createFromBuffer(ensureCompleteJpeg(buffer))
+    }
+    const filePath = resolveLocalPath(imageUrl)
+    if (fs.existsSync(filePath)) {
+      return nativeImage.createFromBuffer(ensureCompleteJpeg(fs.readFileSync(filePath)))
+    }
+    throw new Error('不支持的图片 URL 格式')
   }
 
   const getActiveSkillsDir = (): string => {
@@ -2967,8 +2971,24 @@ app.whenReady().then(() => {
   })
 
   // 从剪贴板读取文件路径（Windows CF_HDROP）或图片
-  ipcMain.handle('api:read-clipboard-files', async () => {
+  ipcMain.handle('api:read-clipboard-files', async (_, preferImage = false) => {
     try {
+      const saveClipboardBitmap = (): { type: 'image'; path: string; name: string } | null => {
+        const img = clipboard.readImage()
+        if (!img || img.isEmpty()) return null
+        const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
+        const fileName = `clipboard_${Date.now()}.png`
+        const filePath = join(tempDir, fileName)
+        fs.writeFileSync(filePath, img.toPNG())
+        return { type: 'image', path: filePath, name: fileName }
+      }
+
+      if (preferImage) {
+        const image = saveClipboardBitmap()
+        if (image) return image
+      }
+
       // 1. 尝试读取 Windows 文件拖拽/复制格式 (FileNameW)
       const fileNameWBuf = clipboard.readBuffer('FileNameW')
       if (fileNameWBuf && fileNameWBuf.length > 0) {
@@ -2986,15 +3006,8 @@ app.whenReady().then(() => {
       }
 
       // 2. 尝试读取剪贴板图片
-      const img = clipboard.readImage()
-      if (img && !img.isEmpty()) {
-        const tempDir = join(os.tmpdir(), 'agentpet_clipboard')
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
-        const fileName = `clipboard_${Date.now()}.png`
-        const filePath = join(tempDir, fileName)
-        fs.writeFileSync(filePath, img.toPNG())
-        return { type: 'image', path: filePath, name: fileName }
-      }
+      const image = saveClipboardBitmap()
+      if (image) return image
 
       return null
     } catch (err) {
@@ -3014,41 +3027,7 @@ app.whenReady().then(() => {
   // 复制图片到剪贴板（支持 local-file:///、wechat-file:/// 和 http/https URL）
   ipcMain.handle('api:copy-image', async (_, imageUrl: string) => {
     try {
-      let img: Electron.NativeImage
-
-      if (imageUrl.startsWith('local-file:///')) {
-        // local-file:///C:/path → C:/path
-        let filePath = imageUrl.replace('local-file:///', '')
-        if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
-        img = nativeImage.createFromPath(filePath)
-      } else if (imageUrl.startsWith('wechat-file://')) {
-        const relativePath = decodeURIComponent(
-          imageUrl.replace('wechat-file://', '').replace(/^\/+/, '')
-        )
-        const segments = relativePath.split('/')
-        let filePath = ''
-        if (segments.length >= 3 && segments[0] === 'local') {
-          // 新格式：wechat-file://local/<safeSessionId>/<fileName>
-          const safeSessionId = segments[1]
-          const fileName = segments.slice(2).join('/')
-          filePath = join(getActiveStorageDir(), 'chat', safeSessionId, 'wechat_files', fileName)
-        } else if (segments.length >= 2 && segments[0] === 'local') {
-          // 旧格式：wechat-file://local/<fileName>
-          const fileName = segments.slice(1).join('/')
-          filePath = join(getActiveStorageDir(), 'wechat_files', fileName)
-        }
-        img = nativeImage.createFromPath(filePath)
-      } else if (imageUrl.startsWith('data:image/')) {
-        // base64 data URL
-        img = nativeImage.createFromDataURL(imageUrl)
-      } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-        // 远程图片：先下载再写入剪贴板
-        const response = await net.fetch(imageUrl)
-        const buffer = Buffer.from(await response.arrayBuffer())
-        img = nativeImage.createFromBuffer(buffer)
-      } else {
-        return { success: false, error: '不支持的图片 URL 格式' }
-      }
+      const img = await loadClipboardNativeImage(imageUrl)
 
       if (img.isEmpty()) {
         return { success: false, error: '图片加载失败，可能文件已被删除' }
@@ -3145,28 +3124,34 @@ app.whenReady().then(() => {
         if (validPaths.length === 0) {
           return { success: false, error: '文件不存在' }
         }
-        // 构建 CF_HDROP 格式的 DROPFILES 结构
-        const encodedPaths = validPaths.map((p) => Buffer.from(p + '\0', 'utf16le'))
-        const totalPathBytes = encodedPaths.reduce((sum, b) => sum + b.length, 0) + 2
-        const dropFiles = Buffer.alloc(20 + totalPathBytes)
-        dropFiles.writeUInt32LE(20, 0)
-        dropFiles.writeUInt32LE(0, 4)
-        dropFiles.writeUInt32LE(0, 8)
-        dropFiles.writeInt32LE(0, 12)
-        dropFiles.writeInt32LE(1, 16)
-        let offset = 20
-        for (const buf of encodedPaths) {
-          buf.copy(dropFiles, offset)
-          offset += buf.length
+        // 如果复制的文件包含图片，优先转为 NativeImage 写入系统剪贴板位图
+        // 这样微信、QQ、Paint、Office 等外部软件可直接通过 Ctrl+V 粘贴图片！
+        const imageExts = /\.(jpg|jpeg|png|gif|webp|bmp)$/i
+        const firstImagePath = validPaths.find((p) => imageExts.test(p))
+        let imageToWrite: Electron.NativeImage | null = null
+        if (firstImagePath) {
+          try {
+            const buffer = ensureCompleteJpeg(fs.readFileSync(firstImagePath))
+            const img = nativeImage.createFromBuffer(buffer)
+            if (!img.isEmpty()) {
+              imageToWrite = img
+            }
+          } catch (e) {
+            console.warn('读取图片写入剪贴板位图失败:', e)
+          }
         }
-        // 同时写入文件格式和文本格式，这样粘贴到资源管理器是文件，粘贴到文本框是文本
-        const writeObj: any = {
-          CF_HDROP: dropFiles
+
+        const writePayload: { text?: string; image?: Electron.NativeImage } = {}
+        if (imageToWrite) {
+          writePayload.image = imageToWrite
         }
         if (text) {
-          writeObj.text = text
+          writePayload.text = text
+        } else if (!imageToWrite) {
+          writePayload.text = validPaths.join('\n')
         }
-        clipboard.write(writeObj)
+
+        clipboard.write(writePayload)
         return { success: true }
       } catch (err: any) {
         console.error('复制文件到剪贴板失败:', err)
@@ -3176,57 +3161,40 @@ app.whenReady().then(() => {
   )
 
   // 显示原生右键菜单（复制图片）
-  ipcMain.on('api:show-image-context-menu', (_, imageUrl: string) => {
+  ipcMain.on('api:show-image-context-menu', (event, imageUrl: string) => {
+    const resolvedPath = resolveLocalPath(imageUrl)
+    const isLocalFile = Boolean(resolvedPath && fs.existsSync(resolvedPath))
+
     const menu = Menu.buildFromTemplate([
       {
         label: '📋 复制图片',
         click: async () => {
           try {
-            let img: Electron.NativeImage
-            if (imageUrl.startsWith('local-file:///')) {
-              let filePath = imageUrl.replace('local-file:///', '')
-              if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
-              img = nativeImage.createFromPath(filePath)
-            } else if (imageUrl.startsWith('wechat-file://')) {
-              const relativePath = decodeURIComponent(
-                imageUrl.replace('wechat-file://', '').replace(/^\/+/, '')
-              )
-              const segments = relativePath.split('/')
-              let filePath = ''
-              if (segments.length >= 3 && segments[0] === 'local') {
-                // 新格式：wechat-file://local/<safeSessionId>/<fileName>
-                const safeSessionId = segments[1]
-                const fileName = segments.slice(2).join('/')
-                filePath = join(
-                  getActiveStorageDir(),
-                  'chat',
-                  safeSessionId,
-                  'wechat_files',
-                  fileName
-                )
-              } else if (segments.length >= 2 && segments[0] === 'local') {
-                // 旧格式：wechat-file://local/<fileName>
-                const fileName = segments.slice(1).join('/')
-                filePath = join(getActiveStorageDir(), 'wechat_files', fileName)
-              }
-              img = nativeImage.createFromPath(filePath)
-            } else if (imageUrl.startsWith('data:image/')) {
-              img = nativeImage.createFromDataURL(imageUrl)
-            } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-              const response = await net.fetch(imageUrl)
-              const buffer = Buffer.from(await response.arrayBuffer())
-              img = nativeImage.createFromBuffer(buffer)
+            const img = await loadClipboardNativeImage(imageUrl)
+            if (!img.isEmpty()) {
+              clipboard.writeImage(img)
             } else {
-              return
+              console.error('原生菜单复制图片失败: 图片为空')
             }
-            if (!img.isEmpty()) clipboard.writeImage(img)
           } catch (err) {
             console.error('原生菜单复制图片失败:', err)
           }
         }
-      }
+      },
+      ...(isLocalFile
+        ? [
+            { type: 'separator' as const },
+            {
+              label: '📁 打开所在位置',
+              click: () => {
+                shell.showItemInFolder(resolvedPath)
+              }
+            }
+          ]
+        : [])
     ])
-    menu.popup()
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    menu.popup(owner ? { window: owner } : undefined)
   })
 
   // 显示原生右键菜单（复制文本）

@@ -2853,10 +2853,28 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                 })
                 return
               }
-              // 系统剪贴板文件（图片等）
-              if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+              // 截图类剪贴板优先从 Electron 原生位图重新编码，避免 Chromium
+              // 暴露的虚拟 JPEG 缺少结束标记；普通文件仍保留原文件路径和名称。
+              const clipboardFiles = e.clipboardData.files
+              const hasClipboardImage = Array.from(e.clipboardData.items).some(item =>
+                item.type.startsWith('image/')
+              )
+              if (hasClipboardImage && window.api.readClipboardFiles) {
                 e.preventDefault()
-                handlePasteFiles(e.clipboardData.files)
+                const clipboardImage = await window.api.readClipboardFiles(true)
+                if (clipboardImage?.type === 'image') {
+                  setAttachedFiles(previous => [...previous, {
+                    name: clipboardImage.name,
+                    path: clipboardImage.path,
+                    objectUrl: `local-file:///${clipboardImage.path.replace(/\\/g, '/')}`
+                  }])
+                  return
+                }
+              }
+              // 系统剪贴板文件（图片等）
+              if (clipboardFiles && clipboardFiles.length > 0) {
+                e.preventDefault()
+                handlePasteFiles(clipboardFiles)
                 return
               }
               // 粘贴纯文本超过 500 字时，自动转为附件卡片展示

@@ -516,8 +516,8 @@ const api = {
     ipcRenderer.invoke('api:copy-image', imageUrl),
   copyFiles: (filePaths: string[], text?: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('api:copy-files', { filePaths, text }),
-  readClipboardFiles: (): Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null> =>
-    ipcRenderer.invoke('api:read-clipboard-files'),
+  readClipboardFiles: (preferImage = false): Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null> =>
+    ipcRenderer.invoke('api:read-clipboard-files', preferImage),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   showImageContextMenu: (imageUrl: string): void => {
     ipcRenderer.send('api:show-image-context-menu', imageUrl)

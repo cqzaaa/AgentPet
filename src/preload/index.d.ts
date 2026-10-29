@@ -247,7 +247,7 @@ declare global {
       copyText: (text: string) => void
       copyImage: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
       copyFiles: (filePaths: string[], text?: string) => Promise<{ success: boolean; error?: string }>
-      readClipboardFiles: () => Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null>
+      readClipboardFiles: (preferImage?: boolean) => Promise<{ type: 'files'; paths: string[] } | { type: 'image'; path: string; name: string } | null>
       getPathForFile: (file: File) => string
       showImageContextMenu: (imageUrl: string) => void
       showTextContextMenu: (selectedText: string) => void

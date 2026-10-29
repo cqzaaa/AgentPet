@@ -30,6 +30,7 @@ import { summarizeCodingVerification } from './coding-verification'
 import { WebResearchProgress } from './web-research-progress'
 import { loadProjectGuidance } from './project-guidance'
 import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
+import { ensureCompleteJpeg, resolveLocalFilePath } from '../image-binary'
 import {
   BOOTSTRAP_TOOL_NAMES,
   DEFAULT_TERMINAL_TOOL_NAMES,
@@ -396,7 +397,7 @@ export class AgentExecutor {
     const blocks: any[] = []
     for (const filePath of filePaths) {
       try {
-        const buffer = fs.readFileSync(filePath)
+        const buffer = ensureCompleteJpeg(fs.readFileSync(filePath))
         let ext = filePath.split('.').pop()?.toLowerCase() || 'png'
         if (ext === 'jpg') ext = 'jpeg'
         const mimeType = `image/${ext}`
@@ -1089,18 +1090,16 @@ Images in current or historical messages are provided directly to the model. Ins
     for (const msg of chatHistory) {
       if (Array.isArray(msg.content)) {
         for (const block of msg.content) {
-          if (block.type === 'image_url' && block.image_url && block.image_url.url && block.image_url.url.startsWith('local-file://')) {
-            let localPath = ''
-            try {
-              const parsedUrl = new URL(block.image_url.url)
-              localPath = decodeURIComponent(parsedUrl.pathname)
-              if (/^\/[A-Za-z]:\//.test(localPath)) localPath = localPath.slice(1)
-            } catch {
-              localPath = block.image_url.url.replace('local-file://', '')
-            }
+          if (
+            block.type === 'image_url' &&
+            block.image_url &&
+            block.image_url.url &&
+            (block.image_url.url.startsWith('local-file://') || block.image_url.url.startsWith('file://'))
+          ) {
+            const localPath = resolveLocalFilePath(block.image_url.url)
             try {
               if (fs.existsSync(localPath)) {
-                const buffer = fs.readFileSync(localPath)
+                const buffer = ensureCompleteJpeg(fs.readFileSync(localPath))
                 let ext = localPath.split('.').pop()?.toLowerCase() || 'jpeg'
                 if (ext === 'jpg') ext = 'jpeg'
                 const mimeType = `image/${ext}`
