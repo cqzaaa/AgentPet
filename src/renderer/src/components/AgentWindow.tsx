@@ -1248,7 +1248,7 @@ export function AgentWindow(): React.JSX.Element {
           </div>
         </div>
 
-        {activeTab !== 'workflow' && (
+        {activeTab !== 'workflow' && activeTab !== 'agent' && (
           <div
             className="content-header"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}

@@ -7,6 +7,7 @@ import { MarkdownText } from '../components/ChatMessageItem'
 import { requestConfirmation } from '../components/confirmService'
 import {
   Activity,
+  Boxes,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -39,6 +40,7 @@ import {
   Settings2,
   ShieldCheck,
   Siren,
+  Sparkles,
   Store,
   Terminal,
   Trash2,
@@ -102,6 +104,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [paddleToken, setPaddleToken] = React.useState('')
   const [paddleTokenConfigured, setPaddleTokenConfigured] = React.useState(false)
 
+  // 技能模块交互状态与双视图
+  const [skillViewMode, setSkillViewMode] = React.useState<'grid' | 'table'>('grid')
+  const [skillSearchQuery, setSkillSearchQuery] = React.useState('')
+
   // MCP 面板交互状态与双视图
   const [mcpViewMode, setMcpViewMode] = React.useState<'grid' | 'table'>('grid')
   const [mcpSearchQuery, setMcpSearchQuery] = React.useState('')
@@ -153,6 +159,32 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     setEditShowApiKey(false)
     setEditEnv('')
   }
+
+  // 技能统计指标计算
+  const skillStats = React.useMemo(() => {
+    const list = skillsList || []
+    const enabledSkills = list.filter((s: any) => s.enabled)
+    const totalTokens = enabledSkills.reduce((acc: number, s: any) => acc + (Number(s.estimatedTokens) || 0), 0)
+    return {
+      totalCount: list.length,
+      enabledCount: enabledSkills.length,
+      totalTokens,
+      folderPath: skillsPath || ''
+    }
+  }, [skillsList, skillsPath])
+
+  // 技能过滤列表
+  const filteredSkills = React.useMemo(() => {
+    const list = skillsList || []
+    const q = skillSearchQuery.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((s: any) => {
+      const name = (s.name || '').toLowerCase()
+      const displayName = (s.displayName || '').toLowerCase()
+      const desc = (s.description || '').toLowerCase()
+      return name.includes(q) || displayName.includes(q) || desc.includes(q)
+    })
+  }, [skillsList, skillSearchQuery])
 
   // MCP 统计指标计算
   const mcpStats = React.useMemo(() => {
@@ -335,17 +367,33 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     <div className="agent-page-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Sub Nav */}
       <div className="sub-tab-nav" style={{ flexShrink: 0 }}>
-        <div className={`sub-tab-item ${agentSubTab === 'skills' ? 'active' : ''}`} onClick={() => setAgentSubTab('skills')}>
-          技能加入
+        <div
+          className={`sub-tab-item ${agentSubTab === 'skills' ? 'active' : ''}`}
+          onClick={() => setAgentSubTab('skills')}
+        >
+          <Sparkles size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>技能加入</span>
         </div>
-        <div className={`sub-tab-item ${agentSubTab === 'memory' ? 'active' : ''}`} onClick={() => setAgentSubTab('memory')}>
-          记忆控制
+        <div
+          className={`sub-tab-item ${agentSubTab === 'memory' ? 'active' : ''}`}
+          onClick={() => setAgentSubTab('memory')}
+        >
+          <Brain size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>记忆控制</span>
         </div>
-        <div className={`sub-tab-item ${agentSubTab === 'cron' ? 'active' : ''}`} onClick={() => setAgentSubTab('cron')}>
-          定时任务
+        <div
+          className={`sub-tab-item ${agentSubTab === 'cron' ? 'active' : ''}`}
+          onClick={() => setAgentSubTab('cron')}
+        >
+          <Clock3 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>定时任务</span>
         </div>
-        <div className={`sub-tab-item ${agentSubTab === 'mcp' ? 'active' : ''}`} onClick={() => setAgentSubTab('mcp')}>
-          MCP 服务
+        <div
+          className={`sub-tab-item ${agentSubTab === 'mcp' ? 'active' : ''}`}
+          onClick={() => setAgentSubTab('mcp')}
+        >
+          <Server size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>MCP 服务</span>
         </div>
       </div>
 
@@ -353,101 +401,381 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
       <div className="sub-content-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingRight: '4px' }}>
         {/* ── 技能加入 ── */}
         {agentSubTab === 'skills' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div className="skills-action-row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <span
-                className="storage-path-display"
-                style={{ flex: 1, minWidth: '220px', marginRight: 0, border: '1px solid var(--border-card)', cursor: 'pointer', wordBreak: 'break-all' }}
-                onClick={handleSkillsPathClick}
-                title="点击选择新的存放路径"
-              >
-                <FolderOpen size={16} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                存放路径: {skillsPath || '正在加载技能目录...'}
-              </span>
-              <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn-secondary" onClick={() => window.api.openSkillsFolder()}>
-                  打开目录
-                </button>
-                <button className="btn-primary" onClick={handleImportSkill}>
-                  <Upload size={15} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                  导入技能包 (.zip)
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* 顶部 Bento 概览指标栏 */}
+            <div className="skills-stats-grid">
+              {/* 总安装数 */}
+              <div className="skill-stat-card">
+                <div className="skill-stat-icon installed">
+                  <Sparkles size={18} strokeWidth={2} />
+                </div>
+                <div className="skill-stat-info">
+                  <div className="skill-stat-value">{skillStats.totalCount}</div>
+                  <div className="skill-stat-label">已安装技能</div>
+                </div>
+              </div>
+
+              {/* 生效运行中（带脉冲绿点） */}
+              <div className="skill-stat-card">
+                <div className="skill-stat-icon enabled">
+                  <Activity size={18} strokeWidth={2} />
+                </div>
+                <div className="skill-stat-info">
+                  <div className="skill-stat-value">
+                    {skillStats.enabledCount}
+                    <span className="mcp-pulse-dot" title="生效就绪中" />
+                  </div>
+                  <div className="skill-stat-label">生效运行中</div>
+                </div>
+              </div>
+
+              {/* 上下文预估预算 */}
+              <div className="skill-stat-card">
+                <div className="skill-stat-icon tokens">
+                  <Boxes size={18} strokeWidth={2} />
+                </div>
+                <div className="skill-stat-info">
+                  <div className="skill-stat-value" style={{ fontSize: '17px' }}>
+                    ≈ {skillStats.totalTokens.toLocaleString()}
+                  </div>
+                  <div className="skill-stat-label">启用 Token 预估</div>
+                </div>
+              </div>
+
+              {/* 存放目录卡片 */}
+              <div className="skill-stat-card">
+                <div className="skill-stat-icon folder">
+                  <FolderOpen size={18} strokeWidth={2} />
+                </div>
+                <div className="skill-stat-info" style={{ overflow: 'hidden' }}>
+                  <div
+                    className="skill-stat-value"
+                    style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', cursor: 'pointer' }}
+                    onClick={handleSkillsPathClick}
+                    title={`点击切换目录：\n${skillStats.folderPath}`}
+                  >
+                    {skillStats.folderPath ? skillStats.folderPath.split(/[/\\]/).filter(Boolean).slice(-2).join('/') : '受管技能目录'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2px' }}>
+                    <span className="skill-stat-label" style={{ margin: 0 }}>本地目录</span>
+                    <div className="skill-stat-actions">
+                      <button
+                        type="button"
+                        className="skill-stat-mini-btn"
+                        onClick={() => window.api.openSkillsFolder()}
+                        title="打开技能存储文件夹"
+                      >
+                        打开
+                      </button>
+                      <button
+                        type="button"
+                        className="skill-stat-mini-btn"
+                        onClick={handleSkillsPathClick}
+                        title="点击选择新的技能存放路径"
+                      >
+                        切换
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 工具栏：搜索、视图切换、导入 */}
+            <div className="skills-toolbar">
+              <div className="skills-toolbar-left">
+                <div className="skills-search-wrap">
+                  <Search size={14} className="skills-search-icon" aria-hidden="true" />
+                  <input
+                    type="text"
+                    className="skills-search-input"
+                    placeholder="按名称、描述搜索技能..."
+                    value={skillSearchQuery}
+                    onChange={(e) => setSkillSearchQuery(e.target.value)}
+                  />
+                  {skillSearchQuery && (
+                    <button
+                      type="button"
+                      className="skills-search-clear"
+                      onClick={() => setSkillSearchQuery('')}
+                      title="清空搜索"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <span className="skills-summary-hint" style={{ color: 'var(--text-muted, #888)', fontSize: '11.5px' }}>
+                  启用表示允许大模型按需调用，无需全部注入上下文
+                </span>
+              </div>
+
+              <div className="skills-toolbar-right">
+                {/* 视图切换器 */}
+                <div className="skills-view-switcher" role="radiogroup" aria-label="视图模式">
+                  <button
+                    type="button"
+                    className={`skills-view-btn ${skillViewMode === 'grid' ? 'active' : ''}`}
+                    onClick={() => setSkillViewMode('grid')}
+                    title="卡片网格视图"
+                    aria-label="卡片网格视图"
+                  >
+                    <LayoutGrid size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`skills-view-btn ${skillViewMode === 'table' ? 'active' : ''}`}
+                    onClick={() => setSkillViewMode('table')}
+                    title="数据列表视图"
+                    aria-label="数据列表视图"
+                  >
+                    <List size={14} />
+                  </button>
+                </div>
+
+                {/* 导入技能主按钮 */}
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleImportSkill}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '32px', fontSize: '12.5px' }}
+                >
+                  <Upload size={14} strokeWidth={2} aria-hidden="true" />
+                  <span>导入技能包 (.zip)</span>
                 </button>
               </div>
             </div>
 
-            <div className="skills-summary-strip">
-              <span><strong>{skillsList.length}</strong> 已安装</span>
-              <span><strong>{skillsList.filter((skill: any) => skill.enabled).length}</strong> 已启用</span>
-              <span className="skills-summary-hint">启用表示允许按需调用，不会把完整 Skill 全部注入上下文</span>
-            </div>
+            {/* 网格卡片视图 (Bento Cards Grid) */}
+            {skillViewMode === 'grid' && (
+              <>
+                {filteredSkills.length > 0 ? (
+                  <div className="skills-cards-grid">
+                    {filteredSkills.map((skill) => {
+                      const displayName = skill.displayName || skill.name.replace(/\.zip$/i, '')
+                      const firstChar = displayName.trim().charAt(0).toUpperCase() || 'S'
+                      const isEnabled = Boolean(skill.enabled)
+                      const isHub = skill.source?.type === 'skillhub'
 
-            <div className="skills-table-wrapper">
-              {skillsList.length > 0 ? (
-                <table className="skills-table">
-                  <colgroup>
-                    <col className="skill-col-enabled" />
-                    <col className="skill-col-identity" />
-                    <col className="skill-col-source" />
-                    <col className="skill-col-tokens" />
-                    <col className="skill-col-date" />
-                    <col className="skill-col-actions" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>启用</th>
-                      <th>Skill</th>
-                      <th>来源</th>
-                      <th>预计 Token</th>
-                      <th>导入日期</th>
-                      <th style={{ textAlign: 'right' }}>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {skillsList.map(skill => (
-                      <tr key={skill.name} className={skill.enabled ? '' : 'is-disabled'}>
-                        <td>
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={Boolean(skill.enabled)}
-                            className={`skill-enable-switch ${skill.enabled ? 'is-on' : ''}`}
-                            onClick={() => toggleSkillEnable(skill.name)}
-                            title={skill.enabled ? '关闭 Skill' : '启用 Skill'}
-                          >
-                            <span />
-                          </button>
-                        </td>
-                        <td>
-                          <div className="skill-identity">
-                            <strong title={skill.displayName || skill.name.replace(/\.zip$/i, '')}>{skill.displayName || skill.name.replace(/\.zip$/i, '')}</strong>
-                            <small title={skill.description || '尚未提供描述'}>{skill.description || '尚未提供描述'}</small>
-                            <span title={skill.name}>{skill.name}</span>
+                      return (
+                        <div
+                          key={skill.name}
+                          className={`skill-card ${isEnabled ? 'enabled' : 'disabled'}`}
+                        >
+                          {/* 卡片头部 */}
+                          <div className="skill-card-header">
+                            <div className="skill-card-header-left">
+                              <div
+                                className="skill-avatar-badge"
+                                style={{ background: getBadgeGradient(displayName) }}
+                              >
+                                {firstChar}
+                              </div>
+                              <div className="skill-card-title-group">
+                                <div className="skill-card-name" title={displayName}>
+                                  {displayName}
+                                </div>
+                                <div className="skill-card-subname" title={skill.name}>
+                                  {skill.name}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 启用开关 */}
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={isEnabled}
+                              className={`skill-enable-switch ${isEnabled ? 'is-on' : ''}`}
+                              onClick={() => toggleSkillEnable(skill.name)}
+                              title={isEnabled ? '关闭此技能' : '启用此技能'}
+                            >
+                              <span />
+                            </button>
                           </div>
-                        </td>
-                        <td>
-                          <div className="skill-source-cell">
-                            <span className="skill-zip-badge">{skill.source?.type === 'skillhub' ? 'SkillHub' : '导入'}</span>
-                            <small>{formatBytes(skill.size)}{skill.version ? ` · v${skill.version}` : ''}</small>
+
+                          {/* 技能描述 */}
+                          <div className="skill-card-body">
+                            <div className="skill-card-desc" title={skill.description || '尚未提供技能描述'}>
+                              {skill.description || '尚未提供技能描述。'}
+                            </div>
+
+                            {/* 标签属性条 */}
+                            <div className="skill-card-tags">
+                              <span className={`skill-badge-tag ${isHub ? 'source-hub' : 'source-local'}`}>
+                                {isHub ? 'SkillHub' : '本地导入'}
+                              </span>
+                              <span className="skill-badge-tag tokens" title="大模型单次请求预计最大 Token 开销">
+                                ≈ {Number(skill.estimatedTokens || 0).toLocaleString()} Tokens
+                              </span>
+                              <span className="skill-badge-tag meta">
+                                {formatBytes(skill.size)}{skill.version ? ` · v${skill.version}` : ''}
+                              </span>
+                            </div>
                           </div>
-                        </td>
-                        <td><span className="skill-token-count">≈ {Number(skill.estimatedTokens || 0).toLocaleString()}</span></td>
-                        <td>{new Date(skill.mtime).toLocaleString()}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button className="delete-btn" onClick={() => handleDeleteSkill(skill.name)}>
-                            <Trash2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
-                            卸载
-                          </button>
-                        </td>
+
+                          {/* 底部操作与元数据 */}
+                          <div className="skill-card-footer">
+                            <span className="skill-footer-date">
+                              {new Date(skill.mtime).toLocaleDateString()}
+                            </span>
+                            <button
+                              type="button"
+                              className="skill-delete-action-btn"
+                              onClick={() => handleDeleteSkill(skill.name)}
+                              title="卸载并删除此技能包"
+                            >
+                              <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                              <span>卸载</span>
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      background: 'var(--bg-card-sub, rgba(128,128,128,0.03))',
+                      border: '1px dashed var(--border-color, rgba(128,128,128,0.2))',
+                      borderRadius: '12px',
+                      padding: '40px 20px',
+                      textAlign: 'center',
+                      color: 'var(--text-muted, #888)'
+                    }}
+                  >
+                    {skillSearchQuery ? (
+                      <>
+                        <div style={{ fontSize: '14px', marginBottom: '8px' }}>
+                          未找到与 &quot;<strong>{skillSearchQuery}</strong>&quot; 匹配的技能
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '4px 12px', fontSize: '12px' }}
+                          onClick={() => setSkillSearchQuery('')}
+                        >
+                          清空搜索
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={32} style={{ opacity: 0.4, marginBottom: '12px', strokeWidth: 1.5 }} />
+                        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-color-strong, #fff)', marginBottom: '4px' }}>
+                          暂无已安装的扩展技能
+                        </div>
+                        <div style={{ fontSize: '12px', marginBottom: '16px' }}>
+                          点击上方“导入技能包 (.zip)”选择本地安装包进行加载
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={handleImportSkill}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <Upload size={14} />
+                          导入技能包 (.zip)
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* 紧凑数据表格视图 (Modern Table View) */}
+            {skillViewMode === 'table' && (
+              <div className="skills-table-modern-wrapper">
+                {filteredSkills.length > 0 ? (
+                  <table className="skills-table-modern">
+                    <colgroup>
+                      <col style={{ width: '56px' }} />
+                      <col style={{ width: '36%' }} />
+                      <col style={{ width: '16%' }} />
+                      <col style={{ width: '16%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '80px' }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'center' }}>启用</th>
+                        <th>技能名称 / 描述</th>
+                        <th>来源与版本</th>
+                        <th>预计 Token</th>
+                        <th>导入日期</th>
+                        <th style={{ textAlign: 'right' }}>操作</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="empty-state">
-                  本地没有已加载的 ZIP 技能包。请点击"导入技能包"选择 ZIP 压缩文件。
-                </div>
-              )}
-            </div>
+                    </thead>
+                    <tbody>
+                      {filteredSkills.map((skill) => {
+                        const displayName = skill.displayName || skill.name.replace(/\.zip$/i, '')
+                        const isEnabled = Boolean(skill.enabled)
+                        const isHub = skill.source?.type === 'skillhub'
+
+                        return (
+                          <tr key={skill.name} style={{ opacity: isEnabled ? 1 : 0.65 }}>
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={isEnabled}
+                                className={`skill-enable-switch ${isEnabled ? 'is-on' : ''}`}
+                                onClick={() => toggleSkillEnable(skill.name)}
+                                title={isEnabled ? '关闭 Skill' : '启用 Skill'}
+                              >
+                                <span />
+                              </button>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <div style={{ fontWeight: 600, color: 'var(--text-color-strong, #fff)' }}>
+                                  {displayName}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted, #888)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '320px' }}>
+                                  {skill.description || skill.name}
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span className={`skill-badge-tag ${isHub ? 'source-hub' : 'source-local'}`}>
+                                  {isHub ? 'SkillHub' : '本地'}
+                                </span>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  {formatBytes(skill.size)}{skill.version ? ` · v${skill.version}` : ''}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span className="skill-badge-tag tokens">
+                                ≈ {Number(skill.estimatedTokens || 0).toLocaleString()}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                              {new Date(skill.mtime).toLocaleString()}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button
+                                type="button"
+                                className="skill-delete-action-btn"
+                                onClick={() => handleDeleteSkill(skill.name)}
+                                title="卸载技能"
+                              >
+                                <Trash2 size={13} strokeWidth={2} />
+                                <span>卸载</span>
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    暂无匹配的技能条目
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
