@@ -259,7 +259,13 @@ const windowsAppUserModelId = 'com.electron.app'
 
 let agentWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
+let isAppQuitting = false
+let agentWindowShouldShow = false
 const sessionEventStore = new SessionEventStore()
+
+app.on('before-quit', () => {
+  isAppQuitting = true
+})
 
 const SESSION_TOOL_EVIDENCE_TOKEN_LIMIT = 48_000
 const SESSION_TOOL_EVIDENCE_ITEM_TOKEN_LIMIT = 12_000
@@ -983,17 +989,23 @@ async function backupSqliteDatabase(sourcePath: string, destinationPath: string)
   })
 }
 
-function createAgentWindow(openParams?: { taskId: string; logId: string }): void {
-  // 打开 Agent 窗口时自动关闭虚拟体和快捷输入窗口，释放渲染进程和 Live2D GPU 资源
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.close()
-  }
-  if (inputWindow && !inputWindow.isDestroyed()) {
-    inputWindow.close()
+function createAgentWindow(
+  openParams?: { taskId: string; logId: string },
+  showWindow = true
+): void {
+  if (showWindow) {
+    agentWindowShouldShow = true
+    // 打开 Agent 窗口时自动关闭虚拟体和快捷输入窗口，释放渲染进程和 Live2D GPU 资源
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close()
+    }
+    if (inputWindow && !inputWindow.isDestroyed()) {
+      inputWindow.close()
+    }
   }
 
   if (agentWindow) {
-    showAgentWindow(agentWindow)
+    if (showWindow) showAgentWindow(agentWindow)
     if (openParams) {
       agentWindow.webContents.send('api:open-cron-log-details', openParams.taskId, openParams.logId)
     }
@@ -1019,7 +1031,9 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       plugins: true,
-      webviewTag: true
+      webviewTag: true,
+      // 普通定时任务由 Agent renderer 托管；窗口隐藏时仍需保持秒级调度。
+      backgroundThrottling: false
     }
   })
 
@@ -1114,7 +1128,7 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
   })
 
   agentWindow.on('ready-to-show', () => {
-    if (agentWindow && !agentWindow.isDestroyed()) {
+    if (agentWindowShouldShow && agentWindow && !agentWindow.isDestroyed()) {
       showAgentWindow(agentWindow)
     }
     // 窗口就绪后，如果有待投递的通知则发送（数据在 localStorage 中）
@@ -1124,8 +1138,18 @@ function createAgentWindow(openParams?: { taskId: string; logId: string }): void
     }
   })
 
+  agentWindow.on('close', (event) => {
+    if (isAppQuitting || !agentWindow || agentWindow.isDestroyed()) return
+    // Alt+F4、任务栏关闭等入口与页面关闭按钮保持一致：仅隐藏到托盘，
+    // 避免销毁承载后台定时任务的 renderer。
+    event.preventDefault()
+    agentWindowShouldShow = false
+    agentWindow.hide()
+  })
+
   agentWindow.on('closed', () => {
     agentWindow = null
+    agentWindowShouldShow = false
     runImmediateGarbageCollection()
   })
 }
@@ -1149,6 +1173,7 @@ ipcMain.on('maximize-agent-window', () => {
 
 ipcMain.on('close-agent-window', () => {
   if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindowShouldShow = false
     agentWindow.hide()
   }
 })
@@ -7604,6 +7629,9 @@ app.whenReady().then(() => {
   })
 
   createTray()
+  // 普通定时任务当前由 Agent renderer 托管。启动时在后台预加载它，
+  // 即使用户从未打开主页面，托盘驻留期间任务也能按时触发。
+  createAgentWindow(undefined, false)
   createWindow()
   registerGlobalAssistantShortcut()
   startRpaScheduleMonitor()

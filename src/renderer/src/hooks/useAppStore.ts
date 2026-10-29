@@ -2118,7 +2118,15 @@ ${skillsContext}`
           return nextTasks
         })
 
-        // 触发系统托盘通知与桌面挂件气泡
+        // 触发 Windows 系统通知与桌面挂件气泡
+        void window.api.showNotification(
+          `完成【${taskToRun.name}】任务`,
+          response
+            ? response.length > 160
+              ? `${response.slice(0, 160)}...`
+              : response
+            : '定时自动化任务已执行完成。'
+        ).catch(console.error)
         window.api.showBubble(`任务 [${taskToRun.name}] 执行成功！`, response, taskToRun.id, logId)
 
         // 记录到通知中心
@@ -2166,19 +2174,24 @@ ${skillsContext}`
           return nextTasks
         })
 
-        window.api.showBubble(`任务 [${taskToRun.name}] 执行失败。`, err.message || err, taskToRun.id, logId)
+        const errorMessage = err.message || String(err)
+        void window.api.showNotification(
+          `【${taskToRun.name}】任务执行失败`,
+          errorMessage
+        ).catch(console.error)
+        window.api.showBubble(`任务 [${taskToRun.name}] 执行失败。`, errorMessage, taskToRun.id, logId)
 
         // 记录到通知中心
         addNotification({
           type: 'task',
           title: `【${taskToRun.name}】任务执行失败`,
-          content: err.message || String(err),
+          content: errorMessage,
           status: 'error',
           metadata: {
             taskId: taskToRun.id,
             taskName: taskToRun.name,
             logId,
-            error: err.message || String(err)
+            error: errorMessage
           }
         })
       }
