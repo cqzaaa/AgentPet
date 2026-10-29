@@ -3314,32 +3314,44 @@ app.whenReady().then(() => {
     triggerEmergencyAutomationStop()
   })
 
-  ipcMain.handle('api:show-notification', async (_, title: string, body: string) => {
-    try {
-      const notification = new Notification({
-        title,
-        body,
-        icon: icon
-      })
-      activeNotifications.add(notification)
-      const releaseNotification = (): void => {
-        activeNotifications.delete(notification)
+  ipcMain.handle(
+    'api:show-notification',
+    async (
+      _,
+      title: string,
+      body: string,
+      navigation?: { taskId: string; logId: string }
+    ) => {
+      try {
+        const notification = new Notification({
+          title,
+          body,
+          icon: icon
+        })
+        activeNotifications.add(notification)
+        const releaseNotification = (): void => {
+          activeNotifications.delete(notification)
+        }
+        notification.on('click', () => {
+          releaseNotification()
+          notification.close()
+          app.focus({ steal: true })
+          if (navigation?.taskId && navigation.logId) {
+            createAgentWindow({ taskId: navigation.taskId, logId: navigation.logId })
+          } else {
+            createAgentWindow()
+          }
+        })
+        notification.on('close', releaseNotification)
+        notification.on('failed', releaseNotification)
+        notification.show()
+        return true
+      } catch (err) {
+        console.error('发送通知失败', err)
+        return false
       }
-      notification.on('click', () => {
-        releaseNotification()
-        notification.close()
-        app.focus({ steal: true })
-        createAgentWindow()
-      })
-      notification.on('close', releaseNotification)
-      notification.on('failed', releaseNotification)
-      notification.show()
-      return true
-    } catch (err) {
-      console.error('发送通知失败', err)
-      return false
     }
-  })
+  )
 
   ipcMain.on(
     'api:trigger-bubble',

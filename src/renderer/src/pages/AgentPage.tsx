@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { formatBytes } from '../utils/helpers'
 import type { AppStore } from '../hooks/useAppStore'
 import type { WorkflowDefinition } from '../../../preload/workflow-types'
@@ -277,6 +278,11 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
   const [cronExecuteAt, setCronExecuteAt] = React.useState<string>('')
   const [workflowChoices, setWorkflowChoices] = React.useState<WorkflowDefinition[]>([])
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null)
+  const [cronDropdownPos, setCronDropdownPos] = React.useState<{
+    top?: number
+    bottom?: number
+    right: number
+  }>({ top: 0, right: 0 })
 
   const formatDatetimeLocal = (timestamp: number) => {
     const d = new Date(timestamp)
@@ -313,6 +319,17 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
     window.addEventListener('click', handleClick)
     return () => window.removeEventListener('click', handleClick)
   }, [])
+
+  React.useEffect(() => {
+    if (!openDropdownId) return
+    const closeDropdown = () => setOpenDropdownId(null)
+    window.addEventListener('resize', closeDropdown)
+    window.addEventListener('scroll', closeDropdown, true)
+    return () => {
+      window.removeEventListener('resize', closeDropdown)
+      window.removeEventListener('scroll', closeDropdown, true)
+    }
+  }, [openDropdownId])
 
   return (
     <div className="agent-page-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
@@ -678,7 +695,22 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                             style={{ padding: '4px 8px', fontSize: '11px' }}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpenDropdownId(openDropdownId === task.id ? null : task.id)
+                              if (openDropdownId === task.id) {
+                                setOpenDropdownId(null)
+                                return
+                              }
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              const menuHeight = task.name === '系统画像提纯与经验沉淀' ? 76 : 112
+                              const right = Math.max(8, window.innerWidth - rect.right)
+                              if (window.innerHeight - rect.bottom < menuHeight + 8) {
+                                setCronDropdownPos({
+                                  bottom: window.innerHeight - rect.top + 4,
+                                  right
+                                })
+                              } else {
+                                setCronDropdownPos({ top: rect.bottom + 4, right })
+                              }
+                              setOpenDropdownId(task.id)
                             }}
                           >
                             <Settings2 size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
@@ -687,18 +719,18 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                           </button>
                         )}
 
-                        {openDropdownId === task.id && (
+                        {openDropdownId === task.id && createPortal(
                           <div
                             style={{
-                              position: 'absolute',
-                              top: '100%',
-                              right: '0',
-                              marginTop: '4px',
+                              position: 'fixed',
+                              top: cronDropdownPos.top !== undefined ? `${cronDropdownPos.top}px` : 'auto',
+                              bottom: cronDropdownPos.bottom !== undefined ? `${cronDropdownPos.bottom}px` : 'auto',
+                              right: `${cronDropdownPos.right}px`,
                               background: 'var(--bg-card)',
                               border: '1px solid var(--border-card)',
                               borderRadius: '6px',
                               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                              zIndex: 10,
+                              zIndex: 9999,
                               display: 'flex',
                               flexDirection: 'column',
                               minWidth: '100px',
@@ -757,7 +789,8 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
                                 移除
                               </div>
                             )}
-                          </div>
+                          </div>,
+                          document.querySelector<HTMLElement>('.agent-window-container') || document.body
                         )}
                       </td>
                     </tr>

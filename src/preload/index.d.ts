@@ -224,7 +224,11 @@ declare global {
       saveCronTasks: (tasks: any[]) => Promise<boolean>
       authorizeCronTask: (task: unknown) => Promise<{ scope: 'scheduled-task'; fingerprint: string; approvedAt: number } | null>
       onCronUpdated: (callback: () => void) => () => void
-      showNotification: (title: string, body: string) => Promise<boolean>
+      showNotification: (
+        title: string,
+        body: string,
+        navigation?: { taskId: string; logId: string }
+      ) => Promise<boolean>
       onShowBubble: (callback: (text: string, details?: string, taskId?: string, logId?: string) => void) => () => void
       showBubble: (text: string, details?: string, taskId?: string, logId?: string) => void
       openCronLogDetails: (taskId: string, logId: string) => void

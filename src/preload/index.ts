@@ -449,8 +449,11 @@ const api = {
       ipcRenderer.removeListener('api:cron-updated', subscription)
     }
   },
-  showNotification: (title: string, body: string): Promise<boolean> =>
-    ipcRenderer.invoke('api:show-notification', title, body),
+  showNotification: (
+    title: string,
+    body: string,
+    navigation?: { taskId: string; logId: string }
+  ): Promise<boolean> => ipcRenderer.invoke('api:show-notification', title, body, navigation),
   onShowBubble: (callback: (text: string, details?: string, taskId?: string, logId?: string) => void): (() => void) => {
     const subscription = (_event: any, text: string, details?: string, taskId?: string, logId?: string) =>
       callback(text, details, taskId, logId)

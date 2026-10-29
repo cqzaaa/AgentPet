@@ -773,6 +773,17 @@ export function useAppStore() {
 
   const activeAvatar = avatarList.find(a => (customModelDir ? a.dir === customModelDir : a.isDefault))
   const currentAvatarName = activeAvatar ? activeAvatar.name : (customModelFile ? customModelFile.replace(/\.model3\.json$/i, '') : 'Mao')
+
+  const markTaskNotificationRead = useCallback((taskId: string, logId?: string) => {
+    const matchingNotification = (useAppStoreRaw.getState().notifications as AppNotification[]).find(
+      notification =>
+        !notification.read &&
+        notification.type === 'task' &&
+        notification.metadata?.taskId === taskId &&
+        (!logId || notification.metadata?.logId === logId)
+    )
+    if (matchingNotification) markNotificationRead(matchingNotification.id)
+  }, [markNotificationRead])
   const currentAvatarStyle = activeAvatar?.languageStyle || 'normal'
   const currentAvatarVoice = activeAvatar?.voice || 'zh-CN-XiaoxiaoNeural'
 
@@ -1138,13 +1149,12 @@ export function useAppStore() {
   useEffect(() => {
     if (!window.api.onOpenCronLogDetails) return
     const unsubscribe = window.api.onOpenCronLogDetails((taskId: string, logId: string) => {
-      setActiveTab('agent')
-      setAgentSubTab('cron')
+      markTaskNotificationRead(taskId, logId)
       setPendingOpenTaskId(taskId)
       setPendingOpenLogId(logId)
     })
     return () => unsubscribe()
-  }, [])
+  }, [markTaskNotificationRead])
 
   // 挂载时解析 URL 传入的定位参数
   useEffect(() => {
@@ -1152,18 +1162,21 @@ export function useAppStore() {
       const href = window.location.href
       const taskMatch = href.match(/[?&]openTaskId=([^&?#]+)/)
       const logMatch = href.match(/[?&]openLogId=([^&?#]+)/)
+      let taskId: string | undefined
+      let logId: string | undefined
       if (taskMatch && taskMatch[1]) {
-        setActiveTab('agent')
-        setAgentSubTab('cron')
-        setPendingOpenTaskId(decodeURIComponent(taskMatch[1]))
+        taskId = decodeURIComponent(taskMatch[1])
+        setPendingOpenTaskId(taskId)
       }
       if (logMatch && logMatch[1]) {
-        setPendingOpenLogId(decodeURIComponent(logMatch[1]))
+        logId = decodeURIComponent(logMatch[1])
+        setPendingOpenLogId(logId)
       }
+      if (taskId) markTaskNotificationRead(taskId, logId)
     } catch (e) {
       console.error('解析 URL 定位参数失败', e)
     }
-  }, [])
+  }, [markTaskNotificationRead])
 
   useEffect(() => window.api.onWorkflowCronUpdated(() => {
     void window.api.getCronTasks().then(tasks => { if (tasks) setCronTasks(tasks) }).catch(console.error)
@@ -2125,7 +2138,8 @@ ${skillsContext}`
             ? response.length > 160
               ? `${response.slice(0, 160)}...`
               : response
-            : '定时自动化任务已执行完成。'
+            : '定时自动化任务已执行完成。',
+          { taskId: taskToRun.id, logId }
         ).catch(console.error)
         window.api.showBubble(`任务 [${taskToRun.name}] 执行成功！`, response, taskToRun.id, logId)
 
@@ -2177,7 +2191,8 @@ ${skillsContext}`
         const errorMessage = err.message || String(err)
         void window.api.showNotification(
           `【${taskToRun.name}】任务执行失败`,
-          errorMessage
+          errorMessage,
+          { taskId: taskToRun.id, logId }
         ).catch(console.error)
         window.api.showBubble(`任务 [${taskToRun.name}] 执行失败。`, errorMessage, taskToRun.id, logId)
 
