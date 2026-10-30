@@ -14,6 +14,7 @@ import { FileChangesCard } from './FileChangesCard'
 import { Tooltip } from './Tooltip'
 import { FileIcon } from './FileIcon'
 import { ImagePreviewModal } from './ImagePreviewModal'
+import { ImageGenerationCard } from './ImageGenerationCard'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -1692,6 +1693,7 @@ interface MessageItemProps {
   onQuoteSelection?: (selection: QuotedSelection, prompt: string, sendNow: boolean) => void
   onEditMessage?: (messageId: number, text: string, files: AttachedFile[]) => Promise<void>
   onRetryFailed?: (messageId: number) => Promise<void>
+  onRetryImageGen?: (messageId: number, imageGen: any) => Promise<void>
   retryDisabled?: boolean
   editDisabled?: boolean
   delegateTaskAttachments?: React.ReactNode[]
@@ -1933,7 +1935,7 @@ function buildToolTrace(msg: any, requestMessage: any): any {
   }
 }
 
-export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onViewPastedText, onQuoteSelection, onEditMessage, onRetryFailed, retryDisabled = false, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
+export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, currentAvatarName, sessionId, requestMessage, highlightedMessageId = null, onPreviewFile, onViewPastedText, onQuoteSelection, onEditMessage, onRetryFailed, onRetryImageGen, retryDisabled = false, editDisabled = false, delegateTaskAttachments }: MessageItemProps) {
   // 处理系统提示与分割消息
   if (msg.sender === 'system') {
     return (
@@ -2954,6 +2956,21 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             {editError && <div className="message-edit-error" role="alert">{editError}</div>}
           </div>
         )}
+
+        {/* 🎨 图像生成卡片（点阵生成中微动效 / 成图预览） */}
+        {!editing && msg.imageGen && (
+          <ImageGenerationCard
+            imageGen={msg.imageGen}
+            onRetry={
+              onRetryImageGen
+                ? () => onRetryImageGen(msg.id, msg.imageGen)
+                : onRetryFailed
+                  ? () => onRetryFailed(msg.id)
+                  : undefined
+            }
+          />
+        )}
+
         {/* 最终大模型回复文本渲染 */}
         {!editing && renderedText && (
           <div

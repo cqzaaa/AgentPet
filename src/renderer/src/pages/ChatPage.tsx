@@ -33,6 +33,7 @@ import {
   FileText,
   FolderOpen,
   Globe2,
+  Image as ImageIcon,
   KeyRound,
   Link,
   Mic,
@@ -77,6 +78,32 @@ function formatQuotedPrompt(selection: QuotedSelection, prompt: string): string 
 }
 
 const sessionVisibleMessages = new Map<string, { key: string; offset: number }>()
+
+// 基于 https://top.cocoloop.cn/image（CocoLoop 2026-10 最新 64 个图像模型排行榜）提炼的全量特征正则
+// 覆盖：包含 image/img/imagen 的通用词，以及最新 Google Nano-Banana、OpenAI GPT-Image/DALL·E、
+// Grok Imagine、Microsoft MAI-Image、Meta Muse、阿里 Qwen-Image/Wanxiang、字节 Seedream/Jimeng/Doubao、
+// FLUX (Pro/Dev/Schnell)、Ideogram、Midjourney/Niji、Recraft、SD4/SD3.5/SDXL、Adobe Firefly、
+// 智谱 CogView、快手 Kolors/Kling、腾讯 Hunyuan、百度 Wenxin/Yige、智源 OmniGen、华为 PixArt、Sana 等
+export const IMAGE_MODEL_REGEX =
+  /(?:image|imagen|\bimg\b|nano-?banana|grok-?imagine|imagine|mai-?image|muse-?image|flux|recraft|dall-?e|dalle|gpt-?image|gpt-?img|stable-?diffusion|\bsd(?:xl|[0-9]|\b)|ideogram|midjourney|\bmj\b|niji|firefly|phoenix|leonardo|seedream|jimeng|wanxiang|wanx|kolors|kling|cogview|hunyuan-?(?:image|dit)|doubao-?image|minimax-?image|step-?image|wenxin|yige|auraflow|lumina|hidream|pixart|omnigen|sana|bria|artguru|wombo|lexica|aperture|t2i|text-?to-?image|text2img|paint|drawing|render)/i
+
+// 基于 CocoLoop 2026 最新榜单综合 Elo 评分推荐的热门生图模型
+const POPULAR_IMAGE_MODELS = [
+  'gpt-image-25-sunburst',
+  'nano-banana-21',
+  'grok-imagine-image-2',
+  'mai-image-26',
+  'qwen-image-30-pro',
+  'seedream-50-pro',
+  'flux-pro-2',
+  'black-forest-labs/FLUX.1-schnell',
+  'ideogram-45-high',
+  'recraft-v4',
+  'dall-e-4',
+  'dall-e-3',
+  'adobe-firefly-4',
+  'imagen-4'
+]
 
 function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition?: boolean }): React.JSX.Element {
   const {
@@ -139,6 +166,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   const [isTaskFloatingActive, setIsTaskFloatingActive] = useState(false)
   const [positionedSessionId, setPositionedSessionId] = useState('')
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
+  const [isImageGenMode, setIsImageGenMode] = useState(false)
+  const [selectedImageModel, setSelectedImageModel] = useState<string>('dall-e-3')
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
   const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
   const [openedSubtask, setOpenedSubtask] = useState<{ runId: string; stepId: string } | null>(null)
@@ -794,6 +823,21 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             <small>常驻右上角，实时查看屏幕或页面</small>
           </span>
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setIsImageGenMode(true)
+            setShowFeaturePopover(false)
+          }}
+        >
+          <span>
+            <ImageIcon size={16} />
+          </span>
+          <span>
+            <strong>创建图像</strong>
+            <small>自然语言生图或图片修改</small>
+          </span>
+        </button>
       </div>
     </div>
   )
@@ -1163,18 +1207,38 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
   // 整合当前可选的所有模型列表（包含已有的 availableModels，以及当前正选中的自定义模型）
   const displayModels = useMemo(() => {
+    if (isImageGenMode) {
+      // 在生图模式下：仅筛选符合生图正则的模型（包含带有 image 关键词及主流生图模型的名字）
+      const matched = availableModels.filter((m) => IMAGE_MODEL_REGEX.test(m))
+      const list = [...matched]
+      if (selectedImageModel && !list.includes(selectedImageModel)) {
+        list.unshift(selectedImageModel)
+      }
+      return list
+    }
+
     const list = [...availableModels]
     if (llmConfig.model && !list.includes(llmConfig.model)) {
       list.push(llmConfig.model)
     }
     return list
-  }, [availableModels, llmConfig.model])
+  }, [availableModels, llmConfig.model, isImageGenMode, selectedImageModel])
 
   // 根据 modelSearchKey 过滤模型列表
   const filteredModels = useMemo(() => {
     if (!modelSearchKey) return displayModels
     return displayModels.filter((m) => m.toLowerCase().includes(modelSearchKey.toLowerCase()))
   }, [displayModels, modelSearchKey])
+
+  // 进入生图模式时，若当前模型列表里有已匹配的生图模型，自动推荐并选中首个
+  useEffect(() => {
+    if (isImageGenMode) {
+      const matched = availableModels.filter((m) => IMAGE_MODEL_REGEX.test(m))
+      if (matched.length > 0 && !matched.includes(selectedImageModel)) {
+        setSelectedImageModel(matched[0])
+      }
+    }
+  }, [isImageGenMode, availableModels, selectedImageModel])
 
   // 决定是否出现滑动条和搜索框（模型总数 >= 8）
   const isModelOverflow = displayModels.length >= 8
@@ -1213,7 +1277,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           }}
         >
           <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>
-            选择模型
+            {isImageGenMode ? '选择生图模型 (已过滤)' : '选择模型'}
           </span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
             共 {displayModels.length} 个模型
@@ -1241,19 +1305,47 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           }}
         >
           {filteredModels.length === 0 ? (
-            <div
-              style={{
-                fontSize: '12px',
-                color: 'var(--text-muted)',
-                textAlign: 'center',
-                padding: '12px 0'
-              }}
-            >
-              无匹配的模型
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '6px 0' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  lineHeight: '1.4'
+                }}
+              >
+                当前服务商未检测到生图模型，请选择常用生图模型或输入：
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {POPULAR_IMAGE_MODELS.map((popModel) => (
+                  <button
+                    key={popModel}
+                    type="button"
+                    style={{
+                      border: '1px solid var(--border-color, rgba(128,128,128,0.2))',
+                      background: 'var(--bg-secondary, rgba(0,0,0,0.02))',
+                      color: 'var(--text-color)',
+                      fontSize: '11.5px',
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      textAlign: 'left',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => {
+                      setSelectedImageModel(popModel)
+                      setShowModelPopover(false)
+                    }}
+                  >
+                    🎨 {popModel}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             filteredModels.map((modelName) => {
-              const isSelected = llmConfig.model === modelName
+              const isSelected = isImageGenMode
+                ? selectedImageModel === modelName
+                : llmConfig.model === modelName
               return (
                 <div
                   key={modelName}
@@ -1272,7 +1364,11 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     color: isSelected ? '#ffffff' : 'var(--text-color)'
                   }}
                   onClick={() => {
-                    saveLlmConfig({ ...llmConfig, model: modelName })
+                    if (isImageGenMode) {
+                      setSelectedImageModel(modelName)
+                    } else {
+                      saveLlmConfig({ ...llmConfig, model: modelName })
+                    }
                     setShowModelPopover(false)
                   }}
                   onMouseEnter={(e) => {
@@ -1329,6 +1425,34 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             })
           )}
         </div>
+        {isImageGenMode && (
+          <div
+            style={{
+              borderTop: '1px solid var(--border-color, rgba(128,128,128,0.12))',
+              paddingTop: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px'
+            }}
+          >
+            <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+              自定义生图模型（支持中转站任意模型）：
+            </div>
+            <input
+              style={searchInputStyle}
+              placeholder="输入模型名并回车选用..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const target = e.currentTarget.value.trim()
+                  if (target) {
+                    setSelectedImageModel(target)
+                    setShowModelPopover(false)
+                  }
+                }
+              }}
+            />
+          </div>
+        )}
       </div>
     )
   }
@@ -1372,7 +1496,235 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     window.requestAnimationFrame(() => chatTextareaRef.current?.focus())
   }, [pendingSteeringPrompt, setInputValue, setPendingSteeringPrompt])
 
+  const handleExecuteImageGen = useCallback(async () => {
+    const prompt = inputValue.trim()
+    const refFile = attachedFiles.find((f: any) =>
+      f.path && /\.(png|jpe?g|webp|gif)$/i.test(f.name || f.path)
+    )
+    if (!prompt && !refFile) {
+      showToast('请输入画面描述或添加图片附件', 'info')
+      return
+    }
+
+    const userText = prompt || '请根据参考图片创建图像'
+    const userMsgId = Date.now()
+    const genMsgId = userMsgId + 1
+
+    const userMsg: any = {
+      id: userMsgId,
+      sender: 'user',
+      text: userText,
+      timestamp: userMsgId,
+      fileInfos: refFile ? [{ name: refFile.name, path: refFile.path }] : undefined
+    }
+
+    const genMsg: any = {
+      id: genMsgId,
+      sender: 'agent',
+      text: '',
+      timestamp: genMsgId,
+      imageGen: {
+        status: 'generating',
+        prompt: userText,
+        referenceImagePath: refFile?.path,
+        model: selectedImageModel,
+        progress: 11
+      }
+    }
+
+    setInputValue('')
+    setAttachedFiles([])
+    setIsImageGenMode(false)
+
+    useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+      sessions.map((s) => {
+        if (s.id !== activeSessionId) return s
+        return {
+          ...s,
+          messages: [...(s.messages || []), userMsg, genMsg]
+        }
+      })
+    )
+
+    try {
+      const result = await window.api.generateImage({
+        prompt: userText,
+        imagePath: refFile?.path,
+        model: selectedImageModel
+      })
+
+      useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+        sessions.map((s) => {
+          if (s.id !== activeSessionId) return s
+          const updatedMessages = (s.messages || []).map((m: any) => {
+            if (m.id !== genMsgId) return m
+            if (result.success) {
+              return {
+                ...m,
+                imageGen: {
+                  status: 'success',
+                  prompt: userText,
+                  referenceImagePath: refFile?.path,
+                  model: selectedImageModel,
+                  imagePath: result.imagePath,
+                  dataUrl: result.dataUrl,
+                  revisedPrompt: result.revisedPrompt,
+                  progress: 100
+                }
+              }
+            } else {
+              return {
+                ...m,
+                imageGen: {
+                  status: 'error',
+                  prompt: userText,
+                  referenceImagePath: refFile?.path,
+                  model: selectedImageModel,
+                  error: result.error || '大模型未返回图像数据'
+                }
+              }
+            }
+          })
+          return { ...s, messages: updatedMessages }
+        })
+      )
+
+      if (!result.success) {
+        showToast(result.error || '图像生成未成功', 'error')
+      }
+    } catch (err: any) {
+      useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+        sessions.map((s) => {
+          if (s.id !== activeSessionId) return s
+          const updatedMessages = (s.messages || []).map((m: any) => {
+            if (m.id !== genMsgId) return m
+            return {
+              ...m,
+              imageGen: {
+                status: 'error',
+                prompt: userText,
+                referenceImagePath: refFile?.path,
+                model: selectedImageModel,
+                error: err?.message || '图像生成请求发生异常'
+              }
+            }
+          })
+          return { ...s, messages: updatedMessages }
+        })
+      )
+      showToast(err?.message || '图像生成请求发生异常', 'error')
+    }
+  }, [inputValue, attachedFiles, activeSessionId, showToast, setInputValue, setAttachedFiles])
+
+  const handleRetryImageGen = useCallback(
+    async (messageId: number, currentImageGen: any) => {
+      const prompt = currentImageGen?.prompt?.trim()
+      if (!prompt) {
+        showToast('原画面描述为空，无法重试', 'error')
+        return
+      }
+
+      // 优先复用原记录的模型；若原记录没有或不合法，则使用当前选中的生图模型
+      const modelToUse = currentImageGen?.model || selectedImageModel
+      const refPath = currentImageGen?.referenceImagePath
+
+      // 立即重置该消息卡片为生成中动效态
+      useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+        sessions.map((s) => {
+          if (s.id !== activeSessionId) return s
+          const updatedMessages = (s.messages || []).map((m: any) => {
+            if (m.id !== messageId) return m
+            return {
+              ...m,
+              imageGen: {
+                ...m.imageGen,
+                status: 'generating',
+                error: undefined,
+                progress: 11
+              }
+            }
+          })
+          return { ...s, messages: updatedMessages }
+        })
+      )
+
+      try {
+        const result = await window.api.generateImage({
+          prompt,
+          imagePath: refPath,
+          model: modelToUse
+        })
+
+        useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+          sessions.map((s) => {
+            if (s.id !== activeSessionId) return s
+            const updatedMessages = (s.messages || []).map((m: any) => {
+              if (m.id !== messageId) return m
+              if (result.success) {
+                return {
+                  ...m,
+                  imageGen: {
+                    status: 'success',
+                    prompt,
+                    referenceImagePath: refPath,
+                    model: modelToUse,
+                    imagePath: result.imagePath,
+                    dataUrl: result.dataUrl,
+                    revisedPrompt: result.revisedPrompt,
+                    progress: 100
+                  }
+                }
+              } else {
+                return {
+                  ...m,
+                  imageGen: {
+                    status: 'error',
+                    prompt,
+                    referenceImagePath: refPath,
+                    model: modelToUse,
+                    error: result.error || '大模型未返回图像数据'
+                  }
+                }
+              }
+            })
+            return { ...s, messages: updatedMessages }
+          })
+        )
+
+        if (!result.success) {
+          showToast(result.error || '图像生成未成功', 'error')
+        }
+      } catch (err: any) {
+        useAppStoreRaw.getState().setSessions((sessions: any[]) =>
+          sessions.map((s) => {
+            if (s.id !== activeSessionId) return s
+            const updatedMessages = (s.messages || []).map((m: any) => {
+              if (m.id !== messageId) return m
+              return {
+                ...m,
+                imageGen: {
+                  status: 'error',
+                  prompt,
+                  referenceImagePath: refPath,
+                  model: modelToUse,
+                  error: err?.message || '图像生成请求发生异常'
+                }
+              }
+            })
+            return { ...s, messages: updatedMessages }
+          })
+        )
+        showToast(err?.message || '图像生成请求发生异常', 'error')
+      }
+    },
+    [activeSessionId, selectedImageModel, showToast]
+  )
+
   const handleSendIntercept = () => {
+    if (isImageGenMode) {
+      void handleExecuteImageGen()
+      return
+    }
     if (draftTokens >= contextLimit) {
       showToast('单次输入过大，请缩短输入或附件内容后继续。', 'error')
       return
@@ -2095,6 +2447,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           onQuoteSelection={handleQuoteSelection}
           onEditMessage={handleEditMessage}
           onRetryFailed={handleRetryFailed}
+          onRetryImageGen={handleRetryImageGen}
           retryDisabled={isSending || activeSessMessages.at(-1)?.id !== message.id}
           editDisabled={isSending}
           delegateTaskAttachments={delegatedRuns.map((snapshot) => (
@@ -2123,6 +2476,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       handleOpenSubtask,
       handleEditMessage,
       handleRetryFailed,
+      handleRetryImageGen,
       isSending,
       activeSessMessages,
       openedSubtask
@@ -2738,6 +3092,26 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             </div>
           )}
 
+          {/* 图像生成模式：内嵌在输入框内部的极简标签（符合图2规范，不占独立横幅） */}
+          {isImageGenMode && (
+            <div className="chat-image-gen-inline-row">
+              <div className="chat-image-gen-inline-pill" role="status" aria-label="创建图像模式已启用">
+                <span className="chat-image-gen-inline-plus" aria-hidden="true">+</span>
+                <span className="chat-image-gen-inline-icon" aria-hidden="true">🖼️</span>
+                <span className="chat-image-gen-inline-text">创建图像</span>
+                <button
+                  type="button"
+                  className="chat-image-gen-inline-close"
+                  onClick={() => setIsImageGenMode(false)}
+                  title="退出创建图像模式"
+                  aria-label="退出创建图像模式"
+                >
+                  <X size={12} strokeWidth={2.2} />
+                </button>
+              </div>
+            </div>
+          )}
+
           <textarea
             ref={chatTextareaRef}
             className="chat-textarea-field resize-none"
@@ -2745,13 +3119,15 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             placeholder={
               draftTokens >= contextLimit
                 ? '单次输入过大，请缩短输入或附件内容后继续。'
-                : isSending
-                  ? pendingSteeringPrompt
-                    ? '随心输入，当前回复完成后将自动发送上方内容，或点击「调整方向」立即发送...'
-                    : `${currentAvatarName} 正在思考中…可继续发送追加指引`
-                  : pendingSteeringPrompt
-                    ? '已排队等待发送...'
-                    : `输入指令并发送给 ${currentAvatarName} ...`
+                : isImageGenMode
+                  ? '描述你想生成的画面，或添加参考图片进行修改...'
+                  : isSending
+                    ? pendingSteeringPrompt
+                      ? '随心输入，当前回复完成后将自动发送上方内容，或点击「调整方向」立即发送...'
+                      : `${currentAvatarName} 正在思考中…可继续发送追加指引`
+                    : pendingSteeringPrompt
+                      ? '已排队等待发送...'
+                      : `输入指令并发送给 ${currentAvatarName} ...`
             }
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -2936,7 +3312,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                         maxWidth: isToolbarNarrow ? '56px' : '85px'
                       }}
                     >
-                      {llmConfig.model || '选择模型'}
+                      {isImageGenMode ? selectedImageModel : llmConfig.model || '选择模型'}
                     </span>
                     <ChevronDown
                       size={13}

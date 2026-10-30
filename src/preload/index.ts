@@ -2,6 +2,9 @@ import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiMo
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
+import type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
+
+export type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
 
 type SessionMutation =
   | { type: 'session-upsert'; session: any }
@@ -480,6 +483,8 @@ const api = {
   wechatGetStatus: (): Promise<any> => ipcRenderer.invoke('api:wechat-get-status'),
   wechatSaveSettings: (settings: any): Promise<boolean> => ipcRenderer.invoke('api:wechat-save-settings', settings),
   getSystemLlmConfig: (): Promise<any> => ipcRenderer.invoke('api:get-system-llm-config'),
+  generateImage: (options: ImageGenerationOptions): Promise<ImageGenerationResult> =>
+    ipcRenderer.invoke('api:generate-image', options),
   syncLlmConfig: (config: any): Promise<any> => ipcRenderer.invoke('api:sync-llm-config', config),
   onWechatStatusUpdated: (callback: (data: any) => void): (() => void) => {
     const subscription = (_event: any, data: any) => callback(data)

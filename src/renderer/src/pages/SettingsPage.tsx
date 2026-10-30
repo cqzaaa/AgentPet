@@ -5,10 +5,13 @@ import { AgentSettingsPanel } from '../components/AgentSettingsPanel'
 import { requestConfirmation } from '../components/confirmService'
 import {
   AudioLines,
+  Bot,
   Cat,
   Check,
   ChevronDown,
+  Cpu,
   FolderOpen,
+  HardDrive,
   MessageSquare,
   Pencil,
   RotateCcw,
@@ -116,17 +119,33 @@ export function SettingsPage({ store }: SettingsPageProps): React.JSX.Element {
     <div className="settings-page-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Sub Nav */}
       <div className="sub-tab-nav" style={{ flexShrink: 0 }}>
-        <div className={`sub-tab-item ${settingsSubTab === 'keys' ? 'active' : ''}`} onClick={() => setSettingsSubTab('keys')}>
-          模型配置
+        <div
+          className={`sub-tab-item ${settingsSubTab === 'keys' ? 'active' : ''}`}
+          onClick={() => setSettingsSubTab('keys')}
+        >
+          <Cpu size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>模型配置</span>
         </div>
-        <div className={`sub-tab-item ${settingsSubTab === 'agents' ? 'active' : ''}`} onClick={() => setSettingsSubTab('agents')}>
-          Agents
+        <div
+          className={`sub-tab-item ${settingsSubTab === 'agents' ? 'active' : ''}`}
+          onClick={() => setSettingsSubTab('agents')}
+        >
+          <Bot size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>Agents</span>
         </div>
-        <div className={`sub-tab-item ${settingsSubTab === 'storage' ? 'active' : ''}`} onClick={() => setSettingsSubTab('storage')}>
-          本地存储
+        <div
+          className={`sub-tab-item ${settingsSubTab === 'storage' ? 'active' : ''}`}
+          onClick={() => setSettingsSubTab('storage')}
+        >
+          <HardDrive size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>本地存储</span>
         </div>
-        <div className={`sub-tab-item ${settingsSubTab === 'avatar' ? 'active' : ''}`} onClick={() => setSettingsSubTab('avatar')}>
-          虚拟体设置
+        <div
+          className={`sub-tab-item ${settingsSubTab === 'avatar' ? 'active' : ''}`}
+          onClick={() => setSettingsSubTab('avatar')}
+        >
+          <Cat size={14} strokeWidth={2} className="ui-icon-leading" aria-hidden="true" />
+          <span>虚拟体设置</span>
         </div>
       </div>
 

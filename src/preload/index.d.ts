@@ -1,6 +1,9 @@
 import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiModelSelection, WikiModelSettings, WikiEvidenceLocation } from './wiki-types'
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
+import type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
+
+export type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
 
 type SessionMutation =
   | { type: 'session-upsert'; session: any }
@@ -238,6 +241,7 @@ declare global {
       wechatGetStatus: () => Promise<any>
       wechatSaveSettings: (settings: any) => Promise<boolean>
       getSystemLlmConfig: () => Promise<any>
+      generateImage: (options: ImageGenerationOptions) => Promise<ImageGenerationResult>
       syncLlmConfig: (config: any) => Promise<any>
       onWechatStatusUpdated: (callback: (data: any) => void) => () => void
       onWechatSessionUpdated: (callback: (sessionId?: string) => void) => () => void

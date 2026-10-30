@@ -21,6 +21,7 @@ import * as Papa from 'papaparse'
 import ExcelJS from 'exceljs'
 import { randomUUID } from 'crypto'
 import { ensureCompleteJpeg, resolveLocalFilePath } from './image-binary'
+import { generateImage, type ImageGenerationOptions } from './image-gen/service'
 
 // Upload previews are only a navigation aid. The original file path remains
 // available to file/Office tools, so storing a large inline copy wastes the
@@ -7256,6 +7257,11 @@ app.whenReady().then(() => {
   ipcMain.handle('api:get-system-llm-config', () => {
     return sanitizeSystemLlmConfig(systemLlmConfig)
   })
+
+  ipcMain.handle(
+    'api:generate-image',
+    async (_event, options: ImageGenerationOptions) => generateImage(options)
+  )
 
   ipcMain.handle('api:sync-llm-config', (_, config) => {
     systemLlmConfig = saveSecureSystemLlmConfig(config)

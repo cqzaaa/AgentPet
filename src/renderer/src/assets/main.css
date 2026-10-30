@@ -4898,6 +4898,352 @@ body {
   margin-bottom: 12px;
 }
 
+/* ── 图像生成 (Taste-Skill Anti-Slop 极简设计) ────────────────────────── */
+
+/* 图2: 输入框内嵌极简模式标签（不占外部独立横条） */
+.chat-image-gen-inline-row {
+  display: flex;
+  align-items: center;
+  margin: 2px 0 6px 2px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.chat-image-gen-inline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 6px;
+  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  border-radius: 8px;
+  user-select: none;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.chat-image-gen-inline-pill:hover {
+  background: var(--bg-active, rgba(0, 0, 0, 0.05));
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+.chat-image-gen-inline-plus {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted, #64748b);
+  line-height: 1;
+  margin-right: -1px;
+}
+
+.chat-image-gen-inline-icon {
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chat-image-gen-inline-text {
+  color: #2563eb;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dark .chat-image-gen-inline-text {
+  color: #60a5fa;
+}
+
+.chat-image-gen-inline-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-image-gen-inline-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-color, #0f172a);
+}
+
+.dark .chat-image-gen-inline-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+}
+
+/* 图3: 图像生成卡片与点阵画布 */
+.image-gen-card {
+  margin: 6px 0;
+  width: 250px;
+  max-width: 100%;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
+}
+
+.image-gen-header {
+  margin-bottom: 8px;
+}
+
+.image-gen-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-color-secondary, #475569);
+  letter-spacing: -0.01em;
+}
+
+.image-gen-canvas {
+  position: relative;
+  width: 100%;
+  height: 190px;
+  background: var(--bg-canvas-dots, #fcfdfe);
+  border: 1px solid rgba(59, 130, 246, 0.08);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.image-gen-dot-matrix {
+  display: grid;
+  grid-template-columns: repeat(17, 1fr);
+  grid-template-rows: repeat(17, 1fr);
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-items: center;
+}
+
+.image-gen-dot {
+  border-radius: 50%;
+  display: inline-block;
+  animation: dotMatrixWave 2.2s ease-in-out infinite alternate;
+}
+
+.image-gen-dot.core {
+  animation: dotCoreWave 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes dotMatrixWave {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.15;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(0.85);
+    opacity: 0.3;
+  }
+}
+
+@keyframes dotCoreWave {
+  0% {
+    transform: scale(0.9);
+    filter: drop-shadow(0 0 1px rgba(37, 99, 235, 0.3));
+  }
+  50% {
+    transform: scale(1.4);
+    filter: drop-shadow(0 0 5px rgba(37, 99, 235, 0.7));
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.4));
+  }
+}
+
+/* 对应图3右下角药丸进度徽标 */
+.image-gen-progress-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2563eb;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+/* 成图结果展示 */
+.image-gen-result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.image-gen-image-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: var(--bg-secondary, #f1f5f9);
+}
+
+.image-gen-result-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.25s ease;
+}
+
+.image-gen-image-wrapper:hover .image-gen-result-img {
+  transform: scale(1.02);
+}
+
+.image-gen-overlay-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.image-gen-image-wrapper:hover .image-gen-overlay-hint {
+  opacity: 1;
+}
+
+.image-gen-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.image-gen-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.16));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  color: var(--text-color, #1e293b);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.image-gen-action-btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #2563eb;
+}
+
+.image-gen-revised-prompt {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.02));
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted, #64748b);
+}
+
+.image-gen-revised-label {
+  font-weight: 600;
+  color: var(--text-color, #334155);
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* 错误容器 */
+.image-gen-error-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.image-gen-error-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.image-gen-error-icon {
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.image-gen-error-text strong {
+  display: block;
+  font-size: 12px;
+  color: #b91c1c;
+  margin-bottom: 2px;
+}
+
+.image-gen-error-text p {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.image-gen-retry-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: #ffffff;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.image-gen-retry-btn:hover {
+  background: #fef2f2;
+}
+
+
 .meeting-detail-meta span {
   display: inline-flex;
   align-items: center;

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronLeft, ChevronRight, CornerDownLeft } from 'lucide-react'
+import { ModelStrengthCapsule } from './ModelStrengthCapsule'
+import { isModelSelectionQuestion } from './model-strength-resolver'
 
 type Option = { label: string; value: string; description?: string }
 type Question = { id: string; question: string; options?: Option[]; placeholder?: string }
@@ -119,34 +121,48 @@ export function ClarificationCard({
           }
         >
           <legend>{currentQuestion.question}</legend>
-          <div className="clarification-options">
-            {(currentQuestion.options || []).map((option) => {
-              const selected = !currentAnswer.useCustom && currentAnswer.selected === option.value
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`clarification-option ${selected ? 'is-selected' : ''}`}
-                  aria-pressed={selected}
-                  onClick={() =>
-                    update(currentQuestion.id, {
-                      selected: option.value,
-                      custom: '',
-                      useCustom: false
-                    })
-                  }
-                >
-                  <span className="clarification-option__marker">
-                    {selected ? <Check size={13} strokeWidth={2.5} aria-hidden="true" /> : null}
-                  </span>
-                  <span className="clarification-option__copy">
-                    <strong>{option.label}</strong>
-                    {option.description && <small>{option.description}</small>}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          {isModelSelectionQuestion(currentQuestion) && (currentQuestion.options || []).length > 0 ? (
+            <ModelStrengthCapsule
+              options={currentQuestion.options || []}
+              selectedValue={currentAnswer.selected}
+              onChange={(newModelId) =>
+                update(currentQuestion.id, {
+                  selected: newModelId,
+                  custom: '',
+                  useCustom: false
+                })
+              }
+            />
+          ) : (
+            <div className="clarification-options">
+              {(currentQuestion.options || []).map((option) => {
+                const selected = !currentAnswer.useCustom && currentAnswer.selected === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`clarification-option ${selected ? 'is-selected' : ''}`}
+                    aria-pressed={selected}
+                    onClick={() =>
+                      update(currentQuestion.id, {
+                        selected: option.value,
+                        custom: '',
+                        useCustom: false
+                      })
+                    }
+                  >
+                    <span className="clarification-option__marker">
+                      {selected ? <Check size={13} strokeWidth={2.5} aria-hidden="true" /> : null}
+                    </span>
+                    <span className="clarification-option__copy">
+                      <strong>{option.label}</strong>
+                      {option.description && <small>{option.description}</small>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div
             className={`clarification-custom-input ${currentAnswer.useCustom ? 'is-active' : ''}`}
           >
