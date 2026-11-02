@@ -1,16 +1,38 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { ChevronRight, LoaderCircle, Terminal } from 'lucide-react'
 import './ChatActivityGroup.css'
 import { formatActivityDuration } from '../hooks/chat-activity-duration'
+import {
+  hasOpenDisclosureDescendant,
+  usePersistentDisclosure
+} from '../hooks/chat-disclosure-state'
 
-export function ChatTurnActivity({ running, durationMs, children }: {
+export function ChatTurnActivity({ running, durationMs, persistenceKey, children }: {
   running: boolean
   durationMs?: number
+  persistenceKey?: string
   children: ReactNode
-}) {
+}): React.JSX.Element {
+  const [isOpen, setIsOpen] = usePersistentDisclosure(
+    persistenceKey,
+    hasOpenDisclosureDescendant(persistenceKey)
+  )
+  const wasRunningRef = useRef(running)
+
+  useEffect(() => {
+    if (wasRunningRef.current && !running && hasOpenDisclosureDescendant(persistenceKey)) {
+      setIsOpen(true)
+    }
+    wasRunningRef.current = running
+  }, [persistenceKey, running, setIsOpen])
+
   if (running) return <>{children}</>
   return (
-    <details className="chat-turn-activity">
+    <details
+      className="chat-turn-activity"
+      open={isOpen}
+      onToggle={(event) => setIsOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className="chat-activity-summary">
         <span>{durationMs === undefined ? '处理记录' : `用时 ${formatActivityDuration(durationMs)}`}</span>
         <ChevronRight size={14} className="chat-activity-chevron" aria-hidden="true" />
@@ -20,21 +42,22 @@ export function ChatTurnActivity({ running, durationMs, children }: {
   )
 }
 
-export function ChatActivityGroup({ count, running, isThinking, activityLabel, defaultOpen = false, children }: {
+export function ChatActivityGroup({ count, running, isThinking, activityLabel, defaultOpen = false, persistenceKey, children }: {
   count: number
   running: boolean
   isThinking?: boolean
   activityLabel?: string
   defaultOpen?: boolean
+  persistenceKey?: string
   children: ReactNode
-}) {
-  const [isOpen, setIsOpen] = useState(defaultOpen)
+}): React.JSX.Element {
+  const [isOpen, setIsOpen] = usePersistentDisclosure(persistenceKey, defaultOpen)
 
   return (
     <details
       className="chat-activity-group"
       open={isOpen}
-      onToggle={(e) => setIsOpen((e.target as HTMLDetailsElement).open)}
+      onToggle={(e) => setIsOpen(e.currentTarget.open)}
     >
       <summary className="chat-activity-summary">
         {running ? <LoaderCircle size={14} className="icon-spin" aria-hidden="true" /> : <Terminal size={14} aria-hidden="true" />}

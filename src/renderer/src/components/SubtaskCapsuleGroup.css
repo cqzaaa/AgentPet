@@ -100,7 +100,9 @@
   transform: translateX(2px);
 }
 .subtask-detail-layer {
-  position: relative;
+  position: absolute;
+  inset-block: 0;
+  right: 0;
   z-index: 25;
   width: clamp(360px, 40vw, 560px);
   min-width: 340px;
@@ -610,10 +612,6 @@
   border-radius: 8px;
   font-size: 12px;
   width: fit-content;
-}
-
-.chat-split-container.has-subtask-detail {
-  flex-direction: row;
 }
 
 .chat-split-container.has-subtask-detail .chat-main {

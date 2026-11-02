@@ -33,6 +33,24 @@ function limitAttachmentTextPreview(content: string): string {
   return `${content.slice(0, ATTACHMENT_TEXT_PREVIEW_LIMIT)}\n\n[附件文本预读已截断：原文共 ${content.length} 个字符，仅保留前 ${ATTACHMENT_TEXT_PREVIEW_LIMIT} 个字符。需要完整内容时请使用文件工具分段读取；需要版式转换时请使用 Office PDF 转换工具。]`
 }
 
+function openLocalFileFromNavigationUrl(url: string): boolean {
+  if (!/^(?:file|local-file):\/\//i.test(url)) return false
+
+  const filePath = resolveLocalFilePath(url).replace(
+    /(\.[A-Za-z0-9]{1,12}):\d+(?::\d+)?$/,
+    '$1'
+  )
+  if (!isAbsolute(filePath) || !fs.existsSync(filePath)) {
+    console.warn('[AgentWindow] 本地文件链接不存在:', filePath)
+    return true
+  }
+
+  void shell.openPath(filePath).then((error) => {
+    if (error) console.error('[AgentWindow] 打开本地文件链接失败:', error)
+  })
+  return true
+}
+
 import { toolRegistry } from './tools/core/tool-registry'
 import { registerBuiltinTools } from './tools/builtin'
 import { mcpManager } from './tools/mcp/mcp-manager'
@@ -1122,7 +1140,7 @@ function createAgentWindow(
       void shell.openExternal(details.url).catch((error) => {
         console.error('[AgentWindow] 打开外部链接失败:', error)
       })
-    } else {
+    } else if (!openLocalFileFromNavigationUrl(details.url)) {
       console.warn('[AgentWindow] 已拦截非网页新窗口地址:', details.url)
     }
     return { action: 'deny' }

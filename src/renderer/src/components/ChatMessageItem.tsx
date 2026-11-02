@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
+import { usePersistentDisclosure } from '../hooks/chat-disclosure-state'
 import { uniqueToolSteps } from '../hooks/tool-step-identity'
 import { activityDurationMs } from '../hooks/chat-activity-duration'
 import { getModelIcon } from '../utils/modelIcons'
@@ -1596,17 +1597,12 @@ function combineToolSteps(toolSteps: any[], isThinking: boolean): any[] {
   return combined
 }
 
-export function ToolStepItem({ step, isThinking }: { step: any; isThinking: boolean }) {
-  const [isItemCollapsed, setIsItemCollapsed] = useState(true)
-  const [isReqCollapsed, setIsReqCollapsed] = useState(true)
-
-  useEffect(() => {
-    if (!isThinking) {
-      setIsItemCollapsed(true)
-      setIsReqCollapsed(true)
-    }
-  }, [isThinking])
-
+export function ToolStepItem({ step, persistenceKey }: { step: any; persistenceKey?: string }) {
+  const [isItemOpen, setIsItemOpen] = usePersistentDisclosure(persistenceKey, false)
+  const [isRequestOpen, setIsRequestOpen] = usePersistentDisclosure(
+    persistenceKey ? `${persistenceKey}/request` : undefined,
+    false
+  )
 
   const toolDisplayName = translateToolName(step.name || '')
 
@@ -1622,8 +1618,8 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <button type="button" className="chat-tool-summary"
-        onClick={() => setIsItemCollapsed(!isItemCollapsed)}
-        aria-expanded={!isItemCollapsed}
+        onClick={() => setIsItemOpen(!isItemOpen)}
+        aria-expanded={isItemOpen}
         title={typeof step.callDetail?.command === 'string' ? step.callDetail.command : toolDisplayName}
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', border: '1px solid var(--border-card)', borderRadius: '6px', color: step.isWaiting ? '#60a5fa' : '#10b981', fontSize: '12px', backgroundColor: 'var(--bg-card)' }}>
@@ -1632,22 +1628,22 @@ export function ToolStepItem({ step, isThinking }: { step: any; isThinking: bool
           ) : <Check size={13} strokeWidth={2.5} aria-hidden="true" />}
         </span>
         <span className="chat-tool-label">{step.isWaiting ? '正在运行' : '已运行'} {typeof step.callDetail?.command === 'string' ? step.callDetail.command : toolDisplayName}</span>
-        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemCollapsed ? <ChevronRight size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />}</span>
+        <span style={{ fontSize: '10px', opacity: 0.7 }}>{isItemOpen ? <ChevronDown size={13} strokeWidth={2} aria-hidden="true" /> : <ChevronRight size={13} strokeWidth={2} aria-hidden="true" />}</span>
       </button>
-      {!isItemCollapsed && (
+      {isItemOpen && (
         <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {step.callDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div
                 style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600, userSelect: 'none' }}
-                onClick={() => setIsReqCollapsed(!isReqCollapsed)}
+                onClick={() => setIsRequestOpen(!isRequestOpen)}
                 title="点击展开/折叠参数"
               >
                 <ArrowDownToLine size={13} strokeWidth={2} aria-hidden="true" />
                 <span>请求参数 / 命令:</span>
-                <span style={{ fontSize: '9px', opacity: 0.7 }}>{isReqCollapsed ? <ChevronRight size={12} strokeWidth={2} aria-hidden="true" /> : <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />}</span>
+                <span style={{ fontSize: '9px', opacity: 0.7 }}>{isRequestOpen ? <ChevronDown size={12} strokeWidth={2} aria-hidden="true" /> : <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />}</span>
               </div>
-              {!isReqCollapsed && (
+              {isRequestOpen && (
                 <div style={{ padding: '8px 12px', background: 'rgba(128,128,128,0.06)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-secondary)', fontFamily: "var(--font-mono, 'Cascadia Code', Consolas, monospace)", lineHeight: 1.55, whiteSpace: 'pre-wrap', border: '1px solid rgba(128,128,128,0.1)' }}>
                   {displayCmd}
                 </div>
@@ -2837,7 +2833,11 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
           <OfficeRuntimeInstallCard key={step.id} step={step} />
         ))}
 
-        {activityBlocks.length > 0 && <ChatTurnActivity running={msg.isThinking} durationMs={activityDurationMs(msg)}>
+        {activityBlocks.length > 0 && <ChatTurnActivity
+          running={msg.isThinking}
+          durationMs={activityDurationMs(msg)}
+          persistenceKey={`session:${sessionId}/message:${msg.id}/turn`}
+        >
         {activityBlocks.map(block => {
           if (block.type === 'commentary') {
             return (
@@ -2861,10 +2861,15 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
                 ? block.steps[0].status === 'started'
                 : msg.isThinking && (block.steps.some(step => step.isWaiting) ||
                   (block.steps.every(step => step.type !== 'tool') && block === activityBlocks[activityBlocks.length - 1] && !msg.text))}
-              isThinking={block.steps[0]?.type !== 'compaction' && msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}>
+              isThinking={block.steps[0]?.type !== 'compaction' && msg.isThinking && block === activityBlocks[activityBlocks.length - 1] && !renderedText}
+              persistenceKey={`session:${sessionId}/message:${msg.id}/turn/activity:${block.id}`}>
               {block.steps.map((step: any) => {
                 if (step.type === 'tool') {
-                  return <ToolStepItem key={step.id} step={step} isThinking={msg.isThinking} />
+                  return <ToolStepItem
+                    key={step.id}
+                    step={step}
+                    persistenceKey={`session:${sessionId}/message:${msg.id}/turn/activity:${block.id}/tool:${step.id}`}
+                  />
                 }
                 if (step.type === 'compaction') return <ContextCompactionItem key={step.id} step={step} />
                 return <ToolThinkItem key={step.id} step={step} isThinking={msg.isThinking} />

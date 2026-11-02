@@ -576,10 +576,15 @@ export function SubtaskDetailDrawer({
                 running={isRunning}
                 isThinking={isRunning && lastTraceStep?.type === 'think'}
                 defaultOpen={false}
+                persistenceKey={`subtask:${snapshot.run.id}/${stepId}/activity`}
               >
                 {trace.map((item, index) =>
                   item.type === 'tool' ? (
-                    <ToolStepItem key={item.id} step={item} isThinking={isRunning} />
+                    <ToolStepItem
+                      key={item.id}
+                      step={item}
+                      persistenceKey={`subtask:${snapshot.run.id}/${stepId}/activity/tool:${item.id}`}
+                    />
                   ) : item.type === 'message' ? (
                     <article key={item.id} className="subtask-message is-progress">
                       <small>过程消息</small>
@@ -603,7 +608,7 @@ export function SubtaskDetailDrawer({
               className={`subtask-message is-response ${isBlockedOrFailed ? 'is-error' : ''}`}
             >
               <small>{status === 'completed' ? 'Agent 回复' : '执行结果'}</small>
-              <div>{renderAdvancedMessage(cleanResultSummary(result))}</div>
+              <div>{renderAdvancedMessage(cleanResultSummary(result), onPreviewFile)}</div>
             </article>
           ) : isRunning ? (
             trace.length === 0 && (

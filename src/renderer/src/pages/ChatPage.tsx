@@ -3715,6 +3715,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
 
       {openedSubtask && collaborationById.get(openedSubtask.runId) && (
         <SubtaskDetailDrawer
+          key={`${openedSubtask.runId}:${openedSubtask.stepId}`}
           snapshot={collaborationById.get(openedSubtask.runId)!}
           stepId={openedSubtask.stepId}
           onClose={() => setOpenedSubtask(null)}
