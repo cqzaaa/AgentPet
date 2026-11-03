@@ -5,6 +5,7 @@ import { formatDateTime } from '../utils/helpers'
 interface ChatSummaryState {
   contextRounds: number
   llmConfig: any
+  memoryDisabledSessionIds: string[]
 }
 
 interface ChatSessionSummaryOptions {
@@ -20,7 +21,8 @@ export function useChatSessionSummary({ getState, setSessions }: ChatSessionSumm
     const session = latestSessions.find(item => item.id === sessionId)
     if (!session) return
 
-    const { contextRounds, llmConfig } = getState()
+    const { contextRounds, llmConfig, memoryDisabledSessionIds } = getState()
+    if (memoryDisabledSessionIds.includes(sessionId)) return
     if (contextRounds <= 0) return
     const triggerCount = contextRounds * 2
     const completed = (session.messages || []).filter((message: any) =>
@@ -90,6 +92,7 @@ ${chatLog}
       }
       backup += '</details>'
       const markdown = `## [${time}] 记忆摘要与纠错沉淀\n${result.trim()}${backup}`
+      if (getState().memoryDisabledSessionIds.includes(sessionId)) return
       if (!(await window.api.appendMemorySummary(sessionId, markdown))) return
 
       const batchIds = new Set(summaryBatch.map((message: any) => message.id))

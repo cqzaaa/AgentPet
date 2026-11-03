@@ -24,6 +24,7 @@ import {
   ArrowUp,
   BarChart3,
   BookOpen,
+  Brain,
   Check,
   ChevronDown,
   Code2,
@@ -106,6 +107,8 @@ const POPULAR_IMAGE_MODELS = [
 ]
 
 function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition?: boolean }): React.JSX.Element {
+  const memoryInjectionEnabled = useAppStoreRaw(state => !state.memoryDisabledSessionIds.includes(state.activeSessionId))
+  const setMemoryInjectionEnabled = useAppStoreRaw(state => state.setMemoryInjectionEnabled)
   const {
     llmConfig,
     activeSessMessages,
@@ -3325,6 +3328,24 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                 {showModelPopover && renderModelPopover()}
               </div>
 
+              <Tooltip
+                content={memoryInjectionEnabled
+                  ? '卸载当前对话的记忆：停止读取、注入和保存经验，已有聊天内容保留'
+                  : '当前对话不读取、不注入、不保存记忆；点击重新加载'}
+                placement="top"
+              >
+                <button
+                  type="button"
+                  className={`chat-knowledge-trigger chat-memory-trigger ${memoryInjectionEnabled ? 'selected' : ''}`}
+                  aria-label={memoryInjectionEnabled ? '卸载当前对话记忆' : '加载当前对话记忆'}
+                  aria-pressed={memoryInjectionEnabled}
+                  disabled={isSending}
+                  onClick={() => setMemoryInjectionEnabled(activeSessionId, !memoryInjectionEnabled)}
+                >
+                  <Brain size={15} aria-hidden="true" />
+                </button>
+              </Tooltip>
+
               <div className="chat-knowledge-select" ref={knowledgePopoverRef}>
                 <Tooltip
                   content={
@@ -3375,7 +3396,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                       <span className="chat-knowledge-option__mark" />
                       <span>
                         <strong>不使用 Wiki</strong>
-                        <small>仅使用当前对话与记忆</small>
+                        <small>{memoryInjectionEnabled ? '仅使用当前对话与记忆' : '仅使用当前对话'}</small>
                       </span>
                       {!selectedKnowledgeBaseId && <Check size={14} aria-hidden="true" />}
                     </button>

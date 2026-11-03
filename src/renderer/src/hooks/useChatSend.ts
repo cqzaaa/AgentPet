@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback } from 'react'
 import { resumeActivityDuration } from './chat-activity-duration'
+import { loadChatMemoryContext } from './chat-memory-context'
 import type { MutableRefObject } from 'react'
 import { formatDateTime } from '../utils/helpers'
 import { mergeCollaborationHistory } from '../utils/collaborationContext'
@@ -15,6 +16,7 @@ interface ChatSendState {
   attachedFiles: any[]
   selectedKnowledgeBaseId: string
   selectedKnowledgeBaseName: string
+  memoryDisabledSessionIds: string[]
   sendingSessionIds: Record<string, boolean>
   llmConfig: any
   contextRounds: number
@@ -308,9 +310,9 @@ export function useChatSend({
       const chatMessages = selectedHistory.map((message: any) => toLlmMessage(message, contextWindow))
 
       const retrievalQuery = [text, fileNames].filter(Boolean).join('\n')
-      const [profileContent, recallResponse, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([
-        window.api.getMemoryProfile().catch((error: any) => { console.error('获取人物画像失败:', error); return '' }),
-        window.api.recallExperiences(text).catch((error: any) => { console.error('获取避坑经验失败:', error); return [] }),
+      const memoryInjectionEnabled = !state.memoryDisabledSessionIds.includes(sessionId)
+      const [memory, skillCatalogResult, activeMcpServers, knowledgeEvidence] = await Promise.all([
+        loadChatMemoryContext(memoryInjectionEnabled, text, window.api),
         window.api.getSkillCatalog(retrievalQuery).catch((error: any) => { console.error('获取 Skill 候选目录失败:', error); return { catalog: '', enabledCount: 0 } }),
         window.api.getActiveMcpServers().catch((error: any) => { console.error('获取可用 MCP 服务列表失败:', error); return [] }),
         state.selectedKnowledgeBaseId && retrievalQuery
@@ -321,28 +323,7 @@ export function useChatSend({
           : Promise.resolve([])
       ])
 
-      let relevantExperiences: any[] = []
-      let recallDebug: any = null
-      const recallResult: any = recallResponse
-      if (recallResult && !Array.isArray(recallResult)) {
-        relevantExperiences = recallResult.results || []
-        recallDebug = recallResult.debug || null
-      } else {
-        relevantExperiences = Array.isArray(recallResult) ? recallResult : []
-      }
-
-      const memoryContext = `\n\n🧠 【长期人物画像与背景设定】\n${profileContent || '暂无详细人物画像。'}` +
-        (relevantExperiences.length > 0
-          ? `\n\n💡 【相关历史经验与避坑指南】\n${relevantExperiences.map((experience: any, index: number) => {
-              let item = `${index + 1}. ${experience.fact}`
-              if (experience.relatedContent) {
-                item += `\n   [关联的原始总结上下文]:\n   """\n   ${experience.relatedContent.replace(/\n/g, '\n   ')}\n   """`
-              } else if (experience.absolutePath) {
-                item += `\n   [对应原始归档文件路径，若需了解详情你可以使用 read_file 访问该路径]: ${experience.absolutePath}`
-              }
-              return item
-            }).join('\n')}`
-          : '')
+      const { memoryContext, relevantExperiences, recallDebug } = memory
       const knowledgeContext = formatKnowledgeEvidence(state.selectedKnowledgeBaseName, knowledgeEvidence as any[])
       const skillsContext = String(skillCatalogResult.catalog || '').trim()
         ? `以下是所有已启用本地 Skill 的业务能力目录。目录不是完整规范；请根据业务简介自行选择，只有确实需要时才调用 request_skill 读取完整内容，每轮最多加载 3 个：\n\n${skillCatalogResult.catalog}`
@@ -437,6 +418,7 @@ ${skillsContext}
           temperature: llmConfig.temperature,
           maxTokens: llmConfig.maxTokens,
           recallDebug,
+          memoryInjectionEnabled,
           knowledgeBase: state.selectedKnowledgeBaseId ? {
             id: state.selectedKnowledgeBaseId,
             name: state.selectedKnowledgeBaseName,
@@ -451,7 +433,7 @@ ${skillsContext}
 
       if (abortedReplyIdsRef.current.has(replyId)) throw new Error('UserAborted')
       const response = await window.api.callLLM(
-        { ...llmConfig, sessionId, messageId: replyId, ...(retry ? { retryFailedReplyId: retry.retryReplyId } : {}) },
+        { ...llmConfig, sessionId, messageId: replyId, disableMemoryPersistence: !memoryInjectionEnabled, ...(retry ? { retryFailedReplyId: retry.retryReplyId } : {}) },
         chatMessages,
         workspacePath
       )

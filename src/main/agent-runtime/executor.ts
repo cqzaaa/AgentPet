@@ -1182,6 +1182,13 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       ? new Set(config.allowedToolNames.map((name) => String(name)))
       : null
     const blockedToolNames = new Set((config.blockedToolNames || []).map(name => String(name)))
+    if (config.disableMemoryPersistence) {
+      blockedToolNames.add('append_memory_summary')
+      blockedToolNames.add('trigger_memory_purify')
+      if (typeof chatHistory[0]?.content === 'string') {
+        chatHistory[0].content += '\n\n<memory_persistence disabled="true">本轮禁止保存长期记忆、人物画像或经验。不要调用记忆写入/提纯工具，也不要通过文件、脚本或其他工具替代保存。普通聊天记录与任务上下文仍按会话机制保留。</memory_persistence>'
+      }
+    }
     const simpleSingleFileMutation = isSimpleSingleFileMutationRequest(latestUserText)
     if (simpleSingleFileMutation) {
       blockedToolNames.add('update_task_plan')

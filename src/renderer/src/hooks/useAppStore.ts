@@ -477,6 +477,12 @@ export const useAppStoreRaw = create<any>((set) => ({
   attachedFiles: [],
   selectedKnowledgeBaseId: localStorage.getItem('agentpet_selected_knowledge_base_id') || '',
   selectedKnowledgeBaseName: localStorage.getItem('agentpet_selected_knowledge_base_name') || '',
+  memoryDisabledSessionIds: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('agentpet_memory_disabled_sessions') || '[]')
+      return Array.isArray(saved) ? saved.filter((id: unknown): id is string => typeof id === 'string') : []
+    } catch { return [] as string[] }
+  })(),
   tokenLogs: (() => {
     const saved = localStorage.getItem('agentpet_token_logs') || localStorage.getItem('agentself_token_logs')
     if (saved) {
@@ -639,6 +645,12 @@ export const useAppStoreRaw = create<any>((set) => ({
     const chatDrafts = { ...state.chatDrafts }
     delete chatDrafts[sessionId]
     return { chatDrafts }
+  }),
+  setMemoryInjectionEnabled: (sessionId: string, enabled: boolean) => set((state: any) => {
+    const ids = (state.memoryDisabledSessionIds as string[]).filter(id => id !== sessionId)
+    if (!enabled) ids.push(sessionId)
+    localStorage.setItem('agentpet_memory_disabled_sessions', JSON.stringify(ids))
+    return { memoryDisabledSessionIds: ids }
   }),
   setSelectedKnowledgeBase: (base: { id: string; name: string } | null) => {
     const id = base?.id || ''

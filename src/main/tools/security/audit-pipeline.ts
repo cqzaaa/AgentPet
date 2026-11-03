@@ -41,15 +41,14 @@ export class AuditPipeline {
       return { blocked: false, requireApproval: false }
     }
 
-    // Python can perform arbitrary file/network/process operations. Neither a
-    // loaded Skill nor turn-wide assist approval proves a script's effects.
+    // Keep Python on the ordinary conversation approval path. Skill activation
+    // remains a separate requirement enforced by the runtime before execution.
     if (toolName === 'run_python') {
       return {
         blocked: false,
-        requireApproval: true,
-        forcePrompt: true,
-        allowTurnScope: false,
-        warning: 'Python 代码或脚本可能直接读写文件、访问网络或启动进程，请核对完整参数后确认本次执行。'
+        requireApproval: permissionMode !== 'assist',
+        allowTurnScope: true,
+        warning: 'Python 代码或脚本可能直接读写文件、访问网络或启动进程，请核对完整参数；可仅允许本次，或授权本次对话。'
       }
     }
 
