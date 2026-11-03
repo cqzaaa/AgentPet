@@ -1,5 +1,6 @@
 import { toolRegistry } from '../core/tool-registry'
-import { BOOTSTRAP_TOOL_NAMES } from '../../agent-runtime/skill-tool-routing'
+import { DEFAULT_TOOL_NAMES } from '../../agent-runtime/skill-tool-routing'
+import { imageManifest, imageExecutor } from './image'
 import { listBuiltinSkills } from '../../skills/builtin-skills'
 
 import { terminalManifest } from './terminal/manifest'
@@ -27,6 +28,7 @@ import { rpaManifest } from './rpa/manifest'
 import { rpaToolExecutor } from './rpa/executor'
 
 export function registerBuiltinTools(): void {
+  toolRegistry.register(imageManifest, imageExecutor)
   toolRegistry.register(terminalManifest, terminalExecutor)
   toolRegistry.register(fileManifest, fileExecutor)
   toolRegistry.register(searchManifest, searchExecutor)
@@ -37,7 +39,7 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(rpaManifest, rpaToolExecutor)
 
   const classifiedToolNames = new Set([
-    ...BOOTSTRAP_TOOL_NAMES,
+    ...DEFAULT_TOOL_NAMES,
     ...listBuiltinSkills().flatMap(skill => skill.allowedTools)
   ])
   const unclassified = Object.keys(toolRegistry.getAllToolsInfo())

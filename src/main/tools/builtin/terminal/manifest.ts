@@ -2,7 +2,7 @@ import { ToolManifest } from '../../core/types'
 import { SOURCE_SEARCH_GUIDANCE } from '../search/source-search-policy'
 
 export const TERMINAL_TOOL_INSTRUCTIONS = `# Terminal commands
-Terminal tools present in tools are available by default; do not request the terminal Skill before using them. An explicitly restricted task may expose only a subset.
+Terminal and Python tools require a loaded Skill. For coding, source inspection, repository changes and engineering verification, load agentpet-coding first. For general shell or Python tasks, load terminal. A workflow Skill may also activate these tools for its own documented scripts. Reuse already loaded Skills; do not request terminal separately when the current Skill has activated the tools. Never substitute shell or Python file I/O for a missing Skill, denied file access or required approval. An explicitly restricted task may expose only a subset.
 ${SOURCE_SEARCH_GUIDANCE}
 Use run_terminal_command with an explicit working directory and appropriate shell. Use run_python for Python code or scripts so AgentPet can supply its managed embedded runtime without depending on a system Python installation. Local node/npm/npx commands automatically use AgentPet's managed portable Node runtime, isolated npm prefix and cache; never inspect or install into the system-global Node environment. Poll durable commands with get_command_output and stop only the exact intended command with kill_command. Do not use shell commands to bypass file safety or approval controls. Never use Start-Process, start, explorer.exe, or a browser executable to open a local browser; load desktop-control, call get_windows first, and use focus_window on the user's existing browser.`
 

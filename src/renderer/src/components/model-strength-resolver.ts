@@ -1,3 +1,5 @@
+import { IMAGE_MODEL_REGEX } from '../../../preload/image-generation-types'
+
 export type ReasoningStrengthLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
 
 export interface ModelOption {
@@ -25,8 +27,17 @@ export const STRENGTH_LEVEL_LABELS: Record<ReasoningStrengthLevel, string> = {
 
 export const ALL_STRENGTH_LEVELS: ReasoningStrengthLevel[] = ['off', 'low', 'medium', 'high', 'max']
 
+export function isImageModelSelectionQuestion(question: { id: string; question: string; options?: ModelOption[] }): boolean {
+  if (!question.options || question.options.length === 0) return false
+  const text = `${question.id} ${question.question}`.toLowerCase()
+  if (/image_model|生图|图片模型|画图|paint|drawing|text2img|t2i/i.test(text)) return true
+  return question.options.length > 0 && question.options.every(opt => IMAGE_MODEL_REGEX.test(opt.value))
+}
+
 export function isModelSelectionQuestion(question: { id: string; question: string; options?: ModelOption[] }): boolean {
   if (!question.options || question.options.length === 0) return false
+  // 生图模型不属于文本思考强度调节模型，改由直观卡片选项呈现
+  if (isImageModelSelectionQuestion(question)) return false
   const text = `${question.id} ${question.question}`.toLowerCase()
   const isModelQuery = /model|模型|codex|claude|gemini|gpt|subagent/i.test(text)
   const optionsLookLikeModels = question.options.some(opt =>

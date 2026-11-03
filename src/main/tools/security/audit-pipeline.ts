@@ -41,6 +41,18 @@ export class AuditPipeline {
       return { blocked: false, requireApproval: false }
     }
 
+    // Python can perform arbitrary file/network/process operations. Neither a
+    // loaded Skill nor turn-wide assist approval proves a script's effects.
+    if (toolName === 'run_python') {
+      return {
+        blocked: false,
+        requireApproval: true,
+        forcePrompt: true,
+        allowTurnScope: false,
+        warning: 'Python 代码或脚本可能直接读写文件、访问网络或启动进程，请核对完整参数后确认本次执行。'
+      }
+    }
+
     if (api?.humanIntervention === 'never') {
       return { blocked: false, requireApproval: false }
     }

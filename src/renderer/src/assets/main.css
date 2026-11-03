@@ -4996,6 +4996,14 @@ body {
   margin-bottom: 8px;
 }
 
+.image-gen-model {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-color-secondary, #475569);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .image-gen-title {
   display: inline-flex;
   align-items: center;
@@ -5144,20 +5152,23 @@ body {
 .image-gen-actions-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
+  margin-top: 2px;
 }
 
 .image-gen-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border-radius: 8px;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border-radius: 6px;
   border: 1px solid var(--border-color, rgba(128, 128, 128, 0.16));
-  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.025));
   color: var(--text-color, #1e293b);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;

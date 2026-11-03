@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronLeft, ChevronRight, CornerDownLeft } from 'lucide-react'
 import { ModelStrengthCapsule } from './ModelStrengthCapsule'
-import { isModelSelectionQuestion } from './model-strength-resolver'
+import { isModelSelectionQuestion, isImageModelSelectionQuestion } from './model-strength-resolver'
+import { useEffect } from 'react'
 
 type Option = { label: string; value: string; description?: string }
 type Question = { id: string; question: string; options?: Option[]; placeholder?: string }
@@ -32,7 +33,21 @@ export function ClarificationCard({
   const canSubmit = step.questions.every(hasAnswer)
   const currentQuestion = step.questions[activeIndex]
   const currentAnswered = currentQuestion ? hasAnswer(currentQuestion) : false
-  const isLastQuestion = activeIndex === step.questions.length - 1
+    const isLastQuestion = activeIndex === step.questions.length - 1
+
+  // 如果是生图模型选择，自动默认高亮预选正则过滤后的首个模型
+  useEffect(() => {
+    if (currentQuestion && isImageModelSelectionQuestion(currentQuestion)) {
+      const current = answers[currentQuestion.id]
+      if (!current?.selected && !current?.useCustom && currentQuestion.options && currentQuestion.options.length > 0) {
+        update(currentQuestion.id, {
+          selected: currentQuestion.options[0].value,
+          custom: '',
+          useCustom: false
+        })
+      }
+    }
+  }, [currentQuestion, answers])
 
   const respond = (cancelled: boolean): void => {
     if (submitted) return

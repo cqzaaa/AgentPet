@@ -84,8 +84,8 @@ const sessionVisibleMessages = new Map<string, { key: string; offset: number }>(
 // Grok Imagine、Microsoft MAI-Image、Meta Muse、阿里 Qwen-Image/Wanxiang、字节 Seedream/Jimeng/Doubao、
 // FLUX (Pro/Dev/Schnell)、Ideogram、Midjourney/Niji、Recraft、SD4/SD3.5/SDXL、Adobe Firefly、
 // 智谱 CogView、快手 Kolors/Kling、腾讯 Hunyuan、百度 Wenxin/Yige、智源 OmniGen、华为 PixArt、Sana 等
-export const IMAGE_MODEL_REGEX =
-  /(?:image|imagen|\bimg\b|nano-?banana|grok-?imagine|imagine|mai-?image|muse-?image|flux|recraft|dall-?e|dalle|gpt-?image|gpt-?img|stable-?diffusion|\bsd(?:xl|[0-9]|\b)|ideogram|midjourney|\bmj\b|niji|firefly|phoenix|leonardo|seedream|jimeng|wanxiang|wanx|kolors|kling|cogview|hunyuan-?(?:image|dit)|doubao-?image|minimax-?image|step-?image|wenxin|yige|auraflow|lumina|hidream|pixart|omnigen|sana|bria|artguru|wombo|lexica|aperture|t2i|text-?to-?image|text2img|paint|drawing|render)/i
+import { IMAGE_MODEL_REGEX } from '../../../preload/image-generation-types'
+export { IMAGE_MODEL_REGEX }
 
 // 基于 CocoLoop 2026 最新榜单综合 Elo 评分推荐的热门生图模型
 const POPULAR_IMAGE_MODELS = [
@@ -167,7 +167,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   const [positionedSessionId, setPositionedSessionId] = useState('')
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false)
   const [isImageGenMode, setIsImageGenMode] = useState(false)
-  const [selectedImageModel, setSelectedImageModel] = useState<string>('dall-e-3')
+  const [selectedImageModel, setSelectedImageModel] = useState<string>('')
   const [showCollaborationComposer, setShowCollaborationComposer] = useState(false)
   const [openedCollaborationRunId, setOpenedCollaborationRunId] = useState('')
   const [openedSubtask, setOpenedSubtask] = useState<{ runId: string; stepId: string } | null>(null)
@@ -1230,15 +1230,15 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     return displayModels.filter((m) => m.toLowerCase().includes(modelSearchKey.toLowerCase()))
   }, [displayModels, modelSearchKey])
 
-  // 进入生图模式时，若当前模型列表里有已匹配的生图模型，自动推荐并选中首个
+  // 可用模型更新或进入生图模式时，若当前模型列表里有已匹配的生图模型，自动推荐并选中首个，绝不使用全局默认兜底
   useEffect(() => {
-    if (isImageGenMode) {
-      const matched = availableModels.filter((m) => IMAGE_MODEL_REGEX.test(m))
-      if (matched.length > 0 && !matched.includes(selectedImageModel)) {
+    const matched = availableModels.filter((m) => IMAGE_MODEL_REGEX.test(m))
+    if (matched.length > 0) {
+      if (!selectedImageModel || !matched.includes(selectedImageModel)) {
         setSelectedImageModel(matched[0])
       }
     }
-  }, [isImageGenMode, availableModels, selectedImageModel])
+  }, [availableModels, selectedImageModel])
 
   // 决定是否出现滑动条和搜索框（模型总数 >= 8）
   const isModelOverflow = displayModels.length >= 8
@@ -1565,7 +1565,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                   status: 'success',
                   prompt: userText,
                   referenceImagePath: refFile?.path,
-                  model: selectedImageModel,
+                  model: result.model || selectedImageModel,
                   imagePath: result.imagePath,
                   dataUrl: result.dataUrl,
                   revisedPrompt: result.revisedPrompt,
@@ -1614,7 +1614,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       )
       showToast(err?.message || '图像生成请求发生异常', 'error')
     }
-  }, [inputValue, attachedFiles, activeSessionId, showToast, setInputValue, setAttachedFiles])
+  }, [inputValue, attachedFiles, activeSessionId, selectedImageModel, showToast, setInputValue, setAttachedFiles])
 
   const handleRetryImageGen = useCallback(
     async (messageId: number, currentImageGen: any) => {
@@ -1667,7 +1667,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                     status: 'success',
                     prompt,
                     referenceImagePath: refPath,
-                    model: modelToUse,
+                    model: result.model || modelToUse,
                     imagePath: result.imagePath,
                     dataUrl: result.dataUrl,
                     revisedPrompt: result.revisedPrompt,

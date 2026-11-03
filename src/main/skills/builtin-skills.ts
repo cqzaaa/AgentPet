@@ -173,7 +173,7 @@ const builtinSkills: BuiltinSkillDefinition[] = [
   staticSkill({
     id: 'terminal',
     name: 'Terminal commands',
-    description: 'Optional reference for PowerShell, cmd, bash, SSH and Python. Terminal tools are available by default; do not request this Skill just to run a command.',
+    description: 'Run general PowerShell, cmd, bash, SSH and Python tasks. Load before using terminal tools unless another loaded workflow Skill already activates them. For source-code inspection, repository changes and engineering verification, load agentpet-coding instead.',
     triggers: ['terminal', 'command', 'shell', 'powershell', 'cmd', 'bash', 'ssh', 'python', '命令', '终端', '脚本'],
     allowedTools: ['run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'],
     instructions: TERMINAL_TOOL_INSTRUCTIONS

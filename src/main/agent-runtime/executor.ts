@@ -16,6 +16,8 @@ import { createApprovalReviewer } from '../tools/security/approval-reviewer'
 import { runPurifyMemoryPipeline, appendMemorySummaryInternal } from '../api/memory'
 import { sshManager } from '../tools/builtin/terminal/ssh-manager'
 import { TERMINAL_TOOL_INSTRUCTIONS } from '../tools/builtin/terminal/manifest'
+import { buildImageToolInstructions } from '../tools/builtin/image'
+import { getAvailableImageModels } from '../image-gen/service'
 import { countMessagesTokens, countTokens } from '../tools/context/token-counter'
 import { skillRegistry } from '../skills/skill-registry'
 import { availableSkillTokens, type SkillLoadBudget } from '../skills/skill-budget'
@@ -33,12 +35,13 @@ import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
 import { ensureCompleteJpeg, resolveLocalFilePath } from '../image-binary'
 import {
   BOOTSTRAP_TOOL_NAMES,
-  DEFAULT_TERMINAL_TOOL_NAMES,
+  TERMINAL_TOOL_NAMES,
   activateAllowedTools,
   createInitialActiveToolNames,
   filterToolDefinitions,
   inferPreloadedSkillIds,
   isPptMasterRequest,
+  isToolExecutionAllowed,
   shouldBlockBasicOfficePptxCreate
 } from './skill-tool-routing'
 
@@ -1010,6 +1013,10 @@ Images in current or historical messages are provided directly to the model. Ins
         : '\n\n<workspace_context>当前会话未绑定工作区；普通文件操作默认使用会话附件目录。</workspace_context>'
     }
 
+    if (typeof chatHistory[0].content === 'string') {
+      const detectedImageModels = await getAvailableImageModels().catch(() => [])
+      chatHistory[0].content += `\n\n${buildImageToolInstructions(detectedImageModels)}`
+    }
     // Collaboration is available by default within the caller's tool permissions.
     // Other Skill-owned tools still require activation through request_skill.
     const taskToolManifest = toolRegistry.getManifest('delegate_tasks') || toolRegistry.getManifest('update_task_plan')
@@ -1291,8 +1298,8 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       chatHistory[0].content += '\n\n<required_managed_skill id="ppt-master" status="preparing">This presentation-design request requires PPT Master. Call request_skill for ppt-master, then call wait_skill_ready exactly once if it is still preparing. Do not use run_office_skill create as a fallback.</required_managed_skill>'
     }
     let effectiveTools = filterToolDefinitions(availableToolDefinitions, activeToolNames, blockedToolNames)
-    if (!activeSkillIds.has('terminal') && effectiveTools.some(tool => DEFAULT_TERMINAL_TOOL_NAMES.has(tool.function.name))) {
-      const terminalInstructions = `\n\n<default_terminal_tools>\n${TERMINAL_TOOL_INSTRUCTIONS}\n</default_terminal_tools>`
+    if (!activeSkillIds.has('terminal') && effectiveTools.some(tool => TERMINAL_TOOL_NAMES.has(tool.function.name))) {
+      const terminalInstructions = `\n\n<active_terminal_tools>\n${TERMINAL_TOOL_INSTRUCTIONS}\n</active_terminal_tools>`
       const systemMessage = chatHistory.find(message => message.role === 'system')
       if (typeof systemMessage?.content === 'string') systemMessage.content += terminalInstructions
       else if (Array.isArray(systemMessage?.content)) systemMessage.content.push({ type: 'text', text: terminalInstructions })
@@ -1731,7 +1738,10 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
             const inputFingerprint = toolName === 'type_text'
               ? `${currentInputTarget}\n${String(toolArgs.text ?? '')}`
               : ''
-            if (!argumentsAreValid) {
+            if (!isToolExecutionAllowed(toolName, activeToolNames, availableToolNameSet, blockedToolNames)) {
+              toolResult = `[工具路由拦截] ${toolName} 未在本轮激活或不在当前允许范围内。编程、源码调查和工程验证请先加载 agentpet-coding；通用命令加载 terminal；其他任务从技能目录加载对应 Skill。已加载的 Skill 无需重复请求。不得用 Python、终端或其他工具绕过技能、文件访问或审批限制。`
+              toolSuccess = false
+            } else if (!argumentsAreValid) {
               const required = Array.isArray(parameterSchema?.required) ? parameterSchema.required.join(', ') : ''
               toolResult = `[工具参数校验失败] ${toolName} 的参数不完整或类型错误${required ? `；必填字段：${required}` : ''}。请根据工具 Schema 重新生成完整参数后重试，不要重复发送空对象。`
               toolSuccess = false
@@ -1867,7 +1877,7 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
 
             const evidence = inspectionEvidence(toolState)
             let displayResult = toolResult
-            if (typeof displayResult === 'string' && displayResult.length > 1000) {
+            if (toolName !== 'generate_image' && typeof displayResult === 'string' && displayResult.length > 1000) {
               displayResult = displayResult.substring(0, 1000) + `\n\n... [工具输出内容过长(${displayResult.length}字符)，为了保持UI流畅已截断展示。大模型后台已读取完整内容。]`
             }
 

@@ -14,6 +14,7 @@ type PendingRequest = {
   resolve: (value: { cancelled: boolean; answers: Record<string, string> }) => void
   timer: NodeJS.Timeout
   sessionId?: string
+  sender: WebContents
 }
 
 class ClarificationManager {
@@ -24,12 +25,7 @@ class ClarificationManager {
   constructor() {
     ipcMain.on('api:clarification-response', (_event, data) => {
       const requestId = Number(data?.requestId)
-      const pending = this.pending.get(requestId)
-      if (!pending) return
-      clearTimeout(pending.timer)
-      this.pending.delete(requestId)
-      this.closeNotification(requestId)
-      pending.resolve({
+      this.finishRequest(requestId, {
         cancelled: Boolean(data?.cancelled),
         answers: data?.answers && typeof data.answers === 'object' ? data.answers : {}
       })
@@ -43,12 +39,9 @@ class ClarificationManager {
     const requestId = this.nextRequestId++
     return new Promise(resolve => {
       const timer = setTimeout(() => {
-        if (!this.pending.has(requestId)) return
-        this.pending.delete(requestId)
-        this.closeNotification(requestId)
-        resolve({ cancelled: true, answers: {} })
+        this.finishRequest(requestId, { cancelled: true, answers: {} })
       }, 10 * 60 * 1000)
-      this.pending.set(requestId, { resolve, timer, sessionId })
+      this.pending.set(requestId, { resolve, timer, sessionId, sender: target.webContents })
 
       target.webContents.send('api:llm-tool-event', { type: 'clarification_request', requestId, questions, sessionId })
       if (!target.isFocused() || target.isMinimized() || !target.isVisible()) {
@@ -60,11 +53,22 @@ class ClarificationManager {
   public cancelPending(sessionId?: string): void {
     for (const [requestId, pending] of this.pending.entries()) {
       if (sessionId && pending.sessionId !== sessionId) continue
-      clearTimeout(pending.timer)
-      this.pending.delete(requestId)
-      this.closeNotification(requestId)
-      pending.resolve({ cancelled: true, answers: {} })
+      this.finishRequest(requestId, { cancelled: true, answers: {} })
     }
+  }
+
+  private finishRequest(requestId: number, response: { cancelled: boolean; answers: Record<string, string> }): void {
+    const pending = this.pending.get(requestId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.pending.delete(requestId)
+    this.closeNotification(requestId)
+    if (!pending.sender.isDestroyed()) {
+      pending.sender.send('api:llm-tool-event', {
+        type: 'clarification_resolved', requestId, sessionId: pending.sessionId
+      })
+    }
+    pending.resolve(response)
   }
 
   private showClarificationNotification(requestId: number, win: BrowserWindow): void {

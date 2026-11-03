@@ -20,6 +20,7 @@ export interface ImageGenState {
   progress?: number
   error?: string
   revisedPrompt?: string
+  model?: string
 }
 
 interface ImageGenerationCardProps {
@@ -37,6 +38,9 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
   const [saved, setSaved] = useState(false)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [animatedProgress, setAnimatedProgress] = useState(imageGen.progress ?? 11)
+  const imageSrc = imageGen.dataUrl || (imageGen.imagePath
+    ? `local-file:///${imageGen.imagePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/').replace(/^([A-Za-z])%3A/, '$1:')}`
+    : undefined)
 
   // 进度条平滑递增动效（从 11% 逐步拟真递增到 96%，完成后跳至 100%）
   useEffect(() => {
@@ -74,16 +78,11 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
 
   // 复制图片到剪贴板
   const handleCopyImage = async (): Promise<void> => {
-    const targetUrl = imageGen.dataUrl || imageGen.imagePath
+    const targetUrl = imageSrc
     if (!targetUrl) return
     try {
-      if (imageGen.dataUrl) {
-        const res = await fetch(imageGen.dataUrl)
-        const blob = await res.blob()
-        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
-      } else if (window.api?.copyText) {
-        window.api.copyText(targetUrl)
-      }
+      const result = await window.api.copyImage(targetUrl)
+      if (!result.success) throw new Error(result.error || '复制图片失败')
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (e) {
@@ -93,7 +92,7 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
 
   // 保存图片
   const handleSaveImage = (): void => {
-    const target = imageGen.dataUrl || imageGen.imagePath
+    const target = imageSrc
     if (!target) return
     try {
       const a = document.createElement('a')
@@ -132,6 +131,7 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
             '图像创建失败'
           )}
         </span>
+        {imageGen.model && <span className="image-gen-model" title={`生成模型：${imageGen.model}`}>{imageGen.model}</span>}
       </div>
 
       {imageGen.status === 'generating' && (
@@ -171,15 +171,15 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
         <div className="image-gen-result-container">
           <div
             className="image-gen-image-wrapper"
-            onClick={() => setPreviewSrc(imageGen.dataUrl || imageGen.imagePath || null)}
+            onClick={() => setPreviewSrc(imageSrc || null)}
           >
             <img
-              src={imageGen.dataUrl || imageGen.imagePath}
+              src={imageSrc}
               alt={imageGen.prompt || '已创建的图像'}
               className="image-gen-result-img"
             />
             <div className="image-gen-overlay-hint">
-              <Maximize2 size={16} /> 点击放大预览
+              <Maximize2 size={16} aria-hidden="true" />
             </div>
           </div>
 
@@ -188,22 +188,20 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
               <button
                 type="button"
                 className="image-gen-action-btn"
-                onClick={() => setPreviewSrc(imageGen.dataUrl || imageGen.imagePath || null)}
+                aria-label="放大预览"
+                onClick={() => setPreviewSrc(imageSrc || null)}
               >
-                <Maximize2 size={13} />
-                <span>放大</span>
+                <Maximize2 size={12} />
               </button>
             </Tooltip>
             <Tooltip content={copied ? '已复制' : '复制图像'} placement="top">
-              <button type="button" className="image-gen-action-btn" onClick={handleCopyImage}>
-                {copied ? <Check size={13} /> : <Copy size={13} />}
-                <span>{copied ? '已复制' : '复制'}</span>
+              <button type="button" className="image-gen-action-btn" aria-label={copied ? '已复制' : '复制图像'} onClick={handleCopyImage}>
+                {copied ? <Check size={12} /> : <Copy size={12} />}
               </button>
             </Tooltip>
             <Tooltip content={saved ? '已下载' : '保存图片'} placement="top">
-              <button type="button" className="image-gen-action-btn" onClick={handleSaveImage}>
-                {saved ? <Check size={13} /> : <Download size={13} />}
-                <span>{saved ? '已保存' : '下载'}</span>
+              <button type="button" className="image-gen-action-btn" aria-label={saved ? '已下载' : '保存图片'} onClick={handleSaveImage}>
+                {saved ? <Check size={12} /> : <Download size={12} />}
               </button>
             </Tooltip>
             {onUseAsReference && imageGen.imagePath && (
@@ -211,10 +209,10 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
                 <button
                   type="button"
                   className="image-gen-action-btn"
+                  aria-label="作为参考图修改"
                   onClick={() => onUseAsReference(imageGen.imagePath!)}
                 >
-                  <RefreshCw size={13} />
-                  <span>作为参考图修改</span>
+                  <RefreshCw size={12} />
                 </button>
               </Tooltip>
             )}
@@ -240,7 +238,7 @@ export const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({
           </div>
           {onRetry && (
             <button type="button" className="image-gen-retry-btn" onClick={onRetry}>
-              <RefreshCw size={13} /> 重新尝试
+              <RefreshCw size={12} /> 重新尝试
             </button>
           )}
         </div>

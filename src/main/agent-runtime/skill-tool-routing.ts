@@ -12,12 +12,13 @@ export const BOOTSTRAP_TOOL_NAMES = new Set([
 
 // Default visibility still respects the caller's allowlist and blocklist.
 export const DEFAULT_COLLABORATION_TOOL_NAMES = new Set(['list_agents', 'list_agent_models', 'delegate_tasks'])
-export const DEFAULT_TERMINAL_TOOL_NAMES = new Set([
+export const TERMINAL_TOOL_NAMES = new Set([
   'run_terminal_command', 'run_command', 'get_command_output', 'kill_command', 'run_python'
 ])
 // Default visibility is separate from bootstrap's allowlist exemption.
 export const DEFAULT_TOOL_NAMES = new Set([
-  ...BOOTSTRAP_TOOL_NAMES, ...DEFAULT_COLLABORATION_TOOL_NAMES, ...DEFAULT_TERMINAL_TOOL_NAMES
+  'generate_image',
+  ...BOOTSTRAP_TOOL_NAMES, ...DEFAULT_COLLABORATION_TOOL_NAMES
 ])
 
 const DESKTOP_APPLICATION_PATTERN = /(?:微信|weixin|钉钉|dingtalk|qq|企业微信|word|excel|powerpoint|ppt|记事本|notepad|计算器|calculator|文件管理器|资源管理器|explorer|浏览器|chrome|edge)/i
@@ -80,9 +81,19 @@ export function createInitialActiveToolNames(options: {
     if (available.has(name)) active.add(name)
   }
   for (const name of options.explicitlyRequestedToolNames || []) {
-    if (available.has(name)) active.add(name)
+    // A caller allowlist limits availability; it does not load terminal instructions.
+    if (available.has(name) && !TERMINAL_TOOL_NAMES.has(name)) active.add(name)
   }
   return active
+}
+
+export function isToolExecutionAllowed(
+  toolName: string,
+  activeToolNames: Set<string>,
+  availableToolNames: Set<string>,
+  blockedToolNames: Set<string>
+): boolean {
+  return activeToolNames.has(toolName) && availableToolNames.has(toolName) && !blockedToolNames.has(toolName)
 }
 
 export function activateAllowedTools(

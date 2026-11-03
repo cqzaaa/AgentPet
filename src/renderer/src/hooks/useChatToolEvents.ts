@@ -95,6 +95,13 @@ export function appendToolSteps(existingSteps: any[] | undefined, events: ChatTo
     }
     else if (type === 'web_sources' && Array.isArray(sources)) toolSteps.push({ id, sequence, timestamp, type: 'sources', detail: sources })
     else if (type === 'clarification_request' && Array.isArray(questions)) toolSteps.push({ id, sequence, timestamp, type: 'clarification', requestId, questions })
+    else if (type === 'clarification_resolved') {
+      for (let index = toolSteps.length - 1; index >= 0; index--) {
+        if (toolSteps[index].type === 'clarification' && toolSteps[index].requestId === requestId) {
+          toolSteps.splice(index, 1)
+        }
+      }
+    }
     else if (type === 'credential_request' && request) toolSteps.push({ id, sequence, timestamp, type: 'credential', requestId, request })
     else if (type === 'generated_files' && Array.isArray(files)) {
       const existingPaths = new Set(

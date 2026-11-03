@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
-import { usePersistentDisclosure } from '../hooks/chat-disclosure-state'
+import { usePersistentDisclosure, collapseOpenDisclosuresByPrefix } from '../hooks/chat-disclosure-state'
 import { uniqueToolSteps } from '../hooks/tool-step-identity'
 import { activityDurationMs } from '../hooks/chat-activity-duration'
 import { getModelIcon } from '../utils/modelIcons'
@@ -16,6 +16,7 @@ import { Tooltip } from './Tooltip'
 import { FileIcon } from './FileIcon'
 import { ImagePreviewModal } from './ImagePreviewModal'
 import { ImageGenerationCard } from './ImageGenerationCard'
+import { imageToolCards } from './image-tool-results'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -2624,6 +2625,17 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     }
   }
 
+  // 当大模型开始流式输出或生成正式内容时，自动收缩用户此前展开的工具调用链路
+  const autoCollapsedRef = useRef(false)
+  useEffect(() => {
+    if (renderedText && !autoCollapsedRef.current) {
+      autoCollapsedRef.current = true
+      collapseOpenDisclosuresByPrefix(`session:${sessionId}/message:${msg.id}`)
+    } else if (!renderedText) {
+      autoCollapsedRef.current = false
+    }
+  }, [renderedText, sessionId, msg.id])
+
   const showThinkingShimmer = msg.sender !== 'user' && msg.isThinking && !renderedText && activityBlocks.length === 0
   const shimmerText = '正在启动中'
 
@@ -2975,6 +2987,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             }
           />
         )}
+
+        {!editing && imageToolCards(msg.toolSteps || [], Boolean(msg.isThinking)).map(card => (
+          <ImageGenerationCard key={card.id} imageGen={card.imageGen} />
+        ))}
 
         {/* 最终大模型回复文本渲染 */}
         {!editing && renderedText && (

@@ -3,9 +3,10 @@ import { randomUUID } from 'crypto'
 import { mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { extname, isAbsolute, join } from 'path'
 import { loadSecureSystemLlmConfig } from '../security/secure-llm-config'
-import type {
-  ImageGenerationOptions,
-  ImageGenerationResult
+import {
+  type ImageGenerationOptions,
+  type ImageGenerationResult,
+  filterImageModels
 } from '../../preload/image-generation-types'
 
 export type { ImageGenerationOptions, ImageGenerationResult } from '../../preload/image-generation-types'
@@ -21,15 +22,104 @@ interface ImageApiResponse {
 }
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-const DEFAULT_IMAGE_MODEL = 'dall-e-3'
 const DEFAULT_IMAGE_SIZE = '1024x1024'
 
-function configuredImageModel(config: Record<string, unknown>): string | undefined {
+// 内存短期缓存，避免频繁请求 /models 接口（30 秒有效）
+let cachedModelsKey = ''
+let cachedImageModels: string[] = []
+let cacheTimestamp = 0
+
+export function configuredImageModel(config: Record<string, unknown>): string | undefined {
   for (const key of ['imageModel', 'imageGenerationModel', 'imageGenModel']) {
     const value = config[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return undefined
+}
+
+/**
+ * 从指定服务端点获取并使用正则过滤出生图模型列表
+ */
+export async function getAvailableImageModels(
+  baseUrl?: string,
+  apiKey?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const systemConfig = loadSecureSystemLlmConfig()
+  const effectiveBaseUrl = (baseUrl ?? systemConfig.baseUrl ?? DEFAULT_BASE_URL)
+    .trim()
+    .replace(/\/+$/, '')
+  const effectiveApiKey = (apiKey ?? systemConfig.apiKey ?? '').trim()
+
+  if (!effectiveBaseUrl) return []
+
+  const cacheKey = `${effectiveBaseUrl}:::${effectiveApiKey}`
+  const now = Date.now()
+  if (cacheKey === cachedModelsKey && now - cacheTimestamp < 30000 && cachedImageModels.length > 0) {
+    return [...cachedImageModels]
+  }
+
+  try {
+    const url = `${effectiveBaseUrl}/models`
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 6000)
+    if (signal) {
+      signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+
+    const response = await fetch(url, { headers, signal: controller.signal }).finally(() => clearTimeout(timeout))
+    if (!response.ok) return cachedImageModels
+
+    const data: any = await response.json()
+    const allModels: string[] = []
+    if (data && Array.isArray(data.data)) {
+      allModels.push(...data.data.map((m: any) => (typeof m === 'string' ? m : m.id)).filter(Boolean))
+    } else if (data && Array.isArray(data.models)) {
+      allModels.push(...data.models.map((m: any) => (typeof m === 'string' ? m : m.name || m.id)).filter(Boolean))
+    }
+
+    const matched = filterImageModels(allModels)
+    if (matched.length > 0) {
+      cachedModelsKey = cacheKey
+      cachedImageModels = matched
+      cacheTimestamp = now
+    }
+    return matched
+  } catch (err) {
+    console.warn('获取生图模型列表失败，将使用已缓存或已配置模型:', err)
+    return cachedImageModels
+  }
+}
+
+/**
+ * 解析并确定最终用于生成图片的模型：
+ * 1. 显式指定的模型
+ * 2. 系统中显式配置的生图模型
+ * 3. 动态通过正则过滤服务商的模型列表，默认使用第一个
+ * 4. 若均无则明确报错，绝不使用兜底模型
+ */
+export async function resolveImageModel(
+  requestedModel?: string,
+  baseUrl?: string,
+  apiKey?: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const trimmed = requestedModel?.trim()
+  if (trimmed) return trimmed
+
+  const systemConfig = loadSecureSystemLlmConfig()
+  const configured = configuredImageModel(systemConfig)
+  if (configured) return configured
+
+  const matched = await getAvailableImageModels(baseUrl, apiKey, signal)
+  if (matched.length > 0) {
+    return matched[0]
+  }
+
+  throw new Error('未检测到可用的生图模型，请在模型配置中指定生图模型，或确认当前服务商提供了包含图像生成能力（如带有 image/flux/sd 等）的模型。')
 }
 
 function contentTypeForPath(filePath: string): string {
@@ -68,7 +158,7 @@ async function responseError(response: Response): Promise<string> {
   }
 }
 
-async function readApiImage(item: ImageApiItem): Promise<{ bytes: Buffer; contentType: string }> {
+async function readApiImage(item: ImageApiItem, signal?: AbortSignal): Promise<{ bytes: Buffer; contentType: string }> {
   if (item.b64_json) {
     const match = item.b64_json.match(/^data:([^;,]+);base64,(.+)$/s)
     const contentType = match?.[1] || 'image/png'
@@ -89,7 +179,7 @@ async function readApiImage(item: ImageApiItem): Promise<{ bytes: Buffer; conten
     throw new Error('图像接口返回了不受支持的图片 URL 协议')
   }
 
-  const response = await fetch(imageUrl)
+  const response = await fetch(imageUrl, { signal })
   if (!response.ok) {
     throw new Error(`下载生成图片失败：${await responseError(response)}`)
   }
@@ -112,7 +202,8 @@ async function createRequest(
   options: ImageGenerationOptions,
   apiKey: string,
   model: string,
-  size: string
+  size: string,
+  signal?: AbortSignal
 ): Promise<Response> {
   const headers: Record<string, string> = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
@@ -121,6 +212,7 @@ async function createRequest(
     headers['Content-Type'] = 'application/json'
     return fetch(endpoint, {
       method: 'POST',
+      signal,
       headers,
       body: JSON.stringify({ prompt: options.prompt.trim(), model, size, n: 1 })
     })
@@ -142,11 +234,12 @@ async function createRequest(
   form.append('model', model)
   form.append('size', size)
   form.append('n', '1')
-  return fetch(endpoint, { method: 'POST', headers, body: form })
+  return fetch(endpoint, { method: 'POST', headers, body: form, signal })
 }
 
 export async function generateImage(
-  options: ImageGenerationOptions
+  options: ImageGenerationOptions,
+  signal?: AbortSignal
 ): Promise<ImageGenerationResult> {
   try {
     if (!options || typeof options !== 'object') {
@@ -163,14 +256,12 @@ export async function generateImage(
       .replace(/\/+$/, '')
     if (!baseUrl) throw new Error('未配置图像接口地址')
 
-    const model =
-      options.model?.trim() ||
-      configuredImageModel(systemConfig) ||
-      DEFAULT_IMAGE_MODEL
+    // 确定生图模型：用户指定 -> 系统显式配置 -> 正则过滤首个模型 -> 无则抛错（严禁全局兜底）
+    const model = await resolveImageModel(options.model, baseUrl, apiKey, signal)
     const size = options.size?.trim() || DEFAULT_IMAGE_SIZE
     const operation = options.imagePath ? 'edits' : 'generations'
     const endpoint = `${baseUrl}/images/${operation}`
-    const response = await createRequest(endpoint, options, apiKey, model, size)
+    const response = await createRequest(endpoint, options, apiKey, model, size, signal)
 
     if (!response.ok) {
       const detail = await responseError(response)
@@ -185,11 +276,13 @@ export async function generateImage(
     const payload = (await response.json()) as ImageApiResponse
     const item = payload.data?.[0]
     if (!item) throw new Error('图像接口响应中没有可用图片')
-    const { bytes, contentType } = await readApiImage(item)
+    const { bytes, contentType } = await readApiImage(item, signal)
+    signal?.throwIfAborted()
     const imagePath = await persistImage(bytes, contentType)
 
     return {
       success: true,
+      model,
       imagePath,
       dataUrl: `data:${contentType};base64,${bytes.toString('base64')}`,
       ...(item.revised_prompt ? { revisedPrompt: item.revised_prompt } : {})
