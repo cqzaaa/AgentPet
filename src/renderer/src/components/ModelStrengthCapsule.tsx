@@ -6,7 +6,6 @@ import {
   STRENGTH_LEVEL_LABELS,
   ALL_STRENGTH_LEVELS,
   resolveModelItems,
-  resolveTargetModelIdWithStrength,
   ResolvedModelItem,
   ModelOption
 } from './model-strength-resolver'
@@ -74,19 +73,12 @@ export function ModelStrengthCapsule({
       const rawPercent = Math.max(0, Math.min(100, (offsetX / rect.width) * 100))
 
       if (isFinal) {
-        // 拖拽释放时，吸附到最近档位节点并触发外部模型联动
+        // 拖拽释放时，吸附到最近档位节点（仅调节强度档位显示与状态，绝不篡改用户所选的模型）
         const nearestLvl = snapToNearestLevel(rawPercent)
         const idx = ALL_STRENGTH_LEVELS.indexOf(nearestLvl)
         const snappedPercent = (idx / (ALL_STRENGTH_LEVELS.length - 1)) * 100
         setSliderPercent(snappedPercent)
         setCurrentLevel(nearestLvl)
-
-        if (activeModel) {
-          const newModelId = resolveTargetModelIdWithStrength(activeModel.id, nearestLvl, options)
-          if (newModelId && newModelId !== selectedValue) {
-            onChange(newModelId)
-          }
-        }
       } else {
         // 拖动过程中平滑移动，同时动态刷新标题
         setSliderPercent(rawPercent)

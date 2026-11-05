@@ -1,5 +1,6 @@
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { copyTextToClipboard } from '../utils/clipboard'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import {
   Activity,
@@ -1074,31 +1075,6 @@ function JsonPrimitive({ value }: { value: unknown }): React.JSX.Element {
   return <span>{String(value)}</span>
 }
 
-async function copyTextToClipboard(value: string): Promise<void> {
-  if (window.api?.copyText) {
-    window.api.copyText(value)
-    return
-  }
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value)
-      return
-    } catch {
-      // Fall through to the selection-based compatibility path.
-    }
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  if (!copied) throw new Error('复制 JSON 失败')
-}
-
 function JsonTreeNode({
   value,
   label,
@@ -1243,7 +1219,8 @@ function StructuredPayload({
   })
   const copyEntry = (path: string, label: string, entryValue: unknown): void => {
     const serializedValue = JSON.stringify(entryValue, null, 2) ?? String(entryValue ?? '')
-    void copyTextToClipboard(`${JSON.stringify(label)}: ${serializedValue}`).then(() => {
+    void copyTextToClipboard(`${JSON.stringify(label)}: ${serializedValue}`).then((success) => {
+      if (!success) return
       setCopiedPath(path)
       if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
       copyFeedbackTimerRef.current = window.setTimeout(() => {
@@ -1325,7 +1302,8 @@ function StructuredPayload({
             title={copied ? '已复制' : '复制 JSON'}
             aria-label={copied ? '已复制' : '复制 JSON'}
             onClick={() => {
-              void copyTextToClipboard(JSON.stringify(value, null, 2) || String(value ?? '')).then(() => {
+              void copyTextToClipboard(JSON.stringify(value, null, 2) || String(value ?? '')).then((success) => {
+                if (!success) return
                 setCopied(true)
                 window.setTimeout(() => setCopied(false), 1600)
               }).catch(console.error)

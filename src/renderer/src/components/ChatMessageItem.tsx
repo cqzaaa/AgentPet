@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type, no-useless-escape, react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/rules-of-hooks */
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
+import { copyFilesToClipboard, copyTextToClipboard } from '../utils/clipboard'
 import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
@@ -110,12 +111,8 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  const handleCopy = () => {
-    if (window.api && typeof window.api.copyText === 'function') {
-      window.api.copyText(code)
-    } else {
-      navigator.clipboard.writeText(code)
-    }
+  const handleCopy = async () => {
+    if (!await copyTextToClipboard(code)) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -474,12 +471,9 @@ function DeliverableFileCard({
 
   const handleCopyPath = async (e: React.MouseEvent): Promise<void> => {
     e.stopPropagation()
-    try {
-      await navigator.clipboard.writeText(normalizedPath)
+    if (await copyTextToClipboard(normalizedPath)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // ignore
     }
   }
 
@@ -2112,6 +2106,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   useEffect(() => {
     if (!selectionPopover) return undefined
+    selectionPromptRef.current?.focus({ preventScroll: true })
     const close = (event: PointerEvent): void => {
       if (!selectionPopoverRef.current?.contains(event.target as Node)) {
         setSelectionPopover(null)
@@ -2124,7 +2119,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
         clearPersistentSelectionHighlight(selectionHighlightOwner)
       }
     }
-    const closeOnViewportChange = (): void => {
+    const closeOnViewportChange = (event: Event): void => {
+      // Pasting or moving the caret can scroll the input horizontally.
+      // Only scrolling outside the popover invalidates its viewport position.
+      if (event.target instanceof Node && selectionPopoverRef.current?.contains(event.target)) return
       setSelectionPopover(null)
       clearPersistentSelectionHighlight(selectionHighlightOwner)
     }
@@ -2358,14 +2356,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
     setWebCitationPopover(null)
   }
 
-  const copyWebCitationUrl = (event: React.MouseEvent, url: string): void => {
+  const copyWebCitationUrl = async (event: React.MouseEvent, url: string): Promise<void> => {
     event.stopPropagation()
     if (!url) return
-    if (window.api?.copyText) {
-      window.api.copyText(url)
-    } else {
-      void navigator.clipboard.writeText(url)
-    }
+    if (!await copyTextToClipboard(url)) return
     setWebUrlCopied(true)
     setTimeout(() => setWebUrlCopied(false), 1800)
   }
@@ -2481,22 +2475,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
       setInternalClipboard(files, textToCopy)
       // 同时写入系统剪贴板（支持粘贴到资源管理器和文本框）
       const filePaths = files.map(f => f.path)
-      if (window.api && typeof window.api.copyFiles === 'function') {
-        await window.api.copyFiles(filePaths, textToCopy)
-      } else {
-        if (window.api && typeof window.api.copyText === 'function') {
-          window.api.copyText(textToCopy)
-        } else {
-          navigator.clipboard.writeText(textToCopy)
-        }
-      }
+      if (!await copyFilesToClipboard(filePaths, textToCopy)) return
     } else {
       // 无文件，纯文本复制
-      if (window.api && typeof window.api.copyText === 'function') {
-        window.api.copyText(textToCopy)
-      } else {
-        navigator.clipboard.writeText(textToCopy)
-      }
+      if (!await copyTextToClipboard(textToCopy)) return
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)

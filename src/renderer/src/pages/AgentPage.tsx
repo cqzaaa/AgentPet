@@ -1,6 +1,7 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
 import { formatBytes } from '../utils/helpers'
+import { copyTextToClipboard } from '../utils/clipboard'
 import type { AppStore } from '../hooks/useAppStore'
 import type { WorkflowDefinition } from '../../../preload/workflow-types'
 import { MarkdownText } from '../components/ChatMessageItem'
@@ -2558,9 +2559,10 @@ export function AgentPage({ store }: AgentPageProps): React.JSX.Element {
               </h3>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(JSON.stringify(testResultData, null, 2))
-                    showToast('已复制到剪贴板', 'success')
+                  onClick={async () => {
+                    if (await copyTextToClipboard(JSON.stringify(testResultData, null, 2))) {
+                      showToast('已复制到剪贴板', 'success')
+                    }
                   }}
                   style={{
                     background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',

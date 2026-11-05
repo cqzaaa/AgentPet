@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { copyTextToClipboard } from '../utils/clipboard'
 import type { TaskEvent, TaskStep } from '../../../main/task-runtime/types'
 import {
   AlertTriangle,
@@ -295,12 +296,9 @@ function SubtaskPromptCard({
   }, [prompt])
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(prompt)
+    if (await copyTextToClipboard(prompt)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
-    } catch {
-      // 忽略无法访问剪贴板的边缘错误
     }
   }, [prompt])
 

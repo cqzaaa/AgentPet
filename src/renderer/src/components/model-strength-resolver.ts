@@ -106,56 +106,12 @@ export function resolveModelItems(options: ModelOption[]): ResolvedModelItem[] {
 
 /**
  * 在选定具体模型时，根据当前强度滑块档位计算出目标模型 ID
+ * 方案 A：解除偷换模型联动，无论滑块处于什么档位，均保持用户所选的模型 ID 绝对稳定不变
  */
 export function resolveTargetModelIdWithStrength(
   currentModelId: string,
-  targetLevel: ReasoningStrengthLevel,
-  allOptions: ModelOption[]
+  _targetLevel: ReasoningStrengthLevel,
+  _allOptions: ModelOption[]
 ): string {
-  const currentLower = currentModelId.toLowerCase()
-
-  // 1. Gemini 特殊处理：high / max 自动对齐到 thinking 变体，反之对齐到普通版
-  if (currentLower.includes('gemini')) {
-    if (targetLevel === 'high' || targetLevel === 'max') {
-      const thinkingCandidate = allOptions.find(o => o.value.toLowerCase().includes('gemini') && o.value.toLowerCase().includes('thinking'))
-      if (thinkingCandidate) return thinkingCandidate.value
-    } else if (targetLevel === 'off' || targetLevel === 'low') {
-      const nonThinkingCandidate = allOptions.find(o => o.value.toLowerCase().includes('gemini') && !o.value.toLowerCase().includes('thinking'))
-      if (nonThinkingCandidate) return nonThinkingCandidate.value
-    }
-  }
-
-  // 2. Codex 特殊处理：如果在 Codex 组内，允许通过滑块快速跨档到 Luna / Terra / Sol / Astra
-  if (currentLower.includes('gpt') || currentLower.includes('sol') || currentLower.includes('terra') || currentLower.includes('luna') || currentLower.includes('astra')) {
-    const is61 = currentLower.includes('6.1')
-    if (targetLevel === 'max') {
-      const astra = allOptions.find(o => o.value.includes('astra'))
-      if (astra) return astra.value
-    } else if (targetLevel === 'high') {
-      const sol = allOptions.find(o => is61 ? o.value.includes('6.1-sol') : o.value.includes('sol'))
-      if (sol) return sol.value
-    } else if (targetLevel === 'medium') {
-      const terra = allOptions.find(o => is61 ? o.value.includes('6.1-terra') : o.value.includes('terra'))
-      if (terra) return terra.value
-    } else if (targetLevel === 'low' || targetLevel === 'off') {
-      const luna = allOptions.find(o => is61 ? o.value.includes('6.1-luna') : o.value.includes('luna'))
-      if (luna) return luna.value
-    }
-  }
-
-  // 3. Claude Code 特殊处理：根据滑块档位联动 Opus / Sonnet / Haiku
-  if (currentLower.includes('claude') || currentLower === 'sonnet' || currentLower === 'opus' || currentLower === 'haiku') {
-    if (targetLevel === 'max') {
-      const opus = allOptions.find(o => o.value.toLowerCase().includes('opus'))
-      if (opus) return opus.value
-    } else if (targetLevel === 'low' || targetLevel === 'off') {
-      const haiku = allOptions.find(o => o.value.toLowerCase().includes('haiku'))
-      if (haiku) return haiku.value
-    } else {
-      const sonnet = allOptions.find(o => o.value.toLowerCase().includes('sonnet'))
-      if (sonnet) return sonnet.value
-    }
-  }
-
   return currentModelId
 }

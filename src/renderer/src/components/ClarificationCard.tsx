@@ -35,9 +35,9 @@ export function ClarificationCard({
   const currentAnswered = currentQuestion ? hasAnswer(currentQuestion) : false
     const isLastQuestion = activeIndex === step.questions.length - 1
 
-  // 如果是生图模型选择，自动默认高亮预选正则过滤后的首个模型
+  // 如果是模型选择（文本模型或生图模型），自动默认预选首个候选模型
   useEffect(() => {
-    if (currentQuestion && isImageModelSelectionQuestion(currentQuestion)) {
+    if (currentQuestion && (isModelSelectionQuestion(currentQuestion) || isImageModelSelectionQuestion(currentQuestion))) {
       const current = answers[currentQuestion.id]
       if (!current?.selected && !current?.useCustom && currentQuestion.options && currentQuestion.options.length > 0) {
         update(currentQuestion.id, {

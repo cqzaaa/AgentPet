@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Copy, Check, X, FileText, Loader2 } from 'lucide-react'
+import { copyTextToClipboard } from '../utils/clipboard'
 
 export interface PastedTextModalProps {
   title: string
@@ -114,21 +115,9 @@ export const PastedTextModal: React.FC<PastedTextModalProps> = ({
 
   const handleCopy = useCallback(async () => {
     if (!text || copied) return
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        const textarea = document.createElement('textarea')
-        textarea.value = text
-        document.body.appendChild(textarea)
-        textarea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textarea)
-      }
+    if (await copyTextToClipboard(text)) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
-    } catch {
-      /* 复制失败静默处理 */
     }
   }, [text, copied])
 
