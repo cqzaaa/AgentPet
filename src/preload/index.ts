@@ -347,6 +347,8 @@ const api = {
     ipcRenderer.invoke('api:get-ollama-models', baseUrl),
   getModels: (config: any): Promise<string[]> =>
     ipcRenderer.invoke('api:get-models', config),
+  getSessionReference: (url: string): Promise<{ id: string; name: string } | null> =>
+    ipcRenderer.invoke('api:get-session-reference', url),
   getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string; todayOnly?: boolean }): Promise<any[] | null> =>
     ipcRenderer.invoke('api:get-local-sessions', options),
   getMessagePromptInfo: (messageId: string | number): Promise<any | null> =>

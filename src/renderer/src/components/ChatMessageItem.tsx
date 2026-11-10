@@ -2,8 +2,10 @@
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
 import { copyFilesToClipboard, copyTextToClipboard } from '../utils/clipboard'
-import { getInternalClipboard, setInternalClipboard, type AttachedFile } from '../hooks/useAppStore'
+import { getInternalClipboard, setInternalClipboard, useAppStoreRaw, type AttachedFile } from '../hooks/useAppStore'
 import { AgentPetMark } from './AgentPetMark'
+import { SessionReferenceLink } from './SessionReferenceLink'
+import { extractSessionReferences } from '../../../preload/session-reference'
 import { ChatActivityGroup, ChatTurnActivity } from './ChatActivityGroup'
 import { usePersistentDisclosure, collapseOpenDisclosuresByPrefix } from '../hooks/chat-disclosure-state'
 import { uniqueToolSteps } from '../hooks/tool-step-identity'
@@ -1003,6 +1005,29 @@ export function renderPlainOrImageText(
 }
 
 export function MarkdownText({
+  rawText,
+  onPreviewFile
+}: {
+  rawText: string
+  onPreviewFile?: PreviewFileHandler
+}): React.JSX.Element {
+  const refs = extractSessionReferences(rawText)
+  if (!refs.length) return <PlainMarkdownText rawText={rawText} onPreviewFile={onPreviewFile} />
+  const parts: React.ReactNode[] = []
+  let offset = 0
+  const pattern = /\[[^\]\n]*\]\((agentpet:\/\/threads\/[A-Za-z0-9_%~.-]+)\)|(agentpet:\/\/threads\/[A-Za-z0-9_%~.-]+)/g
+  for (const match of rawText.matchAll(pattern)) {
+    const url = match[1] || match[2]
+    if (!refs.some(ref => ref.url === url)) continue
+    if (match.index! > offset) parts.push(<PlainMarkdownText key={`text-${offset}`} rawText={rawText.slice(offset, match.index)} onPreviewFile={onPreviewFile} />)
+    parts.push(<SessionReferenceLink key={`ref-${match.index}`} url={url} />)
+    offset = match.index! + match[0].length
+  }
+  if (offset < rawText.length) parts.push(<PlainMarkdownText key={`text-${offset}`} rawText={rawText.slice(offset)} onPreviewFile={onPreviewFile} />)
+  return <>{parts}</>
+}
+
+function PlainMarkdownText({
   rawText,
   onPreviewFile
 }: {
@@ -2062,7 +2087,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
   const citationPopoverRef = useRef<HTMLDivElement>(null)
   const webCitationPopoverRef = useRef<HTMLDivElement>(null)
   const selectionPopoverRef = useRef<HTMLDivElement>(null)
-  const selectionPromptRef = useRef<HTMLInputElement>(null)
   const promptModalRef = useRef<HTMLDivElement>(null)
   const promptModalCloseRef = useRef<HTMLButtonElement>(null)
   const promptModalTriggerRef = useRef<HTMLButtonElement>(null)
@@ -2106,7 +2130,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
   useEffect(() => {
     if (!selectionPopover) return undefined
-    selectionPromptRef.current?.focus({ preventScroll: true })
+    // Keep focus on the body selection so native Ctrl/Cmd+C still copies it.
+    // The prompt receives focus only when the user clicks or tabs into it.
     const close = (event: PointerEvent): void => {
       if (!selectionPopoverRef.current?.contains(event.target as Node)) {
         setSelectionPopover(null)
@@ -3014,7 +3039,34 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
 
         {/* 📝 代码/文件 Diff 修改记录卡片（已编辑文件列表、逐行 Diff 审核与一键撤销） */}
         {!editing && !msg.isThinking && fileChanges.length > 0 && (
-          <FileChangesCard changes={fileChanges} />
+          <FileChangesCard changes={fileChanges} onRevertSuccess={async (paths) => {
+            if (!sessionId) return
+            const store = useAppStoreRaw.getState()
+            const reverted = new Set(paths)
+            let updatedMessage: any
+            store.updateSessionMessages(sessionId, (messages: any[]) => messages.map((message) => {
+              if (String(message.id) !== String(msg.id)) return message
+              const markReverted = (changes: any[]): any[] => changes.map((change) =>
+                reverted.has(change.filePath) ? { ...change, reverted: true } : change
+              )
+              const toolSteps = (message.toolSteps || []).map((step: any) =>
+                step.type === 'fileChanges' && Array.isArray(step.changes)
+                  ? { ...step, changes: markReverted(step.changes) }
+                  : step
+              )
+              const changes = markReverted(message.fileChanges || fileChanges)
+              // History persists toolSteps, while live messages also carry fileChanges.
+              if (!toolSteps.some((step: any) => step.type === 'fileChanges')) {
+                toolSteps.push({ id: `file-changes-${message.id}`, type: 'fileChanges', changes })
+              }
+              updatedMessage = { ...message, toolSteps, fileChanges: changes }
+              return updatedMessage
+            }))
+            if (updatedMessage && !(await window.api.saveMessage({ ...updatedMessage, sessionId }))) {
+              store.setToast('文件已撤销，但撤销标记保存失败')
+              throw new Error('Failed to persist file revert state')
+            }
+          }} />
         )}
 
         {selectionPopover && createPortal(
@@ -3026,7 +3078,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({ msg, curren
             aria-label="处理选中的内容"
           >
             <input
-              ref={selectionPromptRef}
               value={selectionPrompt}
               onChange={(event) => setSelectionPrompt(event.target.value)}
               onKeyDown={(event) => {

@@ -11,7 +11,7 @@ import './FileChangesCard.css'
 
 export interface FileChangesCardProps {
   changes: FileChangeItem[]
-  onRevertSuccess?: (revertedPaths: string[]) => void
+  onRevertSuccess?: (revertedPaths: string[]) => void | Promise<void>
 }
 
 export function FileChangesCard({
@@ -20,7 +20,11 @@ export function FileChangesCard({
 }: FileChangesCardProps): React.JSX.Element | null {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerIndex, setDrawerIndex] = useState(0)
-  const [revertedPaths, setRevertedPaths] = useState<Set<string>>(new Set())
+  const [localRevertedPaths, setRevertedPaths] = useState<Set<string>>(new Set())
+  const revertedPaths = useMemo(() => new Set([
+    ...localRevertedPaths,
+    ...changes.filter((change) => change.reverted).map((change) => change.filePath)
+  ]), [changes, localRevertedPaths])
   const [revertingAll, setRevertingAll] = useState(false)
 
   // [Diff Review] 过滤有效文件变更：必须包含代码增删或属于新建文件
@@ -68,7 +72,7 @@ export function FileChangesCard({
           }
           return next
         })
-        onRevertSuccess?.(pendingChanges.map((item) => item.filePath))
+        await onRevertSuccess?.(pendingChanges.map((item) => item.filePath))
       }
     } catch (err) {
       console.error('[FileChangesCard] 全部撤销失败:', err)
@@ -90,7 +94,7 @@ export function FileChangesCard({
         const res = await window.api.revertFileChanges([targetChange])
         if (res.success) {
           setRevertedPaths((prev) => new Set(prev).add(targetChange.filePath))
-          onRevertSuccess?.([targetChange.filePath])
+          await onRevertSuccess?.([targetChange.filePath])
         }
       } catch (err) {
         console.error('[FileChangesCard] 单文件撤销失败:', err)

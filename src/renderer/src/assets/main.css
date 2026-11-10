@@ -6444,6 +6444,54 @@ body {
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(96, 165, 250, 0.15);
 }
 
+.composer-session-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.session-reference {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  color: var(--accent-color, #2864b4);
+  vertical-align: middle;
+  border-radius: 5px;
+}
+
+.session-reference-link,
+.session-reference-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.session-reference-link span {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-reference-link:hover,
+.session-reference-remove:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.1));
+}
+
+.session-reference button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .chat-textarea-field {
   width: 100%;
   border: none;

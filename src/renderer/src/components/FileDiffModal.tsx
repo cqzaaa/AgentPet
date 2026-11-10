@@ -13,6 +13,7 @@ export interface FileChangeItem {
   originalContent: string
   currentContent: string
   wasCreated?: boolean
+  reverted?: boolean
   subtaskId?: string
   subtaskTitle?: string
   agentId?: string

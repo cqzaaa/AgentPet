@@ -1,4 +1,7 @@
 import os from 'node:os'
+import { getSessionReference, resolveSessionReferenceContext } from '../session-references'
+import { extractSessionReferences } from '../../preload/session-reference'
+import { permissionManager } from '../tools/security/permission-manager'
 import { openLoginTerminal } from './login-terminal'
 import path from 'node:path'
 import { BUILTIN_EXTERNAL_AGENTS } from './catalog'
@@ -140,6 +143,7 @@ export class ExternalAgentManager {
     if (definition.protocol === 'internal') {
       throw new Error('AgentPet 默认 Agent 由现有对话运行时执行')
     }
+    request = await this.authorizeSessionReferences(request, definition, '本机配置的 Agent', options?.signal)
     const cwd = this.normalizeCwd(request.cwd)
     if (definition.protocol === 'claude-stream-json') {
       const connection = createClaudeAcpConnection(definition, cwd, request.model, onProtocolEvent)
@@ -204,7 +208,34 @@ export class ExternalAgentManager {
     if (!request.prompt?.trim()) throw new Error('prompt 不能为空')
     const definition = await this.find(request.agentId)
     if (!definition.enabled) throw new Error(`Agent ${definition.name} 已被禁用`)
+    request = await this.authorizeSessionReferences(request, definition, `SSH 主机 ${connection.host || '未配置'}`, options?.signal)
     return runRemoteAcpPrompt(this.client, definition, { ...request, prompt: request.prompt.trim() }, connection, runId, stepId, onUpdate, onProtocolEvent, options)
+  }
+
+  private async authorizeSessionReferences(
+    request: ExternalAgentRunRequest,
+    definition: ExternalAgentDefinition,
+    destination: string,
+    signal?: AbortSignal
+  ): Promise<ExternalAgentRunRequest> {
+    const references = extractSessionReferences(request.prompt)
+    if (!references.length) return request
+    if (signal?.aborted) throw new Error('UserAborted')
+    const titles = await Promise.all(references.map(async ref => {
+      const session = await getSessionReference(ref.url)
+      if (!session) throw new Error(`引用的会话不存在或已删除：${ref.url}`)
+      return `${session.name || '未命名会话'} (${ref.url})`
+    }))
+    const approval = await permissionManager.requestCommandPermission({
+      command: `向外部 Agent「${definition.name}」(${definition.id}, ${definition.protocol}, ${request.model || '默认模型'}，${destination}) 发送引用会话的完整已保存历史：\n${titles.join('\n')}`,
+      execCwd: request.cwd,
+      warning: '包含所有已保存消息、工具记录和附件信息，可能包含敏感内容；只批准本次发送。',
+      forcePrompt: true,
+      allowTurnScope: false
+    })
+    if (!approval.approved) throw new Error('已取消向外部 Agent 发送引用会话')
+    if (signal?.aborted) throw new Error('UserAborted')
+    return { ...request, prompt: request.prompt + await resolveSessionReferenceContext(request.prompt) }
   }
 
   public async describe(agentId: string): Promise<Pick<ExternalAgentDefinition, 'id' | 'name' | 'protocol'>> {

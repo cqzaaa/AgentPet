@@ -14,6 +14,10 @@ import {
   X
 } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { copyTextToClipboard } from '../utils/clipboard'
+import { sessionLink } from '../../../preload/session-reference'
+import { useAppStoreRaw } from '../hooks/useAppStore'
+import { Link } from 'lucide-react'
 
 // ── 分组定义 ──────────────────────────────────────────────────
 type TimeGroupKey = 'today' | 'yesterday' | 'thisWeek' | 'earlier'
@@ -702,6 +706,16 @@ export function RecentSessionList(props: Props): React.JSX.Element {
                 >
                   <Pencil size={14} strokeWidth={2} aria-hidden="true" />
                   重命名
+                </button>
+                <button type="button" className="recent-context-item" onClick={async () => {
+                  const copied = await copyTextToClipboard(sessionLink(target.id))
+                  useAppStoreRaw.getState().setToast({
+                    message: copied ? '会话链接已复制，可粘贴到对话中引用' : '复制失败，请重试',
+                    type: copied ? 'success' : 'error'
+                  })
+                  setContextMenu(null)
+                }}>
+                  <Link size={14} strokeWidth={2} aria-hidden="true" />复制会话链接
                 </button>
                 <div className="recent-context-divider"></div>
                 <button

@@ -5,6 +5,8 @@ import { getInternalClipboard, setInternalClipboard, useAppStoreRaw } from '../h
 import { useChatController } from '../hooks/useChatController'
 import { ChatMessageItem, type QuotedSelection } from '../components/ChatMessageItem'
 import { AgentPetMark } from '../components/AgentPetMark'
+import { SessionReferenceLink } from '../components/SessionReferenceLink'
+import { extractSessionReferences, removeSessionReferences, splitSessionReferenceDraft } from '../../../preload/session-reference'
 import { Tooltip } from '../components/Tooltip'
 import { latestTaskPlan, TaskPlanFloatingStatus } from '../components/TaskPlanCard'
 import { MeetingRecorderPanel } from '../components/MeetingRecorderPanel'
@@ -158,6 +160,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     openTrajectory,
     currentContextTokens
   } = useChatController()
+  const referenceDraft = useMemo(() => splitSessionReferenceDraft(inputValue), [inputValue])
   const activeWorkspacePath = useAppStoreRaw(
     (state: any) =>
       state.sessions?.find((session: any) => session.id === state.activeSessionId)?.workspacePath ||
@@ -3115,6 +3118,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             </div>
           )}
 
+          {referenceDraft.references.length > 0 && <div className="composer-session-references" aria-label="引用会话">
+            {referenceDraft.references.map(ref => <SessionReferenceLink key={ref.id} url={ref.url}
+              onRemove={() => setInputValue(inputValue.split(`${ref.url}\n`).join('').split(ref.url).join(''))} />)}
+          </div>}
           <textarea
             ref={chatTextareaRef}
             className="chat-textarea-field resize-none"
@@ -3132,9 +3139,20 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                       ? '已排队等待发送...'
                       : `输入指令并发送给 ${currentAvatarName} ...`
             }
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            value={referenceDraft.text}
+            onChange={(e) => setInputValue(referenceDraft.references.map(ref => `${ref.url}\n`).join('') + e.target.value)}
             onPaste={async (e) => {
+              const referencePaste = e.clipboardData.getData('text/plain')
+              const pastedReferences = extractSessionReferences(referencePaste)
+              if (pastedReferences.length && e.clipboardData.files.length === 0) {
+                e.preventDefault()
+                const field = e.currentTarget
+                const visibleText = referenceDraft.text
+                const nextText = visibleText.slice(0, field.selectionStart) + removeSessionReferences(referencePaste) + visibleText.slice(field.selectionEnd)
+                const refs = new Map([...referenceDraft.references, ...pastedReferences].map(ref => [ref.id, ref]))
+                setInputValue([...refs.values()].map(ref => `${ref.url}\n`).join('') + nextText)
+                return
+              }
               const attachLongPastedText = (rawText: string) => {
                 const firstLine = (
                   rawText

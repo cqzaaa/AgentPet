@@ -1,4 +1,5 @@
 import * as fs from 'fs'
+import { resolveSessionReferenceContext } from '../session-references'
 import { normalizeContextWindow } from '../../preload/context-policy'
 import { basename, isAbsolute, join, resolve } from 'path'
 import { ModelRuntimeFactory, ChatMessage, ChatOptions, type ModelProvider } from '../model-runtime'
@@ -940,6 +941,17 @@ read_file({"file_path":"${normalizedPath}","start_line":1,"end_line":200})`
     const resumedMessages = restoreContext(incomingMessages, config.sessionContext)
     const resumedContext = resumedMessages !== incomingMessages
     const chatHistory: ChatMessage[] = resumedMessages
+    const latestUser = chatHistory.findLast((message: ChatMessage) => message.role === 'user')
+    if (latestUser) {
+      const text = typeof latestUser.content === 'string' ? latestUser.content
+        : latestUser.content.filter((block: any) => block.type === 'text').map((block: any) => block.text).join('\n')
+      const referenceContext = text.includes('"referencedConversations":') ? '' : await resolveSessionReferenceContext(text)
+      if (referenceContext) {
+        latestUser.content = typeof latestUser.content === 'string'
+          ? latestUser.content + referenceContext
+          : [...latestUser.content, { type: 'text', text: referenceContext }]
+      }
+    }
     const savedCalibration = resumedContext && config.sessionContext?.tokenCalibration?.model === model
       ? Number(config.sessionContext.tokenCalibration.scale) : 1
     let contextTokenScale = Number.isFinite(savedCalibration) ? Math.max(1, savedCalibration) : 1

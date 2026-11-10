@@ -187,6 +187,7 @@ declare global {
       getModelUrl: () => Promise<string>
       getOllamaModels: (baseUrl: string) => Promise<string[]>
       getModels: (config: any) => Promise<string[]>
+      getSessionReference: (url: string) => Promise<{ id: string; name: string } | null>
       getLocalSessions: (options?: { loadAll?: boolean; activeSessionId?: string; todayOnly?: boolean }) => Promise<any[] | null>
       getMessagePromptInfo: (messageId: string | number) => Promise<any | null>
       createSession: (session: any) => Promise<boolean>

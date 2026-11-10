@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, screen, protocol, net, Tray, Menu, dialog, Notification, session, clipboard, nativeImage, desktopCapturer, globalShortcut } from 'electron'
 import { join, basename, dirname, extname, isAbsolute, resolve, sep } from 'path'
 import { registerMemoryAPIs, getLastCleanupTime } from './api/memory'
+import { configureSessionReferences, getSessionReference } from './session-references'
 import { registerKnowledgeBaseAPIs } from './api/knowledgeBase'
 import { registerWikiAPIs } from './api/wiki'
 import { pathToFileURL } from 'url'
@@ -4579,6 +4580,10 @@ app.whenReady().then(() => {
       }
     }
   }
+
+  configureSessionReferences(getDB)
+  ipcMain.handle('api:get-session-reference', (_event, url: string) =>
+    typeof url === 'string' ? getSessionReference(url) : null)
 
   // 读取本地聊天记录
   ipcMain.handle(
