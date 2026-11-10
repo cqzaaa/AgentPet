@@ -784,7 +784,9 @@ export function CollaborationComposer({
   const [mode, setMode] = React.useState<'auto' | 'manual'>(initialWorkflow ? 'manual' : 'auto')
   const [goal, setGoal] = React.useState(initialWorkflow?.goal || initialGoal)
   const [title, setTitle] = React.useState(initialWorkflow?.title || '未命名工作流')
-  const [savedWorkflow, setSavedWorkflow] = React.useState(initialWorkflow)
+  const [savedWorkflow, setSavedWorkflow] = React.useState(
+    initialWorkflow?.id ? initialWorkflow : undefined
+  )
   const [savingWorkflow, setSavingWorkflow] = React.useState(false)
   const [saveError, setSaveError] = React.useState('')
   const [rpaChoices, setRpaChoices] = React.useState<Array<{ id: string; name: string }>>([])
