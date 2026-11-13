@@ -11,13 +11,13 @@ export const webManifest: ToolManifest = {
   api: [
     {
       name: 'web_search',
-      description: '搜索公开网页并检查主题匹配，返回候选标题、URL 和摘要。默认自动切换备用搜索；无相关候选时明确失败。结果只是线索，请继续 web_fetch 核验详情。',
+      description: '搜索公开网页并检查主题匹配，返回候选标题、URL 和摘要。默认依次尝试元宝搜索（so.qq.com）、Bing、百度，获得相关候选即停止；无相关候选时明确失败。结果只是线索，请继续 web_fetch 核验详情。',
       timeout: 120000,
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: '搜索关键词' },
-          engine: { type: 'string', enum: ['auto', 'bing', 'baidu'], description: '默认 auto；可在检索失败后指定引擎并改写关键词，保留 site/filetype 约束' },
+          engine: { type: 'string', enum: ['auto', 'qq', 'bing', 'baidu'], description: '默认 auto：so.qq.com → Bing → 百度；qq 表示元宝搜索。指定引擎时仅使用该引擎；可在检索失败后指定引擎并改写关键词，保留 site/filetype 约束' },
           max_results: {
             type: 'number',
             minimum: 1,

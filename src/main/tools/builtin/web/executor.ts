@@ -315,6 +315,36 @@ const SEARCH_SCRIPT = String.raw`(async () => {
   return { isFiltered, results };
 })()`
 
+const QQ_SEARCH_SCRIPT = String.raw`(async () => {
+  const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const extract = () => {
+    const seen = new Set();
+    const results = [];
+    for (const card of document.querySelectorAll('article.result-card')) {
+      const anchor = card.querySelector('a[data-log*="title"]');
+      if (!anchor) continue;
+      const title = clean(anchor.textContent);
+      const url = anchor.href || '';
+      if (!title || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+      const snippet = clean(card.querySelector('[data-log*="summary"]')?.textContent);
+      seen.add(url);
+      results.push({ title, url, snippet });
+    }
+    return results;
+  };
+  let previous = '';
+  let stable = 0;
+  for (let i = 0; i < 14; i++) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const results = extract();
+    const signature = JSON.stringify(results);
+    stable = signature === previous ? stable + 1 : 0;
+    previous = signature;
+    if (i >= 3 && results.length && stable >= 2) return results;
+  }
+  return extract();
+})()`
+
 const BAIDU_SEARCH_SCRIPT = String.raw`(() => {
   return new Promise(resolve => {
     const clean = v => String(v || '').replace(/\s+/g, ' ').trim();
@@ -400,50 +430,46 @@ export class WebExecutor implements IToolExecutor {
     if (!rawQuery) return { content: '错误：缺少必要参数 query', success: false }
     const maxResults = Math.min(Math.max(Number(args.max_results) || 8, 1), 15)
     const timeout = normalizeTimeout(args.timeout_seconds)
-    const engine = args.engine === 'bing' || args.engine === 'baidu' ? args.engine : 'auto'
+    const engine = args.engine === 'qq' || args.engine === 'bing' || args.engine === 'baidu' ? args.engine : 'auto'
     const query = sanitizeSearchQuery(rawQuery, engine)
     const deadline = Date.now() + timeout
     const attempts: Array<{ engine: string; status: string }> = []
 
     let results: SearchResult[] = []
 
-    // 1. Primary search with Bing (international cookies injected)
-    const searchUrl = `https://cn.bing.com/search?q=${encodeURIComponent(query)}&count=${maxResults}`
-    if (engine !== 'baidu') try {
-      const bingData = await runInHiddenPage<BingRawSearch>(
-        searchUrl,
-        Math.min(timeout, engine === 'auto' ? Math.max(5000, timeout / 2) : timeout),
-        context.abortSignal,
-        SEARCH_SCRIPT
-      )
-      if (bingData?.results && !isBingSearchDegraded(query, bingData.results, bingData.isFiltered)) {
-        results = relevantSearchResults(query, bingData.results).slice(0, maxResults)
-      }
-      attempts.push({ engine: 'bing', status: results.length ? '相关候选' : '无结果或主题不相关' })
-    } catch (error) {
+    const engines = engine === 'auto' ? ['qq', 'bing', 'baidu'] as const : [engine]
+    for (const [index, currentEngine] of engines.entries()) {
       if (context.abortSignal?.aborted) throw new Error('UserAborted')
-      attempts.push({ engine: 'bing', status: error instanceof Error ? error.message : String(error) })
-    }
-
-    // 2. If Bing degraded or returned 0 results, fall back to Baidu
-    if (!results.length && engine !== 'bing' && !context.abortSignal?.aborted && Date.now() < deadline) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      // Reserve a share of the remaining deadline for each fallback engine.
+      const attemptTimeout = Math.max(1, Math.floor(remaining / (engines.length - index)))
       try {
-        // Keep explicit domain and file-type constraints when changing engines.
-        const baiduUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=${maxResults}`
-        const baiduResults = await runInHiddenPage<SearchResult[]>(
-          baiduUrl,
-          Math.max(1, deadline - Date.now()),
-          context.abortSignal,
-          BAIDU_SEARCH_SCRIPT
-        )
-        if (baiduResults && baiduResults.length > 0) {
-          results = relevantSearchResults(query, baiduResults).slice(0, maxResults)
+        let candidates: SearchResult[] = []
+        if (currentEngine === 'bing') {
+          const data = await runInHiddenPage<BingRawSearch>(
+            `https://cn.bing.com/search?q=${encodeURIComponent(query)}&count=${maxResults}`,
+            attemptTimeout, context.abortSignal, SEARCH_SCRIPT
+          )
+          if (data?.results && !isBingSearchDegraded(query, data.results, data.isFiltered)) {
+            candidates = data.results
+          }
+        } else {
+          candidates = await runInHiddenPage<SearchResult[]>(
+            currentEngine === 'qq'
+              ? `https://so.qq.com/isearch?query=${encodeURIComponent(query)}&quick=1`
+              : `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=${maxResults}`,
+            attemptTimeout, context.abortSignal,
+            currentEngine === 'qq' ? QQ_SEARCH_SCRIPT : BAIDU_SEARCH_SCRIPT
+          ) || []
         }
-        attempts.push({ engine: 'baidu', status: results.length ? '相关候选' : '无结果或主题不相关' })
+        results = relevantSearchResults(query, candidates).slice(0, maxResults)
+        attempts.push({ engine: currentEngine, status: results.length ? '相关候选' : '无结果或主题不相关' })
       } catch (error) {
         if (context.abortSignal?.aborted) throw new Error('UserAborted')
-        attempts.push({ engine: 'baidu', status: error instanceof Error ? error.message : String(error) })
+        attempts.push({ engine: currentEngine, status: error instanceof Error ? error.message : String(error) })
       }
+      if (results.length) break
     }
 
     if (context.abortSignal?.aborted) throw new Error('UserAborted')
