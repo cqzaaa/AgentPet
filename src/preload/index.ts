@@ -504,6 +504,9 @@ const api = {
   revealMcpApiKey: (serverId: string): Promise<string> => ipcRenderer.invoke('api:reveal-mcp-api-key', serverId),
   testMcpServer: (config: any): Promise<any> => ipcRenderer.invoke('api:test-mcp-server', config),
   getMcpConfig: (): Promise<any> => ipcRenderer.invoke('api:get-mcp-config'),
+  detectLocalConnector: (connectorId: string): Promise<any> => ipcRenderer.invoke('api:detect-local-connector', connectorId),
+  connectLocalConnector: (connectorId: string, action?: 'enable' | 'disable' | 'reconnect'): Promise<any> =>
+    ipcRenderer.invoke('api:connect-local-connector', { connectorId, action }),
   onMcpConfigUpdated: (callback: (config: any) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, config: any): void => callback(config)
     ipcRenderer.on('api:mcp-config-updated', handler)

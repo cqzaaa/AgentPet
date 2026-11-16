@@ -426,6 +426,16 @@ export const useAppStoreRaw = create<any>((set) => ({
         if (parsed && parsed.maxTokens === 2048) {
           delete parsed.maxTokens
         }
+        if (parsed && parsed.contextWindow === 258000) {
+          delete parsed.contextWindow
+        }
+        if (Array.isArray(parsed?.profiles)) {
+          parsed.profiles = parsed.profiles.map((profile: any) =>
+            profile?.contextWindow === 258000
+              ? { ...profile, contextWindow: undefined }
+              : profile
+          )
+        }
         if (parsed?.apiKey) legacyLlmConfigForMigration = parsed
         const sanitized = sanitizeLlmConfigForRenderer(parsed)
         if (!parsed?.apiKey) persistSanitizedLlmConfig(sanitized)

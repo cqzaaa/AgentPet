@@ -103,7 +103,8 @@ const CONTEXT_PRESETS = [
   { label: '32k', value: 32000 },
   { label: '128k', value: 128000 },
   { label: '256k', value: 256000 },
-  { label: '500k', value: 500000 }
+  { label: '500k', value: 500000 },
+  { label: '680k', value: 680000 }
 ]
 
 interface ModelConfigPanelProps {
@@ -753,7 +754,7 @@ export function ModelConfigPanel({ store }: ModelConfigPanelProps): React.JSX.El
                   <div className="slider-footer-row">
                     <div className="slider-scale-labels">
                       <span>32k</span>
-                      <span>500k Max</span>
+                      <span>{Math.round(MAX_CONTEXT_WINDOW / 1000)}k Max</span>
                     </div>
                     <div className="preset-pill-group">
                       {CONTEXT_PRESETS.map(preset => (

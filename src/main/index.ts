@@ -406,6 +406,9 @@ let globalAssistantExpandedBounds: Electron.Rectangle | null = null
 const globalAssistantShortcut = 'CommandOrControl+Shift+Space'
 const automationEmergencyShortcut = 'CommandOrControl+Alt+S'
 let automationOverlayHideTimer: NodeJS.Timeout | null = null
+let automationOverlayActive = false
+let automationOverlaySequenceId = 0
+const activeAutomationRuns = new Set<string>()
 let rpaScheduleTimer: NodeJS.Timeout | null = null
 let isCheckingRpaSchedules = false
 
@@ -418,7 +421,16 @@ const automationToolNames = new Set([
   'type_text',
   'key_press',
   'get_windows',
-  'focus_window'
+  'focus_window',
+  'find_ui_elements',
+  'click_ui_element',
+  'focus_ui_element',
+  'perform_computer_actions'
+])
+
+const automationBookkeepingToolNames = new Set([
+  'update_task_plan',
+  'update_task_step'
 ])
 
 const globalAssistantToolNames = new Set([
@@ -457,11 +469,20 @@ function triggerEmergencyAutomationStop(): void {
   credentialManager.cancelPending()
   officeRuntimeManager.cancelPending()
   nodeRuntimeManager.cancelPending()
-  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
+  activeAutomationRuns.clear()
+  automationOverlayActive = false
+  automationOverlaySequenceId += 1
+  if (automationOverlayHideTimer) {
+    clearTimeout(automationOverlayHideTimer)
+    automationOverlayHideTimer = null
+  }
   if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) {
     automationOverlayWindow.hide()
   }
   unregisterAutomationEmergencyShortcut()
+  if (agentWindowShouldShow && agentWindow && !agentWindow.isDestroyed() && !agentWindow.isFocused()) {
+    showAgentWindow(agentWindow)
+  }
 }
 
 function registerAutomationEmergencyShortcut(): void {
@@ -527,29 +548,72 @@ function publishAutomationProgress(payload: {
   args?: any
   result?: string
   sessionId?: string
+  runOwnerId?: string
 }): void {
   if (!automationToolNames.has(payload.name)) return
-  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
+  if (payload.runOwnerId) {
+    activeAutomationRuns.add(payload.runOwnerId)
+  }
+  if (automationOverlayHideTimer) {
+    clearTimeout(automationOverlayHideTimer)
+    automationOverlayHideTimer = null
+  }
+  const isFreshSequence = !automationOverlayActive
+  if (isFreshSequence) {
+    automationOverlayActive = true
+    automationOverlaySequenceId += 1
+  }
+  const targetSeqId = automationOverlaySequenceId
   const overlay = ensureAutomationOverlay()
-  const send = () => overlay.webContents.send('api:automation-progress', payload)
-  if (overlay.webContents.isLoading())
+  const messagePayload = isFreshSequence ? { ...payload, reset: true } : payload
+  const send = () => {
+    if (!overlay.isDestroyed()) {
+      overlay.webContents.send('api:automation-progress', messagePayload)
+    }
+  }
+  if (overlay.webContents.isLoading()) {
     overlay.webContents.once('did-finish-load', () => {
+      if (!automationOverlayActive || targetSeqId !== automationOverlaySequenceId || overlay.isDestroyed()) {
+        return
+      }
       send()
-      overlay?.showInactive()
+      overlay.showInactive()
     })
-  else {
+  } else {
     send()
     overlay.showInactive()
   }
 }
 
-function dismissAutomationOverlay(): void {
-  if (automationOverlayHideTimer) clearTimeout(automationOverlayHideTimer)
-  automationOverlayHideTimer = setTimeout(() => {
-    if (automationOverlayWindow && !automationOverlayWindow.isDestroyed())
+function dismissAutomationOverlay(options?: { immediate?: boolean; runOwnerId?: string }): void {
+  if (options?.runOwnerId) {
+    activeAutomationRuns.delete(options.runOwnerId)
+    if (activeAutomationRuns.size > 0) return
+  } else {
+    activeAutomationRuns.clear()
+  }
+  automationOverlayActive = false
+  automationOverlaySequenceId += 1
+  const targetSeqId = automationOverlaySequenceId
+  if (automationOverlayHideTimer) {
+    clearTimeout(automationOverlayHideTimer)
+    automationOverlayHideTimer = null
+  }
+  const hideNow = () => {
+    if (automationOverlayActive || targetSeqId !== automationOverlaySequenceId) return
+    if (automationOverlayWindow && !automationOverlayWindow.isDestroyed()) {
       automationOverlayWindow.hide()
+    }
     unregisterAutomationEmergencyShortcut()
-  }, 1800)
+  }
+  if (options?.immediate) {
+    hideNow()
+    return
+  }
+  automationOverlayHideTimer = setTimeout(() => {
+    automationOverlayHideTimer = null
+    hideNow()
+  }, 1200)
 }
 
 function getGlobalAssistantUrl(): string {
@@ -6231,6 +6295,24 @@ app.whenReady().then(() => {
         executionController.signal
       )
       const iterator = stream[Symbol.asyncIterator]()
+      const subagentAutomationOwnerId = `subagent:${request.run.id}:${request.step.id}`
+      let subagentAutomationActive = false
+      let subagentAutomationChangedFocus = false
+      const finishSubagentAutomation = (): void => {
+        if (!subagentAutomationActive) return
+        subagentAutomationActive = false
+        const shouldRestoreAgent =
+          subagentAutomationChangedFocus &&
+          agentWindowShouldShow &&
+          Boolean(agentWindow && !agentWindow.isDestroyed() && !agentWindow.isFocused())
+        subagentAutomationChangedFocus = false
+        if (shouldRestoreAgent && agentWindow && !agentWindow.isDestroyed()) {
+          showAgentWindow(agentWindow)
+          dismissAutomationOverlay({ immediate: true, runOwnerId: subagentAutomationOwnerId })
+        } else {
+          dismissAutomationOverlay({ runOwnerId: subagentAutomationOwnerId })
+        }
+      }
       let writingReported = false
       let streamedThinking = ''
       const flushStreamedThinking = async (): Promise<void> => {
@@ -6332,6 +6414,19 @@ app.whenReady().then(() => {
           }
           if (step.type === 'tool_call') {
             await flushStreamedThinking()
+            if (automationToolNames.has(step.name)) {
+              subagentAutomationActive = true
+              if (step.name !== 'get_windows') subagentAutomationChangedFocus = true
+              publishAutomationProgress({
+                type: 'tool_call',
+                name: step.name,
+                args: step.args,
+                sessionId: request.run.sessionId,
+                runOwnerId: subagentAutomationOwnerId
+              })
+            } else if (subagentAutomationActive && !automationBookkeepingToolNames.has(step.name)) {
+              finishSubagentAutomation()
+            }
             const kind = toolRegistry.getManifest(step.name) ? 'tool' : 'mcp'
             await taskRunner.notify(request.run.id, 'tool_call', request.step.id, {
               callId: step.id,
@@ -6342,6 +6437,15 @@ app.whenReady().then(() => {
             await request.reportProgress(`正在调用工具：${step.name}`)
           }
           if (step.type === 'tool_result') {
+            if (automationToolNames.has(step.name)) {
+              publishAutomationProgress({
+                type: 'tool_result',
+                name: step.name,
+                result: step.result,
+                sessionId: request.run.sessionId,
+                runOwnerId: subagentAutomationOwnerId
+              })
+            }
             const kind = toolRegistry.getManifest(step.name) ? 'tool' : 'mcp'
             const modelResult = step.modelResult ?? step.result
             await taskRunner.notify(request.run.id, 'tool_result', request.step.id, {
@@ -6366,6 +6470,7 @@ app.whenReady().then(() => {
         }
         await flushStreamedThinking()
       } finally {
+        finishSubagentAutomation()
         request.signal.removeEventListener('abort', cancelExecution)
       }
       const result = extractExecutionResult(finalResponse)
@@ -6504,6 +6609,39 @@ app.whenReady().then(() => {
       activeLlmAbortControllers.set(sessionId, thisController)
     } else {
       thisController = new AbortController()
+    }
+
+    const senderWindow = event?.sender ? BrowserWindow.fromWebContents(event.sender) : null
+    const canRestoreAgentWindow =
+      !config.suppressAutomationOverlay &&
+      !config.isBackground &&
+      Boolean(agentWindow && !agentWindow.isDestroyed() && senderWindow === agentWindow)
+    const turnAutomationOwnerId = `turn:${sessionId}:${config.messageId ?? Date.now()}`
+    let automationActiveInTurn = false
+    let automationMayHaveChangedFocus = false
+    const finishTurnAutomation = (forceDismiss = false): void => {
+      if (!automationActiveInTurn) {
+        if (forceDismiss && !config.suppressAutomationOverlay && activeAutomationRuns.has(turnAutomationOwnerId)) {
+          dismissAutomationOverlay({ runOwnerId: turnAutomationOwnerId })
+        }
+        return
+      }
+      automationActiveInTurn = false
+      const shouldRestoreAgent =
+        canRestoreAgentWindow &&
+        automationMayHaveChangedFocus &&
+        agentWindowShouldShow &&
+        Boolean(agentWindow && !agentWindow.isDestroyed() && !agentWindow.isFocused())
+      automationMayHaveChangedFocus = false
+      if (shouldRestoreAgent && agentWindow && !agentWindow.isDestroyed()) {
+        showAgentWindow(agentWindow)
+        dismissAutomationOverlay({ immediate: true, runOwnerId: turnAutomationOwnerId })
+      } else {
+        dismissAutomationOverlay({
+          immediate: canRestoreAgentWindow,
+          runOwnerId: turnAutomationOwnerId
+        })
+      }
     }
 
     try {
@@ -6737,7 +6875,23 @@ app.whenReady().then(() => {
             { step: step.step, correlationId: traceRequestId }
           )
         } else if (step.type === 'assistant_message') {
-          // The full message also covers providers that fall back to JSON.
+          const msgToolCalls = Array.isArray(step.message?.tool_calls) ? step.message.tool_calls : []
+          if (automationActiveInTurn && !config.suppressAutomationOverlay) {
+            if (msgToolCalls.length === 0) {
+              finishTurnAutomation()
+            } else {
+              const hasAutomationCall = msgToolCalls.some((tc: any) =>
+                automationToolNames.has(String(tc?.function?.name || ''))
+              )
+              const onlyBookkeepingCalls = msgToolCalls.every((tc: any) =>
+                automationBookkeepingToolNames.has(String(tc?.function?.name || ''))
+              )
+              if (!hasAutomationCall && !onlyBookkeepingCalls) {
+                finishTurnAutomation()
+              }
+            }
+          }
+          // The full message also covers providers that fall back back to JSON.
           if (event) event.sender.send('api:llm-text-delta', {
             content: typeof step.message.content === 'string' ? step.message.content : '',
             phase: step.message.tool_calls?.length ? 'commentary' : 'final',
@@ -6793,7 +6947,19 @@ app.whenReady().then(() => {
             console.warn('[SessionEvents] Tool checkpoint failed', traceError)
           }
           if (!config.suppressAutomationOverlay) {
-            publishAutomationProgress({ type: 'tool_call', name: step.name, args: step.args, sessionId: config.sessionId || sessionId })
+            if (automationToolNames.has(step.name)) {
+              automationActiveInTurn = true
+              if (step.name !== 'get_windows') automationMayHaveChangedFocus = true
+              publishAutomationProgress({
+                type: 'tool_call',
+                name: step.name,
+                args: step.args,
+                sessionId: config.sessionId || sessionId,
+                runOwnerId: turnAutomationOwnerId
+              })
+            } else if (automationActiveInTurn && !automationBookkeepingToolNames.has(step.name)) {
+              finishTurnAutomation()
+            }
           }
           if (event) {
             event.sender.send('api:llm-tool-event', {
@@ -6822,8 +6988,14 @@ app.whenReady().then(() => {
             },
             { correlationId: step.callId }
           )
-          if (!config.suppressAutomationOverlay) {
-            publishAutomationProgress({ type: 'tool_result', name: step.name, result: step.result, sessionId: config.sessionId || sessionId })
+          if (!config.suppressAutomationOverlay && automationToolNames.has(step.name)) {
+            publishAutomationProgress({
+              type: 'tool_result',
+              name: step.name,
+              result: step.result,
+              sessionId: config.sessionId || sessionId,
+              runOwnerId: turnAutomationOwnerId
+            })
           }
           if (event) {
             event.sender.send('api:llm-tool-event', {
@@ -7004,7 +7176,7 @@ app.whenReady().then(() => {
         activeLlmAbortControllers.delete(sessionId)
       }
       abortedSessionIds.delete(sessionId)
-      if (!config.suppressAutomationOverlay) dismissAutomationOverlay()
+      finishTurnAutomation(true)
       return finalResponse
     } catch (e: any) {
       await appendTrace('error', 'system', {
@@ -7025,7 +7197,7 @@ app.whenReady().then(() => {
         activeLlmAbortControllers.delete(sessionId)
       }
       abortedSessionIds.delete(sessionId)
-      if (!config.suppressAutomationOverlay) dismissAutomationOverlay()
+      finishTurnAutomation(true)
       if (thisController.signal.aborted) {
         throw new Error('UserAborted')
       }
@@ -7302,10 +7474,10 @@ app.whenReady().then(() => {
     return server?.apiKey || ''
   })
 
-  ipcMain.handle('api:test-mcp-server', async (_, config) => {
+  ipcMain.handle('api:test-mcp-server', async (event, config) => {
     let testClient: import('@modelcontextprotocol/sdk/client/index.js').Client | undefined
     try {
-      const [{ Client }, { StreamableHTTPClientTransport }, { StdioClientTransport, getDefaultEnvironment }] =
+      const [{ Client }, { StreamableHTTPClientTransport }, { StdioClientTransport }] =
         await Promise.all([
           import('@modelcontextprotocol/sdk/client/index.js'),
           import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
@@ -7319,13 +7491,19 @@ app.whenReady().then(() => {
 
       const client = new Client({ name: 'AgentPet-Test', version: '1.0.0' }, { capabilities: {} })
       testClient = client
+      const rawStartupTimeout = Number(config.startupTimeout ?? runtimeServer?.startupTimeout)
+      const mcpType = config.type || 'stream'
+      const timeoutMs = Number.isFinite(rawStartupTimeout) && rawStartupTimeout > 0
+        ? Math.min(rawStartupTimeout, 120) * 1000
+        : (mcpType === 'stdio' ? 15000 : 5000)
+
       const connect = async (transport: import('@modelcontextprotocol/sdk/shared/transport.js').Transport): Promise<void> => {
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
           await Promise.race([
             client.connect(transport),
             new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error('MCP 连接超时')), config.type === 'stdio' ? 15000 : 5000)
+              timer = setTimeout(() => reject(new Error('MCP 连接超时')), timeoutMs)
             })
           ])
         } finally {
@@ -7333,18 +7511,23 @@ app.whenReady().then(() => {
         }
       }
       let usedProtocol = 'Streamable HTTP'
-      const mcpType = config.type || 'stream'
 
       if (mcpType === 'stdio') {
         const command = config.command || runtimeServer?.command
         if (typeof command !== 'string' || !command.trim()) throw new Error('stdio MCP 服务缺少启动命令')
-        const { resolveStdioCommand } = await import('./tools/mcp/stdio-command.js')
-        const launch = resolveStdioCommand(command, config.args || runtimeServer?.args || [])
+        const { resolveMcpStdioLaunch } = await import('./tools/mcp/stdio-launch')
+        const launch = await resolveMcpStdioLaunch({
+          ...runtimeServer,
+          ...config,
+          command,
+          args: config.args || runtimeServer?.args || [],
+          env: runtimeServer?.env
+        }, { event })
         const transport = new StdioClientTransport({
           command: launch.command,
           args: launch.args,
           ...(config.cwd || runtimeServer?.cwd ? { cwd: config.cwd || runtimeServer?.cwd } : {}),
-          ...(runtimeServer?.env ? { env: { ...getDefaultEnvironment(), ...runtimeServer.env } } : {}),
+          env: launch.env,
           stderr: 'ignore'
         })
         await connect(transport)
@@ -7392,6 +7575,94 @@ app.whenReady().then(() => {
     // 首次查询时触发懒连接，确保大模型能获取到 MCP 工具列表
     await mcpManager.ensureConnected()
     return mcpManager.getActiveServers()
+  })
+
+  ipcMain.handle('api:detect-local-connector', async (_, connectorId: string) => {
+    const { detectLocalConnector } = await import('./tools/mcp/local-connector-detector')
+    return await detectLocalConnector(connectorId)
+  })
+
+  ipcMain.handle('api:connect-local-connector', async (event, payload: { connectorId: string; action?: 'enable' | 'disable' | 'reconnect' }) => {
+    const { detectLocalConnector } = await import('./tools/mcp/local-connector-detector')
+    const {
+      ILLUSTRATOR_CONNECTOR_ID,
+      createIllustratorConnector,
+      isIllustratorConnector
+    } = await import('../preload/illustrator-connector')
+
+    const connectorId = payload?.connectorId
+    if (connectorId !== ILLUSTRATOR_CONNECTOR_ID) {
+      throw new Error(`未知的本地连接器: ${String(connectorId)}`)
+    }
+
+    const broadcastConfig = () => {
+      const sanitized = mcpManager.getSanitizedSystemMcpConfig()
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          try { window.webContents.send('api:mcp-config-updated', sanitized) } catch { /* ignore */ }
+        }
+      }
+      return sanitized
+    }
+
+    const servers = mcpManager.systemMcpConfig.servers || []
+    const existing = servers.find(isIllustratorConnector)
+
+    if (payload?.action === 'disable') {
+      if (existing && existing.enabled) {
+        mcpManager.saveSystemMcpConfig({
+          ...mcpManager.systemMcpConfig,
+          servers: servers.map(item => item.id === existing.id ? { ...item, enabled: false } : item)
+        })
+      }
+      const config = broadcastConfig()
+      const detection = await detectLocalConnector(connectorId)
+      return { success: true, code: 'DISABLED' as const, detection, config }
+    }
+
+    const detection = await detectLocalConnector(connectorId)
+    if (!detection.installed) {
+      return {
+        success: false,
+        code: 'APP_NOT_INSTALLED' as const,
+        detection,
+        error: '未在本机检测到 Adobe Illustrator'
+      }
+    }
+
+    try {
+      await nodeRuntimeManager.ensure({ event })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const latestDetection = await detectLocalConnector(connectorId)
+      return {
+        success: false,
+        code: message.includes('NODE_RUNTIME_INSTALL_CANCELLED') ? 'NODE_RUNTIME_CANCELLED' as const : 'CONNECT_FAILED' as const,
+        detection: latestDetection,
+        error: message
+      }
+    }
+
+    const nextServer = existing ? { ...existing, enabled: true } : createIllustratorConnector()
+    const nextServers = existing
+      ? servers.map(item => item.id === existing.id ? nextServer : item)
+      : [...servers, nextServer]
+    mcpManager.saveSystemMcpConfig({
+      ...mcpManager.systemMcpConfig,
+      servers: nextServers
+    })
+
+    const connected = await mcpManager.connectSingleServer(nextServer)
+    const config = broadcastConfig()
+    const latestDetection = await detectLocalConnector(connectorId)
+
+    return {
+      success: connected,
+      code: connected ? 'CONNECTED' as const : 'CONNECT_FAILED' as const,
+      detection: latestDetection,
+      config,
+      ...(connected ? {} : { error: '连接器服务握手失败，请检查网络或在 MCP 服务管理中测试连接' })
+    }
   })
 
   ipcMain.handle('api:get-paddleocr-token-status', () => ({ configured: hasPaddleOcrToken() }))

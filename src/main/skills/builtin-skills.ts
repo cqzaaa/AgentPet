@@ -3,6 +3,7 @@ import { loadOfficeSkill } from '../tools/builtin/office/skills/registry'
 import type { OfficeSkillName } from '../tools/builtin/office/skills/types'
 import { DESKTOP_CONTROL_INSTRUCTIONS } from '../tools/builtin/computer/policy'
 import agentPetCodingSkill from '../tools/builtin/agentpet-coding/SKILL.md?raw'
+import illustratorSkill from '../tools/builtin/illustrator/SKILL.md?raw'
 import { ensureManagedPptMaster, getManagedSkillRoot } from './managed-skill-runtime'
 import { DELEGATION_POLICY } from '../task-runtime/delegation-policy'
 import { TERMINAL_TOOL_INSTRUCTIONS } from '../tools/builtin/terminal/manifest'
@@ -142,6 +143,14 @@ function pptMasterSkill(): BuiltinSkillDefinition {
 }
 
 const builtinSkills: BuiltinSkillDefinition[] = [
+  staticSkill({
+    id: 'illustrator',
+    name: 'Illustrator',
+    description: 'Create, inspect, edit and export native Adobe Illustrator .ai design files through the local Illustrator MCP connector. Use for Illustrator artboards, layers, editable text, vector paths and colors; requires local Illustrator and an enabled connector.',
+    triggers: ['illustrator', '.ai', '矢量设计稿', 'ai文件', 'ai 文件', 'Illustrator设计稿'],
+    allowedTools: ['list_mcp_servers', 'get_file_metadata'],
+    instructions: illustratorSkill
+  }),
   staticSkill({
     id: 'agentpet-coding',
     name: 'AgentPet coding',

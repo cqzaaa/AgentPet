@@ -21,6 +21,7 @@ import { getModelIcon } from '../utils/modelIcons'
 import { estimateDraftTokens } from '../utils/contextBudget'
 import { normalizeContextWindow } from '../../../preload/context-policy'
 import { FileIcon } from '../components/FileIcon'
+import { IllustratorConnectorItem } from '../components/IllustratorConnectorItem'
 import {
   ArrowDown,
   ArrowUp,
@@ -996,10 +997,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
             }}
           >
             <span className="chat-more-tool-icon">
-              {executionDevice === 'ssh' ? <Globe2 size={15} /> : <Monitor size={15} />}
+              <Plug size={15} />
             </span>
             <span className="chat-more-tool-content">
-              <strong>执行设备切换</strong>
+              <strong>连接器</strong>
               <small>{executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机环境执行'}</small>
             </span>
             <span className="chat-more-tool-badge">
@@ -1879,7 +1880,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
   }, [])
 
   const getMenuItemStyle = (isActive: boolean) => ({
-    padding: '8px 12px',
+    padding: '7px 10px',
+    borderRadius: '8px',
     cursor: 'pointer',
     fontSize: '12.5px',
     display: 'flex',
@@ -1904,18 +1906,18 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
       className="custom-device-menu"
       style={{
         position: 'absolute',
-        bottom: 'calc(100% + 6px)',
+        bottom: 'calc(100% + 8px)',
         ...(alignRight ? { right: 0 } : { left: 0 }),
         background: 'var(--bg-card, #ffffff)',
         border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
-        borderRadius: '8px',
-        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+        borderRadius: '12px',
+        boxShadow: '0 8px 24px -4px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.04)',
         zIndex: 1000,
-        minWidth: '180px',
+        minWidth: '232px',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        padding: '4px 0',
+        padding: '6px',
         animation: 'slideUpMenu 0.15s ease-out'
       }}
     >
@@ -1984,6 +1986,17 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           )}
         </div>
       ) : null}
+
+      <IllustratorConnectorItem
+        config={mcpConfig}
+        refreshMcpServers={refreshMcpServers}
+        showToast={showToast}
+        onManage={() => {
+          setShowDeviceMenu(false)
+          setActiveTab('agent')
+          setAgentSubTab('mcp')
+        }}
+      />
 
       <div
         className="device-menu-item"
@@ -3468,7 +3481,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                   ref={deviceMenuRef}
                 >
                   <Tooltip
-                    content={`执行设备: ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
+                    content={`连接器 · ${executionDevice === 'ssh' && sshConnected ? `SSH (${sshUsername}@${sshHost})` : '本机执行'}`}
                     placement="top"
                     disabled={showDeviceMenu}
                   >
@@ -3489,7 +3502,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                       {executionDevice === 'ssh' ? (
                         <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
                       ) : (
-                        <Monitor size={17} strokeWidth={2} aria-hidden="true" />
+                        <Plug size={17} strokeWidth={2} aria-hidden="true" />
                       )}
                     </div>
                   </Tooltip>

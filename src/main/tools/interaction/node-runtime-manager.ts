@@ -11,6 +11,7 @@ import { buildManagedNodeEnvironment, type ManagedNodeRuntimeInfo } from './node
 const NODE_VERSION = process.versions.node
 const NODE_ARCHIVE_NAME = `node-v${NODE_VERSION}-win-x64`
 const NODE_DOWNLOAD_URL = `https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE_NAME}.zip`
+const MIN_NODE_MAJOR = 20
 
 interface PendingRequest {
   resolve: (approved: boolean) => void
@@ -25,18 +26,43 @@ interface InstallEventContext {
   target: BrowserWindow
 }
 
-function runtimeInfo(): ManagedNodeRuntimeInfo {
+function buildRuntimeInfo(nodeDirName: string, version: string): ManagedNodeRuntimeInfo {
   const rootDir = join(app.getPath('userData'), 'runtimes', 'node-runtime')
-  const nodeDir = join(rootDir, NODE_ARCHIVE_NAME)
+  const nodeDir = join(rootDir, nodeDirName)
+  const sharedPrefixDir = join(rootDir, 'agentpet-packages')
+  const legacyPrefixDir = join(nodeDir, 'agentpet-packages')
+  // Preserve packages already installed inside the versioned directory if shared prefix is not yet created.
+  const prefixDir = fs.existsSync(sharedPrefixDir) || !fs.existsSync(legacyPrefixDir)
+    ? sharedPrefixDir
+    : legacyPrefixDir
   return {
     rootDir,
     nodeDir,
     nodePath: join(nodeDir, 'node.exe'),
     npmPath: join(nodeDir, 'npm.cmd'),
-    prefixDir: join(nodeDir, 'agentpet-packages'),
+    prefixDir,
     cacheDir: join(rootDir, 'npm-cache'),
-    nodeVersion: NODE_VERSION
+    nodeVersion: version
   }
+}
+
+function runtimeInfo(): ManagedNodeRuntimeInfo {
+  return buildRuntimeInfo(NODE_ARCHIVE_NAME, NODE_VERSION)
+}
+
+function parseSemver(version: string): [number, number, number] | null {
+  const match = version.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/)
+  if (!match) return null
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+function isCompatibleVersion(detectedVersion: string, expectedVersion?: string): boolean {
+  const parsed = parseSemver(detectedVersion)
+  if (!parsed || parsed[0] < MIN_NODE_MAJOR) return false
+  if (!expectedVersion) return true
+  const expected = parseSemver(expectedVersion)
+  if (!expected) return true
+  return parsed[0] >= expected[0]
 }
 
 function sendInstallEvent(
@@ -97,8 +123,8 @@ async function extractArchive(archiveBytes: Buffer, rootDir: string): Promise<vo
   }
 }
 
-async function validateRuntime(info: ManagedNodeRuntimeInfo): Promise<boolean> {
-  if (!fs.existsSync(info.nodePath) || !fs.existsSync(info.npmPath)) return false
+async function validateRuntime(info: ManagedNodeRuntimeInfo, strictExact = false): Promise<string | null> {
+  if (!fs.existsSync(info.nodePath) || !fs.existsSync(info.npmPath)) return null
   return await new Promise(resolvePromise => {
     const child = spawn(info.nodePath, ['--version'], {
       cwd: info.nodeDir,
@@ -112,13 +138,56 @@ async function validateRuntime(info: ManagedNodeRuntimeInfo): Promise<boolean> {
     child.stdout.on('data', chunk => { output += String(chunk) })
     child.on('error', () => {
       clearTimeout(timer)
-      resolvePromise(false)
+      resolvePromise(null)
     })
     child.on('close', code => {
       clearTimeout(timer)
-      resolvePromise(code === 0 && output.trim() === `v${info.nodeVersion}`)
+      if (code !== 0) {
+        resolvePromise(null)
+        return
+      }
+      const detected = output.trim().replace(/^v/i, '')
+      if (strictExact) {
+        resolvePromise(detected === info.nodeVersion ? detected : null)
+        return
+      }
+      resolvePromise(isCompatibleVersion(detected) ? detected : null)
     })
   })
+}
+
+async function resolveExistingRuntime(): Promise<ManagedNodeRuntimeInfo | null> {
+  const preferred = runtimeInfo()
+  const preferredVersion = await validateRuntime(preferred, true)
+  if (preferredVersion) return preferred
+
+  const rootDir = preferred.rootDir
+  if (!fs.existsSync(rootDir)) return null
+  let entries: fs.Dirent[] = []
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return null
+  }
+
+  const candidates = entries
+    .filter(entry => entry.isDirectory() && /^node-v\d+\.\d+\.\d+-win-x64$/i.test(entry.name))
+    .map(entry => {
+      const version = entry.name.replace(/^node-v/i, '').replace(/-win-x64$/i, '')
+      const parsed = parseSemver(version)
+      return { name: entry.name, version, parsed }
+    })
+    .filter((item): item is { name: string; version: string; parsed: [number, number, number] } => Boolean(item.parsed))
+    .sort((a, b) => (b.parsed[0] - a.parsed[0]) || (b.parsed[1] - a.parsed[1]) || (b.parsed[2] - a.parsed[2]))
+
+  for (const candidate of candidates) {
+    const info = buildRuntimeInfo(candidate.name, candidate.version)
+    const detected = await validateRuntime(info, false)
+    if (detected && isCompatibleVersion(detected)) {
+      return { ...info, nodeVersion: detected }
+    }
+  }
+  return null
 }
 
 class NodeRuntimeManager {
@@ -138,14 +207,36 @@ class NodeRuntimeManager {
     })
   }
 
+  public async getStatus(): Promise<{ ready: boolean; version?: string; rootDir: string; nodePath?: string }> {
+    const preferred = runtimeInfo()
+    if (process.platform !== 'win32' || process.arch !== 'x64') {
+      return { ready: false, rootDir: preferred.rootDir }
+    }
+    const existing = await resolveExistingRuntime()
+    if (!existing) return { ready: false, rootDir: preferred.rootDir }
+    return {
+      ready: true,
+      version: existing.nodeVersion,
+      rootDir: existing.rootDir,
+      nodePath: existing.nodePath
+    }
+  }
+
   public async ensure(
     context: { sessionId?: string; messageId?: number; event?: { sender: WebContents }; abortSignal?: AbortSignal }
   ): Promise<ManagedNodeRuntimeInfo> {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
       throw new Error('当前 AgentPet Node 运行环境暂仅支持 Windows x64')
     }
+    const existing = await resolveExistingRuntime()
+    if (existing) {
+      await Promise.all([
+        fs.promises.mkdir(existing.prefixDir, { recursive: true }),
+        fs.promises.mkdir(existing.cacheDir, { recursive: true })
+      ]).catch(() => {})
+      return existing
+    }
     const info = runtimeInfo()
-    if (await validateRuntime(info)) return info
 
     const target = context.event?.sender
       ? BrowserWindow.fromWebContents(context.event.sender)
@@ -204,9 +295,8 @@ class NodeRuntimeManager {
   ): Promise<ManagedNodeRuntimeInfo> {
     try {
       sendInstallEvent(eventContext, 'office_runtime_progress', '正在准备 Node 隔离目录', 3)
-      await fs.promises.mkdir(dirname(info.rootDir), { recursive: true })
-      if (fs.existsSync(info.rootDir)) await fs.promises.rm(info.rootDir, { recursive: true, force: true })
       await fs.promises.mkdir(info.rootDir, { recursive: true })
+      if (fs.existsSync(info.nodeDir)) await fs.promises.rm(info.nodeDir, { recursive: true, force: true })
 
       sendInstallEvent(eventContext, 'office_runtime_progress', '正在下载 AgentPet Node 运行环境', 8)
       const archive = await downloadBuffer(NODE_DOWNLOAD_URL, signal, ratio => {
@@ -225,7 +315,7 @@ class NodeRuntimeManager {
         prefixDir: info.prefixDir,
         installedAt: new Date().toISOString()
       }, null, 2), 'utf8')
-      if (!(await validateRuntime(info))) throw new Error('Node 运行环境安装后验证失败')
+      if (!(await validateRuntime(info, true))) throw new Error('Node 运行环境安装后验证失败')
       sendInstallEvent(eventContext, 'office_runtime_complete', 'AgentPet Node 运行环境安装完成', 100)
       return info
     } catch (error) {

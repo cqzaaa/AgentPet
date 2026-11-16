@@ -1,11 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { app } from 'electron'
 import * as fs from 'fs'
 import { join } from 'path'
 import { McpNameMapper } from './mcp-name-mapper.js'
-import { resolveStdioCommand } from './stdio-command.js'
+import { resolveMcpStdioLaunch } from './stdio-launch'
 import {
   loadSecureSystemMcpConfig,
   sanitizeSystemMcpConfig,
@@ -30,6 +30,7 @@ export interface McpServerConfig {
   description?: string
   tools?: any[] // 工具定义缓存字段
   timeout?: number // 超时时间（秒），可选
+  startupTimeout?: number // 服务启动超时（秒），用于首次下载本地包
 }
 
 type McpClientTransport =
@@ -81,15 +82,22 @@ export class McpManager {
     return config.type === 'stdio' ? config.command || '' : config.url
   }
 
-  private createTransport(config: McpServerConfig): McpClientTransport {
+  private startupTimeoutMs(config: McpServerConfig): number {
+    if (typeof config.startupTimeout === 'number' && Number.isFinite(config.startupTimeout) && config.startupTimeout > 0) {
+      return Math.min(config.startupTimeout, 120) * 1000
+    }
+    return config.type === 'stdio' ? 15000 : 5000
+  }
+
+  private async createTransport(config: McpServerConfig): Promise<McpClientTransport> {
     if (config.type === 'stdio') {
       if (!config.command?.trim()) throw new Error('stdio MCP 服务缺少启动命令')
-      const launch = resolveStdioCommand(config.command, config.args || [])
+      const launch = await resolveMcpStdioLaunch(config)
       return new StdioClientTransport({
         command: launch.command,
         args: launch.args,
         ...(config.cwd ? { cwd: config.cwd } : {}),
-        ...(config.env ? { env: { ...getDefaultEnvironment(), ...config.env } } : {}),
+        env: launch.env,
         stderr: 'ignore'
       })
     }
@@ -340,8 +348,8 @@ export class McpManager {
           { capabilities: {} }
         )
 
-        transport = this.createTransport(config)
-        await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
+        transport = await this.createTransport(config)
+        await this.connectClient(client, transport, this.startupTimeoutMs(config))
         console.log(`[MCP] 服务 ${config.name} 使用 ${this.transportName(transport)} 协议连接成功`)
 
         const response = await client.listTools()
@@ -385,6 +393,12 @@ export class McpManager {
         }
       }
     })
+    const existing = this.connections.get(config.id)
+    if (existing) {
+      await existing.client.close().catch(() => {})
+      this.connections.delete(config.id)
+    }
+
     let connection: McpConnection | undefined
     try {
       let transport: McpClientTransport
@@ -393,9 +407,9 @@ export class McpManager {
         { capabilities: {} }
       )
 
-      transport = this.createTransport(config)
+      transport = await this.createTransport(config)
       connection = this.createConnection(client, transport, [], config, reportConnectionTrace)
-      await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
+      await this.connectClient(client, transport, this.startupTimeoutMs(config))
 
       const response = await client.listTools()
       const tools = response.tools || []
@@ -493,8 +507,8 @@ export class McpManager {
       )
       newClient = client
 
-      transport = this.createTransport(config)
-      await this.connectClient(client, transport, config.type === 'stdio' ? 15000 : 5000)
+      transport = await this.createTransport(config)
+      await this.connectClient(client, transport, this.startupTimeoutMs(config))
       console.log(`[MCP] 服务 ${config.name} 重连成功 (${this.transportName(transport)})`)
 
       const response = await client.listTools()

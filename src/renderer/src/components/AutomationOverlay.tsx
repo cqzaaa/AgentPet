@@ -5,14 +5,16 @@ const labels: Record<string, string> = {
   screenshot: '查看当前屏幕', mouse_move: '移动鼠标', mouse_click: '点击界面',
   mouse_click_relative: '点击目标位置', mouse_scroll: '滚动页面', type_text: '输入文字',
   key_press: '按下快捷键', get_windows: '查找可用窗口', focus_window: '切换目标窗口',
+  find_ui_elements: '查找界面元素', click_ui_element: '点击界面元素',
+  focus_ui_element: '聚焦界面元素', perform_computer_actions: '执行电脑操作',
   web_search: '搜索网页', web_fetch: '读取网页'
 }
 
 function iconFor(name: string) {
-  if (name === 'screenshot') return Eye
+  if (name === 'screenshot' || name === 'find_ui_elements') return Eye
   if (name.startsWith('web_')) return PanelTop
   if (name === 'type_text' || name === 'key_press') return Keyboard
-  if (name === 'focus_window' || name === 'get_windows') return PanelTop
+  if (name === 'focus_window' || name === 'get_windows' || name === 'focus_ui_element') return PanelTop
   return MousePointer2
 }
 
@@ -27,6 +29,7 @@ export function AutomationOverlay(): React.JSX.Element {
   useEffect(() => {
     return window.api.onAutomationProgress(event => {
       if (event.sessionId) setSessionId(event.sessionId)
+      if (event.reset) setCompleted(0)
       setActiveName(event.name || 'screenshot')
       if (event.type === 'tool_call') {
         setStatus('running')

@@ -250,6 +250,11 @@ declare global {
       revealMcpApiKey: (serverId: string) => Promise<string>
       testMcpServer: (config: any) => Promise<any>
       getMcpConfig: () => Promise<any>
+      detectLocalConnector: (connectorId: string) => Promise<import('./illustrator-connector').LocalConnectorDetection>
+      connectLocalConnector: (
+        connectorId: string,
+        action?: 'enable' | 'disable' | 'reconnect'
+      ) => Promise<import('./illustrator-connector').LocalConnectorConnectResult>
       onMcpConfigUpdated: (callback: (config: any) => void) => () => void
       onRequestGeolocation: (callback: (data: { requestId: number }) => void) => () => void
       respondGeolocation: (requestId: number, location: any, error?: string) => void

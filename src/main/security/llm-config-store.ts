@@ -1,6 +1,14 @@
 import { existsSync, readFileSync } from 'fs'
-import { normalizeContextWindow } from '../../preload/context-policy'
+import { DEFAULT_CONTEXT_WINDOW, normalizeContextWindow } from '../../preload/context-policy'
 import { SecretVault, writeTextAtomically } from './secret-vault-core'
+
+const LEGACY_DEFAULT_CONTEXT_WINDOW = 258000
+
+function migrateStoredContextWindow(value: unknown): number {
+  return value === LEGACY_DEFAULT_CONTEXT_WINDOW
+    ? DEFAULT_CONTEXT_WINDOW
+    : normalizeContextWindow(value)
+}
 
 export const SYSTEM_LLM_API_KEY_SECRET_ID = 'system-llm-api-key'
 export const SYSTEM_LLM_API_KEY_REF = `secret://${SYSTEM_LLM_API_KEY_SECRET_ID}`
@@ -75,7 +83,10 @@ export class LlmConfigStore {
   load(): RuntimeLlmConfig {
     const stored = this.readStoredConfig()
     const profiles = Array.isArray(stored.profiles)
-      ? stored.profiles.map(normalizeProfile).filter((profile): profile is RuntimeLlmProfile => Boolean(profile))
+      ? stored.profiles
+          .map(normalizeProfile)
+          .filter((profile): profile is RuntimeLlmProfile => Boolean(profile))
+          .map(profile => ({ ...profile, contextWindow: migrateStoredContextWindow(profile.contextWindow) }))
       : []
 
     if (profiles.length > 0) {
@@ -84,7 +95,13 @@ export class LlmConfigStore {
       return { ...active, activeProfileId: active.id, profiles }
     }
 
-    return this.loadLegacyConfig(stored)
+    const legacy = this.loadLegacyConfig(stored)
+    const migratedContextWindow = migrateStoredContextWindow(legacy.contextWindow)
+    return {
+      ...legacy,
+      contextWindow: migratedContextWindow,
+      profiles: legacy.profiles?.map(profile => ({ ...profile, contextWindow: migratedContextWindow }))
+    }
   }
 
   save(input: JsonObject): RuntimeLlmConfig {

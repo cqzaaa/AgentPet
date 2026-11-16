@@ -1,0 +1,247 @@
+.connector-section {
+  margin: 4px 0;
+  padding: 5px 0;
+  border-top: 1px solid var(--border-color, rgba(128, 128, 128, 0.14));
+  border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.14));
+}
+
+.connector-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.connector-row:hover {
+  background: var(--bg-menu-hover, rgba(15, 23, 42, 0.04));
+}
+
+/* Double-Bezel physical icon shell */
+.connector-icon-bezel {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.16));
+  background: var(--bg-surface-secondary, rgba(128, 128, 128, 0.06));
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.connector-icon-bezel:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(217, 119, 6, 0.36);
+}
+
+.connector-icon-bezel:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.connector-icon-bezel:disabled {
+  cursor: wait;
+}
+
+.connector-icon-core {
+  width: 100%;
+  height: 100%;
+  border-radius: 6.5px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-card, #ffffff);
+  color: #b45309;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(15, 23, 42, 0.05);
+  transition:
+    color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-window-container.dark .connector-icon-core {
+  background: rgba(24, 30, 41, 0.96);
+  color: #fbbf24;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+.connector-icon-bezel.is-detecting .connector-icon-core svg {
+  animation: connectorScanPulse 1s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.connector-icon-beacon {
+  position: absolute;
+  top: -2.5px;
+  right: -2.5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--bg-card, #ffffff);
+  background: #94a3b8;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.agent-window-container.dark .connector-icon-beacon {
+  border-color: #141923;
+}
+
+.connector-icon-beacon.state-connected,
+.connector-icon-beacon.state-running {
+  background: #10b981;
+}
+
+.connector-icon-beacon.state-installed {
+  background: #3b82f6;
+}
+
+.connector-icon-beacon.state-missing {
+  background: #e11d48;
+}
+
+.connector-icon-beacon.state-detecting,
+.connector-icon-beacon.state-connecting {
+  background: #f59e0b;
+  animation: connectorBeaconPing 1.1s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.connector-main-trigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary, #18181b);
+  cursor: pointer;
+  text-align: left;
+}
+
+.connector-main-trigger:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.connector-title {
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: -0.015em;
+  color: var(--text-primary, #18181b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Muted semantic pastel pill */
+.connector-pill {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted, #71717a);
+  transition:
+    background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.connector-pill.tone-connected,
+.connector-pill.tone-running {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.connector-pill.tone-installed {
+  background: #e1f3fe;
+  color: #1f6c9f;
+}
+
+.connector-pill.tone-missing {
+  background: #fdebeb;
+  color: #9f2f2d;
+}
+
+.connector-pill.tone-busy {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.agent-window-container.dark .connector-pill.tone-connected,
+.agent-window-container.dark .connector-pill.tone-running {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+}
+
+.agent-window-container.dark .connector-pill.tone-installed {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+}
+
+.agent-window-container.dark .connector-pill.tone-missing {
+  background: rgba(244, 63, 94, 0.16);
+  color: #fda4af;
+}
+
+.agent-window-container.dark .connector-pill.tone-busy {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+}
+
+.connector-manage-btn {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted, #71717a);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.connector-manage-btn:hover {
+  color: var(--text-primary, #18181b);
+  background: var(--bg-surface-secondary, rgba(128, 128, 128, 0.08));
+  border-color: var(--border-color, rgba(128, 128, 128, 0.14));
+}
+
+@keyframes connectorScanPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes connectorBeaconPing {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.6;
+  }
+}
