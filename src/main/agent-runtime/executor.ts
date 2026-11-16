@@ -1325,6 +1325,11 @@ add_mcp_server 只接受服务名称、HTTP 地址或 stdio command/args/cwd；�
       else chatHistory.unshift({ role: 'system', content: terminalInstructions })
     }
     if (isFrontend && effectiveTools.length > 0) {
+      const deliveryInstructions = '\n\n<concise_delivery>默认简洁交付：最终回答说明结果、文件链接和必要的验证或限制，不复述执行过程。已保存到文件的长代码、SVG、HTML、日志或数据，不再全文粘贴到正文；用户明确要求全文时才输出一次。文件写入成功后复用返回路径，不因改名、别名或展示而重新生成整份内容；需要第二文件时优先使用已有文件复制能力。一次请求加载已确定需要的 Skills；无依赖的查询合并调用，桌面操作按已知目标合并为一次有序动作序列，并在末尾验证。不要为了减少轮次绕过权限或验证；成功后及时结束，不增加无关检查。</concise_delivery>'
+      const deliverySystemMessage = chatHistory.find(message => message.role === 'system')
+      if (typeof deliverySystemMessage?.content === 'string') deliverySystemMessage.content += deliveryInstructions
+      else if (Array.isArray(deliverySystemMessage?.content)) deliverySystemMessage.content.push({ type: 'text', text: deliveryInstructions })
+      else chatHistory.unshift({ role: 'system', content: deliveryInstructions })
       const progressInstructions = '\n\n<progress_updates>执行多步骤任务时，在首次工具调用前，用一两句自然正文说明要解决的问题及行动目的。后续仅在有重要发现、实质进展、阻碍或工作阶段变化时更新；每次更新应提供工具卡片之外的新信息。连续读取、搜索或修改属于同一阶段时合并说明，没有新信息就继续执行工具，不必补一句过渡语。不要逐个工具报幕，不要把文件名、工具名或创建计划本身作为进度内容的主体。中文表达应像与同事沟通，句子完整、语气自然；按语境使用“我”或省略主语，不刻意删除主语，也不强制从动作开头。避免反复使用“先……”“我先……”“接下来……”“现在……”等固定开场，不要仅替换连接词制造句式变化。“先”只在确实需要解释前后依赖时使用，不作为默认起手式。围绕当前已知事实说明发现、影响、决定或待解决问题；尚未验证的判断要标明不确定，不要把计划写成已完成的结果。正文与工具调用可以在同一条助手消息中返回，说明之后继续调用工具，不要把进度说明当成任务结束。不要虚构结果，不要输出内部思维链。简单操作保持简洁，最终回答直接说明结果、验证情况和必要的限制，不重复过程播报。</progress_updates>'
       const systemMessage = chatHistory.find(message => message.role === 'system')
       if (typeof systemMessage?.content === 'string') systemMessage.content += progressInstructions

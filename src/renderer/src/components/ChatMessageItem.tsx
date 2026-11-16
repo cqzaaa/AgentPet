@@ -111,7 +111,10 @@ function highlightCode(code: string, lang: string): string {
 // ── 复制代码块的高级代码面板组件 ─────────────────────────────────
 export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const isLongCode = code.length > 1600 || code.split('\n').length > 30
+  // Follow the streaming size until the user explicitly chooses a view.
+  const [collapseOverride, setCollapseOverride] = useState<boolean | null>(null)
+  const isCollapsed = collapseOverride ?? isLongCode
 
   const handleCopy = async () => {
     if (!await copyTextToClipboard(code)) return
@@ -120,8 +123,8 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
   }
 
   const htmlContent = useMemo(() => {
-    return highlightCode(code, lang)
-  }, [code, lang])
+    return isCollapsed ? '' : highlightCode(code, lang)
+  }, [code, lang, isCollapsed])
 
   return (
     <div
@@ -155,7 +158,7 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
             textTransform: 'lowercase'
           }}
         >
-          {lang || 'code'}
+          {lang || 'code'}{isCollapsed ? ` · ${code.split('\n').length} 行（已收起）` : ''}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
@@ -200,7 +203,9 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
 
           <Tooltip content={isCollapsed ? '展开代码' : '折叠代码'} placement="top">
             <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              aria-label={isCollapsed ? '展开代码' : '折叠代码'}
+              aria-expanded={!isCollapsed}
+              onClick={() => setCollapseOverride(!isCollapsed)}
               style={{
                 background: 'transparent',
                 border: 'none',
