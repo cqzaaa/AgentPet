@@ -50,6 +50,7 @@ import {
   Quote,
   Puzzle,
   Radar,
+  RefreshCw,
   Server,
   Settings2,
   ShieldAlert,
@@ -122,6 +123,8 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     setInputValue,
     handleSendChat,
     availableModels,
+    isLoadingModels,
+    handleFetchModels,
     saveLlmConfig,
     attachedFiles,
     setAttachedFiles,
@@ -161,6 +164,10 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
     openTrajectory,
     currentContextTokens
   } = useChatController()
+  const hasConnectedMcpServer = useAppStoreRaw(state =>
+    state.activeMcpServers.some((server: { status?: string }) => server.status === 'connected')
+  )
+  const hasConnectedConnector = sshConnected || hasConnectedMcpServer
   const referenceDraft = useMemo(() => splitSessionReferenceDraft(inputValue), [inputValue])
   const activeWorkspacePath = useAppStoreRaw(
     (state: any) =>
@@ -1286,9 +1293,58 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
           <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-color)' }}>
             {isImageGenMode ? '选择生图模型 (已过滤)' : '选择模型'}
           </span>
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-            共 {displayModels.length} 个模型
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              {isLoadingModels ? '正在刷新...' : `共 ${displayModels.length} 个模型`}
+            </span>
+            <button
+              type="button"
+              title="刷新模型列表"
+              aria-label="刷新模型列表"
+              disabled={isLoadingModels}
+              onClick={(e) => {
+                e.stopPropagation()
+                void handleFetchModels()
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '20px',
+                height: '20px',
+                padding: 0,
+                border: '1px solid var(--border-color, rgba(128,128,128,0.18))',
+                borderRadius: '5px',
+                background: 'var(--bg-secondary, rgba(128,128,128,0.04))',
+                color: isLoadingModels ? 'var(--accent-color, #4f8cff)' : 'var(--text-muted)',
+                cursor: isLoadingModels ? 'wait' : 'pointer',
+                transition: 'all 0.15s ease',
+                flexShrink: 0
+              }}
+              onMouseEnter={(e) => {
+                if (!isLoadingModels) {
+                  e.currentTarget.style.color = 'var(--accent-color, #4f8cff)'
+                  e.currentTarget.style.borderColor = 'var(--accent-color, #4f8cff)'
+                  e.currentTarget.style.background = 'rgba(79, 140, 255, 0.08)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isLoadingModels) {
+                  e.currentTarget.style.color = 'var(--text-muted)'
+                  e.currentTarget.style.borderColor = 'var(--border-color, rgba(128,128,128,0.18))'
+                  e.currentTarget.style.background = 'var(--bg-secondary, rgba(128,128,128,0.04))'
+                }
+              }}
+            >
+              <RefreshCw
+                size={11}
+                strokeWidth={2}
+                className={isLoadingModels ? 'spin' : undefined}
+                style={isLoadingModels ? { animation: 'spin 1s linear infinite' } : undefined}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </div>
         {/* 搜索框：仅在列表项数量 >= 8 时显示 */}
         {isModelOverflow && (
@@ -3491,6 +3547,7 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                         if (!isSending) setShowDeviceMenu(!showDeviceMenu)
                       }}
                       style={{
+                        position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -3503,6 +3560,23 @@ function ChatPageImpl({ restoreScrollPosition = false }: { restoreScrollPosition
                         <Globe2 size={17} strokeWidth={2} aria-hidden="true" />
                       ) : (
                         <Plug size={17} strokeWidth={2} aria-hidden="true" />
+                      )}
+                      {hasConnectedConnector && (
+                        <span
+                          role="img"
+                          aria-label="连接器已连接"
+                          style={{
+                            position: 'absolute',
+                            top: 2,
+                            right: 2,
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            backgroundColor: '#10b981',
+                            boxShadow: '0 0 0 2px var(--bg-primary, #fff)',
+                            pointerEvents: 'none'
+                          }}
+                        />
                       )}
                     </div>
                   </Tooltip>

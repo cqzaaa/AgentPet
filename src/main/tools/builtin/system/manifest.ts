@@ -89,7 +89,8 @@ The available skill catalog contains metadata only. Call request_skill only with
                 artifactPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths produced by the step' },
                 retryCount: { type: 'number', description: 'Number of attempts already made' },
                 agentId: { type: 'string', description: 'Agent id; defaults to agentpet' },
-                model: { type: 'string', description: 'Exact model id returned by list_agent_models; required for every non-default Agent and must never be "default"' }
+                model: { type: 'string', description: 'Exact model id returned by list_agent_models; required for every non-default Agent and must never be "default"' },
+                reasoningEffort: { type: 'string', description: 'Optional exact effort value selected by the user or explicitly requested and supported by this model' }
               },
               required: ['id', 'title', 'status']
             }
@@ -105,7 +106,7 @@ The available skill catalog contains metadata only. Call request_skill only with
     },
     {
       name: 'list_agent_models',
-      description: 'List the explicit model ids currently supported by one Agent. Call list_agents first. If one model is returned, select it explicitly; if multiple are returned and the user did not specify one, ask the user with request_user_clarification before delegate_tasks. Never guess, omit, or pass "default" for a non-default Agent.',
+      description: 'List the supported model ids and any reported reasoning effort options for an Agent. Call list_agents first. If one model is returned, select it explicitly; if multiple are returned and the user did not specify one, ask with request_user_clarification and set agentId on the question. Pass the selected model id and any chosen reasoningEffort to delegate_tasks. Never guess, omit, or pass "default" for a non-default Agent.',
       parameters: {
         type: 'object',
         properties: {
@@ -137,6 +138,7 @@ The available skill catalog contains metadata only. Call request_skill only with
                   description: 'Execution Agent id: agentpet (default), claude-code, codex, antigravity, or a custom ACP Agent id'
                 },
                 model: { type: 'string', description: 'Exact model id returned by list_agent_models; required for every non-default Agent and must never be "default"' },
+                reasoningEffort: { type: 'string', description: 'Optional exact effort value selected by the user or explicitly requested and supported by this model' },
                 dependencies: { type: 'array', items: { type: 'string' } },
                 acceptanceCriteria: { type: 'string' }
               },
@@ -251,6 +253,7 @@ The available skill catalog contains metadata only. Call request_skill only with
               properties: {
                 id: { type: 'string', description: '问题的稳定标识，例如 search_scope' },
                 question: { type: 'string', description: '展示给用户的简短问题' },
+                agentId: { type: 'string', description: '子代理模型选择题填写 list_agents 返回的 Agent ID，应用会加载模型和强度选项' },
                 options: {
                   type: 'array',
                   description: '可选的快捷选项；用户始终可自定义输入',

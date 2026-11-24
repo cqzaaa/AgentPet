@@ -1,3 +1,5 @@
+import type { ModelReasoningOptions } from '../../preload/agent-model-types'
+
 export type ExternalAgentId = 'claude-code' | 'gemini-cli' | 'codex' | string
 
 export type ExternalAgentSource = 'builtin' | 'custom'
@@ -58,6 +60,7 @@ export interface ExternalAgentRunRequest {
   prompt: string
   cwd: string
   model?: string
+  reasoningEffort?: string
 }
 
 export interface ExternalAgentProtocolEvent {
@@ -70,7 +73,7 @@ export interface ExternalAgentProtocolEvent {
   payload: unknown
 }
 
-export interface ExternalAgentModel {
+export interface ExternalAgentModel extends ModelReasoningOptions {
   id: string
   name: string
   description?: string

@@ -1,6 +1,7 @@
 import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiModelSelection, WikiModelSettings, WikiEvidenceLocation } from './wiki-types'
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
+import type { ClarificationAnswers } from './agent-model-types'
 import type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
 
 export type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
@@ -219,7 +220,7 @@ declare global {
       setSandboxMode: (enabled: boolean | 'assist') => Promise<boolean | 'assist'>
       onRequestPermission: (callback: (data: any) => void) => () => void
       respondPermission: (requestId: number, approved: boolean, scope?: 'once' | 'turn', reason?: string) => void
-      respondClarification: (requestId: number, answers: Record<string, string>, cancelled?: boolean) => void
+      respondClarification: (requestId: number, answers: ClarificationAnswers, cancelled?: boolean) => void
       respondCredential: (requestId: number, token: string, cancelled?: boolean) => void
       respondOfficeRuntimeInstall: (requestId: number, approved: boolean) => void
       respondNodeRuntimeInstall: (requestId: number, approved: boolean) => void

@@ -344,6 +344,7 @@ export function AgentWindow(): React.JSX.Element {
       setAgentSubTab: store.setAgentSubTab,
       refreshSkillsAndStorage: store.refreshSkillsAndStorage,
       refreshMcpServers: store.refreshMcpServers,
+      handleFetchModels: store.handleFetchModels,
       saveMcpConfig: store.saveMcpConfig,
       handlePreviewFile: store.handlePreviewFile,
       setShowFilePanel: store.setShowFilePanel,
@@ -373,6 +374,7 @@ export function AgentWindow(): React.JSX.Element {
       store.setAgentSubTab,
       store.refreshSkillsAndStorage,
       store.refreshMcpServers,
+      store.handleFetchModels,
       store.saveMcpConfig,
       store.handlePreviewFile,
       store.setShowFilePanel

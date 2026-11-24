@@ -6102,6 +6102,7 @@ app.whenReady().then(() => {
           agentName: agent.name,
           protocol: agent.protocol,
           model: selectedModel,
+          reasoningEffort: request.step.reasoningEffort,
           attempt,
           request: sanitizeTraceValue({
             operation: 'runPrompt',
@@ -6121,7 +6122,8 @@ app.whenReady().then(() => {
             agentId: selectedAgentId,
             prompt: request.prompt,
             cwd,
-            model: selectedModel
+            model: selectedModel,
+            reasoningEffort: request.step.reasoningEffort
           }
           const onAgentUpdate = (update: unknown): Promise<void> =>
             eventBatcher.push({

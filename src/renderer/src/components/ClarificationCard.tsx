@@ -1,20 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronLeft, ChevronRight, CornerDownLeft } from 'lucide-react'
+import type { ClarificationAnswers, ClarificationQuestion } from '../../../preload/agent-model-types'
 import { ModelStrengthCapsule } from './ModelStrengthCapsule'
 import { isModelSelectionQuestion, isImageModelSelectionQuestion } from './model-strength-resolver'
-import { useEffect } from 'react'
 
-type Option = { label: string; value: string; description?: string }
-type Question = { id: string; question: string; options?: Option[]; placeholder?: string }
-type Answer = { selected: string; custom: string; useCustom: boolean }
+type Answer = { selected: string; custom: string; useCustom: boolean; reasoningEffort?: string }
 
 const EMPTY_ANSWER: Answer = { selected: '', custom: '', useCustom: false }
 
 export function ClarificationCard({
   step
 }: {
-  step: { requestId: number; questions: Question[] }
+  step: { requestId: number; questions: ClarificationQuestion[] }
 }): React.JSX.Element | null {
   const [answers, setAnswers] = useState<Record<string, Answer>>({})
   const [activeIndex, setActiveIndex] = useState(0)
@@ -25,7 +23,7 @@ export function ClarificationCard({
     setAnswers((current) => ({ ...current, [id]: { ...(current[id] || EMPTY_ANSWER), ...patch } }))
   }
 
-  const hasAnswer = (question: Question): boolean => {
+  const hasAnswer = (question: ClarificationQuestion): boolean => {
     const answer = answers[question.id] || EMPTY_ANSWER
     return answer.useCustom ? Boolean(answer.custom.trim()) : Boolean(answer.selected)
   }
@@ -51,10 +49,13 @@ export function ClarificationCard({
 
   const respond = (cancelled: boolean): void => {
     if (submitted) return
-    const values = Object.fromEntries(
+    const values: ClarificationAnswers = Object.fromEntries(
       step.questions.map((question) => {
         const answer = answers[question.id] || EMPTY_ANSWER
-        return [question.id, answer.useCustom ? answer.custom.trim() : answer.selected]
+        const value = question.agentId
+          ? { agentId: question.agentId, model: answer.selected, reasoningEffort: answer.reasoningEffort }
+          : answer.useCustom ? answer.custom.trim() : answer.selected
+        return [question.id, value]
       })
     )
     window.api.respondClarification(step.requestId, cancelled ? {} : values, cancelled)
@@ -92,7 +93,9 @@ export function ClarificationCard({
           <div className="clarification-popover__eyebrow">
             <span className="clarification-popover__pulse" /> 等待你的决定
           </div>
-          <div className="clarification-popover__hint">选择最合适的一项，或输入你自己的想法</div>
+          <div className="clarification-popover__hint">
+            {currentQuestion.allowCustom === false ? '选择要用于子任务的模型' : '选择最合适的一项，或输入你自己的想法'}
+          </div>
         </div>
         <button type="button" className="clarification-popover__skip" onClick={() => respond(true)}>
           暂时跳过
@@ -140,9 +143,11 @@ export function ClarificationCard({
             <ModelStrengthCapsule
               options={currentQuestion.options || []}
               selectedValue={currentAnswer.selected}
-              onChange={(newModelId) =>
+              reasoningEffort={currentAnswer.reasoningEffort}
+              onChange={(model, reasoningEffort) =>
                 update(currentQuestion.id, {
-                  selected: newModelId,
+                  selected: model,
+                  reasoningEffort,
                   custom: '',
                   useCustom: false
                 })
@@ -178,30 +183,30 @@ export function ClarificationCard({
               })}
             </div>
           )}
-          <div
-            className={`clarification-custom-input ${currentAnswer.useCustom ? 'is-active' : ''}`}
-          >
-            <span className="clarification-custom-input__label">其他</span>
-            <input
-              id={`clarification-custom-${currentQuestion.id}`}
-              maxLength={200}
-              value={currentAnswer.custom}
-              onFocus={() => update(currentQuestion.id, { selected: '', useCustom: true })}
-              onChange={(event) =>
-                update(currentQuestion.id, {
-                  selected: '',
-                  custom: event.target.value,
-                  useCustom: true
-                })
-              }
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && currentAnswered) continueToNext()
-              }}
-              placeholder={currentQuestion.placeholder || '自由补充你的要求'}
-              aria-label={`${currentQuestion.question}的其他回答`}
-            />
-            <span>{currentAnswer.custom.length}/200</span>
-          </div>
+          {currentQuestion.allowCustom !== false && (
+            <div className={`clarification-custom-input ${currentAnswer.useCustom ? 'is-active' : ''}`}>
+              <span className="clarification-custom-input__label">其他</span>
+              <input
+                id={`clarification-custom-${currentQuestion.id}`}
+                maxLength={200}
+                value={currentAnswer.custom}
+                onFocus={() => update(currentQuestion.id, { selected: '', useCustom: true })}
+                onChange={(event) =>
+                  update(currentQuestion.id, {
+                    selected: '',
+                    custom: event.target.value,
+                    useCustom: true
+                  })
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && currentAnswered) continueToNext()
+                }}
+                placeholder={currentQuestion.placeholder || '自由补充你的要求'}
+                aria-label={`${currentQuestion.question}的其他回答`}
+              />
+              <span>{currentAnswer.custom.length}/200</span>
+            </div>
+          )}
         </fieldset>
       </div>
 

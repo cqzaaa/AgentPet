@@ -38,6 +38,7 @@ export function useChatController() {
   const isSending = useAppStoreRaw(state => !!state.sendingSessionIds[state.activeSessionId])
   const inputValue = useAppStoreRaw(state => state.inputValue)
   const availableModels = useAppStoreRaw(state => state.availableModels)
+  const isLoadingModels = useAppStoreRaw(state => state.isLoadingModels)
   const attachedFiles = useAppStoreRaw(state => state.attachedFiles)
   const selectedKnowledgeBaseId = useAppStoreRaw(state => state.selectedKnowledgeBaseId)
   const selectedKnowledgeBaseName = useAppStoreRaw(state => state.selectedKnowledgeBaseName)
@@ -62,12 +63,13 @@ export function useChatController() {
 
   return {
     llmConfig, activeSessionId, activeSessMessages, currentContextTokens, currentAvatarName, isSending,
-    inputValue, availableModels, attachedFiles, selectedKnowledgeBaseId, selectedKnowledgeBaseName, highlightedMessageId, isSessionSwitching,
+    inputValue, availableModels, isLoadingModels, attachedFiles, selectedKnowledgeBaseId, selectedKnowledgeBaseName, highlightedMessageId, isSessionSwitching,
     executionDevice, sshConnected, sshHost, sshUsername, activePermissionRequest,
     skillsList, disabledSkillNames, mcpConfig,
     setInputValue: useChatAction('setInputValue'),
     handleSendChat: useChatAction('handleSendChat'),
     saveLlmConfig: useChatAction('saveLlmConfig'),
+    handleFetchModels: useChatAction('handleFetchModels'),
     setAttachedFiles: useChatAction('setAttachedFiles'),
     setSelectedKnowledgeBase: useChatAction('setSelectedKnowledgeBase'),
     handlePasteFiles: useChatAction('handlePasteFiles'),

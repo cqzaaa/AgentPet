@@ -23,6 +23,7 @@ export interface TaskPlanInputStep {
   agentRole?: SubagentRole
   agentId?: string
   model?: string
+  reasoningEffort?: string
   prompt?: string
 }
 
@@ -93,6 +94,7 @@ export interface SubagentTask {
   role: SubagentRole
   agentId?: string
   model?: string
+  reasoningEffort?: string
   title: string
   prompt: string
   status: TaskStepStatus
@@ -113,6 +115,7 @@ export interface DelegateTaskInput {
   role?: SubagentRole
   agentId?: string
   model?: string
+  reasoningEffort?: string
   dependencies?: string[]
   acceptanceCriteria?: string
 }

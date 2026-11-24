@@ -143,6 +143,13 @@ export class ExternalAgentManager {
     if (definition.protocol === 'internal') {
       throw new Error('AgentPet 默认 Agent 由现有对话运行时执行')
     }
+    if (request.reasoningEffort) {
+      const models = await this.listModels(request.agentId, request.cwd)
+      const model = models.find(item => item.id === request.model)
+      if (!model?.reasoningEfforts?.some(effort => effort.value === request.reasoningEffort)) {
+        throw new Error(`${definition.name} 的模型 ${request.model || '默认模型'} 未声明支持推理强度 ${request.reasoningEffort}`)
+      }
+    }
     request = await this.authorizeSessionReferences(request, definition, '本机配置的 Agent', options?.signal)
     const cwd = this.normalizeCwd(request.cwd)
     if (definition.protocol === 'claude-stream-json') {
@@ -161,7 +168,7 @@ export class ExternalAgentManager {
       )
     }
     if (definition.protocol === 'codex-app-server') {
-      const connection = createCodexAcpConnection(definition, cwd, request.model, onProtocolEvent)
+      const connection = createCodexAcpConnection(definition, cwd, request.model, onProtocolEvent, request.reasoningEffort)
       return this.client.runPrompt(
         definition,
         cwd,
@@ -208,6 +215,7 @@ export class ExternalAgentManager {
     if (!request.prompt?.trim()) throw new Error('prompt 不能为空')
     const definition = await this.find(request.agentId)
     if (!definition.enabled) throw new Error(`Agent ${definition.name} 已被禁用`)
+    if (request.reasoningEffort) throw new Error('SSH 执行暂未提供可选推理强度')
     request = await this.authorizeSessionReferences(request, definition, `SSH 主机 ${connection.host || '未配置'}`, options?.signal)
     return runRemoteAcpPrompt(this.client, definition, { ...request, prompt: request.prompt.trim() }, connection, runId, stepId, onUpdate, onProtocolEvent, options)
   }

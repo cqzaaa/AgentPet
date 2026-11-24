@@ -40,6 +40,7 @@ export class SubagentRunner {
         agentRole: input.role,
         agentId: input.agentId,
         model: input.model,
+        reasoningEffort: input.reasoningEffort,
         dependencies: input.dependencies,
         acceptanceCriteria: input.acceptanceCriteria
         ,control: input.control
@@ -54,6 +55,7 @@ export class SubagentRunner {
       role: input.role || 'general',
       agentId: input.agentId,
       model: input.model,
+      reasoningEffort: input.reasoningEffort,
       title: input.title,
       prompt: input.prompt,
       status: 'pending',
@@ -105,6 +107,7 @@ export class SubagentRunner {
         role: (allowedRoles.has(String(input.role)) ? input.role : 'general') as SubagentRole,
         agentId: String(input.agentId || 'agentpet').trim().slice(0, 100) || 'agentpet',
         model: String(input.model || '').trim().slice(0, 200) || undefined,
+        reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort.trim() || undefined : undefined,
         dependencies: Array.isArray(input.dependencies) ? [...new Set(input.dependencies.map(String))].filter(Boolean) : [],
         acceptanceCriteria: String(input.acceptanceCriteria || '').trim().slice(0, 1000) || undefined
       }

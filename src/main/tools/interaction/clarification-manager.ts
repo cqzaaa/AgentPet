@@ -1,17 +1,10 @@
 import { app, BrowserWindow, ipcMain, Notification } from 'electron'
 import type { WebContents } from 'electron'
 
-export type ClarificationOption = { label: string; value: string }
-export type ClarificationQuestion = {
-  id: string
-  question: string
-  options?: ClarificationOption[]
-  allowCustom?: boolean
-  placeholder?: string
-}
+import type { ClarificationAnswers, ClarificationQuestion } from '../../../preload/agent-model-types'
 
 type PendingRequest = {
-  resolve: (value: { cancelled: boolean; answers: Record<string, string> }) => void
+  resolve: (value: { cancelled: boolean; answers: ClarificationAnswers }) => void
   timer: NodeJS.Timeout
   sessionId?: string
   sender: WebContents
@@ -32,7 +25,7 @@ class ClarificationManager {
     })
   }
 
-  public request(questions: ClarificationQuestion[], sessionId?: string, sender?: WebContents): Promise<{ cancelled: boolean; answers: Record<string, string> }> {
+  public request(questions: ClarificationQuestion[], sessionId?: string, sender?: WebContents): Promise<{ cancelled: boolean; answers: ClarificationAnswers }> {
     const target = sender ? BrowserWindow.fromWebContents(sender) : (BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0])
     if (!target || target.isDestroyed()) return Promise.resolve({ cancelled: true, answers: {} })
 
@@ -57,7 +50,7 @@ class ClarificationManager {
     }
   }
 
-  private finishRequest(requestId: number, response: { cancelled: boolean; answers: Record<string, string> }): void {
+  private finishRequest(requestId: number, response: { cancelled: boolean; answers: ClarificationAnswers }): void {
     const pending = this.pending.get(requestId)
     if (!pending) return
     clearTimeout(pending.timer)

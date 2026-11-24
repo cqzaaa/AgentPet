@@ -52,8 +52,8 @@ export class TaskStore {
         const startedAt = stepStatus === 'running' ? previous?.started_at || now : previous?.started_at || null
         const stepCompletedAt = ['completed', 'failed', 'blocked', 'cancelled'].includes(stepStatus) ? previous?.completed_at || now : null
         await database.run(
-          `INSERT INTO task_steps (id, task_run_id, sequence, title, goal, dependencies_json, acceptance_criteria, status, detail, result_summary, artifact_paths_json, retry_count, agent_role, agent_id, model, prompt, started_at, completed_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO task_steps (id, task_run_id, sequence, title, goal, dependencies_json, acceptance_criteria, status, detail, result_summary, artifact_paths_json, retry_count, agent_role, agent_id, model, reasoning_effort, prompt, started_at, completed_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(task_run_id, id) DO UPDATE SET
              sequence = excluded.sequence, title = excluded.title,
              goal = COALESCE(excluded.goal, task_steps.goal),
@@ -61,11 +61,12 @@ export class TaskStore {
              acceptance_criteria = excluded.acceptance_criteria, status = excluded.status, detail = excluded.detail,
              result_summary = excluded.result_summary, artifact_paths_json = excluded.artifact_paths_json,
              retry_count = excluded.retry_count, agent_role = excluded.agent_role, agent_id = excluded.agent_id, model = excluded.model,
+             reasoning_effort = excluded.reasoning_effort,
              prompt = COALESCE(excluded.prompt, task_steps.prompt),
              started_at = excluded.started_at, completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
           item.id, id, index + 1, item.title, item.goal || null, toJson(item.dependencies || []), item.acceptanceCriteria || null,
           stepStatus, item.detail || null, item.resultSummary || item.detail || null, toJson(item.artifactPaths || []), item.retryCount || previous?.retry_count || 0,
-          item.agentRole || null, item.agentId || 'agentpet', item.model || null, item.prompt || null, startedAt, stepCompletedAt, now
+          item.agentRole || null, item.agentId || 'agentpet', item.model || null, item.reasoningEffort || null, item.prompt || null, startedAt, stepCompletedAt, now
         )
         await database.run('UPDATE task_steps SET control_json = ?, connection_json = ? WHERE task_run_id = ? AND id = ?', toJson(item.control), toJson(item.connection), id, item.id)
         for (const artifactPath of item.artifactPaths || []) {
@@ -223,11 +224,11 @@ export class TaskStore {
     await this.withTransaction(database, async () => {
       for (const task of tasks) {
         await database.run(
-          `INSERT INTO subagent_tasks (id, task_run_id, task_step_id, parent_session_id, role, agent_id, model, title, prompt, status, dependencies_json, result_summary, artifact_paths_json, created_at, updated_at, completed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO subagent_tasks (id, task_run_id, task_step_id, parent_session_id, role, agent_id, model, reasoning_effort, title, prompt, status, dependencies_json, result_summary, artifact_paths_json, created_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET status = excluded.status, result_summary = excluded.result_summary,
            artifact_paths_json = excluded.artifact_paths_json, updated_at = excluded.updated_at, completed_at = excluded.completed_at`,
-          task.id, task.taskRunId, task.taskStepId, task.parentSessionId, task.role, task.agentId || 'agentpet', task.model || null, task.title, task.prompt, task.status,
+          task.id, task.taskRunId, task.taskStepId, task.parentSessionId, task.role, task.agentId || 'agentpet', task.model || null, task.reasoningEffort || null, task.title, task.prompt, task.status,
           toJson(task.dependencies), task.resultSummary || null, toJson(task.artifactPaths), task.createdAt, task.updatedAt, task.completedAt || null
         )
       }
@@ -239,7 +240,7 @@ export class TaskStore {
     const rows = await database.all<TaskRow[]>('SELECT * FROM subagent_tasks WHERE task_run_id = ? ORDER BY created_at, id', taskRunId)
     return rows.map(row => ({
       id: row.id, taskRunId: row.task_run_id, taskStepId: row.task_step_id, parentSessionId: row.parent_session_id,
-      role: row.role, agentId: row.agent_id || 'agentpet', model: row.model || undefined, title: row.title, prompt: row.prompt, status: row.status,
+      role: row.role, agentId: row.agent_id || 'agentpet', model: row.model || undefined, reasoningEffort: row.reasoning_effort || undefined, title: row.title, prompt: row.prompt, status: row.status,
       dependencies: parseJson(row.dependencies_json, []), resultSummary: row.result_summary || undefined,
       artifactPaths: parseJson(row.artifact_paths_json, []), createdAt: row.created_at, updatedAt: row.updated_at,
       completedAt: row.completed_at || undefined
@@ -403,10 +404,12 @@ export class TaskStore {
     await this.ensureColumn(this.database, 'task_steps', 'agent_id', "TEXT DEFAULT 'agentpet'")
     await this.ensureColumn(this.database, 'task_steps', 'prompt', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'model', 'TEXT')
+    await this.ensureColumn(this.database, 'task_steps', 'reasoning_effort', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'control_json', 'TEXT')
     await this.ensureColumn(this.database, 'task_steps', 'connection_json', 'TEXT')
     await this.ensureColumn(this.database, 'subagent_tasks', 'agent_id', "TEXT DEFAULT 'agentpet'")
     await this.ensureColumn(this.database, 'subagent_tasks', 'model', 'TEXT')
+    await this.ensureColumn(this.database, 'subagent_tasks', 'reasoning_effort', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'workspace_path', 'TEXT')
     await this.ensureColumn(this.database, 'task_runs', 'parent_turn', 'INTEGER')
     await this.ensureColumn(this.database, 'task_runs', 'parent_message_id', 'TEXT')
@@ -447,6 +450,6 @@ export class TaskStore {
   private mapStep(row: TaskRow): TaskStep {
     const control = parseJson<TaskStep['control']>(row.control_json, undefined)
     const connection = parseJson<TaskStep['connection']>(row.connection_json, undefined)
-    return { control, connection, id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, agentId: row.agent_id || 'agentpet', model: row.model || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
+    return { control, connection, id: row.id, taskRunId: row.task_run_id, sequence: row.sequence, title: row.title, goal: row.goal || undefined, dependencies: parseJson(row.dependencies_json, []), acceptanceCriteria: row.acceptance_criteria || undefined, status: row.status, detail: row.detail || undefined, resultSummary: row.result_summary || undefined, artifactPaths: parseJson(row.artifact_paths_json, []), retryCount: row.retry_count, agentRole: row.agent_role || undefined, agentId: row.agent_id || 'agentpet', model: row.model || undefined, reasoningEffort: row.reasoning_effort || undefined, prompt: row.prompt || undefined, startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined }
   }
 }

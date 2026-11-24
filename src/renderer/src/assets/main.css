@@ -12678,6 +12678,139 @@ body {
   padding: 0 !important;
 }
 
+/* ── Excel / Spreadsheet 工作表切换栏与标题区紧凑化设计 ───────────── */
+.file-preview-viewer-container .ofv-tabs,
+.wiki-file-preview .ofv-tabs {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 2px !important;
+  width: fit-content !important;
+  max-width: calc(100% - 20px) !important;
+  margin: 8px 10px 6px !important;
+  padding: 2px !important;
+  border-radius: 7px !important;
+  border: 1px solid color-mix(in srgb, var(--border-color, #e2e8f0) 75%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-surface-secondary, #f1f5f9) 88%, transparent) !important;
+}
+
+.file-preview-viewer-container .ofv-tabs button,
+.wiki-file-preview .ofv-tabs button {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 22px !important;
+  height: 22px !important;
+  max-width: 180px !important;
+  padding: 0 8px !important;
+  border: 1px solid transparent !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  color: var(--text-muted, #71717a) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  letter-spacing: 0.01em !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition:
+    background 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.12s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.file-preview-viewer-container .ofv-tabs button:hover:not(.is-active),
+.wiki-file-preview .ofv-tabs button:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--bg-card, #ffffff) 65%, transparent) !important;
+  color: var(--text-primary, #18181b) !important;
+}
+
+.file-preview-viewer-container .ofv-tabs button:active,
+.wiki-file-preview .ofv-tabs button:active {
+  transform: scale(0.97) !important;
+}
+
+.file-preview-viewer-container .ofv-tabs button.is-active,
+.wiki-file-preview .ofv-tabs button.is-active {
+  background: color-mix(
+    in srgb,
+    var(--accent-color, #4f8cff) 9%,
+    var(--bg-card, #ffffff)
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--accent-color, #4f8cff) 28%,
+    var(--border-color, #e2e8f0)
+  ) !important;
+  color: color-mix(
+    in srgb,
+    var(--accent-color, #4f8cff) 78%,
+    var(--text-primary, #18181b)
+  ) !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.agent-window-container.dark .file-preview-viewer-container .ofv-tabs,
+.agent-window-container.dark .wiki-file-preview .ofv-tabs {
+  background: color-mix(in srgb, var(--bg-surface-secondary, #131822) 90%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border-color, rgba(255, 255, 255, 0.08)) 90%, transparent) !important;
+}
+
+.agent-window-container.dark .file-preview-viewer-container .ofv-tabs button.is-active,
+.agent-window-container.dark .wiki-file-preview .ofv-tabs button.is-active {
+  background: color-mix(
+    in srgb,
+    var(--accent-color, #4f8cff) 16%,
+    var(--bg-surface, #181e29)
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--accent-color, #4f8cff) 36%,
+    transparent
+  ) !important;
+  color: var(--text-primary, #f4f4f5) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28) !important;
+}
+
+.file-preview-viewer-container .ofv-tabs button:focus-visible,
+.wiki-file-preview .ofv-tabs button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color, #4f8cff) 55%, transparent) !important;
+  outline-offset: 1px !important;
+}
+
+.file-preview-viewer-container .ofv-sheet,
+.wiki-file-preview .ofv-sheet {
+  padding: 0 10px 10px !important;
+}
+
+.file-preview-viewer-container .ofv-sheet h3,
+.wiki-file-preview .ofv-sheet h3 {
+  margin: 0 0 6px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--text-secondary, #3f3f46) !important;
+}
+
+.file-preview-viewer-container .ofv-sheet-summary,
+.wiki-file-preview .ofv-sheet-summary {
+  margin: 0 0 6px !important;
+  font-size: 11px !important;
+  color: var(--text-muted, #71717a) !important;
+}
+
+.file-preview-viewer-container .ofv-table-scroll,
+.wiki-file-preview .ofv-table-scroll {
+  border-radius: 6px !important;
+  border-color: color-mix(in srgb, var(--border-color, #e2e8f0) 85%, transparent) !important;
+}
+
 /* Spreadsheet templates often keep machine field names in hidden rows. */
 .file-preview-viewer-container .ofv-workbook-table tr[hidden] {
   display: none !important;

@@ -134,7 +134,12 @@ export class CodexAcpBridge {
   private activeRpc: CodexInternalRpc | null = null
   private startingRpc: CodexInternalRpc | null = null
 
-  constructor(private readonly definition: ExternalAgentDefinition, cwd: string, model?: string) {
+  constructor(
+    private readonly definition: ExternalAgentDefinition,
+    cwd: string,
+    model?: string,
+    private readonly reasoningEffort?: string
+  ) {
     this.currentCwd = cwd
     this.configuredModel = model
   }
@@ -213,6 +218,13 @@ export class CodexAcpBridge {
         id: String(model.model || model.id),
         name: String(model.displayName || model.model || model.id),
         description: typeof model.description === 'string' ? model.description : undefined,
+        reasoningEfforts: Array.isArray(model.supportedReasoningEfforts)
+          ? model.supportedReasoningEfforts.flatMap((effort: any) =>
+              typeof effort?.reasoningEffort === 'string' && effort.reasoningEffort
+                ? [{ value: effort.reasoningEffort, description: typeof effort.description === 'string' ? effort.description : undefined }]
+                : [])
+          : undefined,
+        defaultReasoningEffort: typeof model.defaultReasoningEffort === 'string' ? model.defaultReasoningEffort : undefined,
         source: 'cli' as const
       }))
     } finally {
@@ -368,6 +380,7 @@ export class CodexAcpBridge {
       try {
         await rpc.request('turn/start', {
           threadId,
+          ...(this.reasoningEffort ? { effort: this.reasoningEffort } : {}),
           input: [{ type: 'text', text: prompt, text_elements: [] }]
         }, PROBE_TIMEOUT_MS)
 
@@ -399,9 +412,10 @@ export function createCodexAcpConnection(
   definition: ExternalAgentDefinition,
   cwd: string,
   model?: string,
-  onProtocolEvent?: (event: ExternalAgentProtocolEvent) => void | Promise<void>
+  onProtocolEvent?: (event: ExternalAgentProtocolEvent) => void | Promise<void>,
+  reasoningEffort?: string
 ): CodexAcpStreamPair {
-  const bridge = new CodexAcpBridge(definition, cwd, model)
+  const bridge = new CodexAcpBridge(definition, cwd, model, reasoningEffort)
   const server = bridge.createServer()
 
   const transport = createAcpObjectStreamPair(onProtocolEvent)

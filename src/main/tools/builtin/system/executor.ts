@@ -180,7 +180,8 @@ export class SystemExecutor implements IToolExecutor {
               artifactPaths: Array.isArray(step?.artifactPaths) ? step.artifactPaths.map(String).filter(Boolean).slice(0, 30) : [],
               retryCount: Math.max(0, Math.min(20, Number(step?.retryCount) || 0)),
               agentId: String(step?.agentId || 'agentpet').trim(),
-              model: String(step?.model || '').trim() || undefined
+              model: String(step?.model || '').trim() || undefined,
+              reasoningEffort: typeof step?.reasoningEffort === 'string' ? step.reasoningEffort.trim() || undefined : undefined
             }
           })
           .filter((step: any) => step.title)
@@ -331,6 +332,7 @@ export class SystemExecutor implements IToolExecutor {
           role: allowedRoles.has(String(task?.role || task?.type)) ? (task.role || task.type) : 'general',
           agentId: String(task?.agentId || 'agentpet').trim(),
           model: String(task?.model || '').trim() || undefined,
+          reasoningEffort: typeof task?.reasoningEffort === 'string' ? task.reasoningEffort.trim() || undefined : undefined,
           dependencies: Array.isArray(task?.dependencies) ? task.dependencies.map(String).filter(Boolean) : [],
           acceptanceCriteria: String(task?.acceptanceCriteria || '').trim() || undefined
         }))
@@ -599,12 +601,13 @@ if (-not $task.Wait(15000)) {
 
       if (api === 'request_user_clarification') {
         const rawQuestions = Array.isArray(args.questions) ? args.questions.slice(0, 3) : []
-        const questions = this.dedupeClarificationQuestions(rawQuestions
+        const parsedQuestions = this.dedupeClarificationQuestions(rawQuestions
           .filter(question => question && typeof question.id === 'string' && typeof question.question === 'string')
           .map(question => ({
             id: question.id.slice(0, 80),
             question: question.question.slice(0, 300),
             placeholder: typeof question.placeholder === 'string' ? question.placeholder.slice(0, 160) : '',
+            agentId: typeof question.agentId === 'string' ? question.agentId.trim() || undefined : undefined,
             allowCustom: true,
             options: Array.isArray(question.options)
               ? question.options.slice(0, 6).filter((option: any) => option && typeof option.label === 'string' && typeof option.value === 'string').map((option: any) => ({
@@ -614,7 +617,23 @@ if (-not $task.Wait(15000)) {
               }))
               : []
           })))
-        if (questions.length === 0) return { content: '错误：至少需要一个有效的澄清问题。', success: false }
+        if (parsedQuestions.length === 0) return { content: '错误：至少需要一个有效的澄清问题。', success: false }
+        const questions = await Promise.all(parsedQuestions.map(async (question) => {
+          if (!question.agentId) return question
+          const models = await externalAgentManager.listModels(question.agentId, context.workspacePath)
+          if (!models.length) throw new Error(`${question.agentId} 未返回可选模型`)
+          return {
+            ...question,
+            allowCustom: false,
+            options: models.map(model => ({
+              label: model.name,
+              value: model.id,
+              description: model.description || '',
+              reasoningEfforts: model.reasoningEfforts,
+              defaultReasoningEffort: model.defaultReasoningEffort
+            }))
+          }
+        }))
 
         const response = await clarificationManager.request(questions, context.sessionId, context.event?.sender)
         return {

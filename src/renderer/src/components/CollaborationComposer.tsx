@@ -1,6 +1,7 @@
 import React from 'react'
 import type { WorkflowDefinition, WorkflowControl } from '../../../preload/workflow-types'
 import type { TaskRun } from '../../../main/task-runtime/types'
+import type { ModelReasoningOptions } from '../../../preload/agent-model-types'
 import {
   Background,
   Controls,
@@ -41,6 +42,7 @@ import {
 } from 'lucide-react'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { ConfirmDialog } from './ConfirmDialog'
+import { ReasoningEffortSelect } from './ModelStrengthCapsule'
 import { renderAdvancedMessage } from './ChatMessageItem'
 import { cleanResultSummary, CollaborationArtifactCards } from './CollaborationRunCard'
 import { TaskDagGraph, type TaskPlan } from './TaskPlanCard'
@@ -55,7 +57,7 @@ interface AgentChoice {
   probe: null | { status: AgentStatus; installed: boolean; error?: string }
 }
 
-interface AgentModel {
+interface AgentModel extends ModelReasoningOptions {
   id: string
   name: string
   description?: string
@@ -69,6 +71,7 @@ interface TaskNodeData extends Record<string, unknown> {
   agentId: string
   agentName: string
   model?: string
+  reasoningEffort?: string
   connection?: {
     kind: 'local' | 'ssh'
     host?: string
@@ -830,6 +833,9 @@ export function CollaborationComposer({
   const agentSelectionTouchedRef = React.useRef(false)
   const flowInstanceRef = React.useRef<ReactFlowInstance<Node<TaskNodeData>, Edge> | null>(null)
   const selectedNode = nodes.find((node) => node.id === selectedNodeId)
+  const selectedModel = selectedNode && models[selectedNode.data.agentId]?.find(
+    (model) => model.id === selectedNode.data.model
+  )
   const selectedAgentId = selectedNode?.data.agentId
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const selectedConnection = selectedNode?.data.connection
@@ -1067,7 +1073,7 @@ export function CollaborationComposer({
             const onlyModel = discovered[0].id
             setNodes((current) => current.map((node) =>
               node.id === selectedNodeId && (!node.data.model || node.data.model === 'default')
-                ? { ...node, data: { ...node.data, model: onlyModel } }
+                ? { ...node, data: { ...node.data, model: onlyModel, reasoningEffort: undefined } }
                 : node
             ))
           }
@@ -1117,6 +1123,7 @@ export function CollaborationComposer({
     updateSelected({
       connection: { ...selectedConnection, ...patch },
       model: undefined,
+      reasoningEffort: undefined,
       ...(needsReplacement && replacement ? { agentId: replacement.id, agentName: replacement.name } : {})
     })
   }
@@ -1362,6 +1369,7 @@ export function CollaborationComposer({
       agentId: node.data.agentId,
       connection: node.data.connection,
       model: node.data.model && node.data.model !== 'default' ? node.data.model : undefined,
+      reasoningEffort: node.data.reasoningEffort,
       dependencies: edges.filter((edge) => edge.target === node.id).map((edge) => edge.source),
       control: {
         ...node.data.control,
@@ -1463,7 +1471,7 @@ export function CollaborationComposer({
   }
   const changeAgent = (agentId: string): void => {
     const agent = agents.find((item) => item.id === agentId)
-    if (agent) updateSelected({ agentId, agentName: agent.name, model: undefined })
+    if (agent) updateSelected({ agentId, agentName: agent.name, model: undefined, reasoningEffort: undefined })
   }
   const runtimeSteps: RuntimeStep[] = runtimeSnapshot.steps.length
     ? runtimeSnapshot.steps
@@ -2162,7 +2170,7 @@ export function CollaborationComposer({
                               disabled={loadingModels || !!modelFailure}
                               aria-busy={loadingModels}
                               value={selectedNode.data.model || ''}
-                              onChange={(event) => updateSelected({ model: event.target.value || undefined })}
+                              onChange={(event) => updateSelected({ model: event.target.value || undefined, reasoningEffort: undefined })}
                             >
                               <option value="" disabled>请选择明确模型</option>
                               {(models[selectedNode.data.agentId] || []).map((model) => (
@@ -2173,6 +2181,16 @@ export function CollaborationComposer({
                             </select>
                           )}
                         </label>
+                        {selectedConnectionKind === 'local' && !loadingModels && !modelFailure && !!selectedModel?.reasoningEfforts?.length && (
+                          <label className="collab-field compact">
+                            <span>推理强度</span>
+                            <ReasoningEffortSelect
+                              model={selectedModel}
+                              value={selectedNode.data.reasoningEffort}
+                              onChange={(reasoningEffort) => updateSelected({ reasoningEffort })}
+                            />
+                          </label>
+                        )}
                         {modelFailure && (
                           <div className="collab-model-feedback" role="status">
                             <span>

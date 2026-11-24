@@ -2,6 +2,7 @@ import type { WikiGraphData, WikiSyncProgress, WikiParserComponentStatus, WikiMo
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatStreamUpdate } from './chat-stream'
+import type { ClarificationAnswers } from './agent-model-types'
 import type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
 
 export type { ImageGenerationOptions, ImageGenerationResult } from './image-generation-types'
@@ -427,7 +428,7 @@ const api = {
   respondPermission: (requestId: number, approved: boolean, scope: 'once' | 'turn' = 'once', reason?: string): void => {
     ipcRenderer.send('api:permission-response', { requestId, approved, scope, reason })
   },
-  respondClarification: (requestId: number, answers: Record<string, string>, cancelled = false): void => {
+  respondClarification: (requestId: number, answers: ClarificationAnswers, cancelled = false): void => {
     ipcRenderer.send('api:clarification-response', { requestId, answers, cancelled })
   },
   respondCredential: (requestId: number, token: string, cancelled = false): void => {

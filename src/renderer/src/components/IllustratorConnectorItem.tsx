@@ -134,7 +134,8 @@ export function IllustratorConnectorItem({
     if (connecting || detecting) return
     setConnecting(true)
     try {
-      const action = server?.enabled ? 'disable' : 'enable'
+      // 启用配置会跨重启保留，只有实际连通时点击才执行停用。
+      const action = connected ? 'disable' : server?.enabled ? 'reconnect' : 'enable'
       const res = await window.api.connectLocalConnector(ILLUSTRATOR_CONNECTOR_ID, action)
       if (res.detection) setDetection(res.detection)
       await refreshMcpServers()
@@ -226,7 +227,7 @@ export function IllustratorConnectorItem({
           className="connector-main-trigger"
           disabled={busy}
           onClick={() => void toggleConnector()}
-          title={server?.enabled ? '点击停用 Illustrator 连接器' : '点击连接本地 Illustrator'}
+          title={connected ? '点击停用 Illustrator 连接器' : '点击连接本地 Illustrator'}
         >
           <span className="connector-title">Illustrator</span>
           <span className={`connector-pill tone-${pillTone}`}>{pillLabel}</span>
